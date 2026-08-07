@@ -195,7 +195,10 @@ impl AppState {
         }
 
         let mut query_registry = QueryRegistry::new();
-        query_registry.register("GetMission", LoadAggregateHandler::new(Arc::clone(&mission_repo)));
+        query_registry.register(
+            "GetMission",
+            LoadAggregateHandler::new(Arc::clone(&mission_repo)),
+        );
         query_registry.register("GetTask", LoadAggregateHandler::new(Arc::clone(&task_repo)));
 
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));
@@ -206,7 +209,10 @@ impl AppState {
         // desktop-shell's/mobile-core's own concern, per Team Prompt 5
         // §3.5/§4.4 — CompositeDiscovery/TransportSelector here fall back
         // to Cloud Relay only until a client wires in the local ones).
-        let discovery = Arc::new(CompositeDiscovery::new(CloudDiscovery::new(), LocalDiscovery::new()));
+        let discovery = Arc::new(CompositeDiscovery::new(
+            CloudDiscovery::new(),
+            LocalDiscovery::new(),
+        ));
         let transport_selector = Arc::new(TransportSelector::new(
             None,
             None,
@@ -243,7 +249,9 @@ impl AppState {
 /// Same in-memory `IdempotencyStore` used by the end-to-end tests; see
 /// `AppState::new`'s doc comment for the caveat this represents.
 struct InMemoryIdempotencyStore {
-    store: std::sync::Mutex<std::collections::HashMap<platform_kernel::OperationId, serde_json::Value>>,
+    store: std::sync::Mutex<
+        std::collections::HashMap<platform_kernel::OperationId, serde_json::Value>,
+    >,
 }
 
 impl InMemoryIdempotencyStore {

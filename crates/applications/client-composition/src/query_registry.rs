@@ -91,7 +91,10 @@ impl QueryRegistry {
         self
     }
 
-    pub async fn dispatch(&self, query: QueryEnvelope) -> Result<QueryResponse, QueryDispatchError> {
+    pub async fn dispatch(
+        &self,
+        query: QueryEnvelope,
+    ) -> Result<QueryResponse, QueryDispatchError> {
         let handler = self
             .handlers
             .get(&query.query_type)
@@ -199,7 +202,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response["aggregate"]["name"], serde_json::json!("Test Mission"));
+        assert_eq!(
+            response["aggregate"]["name"],
+            serde_json::json!("Test Mission")
+        );
         assert_eq!(response["version"], serde_json::json!(3));
     }
 

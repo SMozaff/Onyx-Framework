@@ -17,8 +17,7 @@ use serde_json::{json, Value};
 use tracing::Instrument;
 
 use super::{
-    authenticate_headers, parse_object_id, web_device_object_id, ApiError,
-    ApiState, CommandRequest,
+    authenticate_headers, parse_object_id, web_device_object_id, ApiError, ApiState, CommandRequest,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

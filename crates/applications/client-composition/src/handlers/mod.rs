@@ -31,7 +31,9 @@ pub use creation_handler::{MissionCreationHandler, TaskCreationHandler};
 pub use decision_handler::{MissionDecisionHandler, TaskDecisionHandler};
 
 use platform_contracts::{DecisionContext, IdGenerator};
-use platform_kernel::{ActorContext, EventId, ObjectId, OperationId, PolicyDecisionSet, Timestamp, VerifiedAuthority};
+use platform_kernel::{
+    ActorContext, EventId, ObjectId, OperationId, PolicyDecisionSet, Timestamp, VerifiedAuthority,
+};
 
 /// Generates real random identifiers. Mirrors `api_server::command_handler`'s
 /// private `DefaultIdGenerator` (not exported from that crate — see

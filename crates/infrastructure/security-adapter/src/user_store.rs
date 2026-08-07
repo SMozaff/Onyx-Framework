@@ -78,10 +78,7 @@ fn parse_uuid(value: &str, field: &str) -> Result<uuid::Uuid, UserStoreError> {
 
 #[async_trait]
 impl UserStore for PostgresUserStore {
-    async fn find_by_username(
-        &self,
-        username: &str,
-    ) -> Result<Option<UserRecord>, UserStoreError> {
+    async fn find_by_username(&self, username: &str) -> Result<Option<UserRecord>, UserStoreError> {
         let row = sqlx::query(
             "SELECT id, username, organization_id, password_hash, is_admin, is_active \
              FROM users WHERE LOWER(username) = $1",
@@ -140,14 +137,13 @@ impl UserStore for PostgresUserStore {
     }
 
     async fn set_active(&self, user_id: &str, is_active: bool) -> Result<(), UserStoreError> {
-        let result = sqlx::query(
-            "UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1",
-        )
-        .bind(parse_uuid(user_id, "user_id")?)
-        .bind(is_active)
-        .execute(&self.pool)
-        .await
-        .map_err(infrastructure)?;
+        let result =
+            sqlx::query("UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1")
+                .bind(parse_uuid(user_id, "user_id")?)
+                .bind(is_active)
+                .execute(&self.pool)
+                .await
+                .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -159,14 +155,13 @@ impl UserStore for PostgresUserStore {
         user_id: &str,
         password_hash: &str,
     ) -> Result<(), UserStoreError> {
-        let result = sqlx::query(
-            "UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1",
-        )
-        .bind(parse_uuid(user_id, "user_id")?)
-        .bind(password_hash)
-        .execute(&self.pool)
-        .await
-        .map_err(infrastructure)?;
+        let result =
+            sqlx::query("UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1")
+                .bind(parse_uuid(user_id, "user_id")?)
+                .bind(password_hash)
+                .execute(&self.pool)
+                .await
+                .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -212,10 +207,7 @@ fn record_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> Result<UserRecord, U
 
 #[async_trait]
 impl UserStore for SqliteUserStore {
-    async fn find_by_username(
-        &self,
-        username: &str,
-    ) -> Result<Option<UserRecord>, UserStoreError> {
+    async fn find_by_username(&self, username: &str) -> Result<Option<UserRecord>, UserStoreError> {
         let row = sqlx::query(
             "SELECT id, username, organization_id, password_hash, is_admin, is_active \
              FROM users WHERE LOWER(username) = ?1",
@@ -362,28 +354,44 @@ mod tests {
         let store = store().await;
         let hasher = PasswordHasher::new();
         let hash = hasher.hash("correct horse battery").unwrap();
-        let created = store.create(new_user("Operator", &hash, true)).await.unwrap();
+        let created = store
+            .create(new_user("Operator", &hash, true))
+            .await
+            .unwrap();
         assert_eq!(created.username, "operator", "username must be lowercased");
 
         let found = store.find_by_username("OPERATOR").await.unwrap().unwrap();
         assert_eq!(found.user_id, created.user_id);
         assert!(found.is_admin);
         assert!(found.is_active);
-        assert!(hasher.verify("correct horse battery", &found.password_hash).unwrap());
+        assert!(hasher
+            .verify("correct horse battery", &found.password_hash)
+            .unwrap());
     }
 
     #[tokio::test]
     async fn duplicate_username_is_reported_distinctly() {
         let store = store().await;
-        store.create(new_user("operator", "h", false)).await.unwrap();
+        store
+            .create(new_user("operator", "h", false))
+            .await
+            .unwrap();
         // Different casing must still collide, per the LOWER() unique index.
-        let error = store.create(new_user("OperatoR", "h", false)).await.unwrap_err();
+        let error = store
+            .create(new_user("OperatoR", "h", false))
+            .await
+            .unwrap_err();
         assert_eq!(error, UserStoreError::DuplicateUsername);
     }
 
     #[tokio::test]
     async fn unknown_username_is_none_not_error() {
-        assert!(store().await.find_by_username("nobody").await.unwrap().is_none());
+        assert!(store()
+            .await
+            .find_by_username("nobody")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -398,12 +406,25 @@ mod tests {
     #[tokio::test]
     async fn set_active_and_password_hash_apply_and_detect_missing() {
         let store = store().await;
-        let user = store.create(new_user("operator", "h", false)).await.unwrap();
+        let user = store
+            .create(new_user("operator", "h", false))
+            .await
+            .unwrap();
 
         store.set_active(&user.user_id, false).await.unwrap();
-        assert!(!store.find_by_id(&user.user_id).await.unwrap().unwrap().is_active);
+        assert!(
+            !store
+                .find_by_id(&user.user_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_active
+        );
 
-        store.set_password_hash(&user.user_id, "new-hash").await.unwrap();
+        store
+            .set_password_hash(&user.user_id, "new-hash")
+            .await
+            .unwrap();
         let reloaded = store.find_by_id(&user.user_id).await.unwrap().unwrap();
         assert_eq!(reloaded.password_hash, "new-hash");
 
@@ -423,7 +444,13 @@ mod tests {
         let store = store().await;
         store.create(new_user("zulu", "h", false)).await.unwrap();
         store.create(new_user("alpha", "h", true)).await.unwrap();
-        let names: Vec<_> = store.list().await.unwrap().into_iter().map(|u| u.username).collect();
+        let names: Vec<_> = store
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|u| u.username)
+            .collect();
         assert_eq!(names, vec!["alpha", "zulu"]);
     }
 }

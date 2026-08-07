@@ -68,8 +68,7 @@ pub trait UserStore: Send + Sync {
     /// Look up by username. Returns `Ok(None)` for an unknown username so the
     /// caller can perform a dummy verification and keep the timing of
     /// "unknown user" indistinguishable from "wrong password".
-    async fn find_by_username(&self, username: &str)
-        -> Result<Option<UserRecord>, UserStoreError>;
+    async fn find_by_username(&self, username: &str) -> Result<Option<UserRecord>, UserStoreError>;
 
     async fn find_by_id(&self, user_id: &str) -> Result<Option<UserRecord>, UserStoreError>;
 

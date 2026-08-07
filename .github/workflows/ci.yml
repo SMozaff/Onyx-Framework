@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'feature/**', 'fix/**' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -41,6 +42,14 @@ jobs:
         with:
           toolchain: "1.97.1"
           components: clippy, rustfmt
+      # desktop-shell (Tauri) links against GTK/WebKit. Without this the
+      # `cargo build --workspace` step below fails on a bare runner image
+      # with "gdk-3.0 not found" — reproduced directly during the audit.
+      - name: Install desktop-shell native dependencies (Tauri/GTK)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Ensure rustfmt is installed
         run: rustup component add rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -101,24 +110,6 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
-      # Temporary patch: fix Vite config (move test block to vitest.config.ts)
-      - name: Patch Vite config for Vitest
-        run: |
-          if grep -q '"test":' vite.config.ts; then
-            cat > vitest.config.ts << 'EOF'
-          import { defineConfig } from 'vitest/config';
-          import react from '@vitejs/plugin-react';
-          export default defineConfig({
-            plugins: [react()],
-            test: {
-              globals: true,
-              environment: 'jsdom',
-              setupFiles: './src/test/setup.ts',
-            },
-          });
-          EOF
-            sed -i '/test:/,/^  \}/d' vite.config.ts
-          fi
       - run: npm run type-check
       - run: npm test
       - run: npm run test:a11y

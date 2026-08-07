@@ -154,8 +154,13 @@ mod tests {
     #[test]
     fn hashes_are_phc_format_and_verify() {
         let hasher = PasswordHasher::new();
-        let hash = hasher.hash("correct horse battery").expect("policy-compliant");
-        assert!(hash.starts_with("$argon2id$"), "must be PHC Argon2id: {hash}");
+        let hash = hasher
+            .hash("correct horse battery")
+            .expect("policy-compliant");
+        assert!(
+            hash.starts_with("$argon2id$"),
+            "must be PHC Argon2id: {hash}"
+        );
         assert!(hasher.verify("correct horse battery", &hash).unwrap());
         assert!(!hasher.verify("wrong horse battery!!", &hash).unwrap());
     }

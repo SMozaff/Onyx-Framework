@@ -43,7 +43,10 @@ pub struct EventFilter {
 
 impl EventFilter {
     fn matches(&self, envelope: &EventEnvelopeJson) -> bool {
-        let Some(org) = envelope.get("audit_metadata").and_then(|m| m.get("tenant_isolation_key")) else {
+        let Some(org) = envelope
+            .get("audit_metadata")
+            .and_then(|m| m.get("tenant_isolation_key"))
+        else {
             return false;
         };
         let Ok(org_id) = serde_json::from_value::<OrganizationId>(org.clone()) else {
@@ -229,7 +232,10 @@ mod tests {
             .expect("subscription closed unexpectedly");
         // If org filtering were broken, this would be the other_org event
         // (published first); confirm we skipped straight to the matching one.
-        assert_eq!(received["audit_metadata"]["tenant_isolation_key"], serde_json::to_value(my_org).unwrap());
+        assert_eq!(
+            received["audit_metadata"]["tenant_isolation_key"],
+            serde_json::to_value(my_org).unwrap()
+        );
     }
 
     #[tokio::test]

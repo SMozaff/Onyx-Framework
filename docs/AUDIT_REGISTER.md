@@ -270,3 +270,72 @@ devDependencies** (build/lint/test tooling) — the shipped runtime bundle
 | web-ui (TypeScript) | `npm run type-check` | **0 errors** |
 | web-ui (production build) | `npm run build` | **succeeds**, 101.7 KB gzipped JS, passes bundle-size gate |
 | Desktop UI (production build) | `npm run build` (Vite) | **succeeds**, 37 modules |
+
+## 7. Session 4 — CI Pipeline Audit (`.github/workflows/ci.yml`)
+
+User asked directly whether the CI file builds anything. It did not — four
+distinct, individually reproduced problems.
+
+| # | Finding | Reproduction | Fix |
+|---|---|---|---|
+| 16 | `check` job builds `--workspace --release` with no GTK/WebKit install step; `desktop-shell` is a workspace member | Directly hit `gdk-3.0 not found` on a bare image earlier this session — same class of runner | Added `apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev` (+ webkit/appindicator/rsvg deps) before the toolchain build step |
+| 17 | `web` job's "Patch Vite config for Vitest" step greps for `'"test":'` but `vite.config.ts` uses unquoted `test: {` — **the step has never fired, ever** | `grep -q '"test":' vite.config.ts` → no match, confirmed | Removed the dead step; root cause (vitest 1.6 coverage schema) already fixed at source in session 3 |
+| 18 | `mobile-android` job: `android/build.gradle` pins AGP `8.5.2`; Flutter 3.44.8 stable requires ≥`8.6.0` | Ran `./gradlew tasks` for real after generating the scaffold → `FAILURE: ... Android Gradle Plugin version (8.5.2) is lower than Flutter's minimum supported version ... 8.6.0` | Bumped to `8.6.0` in `settings.gradle`. Re-ran: **that specific error is gone**, build now proceeds to (environment-only) SDK-location resolution, which is expected — this sandbox has no Android SDK installed; GitHub Actions runners do. |
+| 19 | `ensure_platform_scaffold.sh` leaves both `build.gradle`/`build.gradle.kts`, `settings.gradle`/`settings.gradle.kts`, and two `MainActivity.kt` in different packages (`com.onyx` vs `com.onyx.onyx_mobile`) after regeneration | Confirmed by directly running the script and listing the resulting files. Gradle happened to prefer the Groovy variants this run (undocumented precedence), so this was **latent, not the active failure** | Deleted the redundant `.kts` duplicates and the orphaned template `MainActivity.kt`, leaving one unambiguous build definition |
+
+### Correction to an earlier statement (session 2)
+I previously told the user Android/iOS "cannot build" due to missing
+`gradlew`/`Runner.xcodeproj`/launcher icons, and offered to hand-scaffold them.
+That was incomplete — the team had already solved exactly that problem via
+`mobile/tool/ensure_platform_scaffold.sh`, which backs up the hand-written
+`MainActivity.kt`/`WorkManagerService.kt`/`AppDelegate.swift`, runs
+`flutter create`, and restores them. Verified: running it produces a working
+`gradlew` and `Runner.xcodeproj`, and the custom files survive intact. The
+scaffold problem was already solved; the AGP version pin (finding #18) was
+the actual, previously-undiscovered blocker underneath it.
+
+### Files delivered this session
+* `.github/workflows/ci.yml` — findings #16, #17
+* `mobile/android/settings.gradle` — finding #18
+* `mobile/android/` scaffold cleanup — finding #19 (not independently
+  re-delivered; folded into the next full archive)
+
+### Still unverified (flagged, not claimed)
+* `verify_team7.sh` runs `cargo test -p team7-integration-tests --test integration`
+  — crate confirmed to exist; the named integration test target itself was not
+  individually executed this session.
+* The full `mobile-android` job cannot be end-to-end verified without a real
+  Android SDK, which this sandbox does not have. The reproduced AGP fix is
+  confirmed as far as this environment allows.
+
+## 8. Session 5 — Real CI Log Analysis (post-outage jobs)
+
+User uploaded two real GitHub Actions job logs from runs after the platform-wide
+outage cleared. Two genuine, unrelated failures — both root-caused by execution,
+not inspection.
+
+| # | Job | Failure | Root cause | Fix |
+|---|---|---|---|---|
+| 20 | `check` | `cargo fmt --check` exit 1, 44 diffs across 14 files | **Mixed**: 7 files were pre-existing formatting drift never caught before (this repo has no fmt-check history); 7 were files added/edited across sessions 2–4 (`password.rs`, `user_store.rs` ×2, `admin.rs`) that I never ran `cargo fmt` against. **This half is on me** — I verified compilation and test-passing throughout but never checked formatting. | `cargo fmt --all` across the whole workspace. Re-verified: `cargo check` 0 errors, `cargo test --lib` **114 passed, 0 failed** (up from 100 — the 14 new is expected: security-adapter's tests were previously counted separately and are now included in the same full-workspace run). |
+| 21 | `web` | `tests/integration/commands.test.tsx` — `expected false to be true` on `result.current.isSuccess` | **Confirmed by direct execution, not inference.** Instrumented the test: `mutateAsync` resolved with real success data (`{"success":true,...}`), but `isSuccess` read immediately after was still `false` — a React Query state-transition timing issue, not a logic bug. Confirmed by comparing against the sibling `queries.test.tsx`, which already uses `waitFor(() => expect(result.current.isSuccess).toBe(true))` for exactly this reason; `commands.test.tsx` read the flag synchronously instead. | Changed the assertion to `await waitFor(() => expect(result.current.isSuccess).toBe(true))`, matching the established pattern. Re-verified: **passes**. |
+
+### Explicitly ruled out during investigation (stated for the record, not left implicit)
+* The credential-name change from session 3 (`operator`→`test-admin`) was
+  **not** the cause of #21 — `authenticate()` in `test-utils.tsx` sets auth
+  state directly via the Zustand store and never calls the mock `/api/auth/login`
+  endpoint at all.
+* `sessionStorage['onyx_user']`, which `useCommand.ts`'s `organizationId()`
+  reads, **is correctly populated** by `authStore.login() → storeSession()`
+  in both the real app and the test helper — confirmed by direct instrumentation.
+  This was suspected as a possible production bug and directly disproven.
+* The mock server's fixture notification ID/version matched the test's
+  expectations exactly — not the cause.
+
+### Full verification after both fixes
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | **0 diffs** |
+| `cargo check --workspace --exclude desktop-shell --exclude e2e` | **0 errors** |
+| `cargo test --workspace --exclude desktop-shell --exclude e2e --lib` | **114 passed, 0 failed** |
+| `npm run type-check` (web-ui) | **0 errors** |
+| `npx vitest run` (web-ui, full suite) | **130 passed, 7 intentionally skipped, 0 failed** |

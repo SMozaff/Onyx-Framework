@@ -30,8 +30,8 @@ use persistence_sqlite::{SqliteRepository, SqliteUnitOfWorkFactory};
 use platform_kernel::{ObjectId, OrganizationId};
 use query_application::{IdempotencyError, IdempotencyStore, Repository, UnitOfWorkFactory};
 use security_adapter::{
-    Ed25519JwtCodec, EnvironmentSecretProvider, InMemorySlidingWindowRateLimiter,
-    PasswordHasher, PostgresSlidingWindowRateLimiter, PostgresUserStore, SqliteUserStore,
+    Ed25519JwtCodec, EnvironmentSecretProvider, InMemorySlidingWindowRateLimiter, PasswordHasher,
+    PostgresSlidingWindowRateLimiter, PostgresUserStore, SqliteUserStore,
 };
 use security_application::{RateLimiter, SecretProvider, UserStore};
 use serde::{Deserialize, Serialize};

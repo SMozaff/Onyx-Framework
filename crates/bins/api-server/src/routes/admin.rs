@@ -173,7 +173,9 @@ pub async fn bootstrap(
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserDto>), ApiError> {
     // 1. The endpoint is disabled unless a token is configured (fail closed).
-    let expected = std::env::var(BOOTSTRAP_TOKEN_ENV).ok().filter(|token| !token.is_empty());
+    let expected = std::env::var(BOOTSTRAP_TOKEN_ENV)
+        .ok()
+        .filter(|token| !token.is_empty());
     let Some(expected) = expected else {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,

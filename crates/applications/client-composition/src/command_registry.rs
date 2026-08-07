@@ -27,7 +27,9 @@
 use std::collections::HashMap;
 
 use platform_contracts::CommandEnvelope;
-use platform_kernel::{ActorContext, CorrelationId, LifecycleEpoch, ObjectId, ObjectVersion, OperationId, VectorClock};
+use platform_kernel::{
+    ActorContext, CorrelationId, LifecycleEpoch, ObjectId, ObjectVersion, OperationId, VectorClock,
+};
 
 /// The outcome of a successful command dispatch. Mirrors
 /// `api_server::CommandResult` (a `serde_json::Value`) for decision
@@ -139,8 +141,10 @@ impl CommandRegistry {
         command_type: impl Into<String>,
         handler: impl CreationHandler + 'static,
     ) -> &mut Self {
-        self.handlers
-            .insert(command_type.into(), RegisteredHandler::Creation(Box::new(handler)));
+        self.handlers.insert(
+            command_type.into(),
+            RegisteredHandler::Creation(Box::new(handler)),
+        );
         self
     }
 
@@ -150,8 +154,10 @@ impl CommandRegistry {
         command_type: impl Into<String>,
         handler: impl DecisionHandler + 'static,
     ) -> &mut Self {
-        self.handlers
-            .insert(command_type.into(), RegisteredHandler::Decision(Box::new(handler)));
+        self.handlers.insert(
+            command_type.into(),
+            RegisteredHandler::Decision(Box::new(handler)),
+        );
         self
     }
 
@@ -162,10 +168,9 @@ impl CommandRegistry {
         &self,
         envelope: CommandEnvelope<serde_json::Value>,
     ) -> Result<CommandResult, CommandDispatchError> {
-        let handler = self
-            .handlers
-            .get(&envelope.command_type)
-            .ok_or_else(|| CommandDispatchError::UnknownCommandType(envelope.command_type.clone()))?;
+        let handler = self.handlers.get(&envelope.command_type).ok_or_else(|| {
+            CommandDispatchError::UnknownCommandType(envelope.command_type.clone())
+        })?;
 
         match handler {
             RegisteredHandler::Creation(h) => {
@@ -209,11 +214,14 @@ impl Default for CommandRegistry {
 mod tests {
     use super::*;
     use platform_kernel::{
-        AuthorityEpoch, AuthorityProof, AuthorityScope, CommandId, CorrelationId,
-        DomainObjectRef, ObjectId, ProofType, SchemaVersion, Timestamp,
+        AuthorityEpoch, AuthorityProof, AuthorityScope, CommandId, CorrelationId, DomainObjectRef,
+        ObjectId, ProofType, SchemaVersion, Timestamp,
     };
 
-    fn sample_envelope(command_type: &str, payload: serde_json::Value) -> CommandEnvelope<serde_json::Value> {
+    fn sample_envelope(
+        command_type: &str,
+        payload: serde_json::Value,
+    ) -> CommandEnvelope<serde_json::Value> {
         let org = ObjectId::new_random();
         CommandEnvelope {
             command_id: CommandId::new_random(),
@@ -302,7 +310,10 @@ mod tests {
         let result = registry.dispatch(envelope).await.unwrap();
 
         assert_eq!(result["success"], serde_json::json!(true));
-        assert_eq!(result["echoed_payload"]["name"], serde_json::json!("widget"));
+        assert_eq!(
+            result["echoed_payload"]["name"],
+            serde_json::json!("widget")
+        );
     }
 
     #[tokio::test]

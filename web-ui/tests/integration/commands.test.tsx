@@ -16,9 +16,14 @@ describe('command flow', () => {
   it('acknowledges through the API and never mutates the input projection', async () => {
     authenticate();
     const { result } = renderHook(() => useAcknowledgeNotification(), { wrapper: TestProviders });
+    // mutateAsync's returned promise resolves with the mutationFn's result,
+    // but the mutation's isSuccess flag is a separate React Query state
+    // transition that lands slightly after — reading it synchronously here
+    // races that transition. waitFor is the pattern this repo already uses
+    // for the same reason in queries.test.tsx.
     await act(async () => { await result.current.mutateAsync(notification); });
     expect(notification.status).toBe('unacknowledged');
-    expect(result.current.isSuccess).toBe(true);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
   it('fails visibly when the network is lost', async () => {

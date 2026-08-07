@@ -45,8 +45,8 @@ impl DecisionHandler for MissionDecisionHandler {
         vector_clock: VectorClock,
         correlation_id: CorrelationId,
     ) -> Result<CommandResult, api_server::CommandError> {
-        let command: mission_domain::MissionCommand = serde_json::from_value(payload)
-            .map_err(api_server::CommandError::Serialization)?;
+        let command: mission_domain::MissionCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
 
         api_server::handle_command::<mission_domain::Mission, _, _, _>(
             command,
@@ -102,8 +102,8 @@ impl DecisionHandler for TaskDecisionHandler {
         vector_clock: VectorClock,
         correlation_id: CorrelationId,
     ) -> Result<CommandResult, api_server::CommandError> {
-        let command: work_domain::TaskCommand = serde_json::from_value(payload)
-            .map_err(api_server::CommandError::Serialization)?;
+        let command: work_domain::TaskCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
 
         api_server::handle_command::<work_domain::Task, _, _, _>(
             command,

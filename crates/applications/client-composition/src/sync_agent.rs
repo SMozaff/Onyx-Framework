@@ -17,9 +17,11 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use platform_kernel::{OrganizationId, ReplicaId};
-use synchronization_domain::{ConflictRecord, ConflictResolution, SyncCursor, SyncError, SynchronizationSession};
-use sync_transport::{CompositeDiscovery, PeerInfo, TransportError, TransportSelector};
 use sync_transport::message::SyncMessageType;
+use sync_transport::{CompositeDiscovery, PeerInfo, TransportError, TransportSelector};
+use synchronization_domain::{
+    ConflictRecord, ConflictResolution, SyncCursor, SyncError, SynchronizationSession,
+};
 use worker_application::OutboxStore;
 
 use crate::event_bus::EventBus;
@@ -314,7 +316,9 @@ impl SyncAgent {
             .await
             .map_err(SyncSessionError::Transport)?;
 
-        let result = self.run_session_over_connection(&peer, connection.as_mut()).await;
+        let result = self
+            .run_session_over_connection(&peer, connection.as_mut())
+            .await;
         let _ = connection.close().await;
         result
     }
@@ -329,7 +333,8 @@ impl SyncAgent {
         peer: &PeerInfo,
         connection: &mut dyn sync_transport::Connection,
     ) -> Result<(), SyncSessionError> {
-        let mut session = SynchronizationSession::new(self.local_replica, peer.id, self.organization_id);
+        let mut session =
+            SynchronizationSession::new(self.local_replica, peer.id, self.organization_id);
 
         // Phase 1: Discovery. Send our vector clock, receive the peer's.
         let discovery_payload = DiscoveryPayload {
@@ -398,7 +403,10 @@ impl SyncAgent {
         if !conflicts.is_empty() {
             let mut records = self.open_conflicts.write().await;
             for conflict in &conflicts {
-                if !records.iter().any(|existing| existing.conflict_id == conflict.conflict_id) {
+                if !records
+                    .iter()
+                    .any(|existing| existing.conflict_id == conflict.conflict_id)
+                {
                     records.push(conflict.clone());
                 }
             }
@@ -610,7 +618,10 @@ mod tests {
             ReplicaId::new_random(),
             OrganizationId::new_random(),
             outbox,
-            Arc::new(CompositeDiscovery::new(CloudDiscovery::new(), LocalDiscovery::new())),
+            Arc::new(CompositeDiscovery::new(
+                CloudDiscovery::new(),
+                LocalDiscovery::new(),
+            )),
             Arc::new(TransportSelector::new(
                 None,
                 None,
@@ -760,11 +771,17 @@ mod tests {
             serde_json::to_vec(&discovery_payload).unwrap(),
         )]);
 
-        let result = agent.run_session_over_connection(&peer, &mut connection).await;
+        let result = agent
+            .run_session_over_connection(&peer, &mut connection)
+            .await;
         assert!(result.is_ok(), "expected Ok, got {result:?}");
 
         let sent = connection.sent_messages();
-        assert_eq!(sent.len(), 1, "only the DiscoveryRequest should have been sent");
+        assert_eq!(
+            sent.len(),
+            1,
+            "only the DiscoveryRequest should have been sent"
+        );
         assert_eq!(sent[0].message_type, SyncMessageType::DiscoveryRequest);
     }
 
@@ -777,15 +794,20 @@ mod tests {
 
         // Peer replies with the wrong message type (Ack instead of
         // DiscoveryResponse) — must be rejected, not silently accepted.
-        let mut connection = ScriptedConnection::new(vec![scripted_message(SyncMessageType::Ack, vec![])]);
+        let mut connection =
+            ScriptedConnection::new(vec![scripted_message(SyncMessageType::Ack, vec![])]);
 
-        let result = agent.run_session_over_connection(&peer, &mut connection).await;
+        let result = agent
+            .run_session_over_connection(&peer, &mut connection)
+            .await;
         match result {
             Err(SyncSessionError::UnexpectedMessageType {
                 expected: SyncMessageType::DiscoveryResponse,
                 actual: SyncMessageType::Ack,
             }) => {}
-            other => panic!("expected UnexpectedMessageType(DiscoveryResponse, Ack), got {other:?}"),
+            other => {
+                panic!("expected UnexpectedMessageType(DiscoveryResponse, Ack), got {other:?}")
+            }
         }
     }
 
@@ -821,11 +843,17 @@ mod tests {
             ),
         ]);
 
-        let result = agent.run_session_over_connection(&peer, &mut connection).await;
+        let result = agent
+            .run_session_over_connection(&peer, &mut connection)
+            .await;
         assert!(result.is_ok(), "expected Ok, got {result:?}");
 
         let sent = connection.sent_messages();
-        assert_eq!(sent.len(), 2, "DiscoveryRequest + OfferOperations should have been sent");
+        assert_eq!(
+            sent.len(),
+            2,
+            "DiscoveryRequest + OfferOperations should have been sent"
+        );
         assert_eq!(sent[0].message_type, SyncMessageType::DiscoveryRequest);
         assert_eq!(sent[1].message_type, SyncMessageType::OfferOperations);
 
@@ -843,7 +871,10 @@ mod tests {
             "audit_metadata": {"tenant_isolation_key": org},
         }));
 
-        let agent = sample_agent(Arc::clone(&event_bus), Arc::clone(&outbox) as Arc<dyn OutboxStore>);
+        let agent = sample_agent(
+            Arc::clone(&event_bus),
+            Arc::clone(&outbox) as Arc<dyn OutboxStore>,
+        );
         let mut sub = event_bus.subscribe(crate::event_bus::EventFilter {
             organization_id: org,
             event_types: None,

@@ -109,16 +109,18 @@ pub async fn login(
         }
     };
 
-    let access_token = issue_token(&state, &user, "access", 3600).await.map_err(|_| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "TOKEN_ISSUANCE_FAILED",
-            "INFRASTRUCTURE",
-            "TRANSIENT",
-            uuid::Uuid::new_v4().to_string(),
-            json!({}),
-        )
-    })?;
+    let access_token = issue_token(&state, &user, "access", 3600)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "TOKEN_ISSUANCE_FAILED",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
     let refresh_token = issue_token(&state, &user, "refresh", 7 * 24 * 3600)
         .await
         .map_err(|_| {
