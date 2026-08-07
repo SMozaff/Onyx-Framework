@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox SET published = TRUE, last_error = $1 WHERE outbox_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "622ca60b831ab844e6f78bb08e4aaca1ca443d5eaa159cd96a2f11a264daaa8c"
+}

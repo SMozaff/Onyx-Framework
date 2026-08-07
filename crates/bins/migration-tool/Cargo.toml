@@ -1,0 +1,18 @@
+[package]
+name = "migration-tool"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "migration-tool"
+path = "src/main.rs"
+
+[dependencies]
+sqlx.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+chrono.workspace = true

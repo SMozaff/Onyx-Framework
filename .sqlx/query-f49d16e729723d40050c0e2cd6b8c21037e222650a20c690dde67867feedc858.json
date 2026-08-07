@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO inbox (consumer_id, event_id, processed_at)\n            VALUES ($1, $2, to_timestamp($3::double precision / 1000.0))\n            ON CONFLICT (consumer_id, event_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f49d16e729723d40050c0e2cd6b8c21037e222650a20c690dde67867feedc858"
+}

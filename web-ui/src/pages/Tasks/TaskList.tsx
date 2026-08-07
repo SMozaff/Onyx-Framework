@@ -1,0 +1,3 @@
+import StatusBadge from '../../components/StatusBadge';
+import type { TaskSummary } from '../../types/query';
+export default function TaskList({ tasks, selectedId, onSelect }: { tasks: TaskSummary[]; selectedId: string | null; onSelect: (task: TaskSummary) => void }) { return <div className="data-list" role="list" aria-label="Tasks">{tasks.map((task) => <button type="button" role="listitem" key={task.id} className={`data-row ${selectedId === task.id ? 'data-row-selected' : ''}`} onClick={() => onSelect(task)}><div><strong>{task.title}</strong><span>{task.owner}</span></div><div className="row-meta"><span>{task.priority}</span><StatusBadge status={task.status} /></div></button>)}</div>; }

@@ -1,0 +1,17 @@
+[package]
+name = "work-domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "ONYX Task aggregate: pure domain logic for task lifecycle."
+
+[dependencies]
+platform-kernel = { path = "../../kernel/platform-kernel" }
+platform-contracts = { path = "../../kernel/platform-contracts" }
+mission-domain = { path = "../mission-domain" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+serde_json = "1.0"
+proptest = "1.0"

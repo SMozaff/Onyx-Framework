@@ -1,0 +1,44 @@
+namespace: onyx
+replicaCount: 3
+image:
+  repository: ghcr.io/example/onyx-api
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  httpPort: 3000
+  metricsPort: 9090
+ingress:
+  enabled: true
+  className: nginx
+  host: api.onyx.example.com
+  tlsSecret: onyx-api-tls
+resources:
+  requests: {cpu: 250m, memory: 256Mi}
+  limits: {cpu: "1", memory: 1Gi}
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+prometheus:
+  address: http://prometheus-operated.monitoring.svc:9090
+  errorRateQuery: sum(rate(requests_total{service="onyx_api_server",status=~"5.."}[2m])) / clamp_min(sum(rate(requests_total{service="onyx_api_server"}[2m])), 1)
+env:
+  RUST_LOG: info
+  ONYX_ENV: production
+  ONYX_BIND: 0.0.0.0:3000
+  ONYX_METRICS_BIND: 0.0.0.0:9090
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-collector.observability.svc:4317
+secretRef: onyx-api-secrets
+# The referenced Secret must contain these keys. DATABASE_URL must be a
+# PostgreSQL URL because the Rollout runs multiple API replicas.
+secretContract:
+  requiredKeys:
+    - DATABASE_URL
+    - ONYX_GOVERNANCE_DATABASE_URL
+    - ONYX_AUTHORITY_SIGNING_KEY
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001

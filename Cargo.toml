@@ -1,0 +1,127 @@
+[workspace]
+resolver = "2"
+members = [
+    "kernel-contracts-stub",
+    "crates/kernel/platform-kernel",
+    "crates/kernel/platform-contracts",
+    "crates/domains/mission-domain",
+    "crates/domains/work-domain",
+    "crates/applications/query-application",
+    "crates/applications/worker-application",
+    "crates/applications/client-composition",
+    "crates/applications/security-application",
+    "crates/applications/audit-application",
+    "crates/infrastructure/persistence-common",
+    "crates/infrastructure/persistence-postgres",
+    "crates/infrastructure/persistence-sqlite",
+    "crates/infrastructure/messaging-adapter",
+    "crates/infrastructure/observability-adapter",
+    "crates/infrastructure/security-adapter",
+    "crates/infrastructure/background-jobs",
+    "crates/bins/api-server",
+    "crates/bins/worker",
+    "crates/bins/migration-tool",
+    "crates/bins/sync-agent",
+    "crates/bins/desktop-shell",
+    "crates/mobile-core",
+    "crates/kernel/platform-contracts-ext",
+    "crates/synchronization/crdt",
+    "crates/synchronization/synchronization-domain",
+    "crates/synchronization/sync-test-utils",
+    "crates/transports/sync-transport",
+    "crates/transports/sync-transport-mobile",
+    "crates/team7-integration-tests",
+    "crates/team8-e2e-tests",
+    "crates/team8-chaos-tests",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.75"
+publish = false
+
+[workspace.dependencies]
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "uuid", "chrono", "json", "migrate"] }
+chrono = { version = "0.4", features = ["serde"] }
+axum = { version = "0.7", features = ["ws"] }
+base64 = "0.21"
+hmac = "0.12"
+sha2 = "0.10"
+tower-http = { version = "0.6", features = ["cors"] }
+futures-util = "0.3"
+
+# --- Team 7 (Observability, Background Processing, Security) ---
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+hex = "0.4"
+prometheus = "0.13"
+opentelemetry = "0.22"
+opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.15", features = ["grpc-tonic", "trace"] }
+tracing-opentelemetry = "0.23"
+
+# --- Team 8 (Release, E2E, Chaos) ---
+testcontainers-modules = { version = "0.15", features = ["postgres", "blocking"] }
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
+
+kernel-contracts-stub = { path = "kernel-contracts-stub" }
+platform-kernel = { path = "crates/kernel/platform-kernel" }
+platform-contracts = { path = "crates/kernel/platform-contracts" }
+mission-domain = { path = "crates/domains/mission-domain" }
+work-domain = { path = "crates/domains/work-domain" }
+query-application = { path = "crates/applications/query-application" }
+worker-application = { path = "crates/applications/worker-application" }
+client-composition = { path = "crates/applications/client-composition" }
+security-application = { path = "crates/applications/security-application" }
+audit-application = { path = "crates/applications/audit-application" }
+observability-adapter = { path = "crates/infrastructure/observability-adapter" }
+security-adapter = { path = "crates/infrastructure/security-adapter" }
+background-jobs = { path = "crates/infrastructure/background-jobs" }
+
+api-server = { path = "crates/bins/api-server" }
+desktop-shell = { path = "crates/bins/desktop-shell" }
+mobile-core = { path = "crates/mobile-core" }
+persistence-common = { path = "crates/infrastructure/persistence-common" }
+persistence-postgres = { path = "crates/infrastructure/persistence-postgres" }
+persistence-sqlite = { path = "crates/infrastructure/persistence-sqlite" }
+messaging-adapter = { path = "crates/infrastructure/messaging-adapter" }
+platform-contracts-ext = { path = "crates/kernel/platform-contracts-ext" }
+crdt = { path = "crates/synchronization/crdt" }
+synchronization-domain = { path = "crates/synchronization/synchronization-domain" }
+sync-test-utils = { path = "crates/synchronization/sync-test-utils" }
+sync-transport = { path = "crates/transports/sync-transport" }
+sync-transport-mobile = { path = "crates/transports/sync-transport-mobile" }
+proptest = "1"
+rand = "0.8"
+anyhow = "1"
+
+# --- Team 4 (Networking / P2P Transports) additional dependencies ---
+# Not previously in the workspace; added here rather than duplicated as
+# non-workspace deps in sync-transport's own Cargo.toml, matching the
+# existing convention (all shared deps centralized at workspace level).
+quinn = "0.10"
+rustls = "0.21"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
+tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots"] }
+libc = "0.2"
+objc = "0.2"
+jni = "0.21"
+rcgen = "0.11"
+
+# --- Password hashing (Audit fix H-01) ---
+# Argon2id is the OWASP-recommended password KDF. `password-hash` supplies the
+# PHC string format so parameters travel with the stored hash, which keeps
+# future parameter increases backward compatible. `subtle` supplies the
+# constant-time equality used for the username comparison.
+argon2 = { version = "0.5", features = ["std"] }
+password-hash = { version = "0.5", features = ["std"] }
+subtle = "2.5"

@@ -1,0 +1,11 @@
+[package]
+name = "security-application"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+platform-kernel.workspace = true
+serde.workspace = true
+thiserror.workspace = true

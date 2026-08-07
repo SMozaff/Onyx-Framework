@@ -1,0 +1,9 @@
+{
+  "checks": 345,
+  "passed": 345,
+  "failures": [],
+  "warnings": [
+    "Cargo.lock predates Team 7/8 dependencies; regenerate and commit before sign-off",
+    "web-ui/package-lock.json is absent; generate and commit before sign-off"
+  ]
+}

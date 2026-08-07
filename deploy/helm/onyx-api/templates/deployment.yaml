@@ -1,0 +1,83 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "onyx-api.fullname" . }}-error-rate
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "onyx-api.labels" . | nindent 4 }}
+spec:
+  metrics:
+    - name: http-error-rate
+      interval: 1m
+      count: 60
+      successCondition: result[0] <= 0.01
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: {{ .Values.prometheus.address | quote }}
+          query: {{ .Values.prometheus.errorRateQuery | quote }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "onyx-api.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "onyx-api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "onyx-api.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    canary:
+      stableService: {{ include "onyx-api.fullname" . }}-stable
+      canaryService: {{ include "onyx-api.fullname" . }}-canary
+      trafficRouting:
+        nginx:
+          stableIngress: {{ include "onyx-api.fullname" . }}
+      analysis:
+        templates:
+          - templateName: {{ include "onyx-api.fullname" . }}-error-rate
+        startingStep: 1
+      steps:
+        - setWeight: 10
+        - pause: {duration: 30m}
+        - setWeight: 50
+        - pause: {duration: 30m}
+        - setWeight: 100
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "onyx-api.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - {name: http, containerPort: 3000}
+            - {name: metrics, containerPort: 9090}
+          envFrom:
+            - secretRef: {name: {{ .Values.secretRef }}}
+          env:
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
