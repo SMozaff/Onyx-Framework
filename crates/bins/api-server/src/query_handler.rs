@@ -271,11 +271,10 @@ async fn dashboard_summary(
                     unread_notifications += 1;
                 }
             }
-            "approval" => {
-                if status == "pending" {
-                    pending_approvals += 1;
-                }
+            "approval" if status == "pending" => {
+                pending_approvals += 1;
             }
+            "approval" => {}
             _ => {}
         }
         if matches!(

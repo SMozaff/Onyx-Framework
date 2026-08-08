@@ -67,7 +67,7 @@ async fn serve_socket(socket: WebSocket, state: ApiState, authenticated_org: Str
             event = bus.recv() => {
                 match event {
                     Ok(value) if matches_filter(&value, &filter) => {
-                        if sender.send(Message::Text(value.to_string().into())).await.is_err() { break; }
+                        if sender.send(Message::Text(value.to_string())).await.is_err() { break; }
                     }
                     Ok(_) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {

@@ -132,16 +132,26 @@ void mobile_core_unsubscribe(struct EventSubscription *sub);
 /**
  * Lists locally stored aggregate projections for one aggregate type.
  * Returns a JSON array ordered by most recently updated first.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`. `aggregate_type`
+ * must be a valid, NUL-terminated C string pointer.
  */
 char *mobile_core_list_aggregates(struct MobileApp *handle, const char *aggregate_type);
 
 /**
  * Returns the current local-first synchronization state as JSON.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`.
  */
 char *mobile_core_get_sync_status(struct MobileApp *handle);
 
 /**
  * Returns all currently open synchronization conflicts as JSON.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`.
  */
 char *mobile_core_list_conflicts(struct MobileApp *handle);
 
@@ -149,6 +159,10 @@ char *mobile_core_list_conflicts(struct MobileApp *handle);
  * Resolves an open conflict using `local`, `remote`, or `escalate`.
  * `conflict_json` must contain the serialized `conflict_id` field returned
  * by `mobile_core_list_conflicts`.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`. `conflict_json`
+ * and `resolution` must each be a valid, NUL-terminated C string pointer.
  */
 int mobile_core_resolve_conflict(struct MobileApp *handle,
                                  const char *conflict_json,

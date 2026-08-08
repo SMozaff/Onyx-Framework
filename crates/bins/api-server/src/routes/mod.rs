@@ -77,6 +77,21 @@ pub struct ApiState {
     pub password_hasher: Arc<PasswordHasher>,
 }
 
+/// The storage-backend-specific handles `ApiState::new` assembles, before
+/// they're destructured into named fields. One tuple, constructed once per
+/// process start (Postgres branch or SQLite branch), never passed further —
+/// named here only to satisfy `clippy::type_complexity`, not because it's
+/// reused elsewhere.
+type StorageBackendHandles = (
+    ProjectionPool,
+    Arc<dyn Repository>,
+    Arc<dyn Repository>,
+    Arc<dyn UnitOfWorkFactory>,
+    Arc<dyn IdempotencyStore>,
+    Option<SqlitePool>,
+    Option<PgPool>,
+);
+
 impl ApiState {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
         let environment = std::env::var("ONYX_ENV").unwrap_or_else(|_| "development".to_string());
@@ -96,15 +111,7 @@ impl ApiState {
             idempotency_store,
             sqlite_pool,
             primary_postgres_pool,
-        ): (
-            ProjectionPool,
-            Arc<dyn Repository>,
-            Arc<dyn Repository>,
-            Arc<dyn UnitOfWorkFactory>,
-            Arc<dyn IdempotencyStore>,
-            Option<SqlitePool>,
-            Option<PgPool>,
-        ) = if postgres_primary {
+        ): StorageBackendHandles = if postgres_primary {
             let pool = PgPoolOptions::new()
                 .max_connections(20)
                 .connect(database_url)

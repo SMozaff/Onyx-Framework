@@ -12,6 +12,10 @@ use crate::{cstr_to_string, string_to_cstr, MobileApp};
 
 /// Lists locally stored aggregate projections for one aggregate type.
 /// Returns a JSON array ordered by most recently updated first.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `mobile_core_new`. `aggregate_type`
+/// must be a valid, NUL-terminated C string pointer.
 #[no_mangle]
 pub unsafe extern "C" fn mobile_core_list_aggregates(
     handle: *mut MobileApp,
@@ -59,6 +63,9 @@ pub unsafe extern "C" fn mobile_core_list_aggregates(
 }
 
 /// Returns the current local-first synchronization state as JSON.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `mobile_core_new`.
 #[no_mangle]
 pub unsafe extern "C" fn mobile_core_get_sync_status(handle: *mut MobileApp) -> *mut c_char {
     if handle.is_null() {
@@ -75,6 +82,9 @@ pub unsafe extern "C" fn mobile_core_get_sync_status(handle: *mut MobileApp) -> 
 }
 
 /// Returns all currently open synchronization conflicts as JSON.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `mobile_core_new`.
 #[no_mangle]
 pub unsafe extern "C" fn mobile_core_list_conflicts(handle: *mut MobileApp) -> *mut c_char {
     if handle.is_null() {
@@ -93,6 +103,10 @@ pub unsafe extern "C" fn mobile_core_list_conflicts(handle: *mut MobileApp) -> *
 /// Resolves an open conflict using `local`, `remote`, or `escalate`.
 /// `conflict_json` must contain the serialized `conflict_id` field returned
 /// by `mobile_core_list_conflicts`.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `mobile_core_new`. `conflict_json`
+/// and `resolution` must each be a valid, NUL-terminated C string pointer.
 #[no_mangle]
 pub unsafe extern "C" fn mobile_core_resolve_conflict(
     handle: *mut MobileApp,

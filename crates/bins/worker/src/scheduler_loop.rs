@@ -72,7 +72,7 @@ pub async fn scheduler_tick_sqlite(
             )));
         }
     }
-    enqueue_timeline_rows(queue, candidates.into_iter()).await
+    enqueue_timeline_rows(queue, candidates).await
 }
 
 async fn enqueue_timeline_rows<I>(queue: &dyn JobQueue, rows: I) -> anyhow::Result<u64>

@@ -396,3 +396,28 @@ questions below.
 
 I have not picked one — this is exactly the kind of "undecided, ask" case per
 your standing instruction. Which approach do you want?
+
+### Resolution — Session 7
+
+**Owner decision: option 1, `#[allow(clippy::result_large_err)]`.**
+
+Implemented as a single crate-level `#![allow(clippy::result_large_err)]` in
+`crates/bins/api-server/src/lib.rs`, with an inline doc comment explaining the
+rationale (all 11 call sites are per-request, error-path-only helpers in
+`routes/{admin,command,events,mod}.rs`; none are hot-path; `ApiError` is
+always consumed immediately by `IntoResponse`, never threaded through many
+stack frames). One allow, documented once, rather than 11 scattered
+per-function annotations — chosen to match this file's existing convention
+of a single provenance/rationale doc comment at the crate root.
+
+`main.rs` was checked and confirmed to never construct or return `ApiError`
+directly (it only imports `router`/`ApiState` from the `routes` module), so
+the bin target needed no separate annotation.
+
+**Verification status:** implemented but **not yet re-run through
+`cargo clippy`** in this session — this sandbox has no Rust toolchain
+installed (`rustc`/`cargo` not found). This should be verified with
+`cargo clippy -p api-server -- -D warnings` on a machine with the pinned
+1.97.1 toolchain before being counted as closed. Flagging this explicitly
+rather than claiming verification I did not perform.
+**Status:** CLOSED (implementation) / VERIFICATION PENDING (toolchain unavailable in this session).
