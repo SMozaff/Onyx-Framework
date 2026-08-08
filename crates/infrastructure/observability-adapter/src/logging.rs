@@ -147,10 +147,10 @@ impl Visit for JsonVisitor {
 fn take_string(fields: &mut Map<String, Value>, name: &str) -> String {
     fields
         .remove(name)
-        .and_then(|value| match value {
-            Value::String(value) => Some(value),
-            Value::Null => Some(String::new()),
-            other => Some(other.to_string()),
+        .map(|value| match value {
+            Value::String(value) => value,
+            Value::Null => String::new(),
+            other => other.to_string(),
         })
         .unwrap_or_default()
 }

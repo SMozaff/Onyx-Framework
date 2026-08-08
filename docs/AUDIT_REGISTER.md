@@ -339,3 +339,60 @@ not inspection.
 | `cargo test --workspace --exclude desktop-shell --exclude e2e --lib` | **114 passed, 0 failed** |
 | `npm run type-check` (web-ui) | **0 errors** |
 | `npx vitest run` (web-ui, full suite) | **130 passed, 7 intentionally skipped, 0 failed** |
+
+## 9. Session 6 — Three New Real CI Logs (post-outage, new job types)
+
+Three new logs — including, for the first time, `mobile-android` and
+`mobile-ios` jobs actually completing enough to fail meaningfully (previously
+blocked by the platform outage). Each root-caused by direct reproduction.
+
+| # | Job | Failure | Root cause | Fix |
+|---|---|---|---|---|
+| 22 | `mobile-android` | `Both build.gradle and build.gradle.kts exist ... likely a mistake`, ultimately fails on `workmanager` Kotlin compile errors | **My AGP fix from session 4 is confirmed working** (Gradle now runs at 8.6.0 with only a soft deprecation notice, not a failure) — but `mobile/tool/ensure_platform_scaffold.sh` regenerates the `.kts` duplicate files from `flutter create` on **every fresh CI checkout**, so my earlier one-time manual deletion never survived into CI, which always starts from a clean clone | Moved the cleanup into the scaffold script itself (its permanent, correct location) so it runs every time the script does. Re-ran the script from a clean state in the sandbox: **confirmed only Groovy files remain, `gradlew` regenerates correctly.** |
+| 23 | `mobile-android` (actual failure) | `Unresolved reference 'shim'/'registerWith'/'ShimPluginRegistry'` in `workmanager-0.5.2`'s own Android source | Confirmed via web search against `fluttercommunity/flutter_workmanager` issues #586 and #588 — exact matching error text. `workmanager 0.5.2` references Android's v1-embedding shim classes, removed by newer Flutter/AGP toolchains. Checked this project's own usage (`lib/background/android/workmanager_service.dart`) against the stable public API (`initialize`/`registerPeriodicTask`/`executeTask`) — unaffected by the fix. | Bumped `workmanager: ^0.5.0` → `^0.6.0` (fixes the shim removal without pulling in 0.9.x's unrelated breaking factory-pattern API change, per the package's own changelog). |
+| 24 | `mobile-ios` | `Invalid Podfile: cannot load such file -- /opt/flutter/packages/flutter_tools/bin/podhelper` | **Not a repository bug.** The Podfile correctly resolves `flutter_root` dynamically from `ios/Flutter/Generated.xcconfig` at build time — verified by reading it. The actual cause: `Generated.xcconfig` (containing a **stale path from my own sandbox's Linux Flutter install**, `/opt/flutter`) had been accidentally included in the delivered zip. `mobile/ios/.gitignore` correctly lists `Flutter/Generated.xcconfig` as ignored — the project's own ignore rules are correct; my packaging in session 4/5 didn't respect `.gitignore` when zipping. | Deleted `ios/Flutter/Generated.xcconfig`, `flutter_export_environment.sh`, `.flutter-plugins-dependencies`, and `ios/Flutter/ephemeral/` from the delivered tree. On a real checkout `flutter pub get` regenerates these correctly, scoped to that machine's actual Flutter install. |
+| 25 | `check` (clippy) | `bind_instead_of_map` in `observability-adapter/src/logging.rs` | Pre-existing, predates all sessions — first time `clippy -D warnings` has ever been run against this codebase in CI. Every match arm returned `Some(...)`, making `.and_then()` strictly more complex than `.map()`. | Applied clippy's own suggested rewrite. Re-verified: `cargo clippy -p observability-adapter -- -D warnings` clean. |
+
+### Widening the clippy check surfaced a larger pre-existing gap — not yet fully resolved
+Running `cargo clippy --workspace -- -D warnings` (rather than per-crate) after
+fixing #25 surfaced **12 further pre-existing lint violations**, all predating
+this project's audit sessions, concentrated in `security-adapter` and
+`api-server`:
+
+* Fixed immediately (mechanical, no design decision required):
+  - `type_complexity` in `rate_limiter.rs` — factored into a named `RateLimitEventLog` type alias.
+  - `unnecessary_lazy_evaluations` in `secret_provider.rs` — `.ok_or_else(|| X)` → `.ok_or(X)` per clippy's own suggestion.
+* **Deliberately NOT fixed yet, flagged for owner decision:**
+  - `result_large_err` (8 occurrences in `routes/command.rs`) — clippy reports
+    `ApiError` is ≥136 bytes, and recommends `Box<ApiError>` or boxing its large
+    fields. This is a genuine, worthwhile perf finding, but changing `ApiError`'s
+    shape touches every `Result<_, ApiError>` call site across the API surface —
+    a wider, more deliberate change than the mechanical fixes in this session.
+  - `collapsible_match` in `query_handler.rs:275` — a real but low-risk simplification.
+  - `useless_conversion` — one occurrence, not yet triaged.
+
+**This is now flagged as its own item, not silently deferred** — see open
+questions below.
+
+### Verification after fixes applied this session
+| Check | Result |
+|---|---|
+| `mobile/tool/ensure_platform_scaffold.sh` re-run from clean state | Only Groovy Gradle files present, `gradlew` regenerated, custom Kotlin/Swift files preserved |
+| `cargo clippy -p observability-adapter --lib -- -D warnings` | **Clean** |
+| `cargo clippy --workspace --exclude desktop-shell --exclude e2e -- -D warnings` | **12 pre-existing violations found and reported to owner; 2 fixed, 10 deferred pending scope decision (see below)** |
+
+## 10. Open Question — `result_large_err` Scope
+
+`ApiError` is ≥136 bytes and clippy's `-D warnings` gate fails 8+ call sites on
+`result_large_err`. Three ways to resolve, in increasing order of invasiveness:
+
+1. **`#[allow(clippy::result_large_err)]`** at the affected functions — fastest,
+   documents the decision, changes nothing structurally. Reasonable if `ApiError`
+   is rarely on a hot path (it's constructed on error paths only, not success paths).
+2. **`Box<ApiError>`** the return type — clippy's literal suggestion. Touches every
+   call site that constructs or matches `Result<_, ApiError>` across `api-server`.
+3. **Shrink `ApiError` itself** — e.g. box `ApiErrorBody`'s `Value` field. Smallest
+   runtime cost, largest diff.
+
+I have not picked one — this is exactly the kind of "undecided, ask" case per
+your standing instruction. Which approach do you want?

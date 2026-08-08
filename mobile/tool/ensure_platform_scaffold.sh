@@ -48,3 +48,16 @@ if [[ -f android/app/build.gradle.kts ]]; then
   sed -i.bak -E 's/minSdk = flutter\.minSdkVersion/minSdk = 29/' android/app/build.gradle.kts || true
   rm -f android/app/build.gradle.kts.bak
 fi
+
+# `flutter create` always emits Kotlin-DSL build files (build.gradle.kts,
+# settings.gradle.kts) alongside this project's pre-existing Groovy ones.
+# Gradle resolves the ambiguity by preferring Groovy and printing "Both
+# build.gradle and build.gradle.kts exist ... likely a mistake" — confirmed
+# in CI (session 6 audit finding #22). Harmless today only because of that
+# undocumented precedence; removing the duplicates makes the build
+# unambiguous instead of relying on it. Also remove the .kts-generated
+# MainActivity.kt template, which lands in a different package
+# (com.onyx.onyx_mobile) than this project's real one (com.onyx) and is
+# never referenced by the Groovy manifest.
+rm -f android/build.gradle.kts android/settings.gradle.kts android/app/build.gradle.kts
+find android/app/src/main/kotlin -type d -name onyx_mobile -exec rm -rf {} + 2>/dev/null || true

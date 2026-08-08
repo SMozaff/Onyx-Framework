@@ -62,7 +62,7 @@ impl SecretProvider for EnvironmentSecretProvider {
             Ok(raw) => {
                 let expiry_name = format!("{name}_PREVIOUS_VALID_UNTIL_UNIX");
                 let valid_until = Self::previous_expiry(name)?
-                    .ok_or_else(|| SecretProviderError::InvalidEncoding(expiry_name))?;
+                    .ok_or(SecretProviderError::InvalidEncoding(expiry_name))?;
                 Some(SecretVersion {
                     value: Self::decode(&previous_name, raw)?,
                     valid_until: Some(valid_until),

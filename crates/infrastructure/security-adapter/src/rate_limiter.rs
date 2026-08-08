@@ -167,12 +167,19 @@ impl RateLimiter for PostgresSlidingWindowRateLimiter {
     }
 }
 
+/// Rate-limit event timestamps keyed by (subject, resource class).
+///
+/// Named per clippy's `type_complexity` lint (reproduced in CI — session 6
+/// audit finding #24): the bare nested type triggers the lint at every use
+/// site, and the alias documents what the tuple key represents.
+type RateLimitEventLog = Arc<Mutex<HashMap<(String, ResourceClass), VecDeque<u64>>>>;
+
 /// Deterministic development/test adapter. Production composition MUST use
 /// `PostgresSlidingWindowRateLimiter` per ruling R8.
 #[derive(Clone)]
 pub struct InMemorySlidingWindowRateLimiter {
     policies: Arc<HashMap<ResourceClass, RateLimitPolicy>>,
-    events: Arc<Mutex<HashMap<(String, ResourceClass), VecDeque<u64>>>>,
+    events: RateLimitEventLog,
 }
 
 impl Default for InMemorySlidingWindowRateLimiter {
