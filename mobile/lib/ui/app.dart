@@ -22,14 +22,10 @@ class OnyxController extends ChangeNotifier {
     required this.organizationId,
     required this.userId,
     required this.relayEndpoint,
-  }) : envelopeFactory = CommandEnvelopeFactory(
-          organizationId: organizationId,
-          userId: userId,
-        );
+  });
 
   final OnyxApi api;
   final SharedPreferences preferences;
-  final CommandEnvelopeFactory envelopeFactory;
   String organizationId;
   String userId;
   String relayEndpoint;
@@ -98,7 +94,7 @@ class OnyxController extends ChangeNotifier {
   Future<void> createMission(String name, String? description) async {
     final missionId = randomUuid();
     await api.executeCommand(
-      envelopeFactory.create(
+      api.buildCommandEnvelope(
         commandType: 'CreateMission',
         targetType: 'mission',
         targetId: missionId,
@@ -106,7 +102,7 @@ class OnyxController extends ChangeNotifier {
           'CreateMission': <String, dynamic>{
             'name': name,
             'description': description,
-            'owner_id': uuidToBytes(userId),
+            'owner_id': api.encodeId(userId),
           },
         },
       ),
@@ -121,16 +117,16 @@ class OnyxController extends ChangeNotifier {
   }) async {
     final taskId = randomUuid();
     await api.executeCommand(
-      envelopeFactory.create(
+      api.buildCommandEnvelope(
         commandType: 'CreateTask',
         targetType: 'task',
         targetId: taskId,
         payload: <String, dynamic>{
           'CreateTask': <String, dynamic>{
-            'mission_id': uuidToBytes(mission.id),
+            'mission_id': api.encodeId(mission.id),
             'title': title,
             'description': description,
-            'owner_id': uuidToBytes(userId),
+            'owner_id': api.encodeId(userId),
           },
         },
       ),
@@ -198,6 +194,59 @@ class OnyxApp extends StatelessWidget {
         ),
       ),
       home: const _MobileShell(),
+    );
+  }
+}
+
+/// Wires an already-constructed [OnyxApi] into an [OnyxController] and
+/// hosts [OnyxApp] beneath a [ChangeNotifierProvider], exactly the
+/// `runApp(ChangeNotifierProvider<OnyxController>(...))` shape
+/// `main.dart`'s `restartApp` previously built inline for the FFI path.
+///
+/// Factored out as its own widget (rather than kept inline in
+/// `restartApp`) specifically so `HttpLoginScreen` can push it via
+/// [Navigator] after a successful login — at that point the app is
+/// already running inside a `MaterialApp` (the login screen's own), so a
+/// second top-level `runApp()` call would be the wrong tool; `Navigator`
+/// is. `restartApp` continues to use this same widget via `runApp()` for
+/// the FFI path, so there is exactly one place that builds this wiring,
+/// not two.
+///
+/// Deliberately takes already-resolved `organizationId`/`userId`/
+/// `relayEndpoint` rather than reading `SharedPreferences` itself with
+/// its own defaults: the FFI path's real defaults live in `main.dart`
+/// (`defaultOrganizationId` etc.) and HTTP-mode's `HttpLoginScreen` has
+/// no equivalent defaults to fall back to (an empty LAN org ID is a
+/// caller-visible bug, not a sensible default) — a single default set
+/// baked into this widget would have been wrong for one path or the
+/// other.
+class OnyxControllerHost extends StatelessWidget {
+  const OnyxControllerHost({
+    super.key,
+    required this.api,
+    required this.preferences,
+    required this.organizationId,
+    required this.userId,
+    required this.relayEndpoint,
+  });
+
+  final OnyxApi api;
+  final SharedPreferences preferences;
+  final String organizationId;
+  final String userId;
+  final String relayEndpoint;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider<OnyxController>(
+      create: (_) => OnyxController(
+        api: api,
+        preferences: preferences,
+        organizationId: organizationId,
+        userId: userId,
+        relayEndpoint: relayEndpoint,
+      )..initialize(),
+      child: const OnyxApp(),
     );
   }
 }

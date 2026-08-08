@@ -16,6 +16,33 @@ import 'package:ffi/ffi.dart';
 abstract interface class OnyxApi {
   Stream<Map<String, dynamic>> get events;
 
+  /// Encodes a single UUID string the way this transport's server side
+  /// expects it inside a command/query payload — raw bytes for the
+  /// FFI/mobile-core boundary, the plain string unchanged for the HTTP
+  /// path to api-server (see `net/command.dart`'s doc comment on why
+  /// these two encodings genuinely differ). Callers use this for
+  /// payload-nested id fields (e.g. `owner_id`, `mission_id`) that
+  /// [buildCommandEnvelope] can't reach generically, since payload shape
+  /// is command-specific and arbitrarily nested (e.g. `CreateMission`'s
+  /// payload wraps its fields one level deeper, under a `'CreateMission'`
+  /// key) — see `ui/app.dart`'s `createMission`/`createTask`.
+  dynamic encodeId(String uuid);
+
+  /// Builds a command envelope's outer fields (command_id, target,
+  /// actor, etc.) ready for [executeCommand] — encoding `targetId`
+  /// however this transport expects (see [encodeId]). Does NOT encode
+  /// anything inside `payload`; callers must call [encodeId] themselves
+  /// for any payload-nested id fields before passing `payload` in.
+  Map<String, dynamic> buildCommandEnvelope({
+    required String commandType,
+    required String targetType,
+    required String targetId,
+    required Map<String, dynamic> payload,
+    int expectedVersion = 0,
+    int lifecycleEpoch = 0,
+    int authorityEpoch = 0,
+  });
+
   Future<Map<String, dynamic>> executeCommand(Map<String, dynamic> envelope);
   Future<dynamic> executeQuery(Map<String, dynamic> envelope);
   Future<List<LoadedAggregate>> listAggregates(String aggregateType);
@@ -189,7 +216,41 @@ class CommandEnvelopeFactory {
 }
 
 class OnyxMobile implements OnyxApi {
-  OnyxMobile._(DynamicLibrary library, this._handle) : _bindings = _MobileCoreBindings(library);
+  OnyxMobile._(DynamicLibrary library, this._handle)
+      : _bindings = _MobileCoreBindings(library);
+
+  /// Set by callers that need [buildCommandEnvelope] to work (i.e.
+  /// anything using `OnyxController`) — see `main.dart`'s
+  /// `_initializeMobileCore`, which sets this right after construction.
+  /// Not a constructor parameter because [open] doesn't know the
+  /// organization/user ids at the point it constructs the FFI handle
+  /// (those come from `SharedPreferences`, read by `main.dart` at the
+  /// same time, not derivable from `open`'s own parameters).
+  late final CommandEnvelopeFactory envelopeFactory;
+
+  @override
+  dynamic encodeId(String uuid) => uuidToBytes(uuid);
+
+  @override
+  Map<String, dynamic> buildCommandEnvelope({
+    required String commandType,
+    required String targetType,
+    required String targetId,
+    required Map<String, dynamic> payload,
+    int expectedVersion = 0,
+    int lifecycleEpoch = 0,
+    int authorityEpoch = 0,
+  }) {
+    return envelopeFactory.create(
+      commandType: commandType,
+      targetType: targetType,
+      targetId: targetId,
+      payload: payload,
+      expectedVersion: expectedVersion,
+      lifecycleEpoch: lifecycleEpoch,
+      authorityEpoch: authorityEpoch,
+    );
+  }
 
   static Future<OnyxMobile> open({
     required String databasePath,
