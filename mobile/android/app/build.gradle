@@ -7,6 +7,12 @@ plugins {
 android {
     namespace "com.onyx"
     compileSdk flutter.compileSdkVersion
+    // Needed even though this module has no CMakeLists.txt:
+    // mobile/tool/build_rust_android.sh cross-compiles mobile-core with
+    // cargo-ndk into src/main/jniLibs (arm64-v8a, armeabi-v7a, x86_64) before
+    // assembly, and cargo-ndk requires a real NDK. jniLibs is generated and
+    // gitignored, so its absence in a fresh checkout is not evidence that
+    // nothing here is native.
     ndkVersion flutter.ndkVersion
 
     defaultConfig {

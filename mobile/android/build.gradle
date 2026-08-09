@@ -1,11 +1,12 @@
 allprojects {
-    // Mirrors first, direct repositories kept as fallback — see the matching
-    // comment in settings.gradle for why dl.google.com cannot be relied on
-    // here. This block covers dependency resolution; settings.gradle's covers
-    // plugin resolution, and both need it independently.
+    // Same opt-in mirrors as settings.gradle — see the comment there. That
+    // block covers plugin resolution and this one dependency resolution;
+    // Gradle keeps the two repository lists separate, so both need it.
     repositories {
-        maven { url "https://maven.aliyun.com/repository/google" }
-        maven { url "https://maven.aliyun.com/repository/public" }
+        if (System.getenv("ONYX_GRADLE_MIRRORS") == "1") {
+            maven { url "https://maven.aliyun.com/repository/google" }
+            maven { url "https://maven.aliyun.com/repository/public" }
+        }
         google(); mavenCentral()
     }
 }

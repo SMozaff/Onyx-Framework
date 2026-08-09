@@ -7,17 +7,17 @@ pluginManagement {
         return flutterSdkPath
     }()
     includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
-    // The Aliyun entries mirror Google's Maven / Maven Central / the Gradle
-    // Plugin Portal. They are listed FIRST because dl.google.com is not
-    // reachable from the network this is built on, so a leading `google()`
-    // just stalls every plugin lookup before the mirror is ever consulted.
-    // The direct repositories are kept after them, not replaced: on a network
-    // where Google's Maven does resolve, Gradle still falls back to them for
-    // anything the mirrors happen not to carry.
+    // Opt-in mirrors for networks where dl.google.com does not resolve, which
+    // otherwise fails plugin lookup outright. Off by default so CI and every
+    // normal network keep resolving straight from the canonical repositories
+    // and never depend on a third-party host; set ONYX_GRADLE_MIRRORS=1 to
+    // put them in front on a machine that needs them.
     repositories {
-        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
-        maven { url "https://maven.aliyun.com/repository/google" }
-        maven { url "https://maven.aliyun.com/repository/public" }
+        if (System.getenv("ONYX_GRADLE_MIRRORS") == "1") {
+            maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
+            maven { url "https://maven.aliyun.com/repository/google" }
+            maven { url "https://maven.aliyun.com/repository/public" }
+        }
         google(); mavenCentral(); gradlePluginPortal()
     }
 }
