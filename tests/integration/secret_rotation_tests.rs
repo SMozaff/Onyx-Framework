@@ -1,9 +1,20 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+
+use tokio::sync::Mutex;
 
 use platform_kernel::Timestamp;
 use security_adapter::{Ed25519JwtCodec, EnvironmentSecretProvider};
 use security_application::{RotatingSecret, SecretProvider, SecretVersion};
 
+/// Serializes the tests below, which read and write process-global
+/// environment variables and would otherwise race each other.
+///
+/// Deliberately `tokio`'s mutex rather than `std`'s: the guard has to stay
+/// held across the `provider.get(..).await` calls that read those variables,
+/// and a `std::sync::MutexGuard` held across an await point is what
+/// `clippy::await_holding_lock` rejects. It also drops the poisoning
+/// behaviour, so a single failing assertion here no longer makes every other
+/// test in this file fail with a poison error instead of its own message.
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -11,7 +22,7 @@ fn env_lock() -> &'static Mutex<()> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn previous_secret_works_during_grace_and_expires_afterward() {
-    let _guard = env_lock().lock().unwrap();
+    let _guard = env_lock().lock().await;
     let now = Timestamp::now().0 / 1_000_000_000;
     std::env::set_var("TEAM7_ROTATING_KEY", "current");
     std::env::set_var("TEAM7_ROTATING_KEY_PREVIOUS", "previous");
@@ -37,7 +48,7 @@ async fn previous_secret_works_during_grace_and_expires_afterward() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn previous_secret_requires_an_explicit_grace_expiry() {
-    let _guard = env_lock().lock().unwrap();
+    let _guard = env_lock().lock().await;
     std::env::set_var("TEAM7_ROTATING_KEY", "current");
     std::env::set_var("TEAM7_ROTATING_KEY_PREVIOUS", "previous");
     std::env::remove_var("TEAM7_ROTATING_KEY_PREVIOUS_VALID_UNTIL_UNIX");
