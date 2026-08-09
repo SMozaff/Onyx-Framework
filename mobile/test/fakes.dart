@@ -21,6 +21,40 @@ class FakeOnyxApi implements OnyxApi {
   @override
   Stream<Map<String, dynamic>> get events => controller.stream;
 
+  /// Reuses the real [CommandEnvelopeFactory] rather than hand-rolling a
+  /// second envelope shape here. Tests drive `OnyxController`'s create/
+  /// update paths through [buildCommandEnvelope] and [encodeId], so a fake
+  /// that built envelopes or encoded ids differently from `OnyxMobile`
+  /// would let a genuine encoding regression pass. Ids match the defaults
+  /// in main.dart.
+  final envelopeFactory = CommandEnvelopeFactory(
+    organizationId: '11111111-1111-1111-1111-111111111111',
+    userId: '33333333-3333-4333-8333-333333333333',
+  );
+
+  @override
+  dynamic encodeId(String uuid) => uuidToBytes(uuid);
+
+  @override
+  Map<String, dynamic> buildCommandEnvelope({
+    required String commandType,
+    required String targetType,
+    required String targetId,
+    required Map<String, dynamic> payload,
+    int expectedVersion = 0,
+    int lifecycleEpoch = 0,
+    int authorityEpoch = 0,
+  }) =>
+      envelopeFactory.create(
+        commandType: commandType,
+        targetType: targetType,
+        targetId: targetId,
+        payload: payload,
+        expectedVersion: expectedVersion,
+        lifecycleEpoch: lifecycleEpoch,
+        authorityEpoch: authorityEpoch,
+      );
+
   @override
   Future<Map<String, dynamic>> executeCommand(Map<String, dynamic> envelope) async {
     commandCalls += 1;

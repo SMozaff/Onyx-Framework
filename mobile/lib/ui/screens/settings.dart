@@ -69,19 +69,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
-                RadioListTile<String>(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Local-first'),
-                  value: 'ffi',
+                // RadioListTile's own groupValue/onChanged were deprecated
+                // after Flutter 3.32; the selected value and the change
+                // callback now live on a RadioGroup ancestor, and each tile
+                // carries only its own `value`.
+                RadioGroup<String>(
                   groupValue: _transportMode,
                   onChanged: (value) => setState(() => _transportMode = value!),
-                ),
-                RadioListTile<String>(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('LAN (connect to api-server)'),
-                  value: 'http',
-                  groupValue: _transportMode,
-                  onChanged: (value) => setState(() => _transportMode = value!),
+                  child: const Column(
+                    children: <Widget>[
+                      RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('Local-first'),
+                        value: 'ffi',
+                      ),
+                      RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('LAN (connect to api-server)'),
+                        value: 'http',
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Align(
