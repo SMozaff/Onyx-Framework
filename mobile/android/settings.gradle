@@ -7,7 +7,19 @@ pluginManagement {
         return flutterSdkPath
     }()
     includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
-    repositories { google(); mavenCentral(); gradlePluginPortal() }
+    // The Aliyun entries mirror Google's Maven / Maven Central / the Gradle
+    // Plugin Portal. They are listed FIRST because dl.google.com is not
+    // reachable from the network this is built on, so a leading `google()`
+    // just stalls every plugin lookup before the mirror is ever consulted.
+    // The direct repositories are kept after them, not replaced: on a network
+    // where Google's Maven does resolve, Gradle still falls back to them for
+    // anything the mirrors happen not to carry.
+    repositories {
+        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://maven.aliyun.com/repository/public" }
+        google(); mavenCentral(); gradlePluginPortal()
+    }
 }
 
 plugins {

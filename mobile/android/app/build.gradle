@@ -7,7 +7,12 @@ plugins {
 android {
     namespace "com.onyx"
     compileSdk flutter.compileSdkVersion
-    ndkVersion flutter.ndkVersion
+    // ndkVersion intentionally not set: this module compiles no native code
+    // (no CMakeLists.txt / Android.mk, and src/main/jniLibs does not exist),
+    // so declaring it only makes AGP validate an NDK install that nothing
+    // here would use. Restore it if mobile-core's .so is ever bundled — see
+    // the note in mobile/README about the FFI path needing that library.
+    // ndkVersion flutter.ndkVersion
 
     defaultConfig {
         applicationId "com.onyx"

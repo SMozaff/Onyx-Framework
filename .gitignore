@@ -16,3 +16,19 @@ mobile/ios/.symlinks/
 mobile/ios/Flutter/ephemeral/
 mobile/ios/Frameworks/
 mobile/pubspec.lock
+mobile/android/build/
+
+# Local SQLite databases. api-server creates onyx-team7.db on first run and
+# stores real user rows in it, including password hashes — it is per-machine
+# runtime state, never source.
+*.db
+*.db-shm
+*.db-wal
+
+# Node dependencies, restored with `npm install`.
+web-ui/node_modules/
+
+# Per-machine web-ui config: VITE_API_BASE/VITE_WS_BASE point at whichever
+# host is serving api-server on this particular network, so a committed copy
+# would be wrong for everyone else.
+web-ui/.env
