@@ -13,7 +13,7 @@ name = "desktop-shell"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = "2.0"
+tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
 client-composition.workspace = true
@@ -22,7 +22,7 @@ platform-contracts.workspace = true
 query-application.workspace = true
 persistence-sqlite.workspace = true
 sync-transport.workspace = true
-tauri = "2.11"
+tauri = { version = "2.11", features = [] }
 keyring = { version = "4", features = ["v1"] }
 serde.workspace = true
 serde_json.workspace = true
