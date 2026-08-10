@@ -141,3 +141,121 @@ impl CreationHandler for TaskCreationHandler {
         Ok(result)
     }
 }
+
+/// Creates a `Conversation` from a `CreateConversation` command via
+/// `Conversation::create()`. See [`MissionCreationHandler`] for the shared
+/// implementation notes (including the flagged gap: no outbox message
+/// registered for creation events yet).
+pub struct ConversationCreationHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+}
+
+impl ConversationCreationHandler {
+    pub fn new(repo: Arc<dyn Repository>, unit_factory: Arc<dyn UnitOfWorkFactory>) -> Self {
+        Self { repo, unit_factory }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreationHandler for ConversationCreationHandler {
+    async fn handle_creation(
+        &self,
+        payload: serde_json::Value,
+        actor: ActorContext,
+        operation_id: OperationId,
+        _correlation_id: CorrelationId,
+        _vector_clock: VectorClock,
+    ) -> Result<CommandResult, CreationError> {
+        let command: communication_domain::ConversationCommand = serde_json::from_value(payload)?;
+        let organization_id = actor.organization_id;
+        let ctx = creation_decision_context(actor);
+
+        let events = communication_domain::Conversation::create(command, &ctx)
+            .map_err(|e| CreationError::Domain(e.to_string()))?;
+        let conversation = communication_domain::Conversation::from_created_event(&events[0]);
+        let aggregate_state = serde_json::to_value(&conversation)?;
+
+        let mut unit = self
+            .unit_factory
+            .create(organization_id)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        self.repo
+            .commit(aggregate_state, &[], &mut *unit)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        let result = serde_json::json!({
+            "success": true,
+            "operation_id": operation_id,
+            "conversation_id": conversation.id().0,
+        });
+        unit.register_idempotency_result(operation_id, result.clone());
+        unit.commit()
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        Ok(result)
+    }
+}
+
+/// Creates a `Message` from a `PostMessage` command via `Message::create()`.
+/// See [`MissionCreationHandler`] for the shared implementation notes
+/// (including the flagged gap: no outbox message registered for creation
+/// events yet).
+pub struct MessageCreationHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+}
+
+impl MessageCreationHandler {
+    pub fn new(repo: Arc<dyn Repository>, unit_factory: Arc<dyn UnitOfWorkFactory>) -> Self {
+        Self { repo, unit_factory }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreationHandler for MessageCreationHandler {
+    async fn handle_creation(
+        &self,
+        payload: serde_json::Value,
+        actor: ActorContext,
+        operation_id: OperationId,
+        _correlation_id: CorrelationId,
+        _vector_clock: VectorClock,
+    ) -> Result<CommandResult, CreationError> {
+        let command: communication_domain::MessageCommand = serde_json::from_value(payload)?;
+        let organization_id = actor.organization_id;
+        let ctx = creation_decision_context(actor);
+
+        let events = communication_domain::Message::create(command, &ctx)
+            .map_err(|e| CreationError::Domain(e.to_string()))?;
+        let message = communication_domain::Message::from_created_event(&events[0]);
+        let aggregate_state = serde_json::to_value(&message)?;
+
+        let mut unit = self
+            .unit_factory
+            .create(organization_id)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        self.repo
+            .commit(aggregate_state, &[], &mut *unit)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        let result = serde_json::json!({
+            "success": true,
+            "operation_id": operation_id,
+            "message_id": message.id().0,
+        });
+        unit.register_idempotency_result(operation_id, result.clone());
+        unit.commit()
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        Ok(result)
+    }
+}
