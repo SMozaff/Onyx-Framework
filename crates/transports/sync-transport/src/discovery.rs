@@ -64,13 +64,27 @@ impl PeerInfo {
 }
 
 /// Combines local and cloud discovery.
+///
+/// Holds `Discovery` trait objects rather than the two concrete placeholder
+/// types it was first written against. Those types are stubs, so naming them
+/// in the field types made the merge unreachable for any real implementation:
+/// a composition root could not substitute `lan-discovery`'s UDP-broadcast
+/// scanner without editing this struct.
 pub struct CompositeDiscovery {
-    cloud_discovery: CloudDiscovery,
-    local_discovery: LocalDiscovery,
+    cloud_discovery: Box<dyn Discovery>,
+    local_discovery: Box<dyn Discovery>,
 }
 
 impl CompositeDiscovery {
-    pub fn new(cloud: CloudDiscovery, local: LocalDiscovery) -> Self {
+    pub fn new(cloud: impl Discovery + 'static, local: impl Discovery + 'static) -> Self {
+        Self {
+            cloud_discovery: Box::new(cloud),
+            local_discovery: Box::new(local),
+        }
+    }
+
+    /// For a composition root that already owns its discovery as an `Arc`.
+    pub fn from_boxed(cloud: Box<dyn Discovery>, local: Box<dyn Discovery>) -> Self {
         Self {
             cloud_discovery: cloud,
             local_discovery: local,

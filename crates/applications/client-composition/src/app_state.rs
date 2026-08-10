@@ -209,9 +209,18 @@ impl AppState {
         // desktop-shell's/mobile-core's own concern, per Team Prompt 5
         // §3.5/§4.4 — CompositeDiscovery/TransportSelector here fall back
         // to Cloud Relay only until a client wires in the local ones).
-        let discovery = Arc::new(CompositeDiscovery::new(
-            CloudDiscovery::new(),
-            LocalDiscovery::new(),
+        // Cloud presence stays stubbed: it is the Cloud Relay's own peer
+        // directory, which does not exist yet. Local discovery is whatever
+        // the composition root supplied — `lan-discovery` on desktop and
+        // mobile — falling back to the stub only where none was given, which
+        // in practice means tests.
+        let local: Box<dyn sync_transport::Discovery> = match config.local_discovery {
+            Some(discovery) => Box::new(ArcDiscovery(discovery)),
+            None => Box::new(LocalDiscovery::new()),
+        };
+        let discovery = Arc::new(CompositeDiscovery::from_boxed(
+            Box::new(CloudDiscovery::new()),
+            local,
         ));
         let transport_selector = Arc::new(TransportSelector::new(
             None,
