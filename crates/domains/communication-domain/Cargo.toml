@@ -1,0 +1,16 @@
+[package]
+name = "communication-domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "ONYX Conversation/Message aggregates: pure domain logic for team messaging."
+
+[dependencies]
+platform-kernel = { path = "../../kernel/platform-kernel" }
+platform-contracts = { path = "../../kernel/platform-contracts" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+serde_json = "1.0"
+proptest = "1.0"
