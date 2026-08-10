@@ -27,8 +27,14 @@
 mod creation_handler;
 mod decision_handler;
 
-pub use creation_handler::{MissionCreationHandler, TaskCreationHandler};
-pub use decision_handler::{MissionDecisionHandler, TaskDecisionHandler};
+pub use creation_handler::{
+    ConversationCreationHandler, MessageCreationHandler, MissionCreationHandler,
+    TaskCreationHandler,
+};
+pub use decision_handler::{
+    ConversationDecisionHandler, MessageDecisionHandler, MissionDecisionHandler,
+    TaskDecisionHandler,
+};
 
 use platform_contracts::{DecisionContext, IdGenerator};
 use platform_kernel::{
