@@ -1,0 +1,75 @@
+{
+  "name": "ONYX (Rust + Flutter + Android + Web)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+  // Every version here is pinned to what CI already uses
+  // (.github/workflows/ci.yml), so a Codespace and a CI run build against
+  // identical toolchains — the thing local development on a constrained
+  // Windows machine could never guarantee (see MEMORY.md: Google's Dart SDK
+  // and Android NDK endpoints are geo-blocked from that network; this
+  // container's build steps use the same direct URLs CI uses precisely
+  // because GitHub's own runners/Codespaces are not behind that block).
+  "features": {
+    // `version` deliberately left at the feature's default rather than
+    // pinned to 1.97.1 here: the repo's own rust-toolchain.toml already
+    // pins that exact version, and rustup auto-installs whatever toolchain
+    // a directory's rust-toolchain.toml names the first time cargo/rustc
+    // runs there — the same mechanism CI implicitly relies on. Pinning it
+    // a second time here would be a second source of truth that could
+    // silently drift from the file that actually governs the build.
+    "ghcr.io/devcontainers/features/rust:1": {
+      "components": "clippy,rustfmt"
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17",
+      "installMaven": false,
+      "installGradle": false
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    },
+    // Postgres/NATS/Redis for deploy/docker-compose.local.yml (Team Prompt
+    // 8 §3.4) and any container-backed integration test that needs a real
+    // broker rather than the embedded/SQLite paths most tests already use.
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {}
+  },
+
+  "onCreateCommand": "bash .devcontainer/setup-mobile.sh",
+
+  // Confirms the environment actually works before a session starts editing
+  // in it, rather than discovering a broken toolchain mid-task.
+  "postCreateCommand": "cargo --version && flutter --version && node --version && java -version",
+
+  "containerEnv": {
+    "SQLX_OFFLINE": "true",
+    "ANDROID_HOME": "/opt/android-sdk",
+    "ANDROID_SDK_ROOT": "/opt/android-sdk",
+    "PATH": "/opt/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:${containerEnv:PATH}"
+  },
+
+  "forwardPorts": [3000, 5173, 9090],
+  "portsAttributes": {
+    "3000": { "label": "api-server" },
+    "5173": { "label": "web-ui (Vite)" },
+    "9090": { "label": "Prometheus metrics" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "Dart-Code.flutter",
+        "Dart-Code.dart-code",
+        "tauri-apps.tauri-vscode",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  },
+
+  // Codespaces prebuilds run onCreateCommand ahead of time against this
+  // config (GitHub Docs: "Configuring prebuilds") — enable it in the repo's
+  // Settings > Codespaces once this file merges, so a new Codespace opens
+  // with Flutter/Android/Rust already warm instead of re-running the ~10
+  // minute setup script per session.
+  "remoteUser": "vscode"
+}

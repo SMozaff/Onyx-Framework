@@ -2,7 +2,28 @@
 
 A local‑first, authority‑aware mission operations system.
 
+## Development environment
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/muzaff-beep/Onyx-Framwork)
+
+Development happens in the devcontainer (`.devcontainer/`), not on a bare
+local machine. Click the badge above, or **Code → Codespaces → Create
+codespace** on this repo. The container provisions Rust (pinned to the exact
+`rust-toolchain.toml` version), Flutter, the Android SDK, `cargo-ndk`, and
+Node — every toolchain this workspace needs, versioned to match CI
+(`.github/workflows/ci.yml`) rather than whatever happens to be on a given
+laptop. First boot takes several minutes while `.devcontainer/setup-mobile.sh`
+installs Flutter and the Android SDK; enabling
+[Codespaces prebuilds](https://docs.github.com/en/codespaces/prebuilding-your-codespaces)
+for this repo removes that wait for everyone after the first prebuild.
+
+`docs/RUN_LOCALLY.md` covers running outside a Codespace for the rare case
+that requires it (e.g. a physical device on a local network for P2P testing)
+— read its banner first.
+
 ## Quick Start
+
+Once inside the Codespace / devcontainer:
 
 ```bash
 cargo build --workspace --release

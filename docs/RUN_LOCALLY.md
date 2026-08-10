@@ -1,3 +1,12 @@
+> **Development has moved to GitHub Codespaces** (`.devcontainer/`) — see the
+> repo README's "Development environment" section. Everything below is kept
+> for the specific cases a Codespace cannot cover (a physical phone on your
+> own LAN for P2P/discovery testing, offline-from-GitHub work, etc.), not as
+> the default path. It also predates this session's fixes to several build
+> issues local machines hit that a Codespace does not (Google-endpoint
+> geo-blocking, host RAM limits corrupting the Cargo build cache — see
+> `MEMORY.md` if replicating any of this outside the container).
+
 # ONYX — Run It Yourself (verified working build)
 
 This is the fixed tree from audit fixes **C-01**, **C-02** and **H-01**. Everything
