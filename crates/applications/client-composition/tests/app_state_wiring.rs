@@ -220,3 +220,143 @@ async fn app_state_new_wires_task_commands_independently_of_mission_commands() {
     assert_eq!(result["success"], serde_json::json!(true));
     assert!(result.get("task_id").is_some());
 }
+
+/// Proves the Communication wiring end to end through the real composition
+/// root: CreateConversation, AddMember, PostMessage, and EditMessage all
+/// dispatch through `AppState`'s `CommandRegistry` against real SQLite, and
+/// both `GetConversation`/`GetMessage` find what was written — the same
+/// path `desktop-shell`'s `execute_command`/`execute_query` Tauri commands
+/// and `mobile-core`'s FFI equivalents actually call. Compiling was never
+/// the bar; this is the evidence the wiring in `app_state.rs` is correct.
+#[tokio::test]
+async fn app_state_new_wires_conversation_and_message_commands_end_to_end() {
+    let pool = test_pool().await;
+    let organization_id = OrganizationId::new_random();
+    let state = AppState::new(pool, test_config());
+
+    // 1. Create a conversation.
+    let create_conversation = envelope_for(
+        "CreateConversation",
+        ObjectId::new_random(),
+        organization_id,
+        serde_json::json!({ "CreateConversation": { "conversation_type": "Channel" } }),
+    );
+    let create_conversation = CommandEnvelope {
+        target: DomainObjectRef {
+            id: ObjectId::new_random(),
+            r#type: "conversation".to_string(),
+            organization_id,
+        },
+        ..create_conversation
+    };
+    let created = state
+        .command_registry
+        .dispatch(create_conversation)
+        .await
+        .expect("CreateConversation should succeed through the real CommandRegistry");
+    assert_eq!(created["success"], serde_json::json!(true));
+    let conversation_id: ObjectId =
+        serde_json::from_value(created["conversation_id"].clone()).unwrap();
+
+    // 2. Add a member — a decision command, proving the Conversation
+    // DecisionHandler path (load -> decide -> commit) also works.
+    let new_member = test_user_id();
+    let add_member = CommandEnvelope {
+        target: DomainObjectRef {
+            id: conversation_id,
+            r#type: "conversation".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "AddMember",
+            conversation_id,
+            organization_id,
+            serde_json::json!({ "AddMember": { "user_id": new_member } }),
+        )
+    };
+    let add_result = state
+        .command_registry
+        .dispatch(add_member)
+        .await
+        .expect("AddMember should succeed against the freshly created conversation");
+    assert_eq!(add_result["success"], serde_json::json!(true));
+    assert_eq!(add_result["new_version"], serde_json::json!(1));
+
+    // 3. GetConversation should reflect the added member.
+    let conversation_query = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "GetConversation".to_string(),
+            target_id: conversation_id,
+        })
+        .await
+        .expect("GetConversation should find the conversation");
+    let members = conversation_query["aggregate"]["members"]
+        .as_array()
+        .expect("members must be a JSON array");
+    assert_eq!(members.len(), 2, "creator plus the newly added member");
+
+    // 4. Post a message into that conversation.
+    let post_message = CommandEnvelope {
+        target: DomainObjectRef {
+            id: ObjectId::new_random(),
+            r#type: "message".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "PostMessage",
+            ObjectId::new_random(),
+            organization_id,
+            serde_json::json!({
+                "PostMessage": {
+                    "conversation_id": conversation_id,
+                    "body": "hello from the wiring test",
+                }
+            }),
+        )
+    };
+    let posted = state
+        .command_registry
+        .dispatch(post_message)
+        .await
+        .expect("PostMessage should succeed through the real CommandRegistry");
+    assert_eq!(posted["success"], serde_json::json!(true));
+    let message_id: ObjectId = serde_json::from_value(posted["message_id"].clone()).unwrap();
+
+    // 5. Edit it — proving the Message DecisionHandler path too.
+    let edit_message = CommandEnvelope {
+        target: DomainObjectRef {
+            id: message_id,
+            r#type: "message".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "EditMessage",
+            message_id,
+            organization_id,
+            serde_json::json!({ "EditMessage": { "new_body": "edited via wiring test" } }),
+        )
+    };
+    let edited = state
+        .command_registry
+        .dispatch(edit_message)
+        .await
+        .expect("EditMessage should succeed against the freshly posted message");
+    assert_eq!(edited["success"], serde_json::json!(true));
+
+    // 6. GetMessage should reflect the edit, proving persistence round-trips
+    // through the real SQLite-backed Repository, not just in-memory state.
+    let message_query = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "GetMessage".to_string(),
+            target_id: message_id,
+        })
+        .await
+        .expect("GetMessage should find the message");
+    assert_eq!(
+        message_query["aggregate"]["body"],
+        serde_json::json!("edited via wiring test")
+    );
+    assert_eq!(message_query["aggregate"]["status"], serde_json::json!("Edited"));
+}

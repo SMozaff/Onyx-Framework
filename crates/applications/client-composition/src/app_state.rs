@@ -33,7 +33,9 @@ use sync_transport::{CompositeDiscovery, TransportSelector};
 use crate::command_registry::CommandRegistry;
 use crate::event_bus::EventBus;
 use crate::handlers::{
-    MissionCreationHandler, MissionDecisionHandler, TaskCreationHandler, TaskDecisionHandler,
+    ConversationCreationHandler, ConversationDecisionHandler, MessageCreationHandler,
+    MessageDecisionHandler, MissionCreationHandler, MissionDecisionHandler, TaskCreationHandler,
+    TaskDecisionHandler,
 };
 use crate::query_registry::{LoadAggregateHandler, QueryRegistry};
 use crate::sync_agent::{SyncAgent, SyncAgentConfig};
@@ -80,6 +82,21 @@ const TASK_DECISION_COMMANDS: &[&str] = &[
     "CloseTask",
     "ReopenTask",
     "CancelTask",
+];
+
+/// Every `ConversationCommand` variant other than `CreateConversation`.
+/// See [`MISSION_DECISION_COMMANDS`]'s doc comment for why one handler
+/// instance correctly serves both of them.
+const CONVERSATION_DECISION_COMMANDS: &[&str] = &["AddMember", "ArchiveConversation"];
+
+/// Every `MessageCommand` variant other than `PostMessage`.
+/// See [`MISSION_DECISION_COMMANDS`]'s doc comment for why one handler
+/// instance correctly serves all of them.
+const MESSAGE_DECISION_COMMANDS: &[&str] = &[
+    "EditMessage",
+    "RedactMessage",
+    "AddReaction",
+    "RemoveReaction",
 ];
 
 /// Configuration `AppState::new` needs beyond the database pool itself.
@@ -163,6 +180,10 @@ impl AppState {
             Arc::new(SqliteRepository::new(pool.clone(), "mission"));
         let task_repo: Arc<dyn query_application::Repository> =
             Arc::new(SqliteRepository::new(pool.clone(), "task"));
+        let conversation_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "conversation"));
+        let message_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "message"));
         let unit_factory: Arc<dyn query_application::UnitOfWorkFactory> =
             Arc::new(SqliteUnitOfWorkFactory::new(pool.clone()));
         let idempotency_store: Arc<dyn IdempotencyStore> =
@@ -197,6 +218,37 @@ impl AppState {
                 ),
             );
         }
+        command_registry.register_creation(
+            "CreateConversation",
+            ConversationCreationHandler::new(
+                Arc::clone(&conversation_repo),
+                Arc::clone(&unit_factory),
+            ),
+        );
+        for command_type in CONVERSATION_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                ConversationDecisionHandler::new(
+                    Arc::clone(&conversation_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
+        command_registry.register_creation(
+            "PostMessage",
+            MessageCreationHandler::new(Arc::clone(&message_repo), Arc::clone(&unit_factory)),
+        );
+        for command_type in MESSAGE_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                MessageDecisionHandler::new(
+                    Arc::clone(&message_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
 
         let mut query_registry = QueryRegistry::new();
         query_registry.register(
@@ -204,6 +256,14 @@ impl AppState {
             LoadAggregateHandler::new(Arc::clone(&mission_repo)),
         );
         query_registry.register("GetTask", LoadAggregateHandler::new(Arc::clone(&task_repo)));
+        query_registry.register(
+            "GetConversation",
+            LoadAggregateHandler::new(Arc::clone(&conversation_repo)),
+        );
+        query_registry.register(
+            "GetMessage",
+            LoadAggregateHandler::new(Arc::clone(&message_repo)),
+        );
 
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));
 
