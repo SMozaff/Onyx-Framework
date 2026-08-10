@@ -203,6 +203,14 @@ where
             "service": if event_service.is_empty() { self.service.clone() } else { event_service },
             "trace_id": trace_id,
             "operation_id": take_string(&mut fields, "operation_id"),
+            // Mandatory per Team Prompt 7 §3.8's log schema. Previously these
+            // two fell through into `details` when a caller supplied them,
+            // and were absent entirely when it did not — so the one field
+            // that ties a log line to the error a user actually saw
+            // (`error_code`) and the one that groups a whole workflow
+            // (`correlation_id`) were the two you could not filter on.
+            "correlation_id": take_string(&mut fields, "correlation_id"),
+            "error_code": take_string(&mut fields, "error_code"),
             "actor_id": take_string(&mut fields, "actor_id"),
             "organization_id": take_string(&mut fields, "organization_id"),
             "command_type": take_string(&mut fields, "command_type"),
