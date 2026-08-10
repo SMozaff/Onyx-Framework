@@ -18,6 +18,7 @@ platform-contracts.workspace = true
 query-application.workspace = true
 persistence-sqlite.workspace = true
 sync-transport.workspace = true
+lan-discovery.workspace = true
 synchronization-domain.workspace = true
 sync-transport-mobile.workspace = true
 serde.workspace = true

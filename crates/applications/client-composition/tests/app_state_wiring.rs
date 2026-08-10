@@ -72,6 +72,7 @@ fn test_config() -> AppStateConfig {
         event_bus_capacity: 16,
         cloud_relay_endpoint: "wss://relay.test.invalid/v1".to_string(),
         cloud_relay_auth_provider: Arc::new(StubAuthorityProvider),
+        local_discovery: None,
         cloud_relay_socket_factory: Arc::new(StubRelaySocketFactory),
     }
 }

@@ -105,6 +105,10 @@ pub struct AppStateConfig {
     /// auth work, etc.) is the composing client's responsibility to
     /// supply here — `AppState` does not fabricate one.
     pub cloud_relay_auth_provider: Arc<dyn sync_transport::placeholder_types::AuthorityProvider>,
+    /// Local peer discovery. `None` falls back to the stub, which discovers
+    /// nothing — correct for tests, useless on a real network, so every
+    /// shipping composition root supplies `lan_discovery::LanDiscovery`.
+    pub local_discovery: Option<Arc<dyn sync_transport::Discovery>>,
     /// Provides the actual socket implementation `CloudRelayTransport`
     /// connects over (e.g. `tokio-tungstenite`-backed WebSockets — see
     /// Team 4's `DECISIONS.md` §10 "no direct tokio in production code"
@@ -287,5 +291,24 @@ impl IdempotencyStore for InMemoryIdempotencyStore {
     ) -> Result<(), query_application::IdempotencyError> {
         self.store.lock().unwrap().insert(operation_id, result);
         Ok(())
+    }
+}
+
+/// Lets an `Arc<dyn Discovery>` satisfy `CompositeDiscovery`'s `Box<dyn
+/// Discovery>` slot. Composition roots hold discovery as an `Arc` because the
+/// same instance is also read for UI peer lists, and `Arc` cannot coerce to
+/// `Box` on its own.
+struct ArcDiscovery(Arc<dyn sync_transport::Discovery>);
+
+#[async_trait::async_trait]
+impl sync_transport::Discovery for ArcDiscovery {
+    async fn discover_peers(
+        &self,
+        organization_id: platform_kernel::OrganizationId,
+    ) -> Result<
+        Vec<sync_transport::discovery::PeerInfo>,
+        sync_transport::placeholder_types::DiscoveryError,
+    > {
+        self.0.discover_peers(organization_id).await
     }
 }

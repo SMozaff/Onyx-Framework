@@ -2,7 +2,7 @@
 //! §3.4, built against real `platform_kernel::{OrganizationId, ReplicaId,
 //! Timestamp}`.
 
-use crate::placeholder_types::{CloudDiscovery, DiscoveryError, LocalDiscovery};
+use crate::placeholder_types::DiscoveryError;
 use async_trait::async_trait;
 use platform_kernel::{OrganizationId, ReplicaId, Timestamp};
 use serde::{Deserialize, Serialize};

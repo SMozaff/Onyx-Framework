@@ -104,6 +104,7 @@ pub trait DecisionHandler: Send + Sync {
         actor: ActorContext,
         expected_version: ObjectVersion,
         expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
         vector_clock: VectorClock,
         correlation_id: CorrelationId,
     ) -> Result<CommandResult, api_server::CommandError>;
@@ -194,6 +195,7 @@ impl CommandRegistry {
                         envelope.actor,
                         envelope.expected_version,
                         envelope.expected_lifecycle_epoch,
+                        envelope.expected_authority_epoch,
                         envelope.vector_clock,
                         envelope.correlation_id,
                     )
@@ -294,6 +296,7 @@ mod tests {
             _actor: ActorContext,
             _expected_version: ObjectVersion,
             _expected_lifecycle_epoch: LifecycleEpoch,
+            _expected_authority_epoch: platform_kernel::AuthorityEpoch,
             _vector_clock: VectorClock,
             _correlation_id: CorrelationId,
         ) -> Result<CommandResult, api_server::CommandError> {

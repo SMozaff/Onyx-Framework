@@ -42,6 +42,7 @@ impl DecisionHandler for MissionDecisionHandler {
         actor: ActorContext,
         expected_version: ObjectVersion,
         expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
         vector_clock: VectorClock,
         correlation_id: CorrelationId,
     ) -> Result<CommandResult, api_server::CommandError> {
@@ -55,7 +56,7 @@ impl DecisionHandler for MissionDecisionHandler {
             actor,
             expected_version,
             expected_lifecycle_epoch,
-            platform_kernel::AuthorityEpoch(0), // see R2: handle_command's own `_expected_authority_epoch` param is unused (`_`-prefixed) in its real signature.
+            expected_authority_epoch,
             vector_clock,
             correlation_id,
             "mission",
@@ -99,6 +100,7 @@ impl DecisionHandler for TaskDecisionHandler {
         actor: ActorContext,
         expected_version: ObjectVersion,
         expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
         vector_clock: VectorClock,
         correlation_id: CorrelationId,
     ) -> Result<CommandResult, api_server::CommandError> {
@@ -112,7 +114,7 @@ impl DecisionHandler for TaskDecisionHandler {
             actor,
             expected_version,
             expected_lifecycle_epoch,
-            platform_kernel::AuthorityEpoch(0),
+            expected_authority_epoch,
             vector_clock,
             correlation_id,
             "task",

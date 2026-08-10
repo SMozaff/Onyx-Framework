@@ -219,6 +219,27 @@ pub fn run() {
                 // factory below, which must announce the same id to the relay
                 // for this replica to be addressable.
                 let local_replica = ReplicaId::new_random();
+                let organization_id = OrganizationId::new_random();
+
+                // Discovery failing to bind must not stop the app: a machine
+                // with the UDP port already taken, or a hardened host that
+                // forbids broadcast, still works over a configured relay
+                // endpoint. It loses automatic peer-finding, not sync.
+                let lan_discovery: Option<Arc<dyn sync_transport::Discovery>> =
+                    match lan_discovery::LanDiscovery::start(
+                        local_replica,
+                        organization_id,
+                        3000,
+                        hostname_or_none(),
+                    )
+                    .await
+                    {
+                        Ok(d) => Some(Arc::new(d)),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "LAN discovery unavailable; relay only");
+                            None
+                        }
+                    };
 
                 let config = AppStateConfig {
                     local_replica,
@@ -227,15 +248,17 @@ pub fn run() {
                     // randomly generated per launch. No login/auth flow
                     // exists yet in this increment's scope (Increment 7)
                     // — flagged, not silently assumed resolved.
-                    organization_id: OrganizationId::new_random(),
+                    organization_id,
                     sync_agent_config: client_composition::sync_agent::SyncAgentConfig::default(),
                     event_bus_capacity: 1024,
-                    // TODO(cloud relay): no real endpoint/auth/socket
-                    // implementation exists yet (see DECISIONS.md's
-                    // AppState entry) — these are placeholders so the
-                    // app starts; Cloud Relay sync will fail at connect
-                    // time until real ones are supplied.
-                    cloud_relay_endpoint: "wss://relay.onyx.example/v1".to_string(),
+                    // An offline LAN has no public relay and no TLS
+                    // certificate, so the default is the loopback api-server
+                    // over ws://. Point ONYX_RELAY_ENDPOINT at the host
+                    // running api-server (e.g. ws://192.168.1.183:3000) to
+                    // join a LAN deployment.
+                    cloud_relay_endpoint: std::env::var("ONYX_RELAY_ENDPOINT")
+                        .unwrap_or_else(|_| "ws://127.0.0.1:3000".to_string()),
+                    local_discovery: lan_discovery,
                     cloud_relay_auth_provider: Arc::new(
                         sync_transport::placeholder_types::StaticAuthorityProvider(String::new()),
                     ),
@@ -268,3 +291,11 @@ pub fn run() {
 // `TransportError::Unreachable` for every call. It is replaced by
 // `relay_socket::TungsteniteRelaySocketFactory`, which opens a real WebSocket
 // to the relay endpoint now served at `/api/relay/:target_id`.
+
+/// A human-readable name for this device in peer lists. Best-effort: the
+/// hostname is a convenience label, not an identifier — `ReplicaId` is.
+fn hostname_or_none() -> Option<String> {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+}

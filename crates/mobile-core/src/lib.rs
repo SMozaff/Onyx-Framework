@@ -175,9 +175,32 @@ pub unsafe extern "C" fn mobile_core_new(
             let _ = sqlx::query(stmt).execute(&pool).await;
         }
 
+        let local_replica = ReplicaId::new_random();
+
+        // Phones are the case LAN discovery exists for: a handset joining the
+        // site Wi-Fi has no way to know the other replicas' addresses, and no
+        // one is going to type them in. Binding can fail on a hardened or
+        // restricted device, which costs automatic peer-finding, not sync.
+        let lan_discovery: Option<Arc<dyn sync_transport::Discovery>> =
+            match lan_discovery::LanDiscovery::start(
+                local_replica,
+                config.organization_id,
+                3000,
+                None,
+            )
+            .await
+            {
+                Ok(d) => Some(Arc::new(d)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "LAN discovery unavailable; relay only");
+                    None
+                }
+            };
+
         let app_config = AppStateConfig {
-            local_replica: ReplicaId::new_random(),
+            local_replica,
             organization_id: config.organization_id,
+            local_discovery: lan_discovery,
             sync_agent_config: client_composition::sync_agent::SyncAgentConfig {
                 sync_interval: std::time::Duration::from_secs(config.sync_interval_secs),
                 ..Default::default()

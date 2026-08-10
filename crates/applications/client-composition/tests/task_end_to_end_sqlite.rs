@@ -264,6 +264,14 @@ async fn version_advances_correctly_across_three_successive_decision_commands() 
     // fixed LifecycleEpoch(0) for every command (an earlier draft of this
     // test did) was a bug in the test, not in the fix.
     let mut expected_lifecycle_epoch = 0u64;
+    // The comment above already states AssignOwner advances authority_epoch,
+    // but nothing tracked it: the envelope left expected_authority_epoch at
+    // its default 0, so the second AssignOwner was rejected with
+    // AuthorityEpochConflict { expected: 0, actual: 1 }. The domain was right
+    // — owner_id is authority-controlled for Work, so reassignment advances
+    // the epoch — and the test simply never asserted the half of the
+    // behaviour it had described.
+    let mut expected_authority_epoch = 0u64;
 
     for (expected_version, (command_type, payload)) in commands.into_iter().enumerate() {
         let mut envelope = envelope_for(
@@ -275,6 +283,8 @@ async fn version_advances_correctly_across_three_successive_decision_commands() 
         );
         envelope.expected_lifecycle_epoch =
             platform_kernel::LifecycleEpoch(expected_lifecycle_epoch);
+        envelope.expected_authority_epoch =
+            platform_kernel::AuthorityEpoch(expected_authority_epoch);
 
         let result = registry.dispatch(envelope).await.unwrap_or_else(|e| {
             panic!("command {expected_version} ({command_type}) should succeed: {e:?}")
@@ -282,6 +292,9 @@ async fn version_advances_correctly_across_three_successive_decision_commands() 
 
         if command_type == "MarkReady" {
             expected_lifecycle_epoch += 1;
+        }
+        if command_type == "AssignOwner" {
+            expected_authority_epoch += 1;
         }
 
         let expected_new_version = expected_version as u64 + 1;

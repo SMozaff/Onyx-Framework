@@ -14,7 +14,16 @@ use platform_kernel::OrganizationId;
 use std::ffi::{CStr, CString};
 
 fn test_db_path() -> String {
-    format!("/tmp/mobile-core-test-{}.sqlite", uuid::Uuid::new_v4())
+    // A literal "/tmp/..." only resolves for a native Windows binary if
+    // C:\tmp exists, which it does not by default — sqlx's connect then
+    // fails, mobile_core_new's `.ok()?` swallows it, and every test here
+    // fails uniformly with a null handle and no indication why. Was never a
+    // reachable path on this platform; std::env::temp_dir() is the real
+    // cross-platform equivalent.
+    std::env::temp_dir()
+        .join(format!("mobile-core-test-{}.sqlite", uuid::Uuid::new_v4()))
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn config_json(organization_id: OrganizationId) -> String {
