@@ -10,6 +10,7 @@
 //! requires `#[cfg_attr(mobile, tauri::mobile_entry_point)] pub fn run()`
 //! as the entry point.
 
+mod relay_socket;
 mod secure_storage;
 
 use std::sync::Arc;
@@ -214,8 +215,13 @@ pub fn run() {
 
                 let storage: Arc<dyn SecureStorage> = Arc::new(KeyringSecureStorage::new());
 
+                // Generated once here and shared with the relay socket
+                // factory below, which must announce the same id to the relay
+                // for this replica to be addressable.
+                let local_replica = ReplicaId::new_random();
+
                 let config = AppStateConfig {
-                    local_replica: ReplicaId::new_random(),
+                    local_replica,
                     // TODO(auth/org resolution): organization_id should
                     // come from the authenticated user's session, not be
                     // randomly generated per launch. No login/auth flow
@@ -233,7 +239,9 @@ pub fn run() {
                     cloud_relay_auth_provider: Arc::new(
                         sync_transport::placeholder_types::StaticAuthorityProvider(String::new()),
                     ),
-                    cloud_relay_socket_factory: Arc::new(NotYetImplementedSocketFactory),
+                    cloud_relay_socket_factory: Arc::new(
+                        relay_socket::TungsteniteRelaySocketFactory::new(local_replica),
+                    ),
                 };
 
                 let state = Arc::new(AppState::new(pool, config));
@@ -256,21 +264,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Placeholder `RelaySocketFactory` — see the `TODO(cloud relay)` note in
-/// `run()`'s `setup` above and `DECISIONS.md`'s `AppState` entry. Every
-/// call fails immediately rather than silently pretending to succeed.
-struct NotYetImplementedSocketFactory;
-
-#[async_trait::async_trait]
-impl sync_transport::cloud_relay::RelaySocketFactory for NotYetImplementedSocketFactory {
-    async fn connect(
-        &self,
-        _relay_url: &str,
-        _peer: &sync_transport::PeerInfo,
-        _bearer_token: &str,
-        _timeout: std::time::Duration,
-    ) -> Result<Box<dyn sync_transport::cloud_relay::RelaySocket>, sync_transport::TransportError>
-    {
-        Err(sync_transport::TransportError::Unreachable)
-    }
-}
+// `NotYetImplementedSocketFactory` lived here and returned
+// `TransportError::Unreachable` for every call. It is replaced by
+// `relay_socket::TungsteniteRelaySocketFactory`, which opens a real WebSocket
+// to the relay endpoint now served at `/api/relay/:target_id`.

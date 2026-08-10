@@ -38,6 +38,7 @@ sha2.workspace = true
 tower-http.workspace = true
 futures-util.workspace = true
 uuid.workspace = true
+sync-transport.workspace = true
 chrono.workspace = true
 security-application.workspace = true
 security-adapter.workspace = true
@@ -45,3 +46,7 @@ audit-application.workspace = true
 observability-adapter.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
+
+[dev-dependencies]
+tokio-tungstenite.workspace = true
+reqwest.workspace = true

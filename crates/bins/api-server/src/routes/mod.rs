@@ -6,6 +6,7 @@ pub mod auth;
 pub mod command;
 pub mod events;
 pub mod query;
+pub mod relay;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -75,6 +76,10 @@ pub struct ApiState {
     /// Argon2id hasher. Held on state rather than constructed per request:
     /// building it derives a dummy hash, which is deliberately expensive.
     pub password_hasher: Arc<PasswordHasher>,
+    /// Live Cloud Relay connections, keyed by replica. Empty until a replica
+    /// dials `/api/relay/:target`; see `routes::relay` for why presence is
+    /// per-instance and what that means for horizontal scaling.
+    pub relay_registry: relay::RelayRegistry,
 }
 
 /// The storage-backend-specific handles `ApiState::new` assembles, before
@@ -226,6 +231,7 @@ impl ApiState {
             metrics: Metrics::new("onyx_api_server")?,
             user_store,
             password_hasher: Arc::new(PasswordHasher::new()),
+            relay_registry: relay::RelayRegistry::new(),
         })
     }
 
@@ -280,6 +286,9 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/command", command_route)
         .route("/api/query", get(query::query_route))
         .route("/api/events", get(events::websocket_route))
+        // Cloud Relay (Part II §8.2). The path segment is the replica being
+        // dialled, matching the URL CloudRelayTransport::connect builds.
+        .route("/api/relay/:target_id", get(relay::relay_route))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::rate_limit::observe_request,
