@@ -501,15 +501,22 @@ async fn app_state_new_wires_file_asset_and_upload_session_commands_end_to_end()
         .await
         .expect("AppendChunk should succeed against the freshly started upload session");
     assert_eq!(appended["success"], serde_json::json!(true));
+    let version_after_append: u64 = serde_json::from_value(appended["new_version"].clone())
+        .expect("AppendChunk's result must carry the aggregate's new version");
 
     // 6. Finalize — proving the UploadSession DecisionHandler path fully
-    // round-trips through real SQLite, not just in-memory state.
+    // round-trips through real SQLite, not just in-memory state. Must
+    // target the version AppendChunk just advanced to, not envelope_for's
+    // default of 0 — this aggregate has now taken two decision commands
+    // in sequence, unlike the single-decision Conversation/Message tests
+    // above where the default happened to still be correct.
     let finalize_upload = CommandEnvelope {
         target: DomainObjectRef {
             id: upload_session_id,
             r#type: "upload_session".to_string(),
             organization_id,
         },
+        expected_version: ObjectVersion(version_after_append),
         ..envelope_for(
             "FinalizeUpload",
             upload_session_id,
