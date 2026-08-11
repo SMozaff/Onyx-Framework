@@ -12,6 +12,7 @@ worker-application.workspace = true
 mission-domain.workspace = true
 work-domain.workspace = true
 communication-domain.workspace = true
+file-domain.workspace = true
 synchronization-domain.workspace = true
 sync-transport.workspace = true
 api-server.workspace = true

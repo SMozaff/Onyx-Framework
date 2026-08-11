@@ -7,6 +7,7 @@ members = [
     "crates/domains/mission-domain",
     "crates/domains/work-domain",
     "crates/domains/communication-domain",
+    "crates/domains/file-domain",
     "crates/applications/query-application",
     "crates/applications/worker-application",
     "crates/applications/client-composition",
@@ -81,6 +82,7 @@ platform-contracts = { path = "crates/kernel/platform-contracts" }
 mission-domain = { path = "crates/domains/mission-domain" }
 work-domain = { path = "crates/domains/work-domain" }
 communication-domain = { path = "crates/domains/communication-domain" }
+file-domain = { path = "crates/domains/file-domain" }
 query-application = { path = "crates/applications/query-application" }
 worker-application = { path = "crates/applications/worker-application" }
 client-composition = { path = "crates/applications/client-composition" }

@@ -28,12 +28,12 @@ mod creation_handler;
 mod decision_handler;
 
 pub use creation_handler::{
-    ConversationCreationHandler, MessageCreationHandler, MissionCreationHandler,
-    TaskCreationHandler,
+    ConversationCreationHandler, FileAssetCreationHandler, MessageCreationHandler,
+    MissionCreationHandler, TaskCreationHandler, UploadSessionCreationHandler,
 };
 pub use decision_handler::{
-    ConversationDecisionHandler, MessageDecisionHandler, MissionDecisionHandler,
-    TaskDecisionHandler,
+    ConversationDecisionHandler, FileAssetDecisionHandler, MessageDecisionHandler,
+    MissionDecisionHandler, TaskDecisionHandler, UploadSessionDecisionHandler,
 };
 
 use platform_contracts::{DecisionContext, IdGenerator};

@@ -201,6 +201,124 @@ impl CreationHandler for ConversationCreationHandler {
     }
 }
 
+/// Creates a `FileAsset` from a `CreateFileAsset` command via
+/// `FileAsset::create()`. See [`MissionCreationHandler`] for the shared
+/// implementation notes (including the flagged gap: no outbox message
+/// registered for creation events yet).
+pub struct FileAssetCreationHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+}
+
+impl FileAssetCreationHandler {
+    pub fn new(repo: Arc<dyn Repository>, unit_factory: Arc<dyn UnitOfWorkFactory>) -> Self {
+        Self { repo, unit_factory }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreationHandler for FileAssetCreationHandler {
+    async fn handle_creation(
+        &self,
+        payload: serde_json::Value,
+        actor: ActorContext,
+        operation_id: OperationId,
+        _correlation_id: CorrelationId,
+        _vector_clock: VectorClock,
+    ) -> Result<CommandResult, CreationError> {
+        let command: file_domain::FileAssetCommand = serde_json::from_value(payload)?;
+        let organization_id = actor.organization_id;
+        let ctx = creation_decision_context(actor);
+
+        let events = file_domain::FileAsset::create(command, &ctx)
+            .map_err(|e| CreationError::Domain(e.to_string()))?;
+        let file_asset = file_domain::FileAsset::from_created_event(&events[0]);
+        let aggregate_state = serde_json::to_value(&file_asset)?;
+
+        let mut unit = self
+            .unit_factory
+            .create(organization_id)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        self.repo
+            .commit(aggregate_state, &[], &mut *unit)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        let result = serde_json::json!({
+            "success": true,
+            "operation_id": operation_id,
+            "file_asset_id": file_asset.id().0,
+        });
+        unit.register_idempotency_result(operation_id, result.clone());
+        unit.commit()
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        Ok(result)
+    }
+}
+
+/// Creates an `UploadSession` from a `StartUpload` command via
+/// `UploadSession::create()`. See [`MissionCreationHandler`] for the
+/// shared implementation notes (including the flagged gap: no outbox
+/// message registered for creation events yet).
+pub struct UploadSessionCreationHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+}
+
+impl UploadSessionCreationHandler {
+    pub fn new(repo: Arc<dyn Repository>, unit_factory: Arc<dyn UnitOfWorkFactory>) -> Self {
+        Self { repo, unit_factory }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreationHandler for UploadSessionCreationHandler {
+    async fn handle_creation(
+        &self,
+        payload: serde_json::Value,
+        actor: ActorContext,
+        operation_id: OperationId,
+        _correlation_id: CorrelationId,
+        _vector_clock: VectorClock,
+    ) -> Result<CommandResult, CreationError> {
+        let command: file_domain::UploadSessionCommand = serde_json::from_value(payload)?;
+        let organization_id = actor.organization_id;
+        let ctx = creation_decision_context(actor);
+
+        let events = file_domain::UploadSession::create(command, &ctx)
+            .map_err(|e| CreationError::Domain(e.to_string()))?;
+        let upload_session = file_domain::UploadSession::from_created_event(&events[0]);
+        let aggregate_state = serde_json::to_value(&upload_session)?;
+
+        let mut unit = self
+            .unit_factory
+            .create(organization_id)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        self.repo
+            .commit(aggregate_state, &[], &mut *unit)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        let result = serde_json::json!({
+            "success": true,
+            "operation_id": operation_id,
+            "upload_session_id": upload_session.id().0,
+        });
+        unit.register_idempotency_result(operation_id, result.clone());
+        unit.commit()
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        Ok(result)
+    }
+}
+
 /// Creates a `Message` from a `PostMessage` command via `Message::create()`.
 /// See [`MissionCreationHandler`] for the shared implementation notes
 /// (including the flagged gap: no outbox message registered for creation

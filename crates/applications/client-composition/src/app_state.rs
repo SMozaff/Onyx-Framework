@@ -33,9 +33,10 @@ use sync_transport::{CompositeDiscovery, TransportSelector};
 use crate::command_registry::CommandRegistry;
 use crate::event_bus::EventBus;
 use crate::handlers::{
-    ConversationCreationHandler, ConversationDecisionHandler, MessageCreationHandler,
-    MessageDecisionHandler, MissionCreationHandler, MissionDecisionHandler, TaskCreationHandler,
-    TaskDecisionHandler,
+    ConversationCreationHandler, ConversationDecisionHandler, FileAssetCreationHandler,
+    FileAssetDecisionHandler, MessageCreationHandler, MessageDecisionHandler,
+    MissionCreationHandler, MissionDecisionHandler, TaskCreationHandler, TaskDecisionHandler,
+    UploadSessionCreationHandler, UploadSessionDecisionHandler,
 };
 use crate::query_registry::{LoadAggregateHandler, QueryRegistry};
 use crate::sync_agent::{SyncAgent, SyncAgentConfig};
@@ -98,6 +99,22 @@ const MESSAGE_DECISION_COMMANDS: &[&str] = &[
     "AddReaction",
     "RemoveReaction",
 ];
+
+/// Every `FileAssetCommand` variant other than `CreateFileAsset`.
+/// See [`MISSION_DECISION_COMMANDS`]'s doc comment for why one handler
+/// instance correctly serves all of them.
+const FILE_ASSET_DECISION_COMMANDS: &[&str] = &[
+    "CreateVersion",
+    "GrantFileAccess",
+    "RevokeFileAccess",
+    "QuarantineFile",
+    "ArchiveFile",
+];
+
+/// Every `UploadSessionCommand` variant other than `StartUpload`.
+/// See [`MISSION_DECISION_COMMANDS`]'s doc comment for why one handler
+/// instance correctly serves both of them.
+const UPLOAD_SESSION_DECISION_COMMANDS: &[&str] = &["AppendChunk", "FinalizeUpload"];
 
 /// Configuration `AppState::new` needs beyond the database pool itself.
 /// Not specified by any prior increment.
@@ -184,6 +201,10 @@ impl AppState {
             Arc::new(SqliteRepository::new(pool.clone(), "conversation"));
         let message_repo: Arc<dyn query_application::Repository> =
             Arc::new(SqliteRepository::new(pool.clone(), "message"));
+        let file_asset_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "file_asset"));
+        let upload_session_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "upload_session"));
         let unit_factory: Arc<dyn query_application::UnitOfWorkFactory> =
             Arc::new(SqliteUnitOfWorkFactory::new(pool.clone()));
         let idempotency_store: Arc<dyn IdempotencyStore> =
@@ -250,6 +271,41 @@ impl AppState {
             );
         }
 
+        command_registry.register_creation(
+            "CreateFileAsset",
+            FileAssetCreationHandler::new(
+                Arc::clone(&file_asset_repo),
+                Arc::clone(&unit_factory),
+            ),
+        );
+        for command_type in FILE_ASSET_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                FileAssetDecisionHandler::new(
+                    Arc::clone(&file_asset_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
+        command_registry.register_creation(
+            "StartUpload",
+            UploadSessionCreationHandler::new(
+                Arc::clone(&upload_session_repo),
+                Arc::clone(&unit_factory),
+            ),
+        );
+        for command_type in UPLOAD_SESSION_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                UploadSessionDecisionHandler::new(
+                    Arc::clone(&upload_session_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
+
         let mut query_registry = QueryRegistry::new();
         query_registry.register(
             "GetMission",
@@ -263,6 +319,14 @@ impl AppState {
         query_registry.register(
             "GetMessage",
             LoadAggregateHandler::new(Arc::clone(&message_repo)),
+        );
+        query_registry.register(
+            "GetFileAsset",
+            LoadAggregateHandler::new(Arc::clone(&file_asset_repo)),
+        );
+        query_registry.register(
+            "GetUploadSession",
+            LoadAggregateHandler::new(Arc::clone(&upload_session_repo)),
         );
 
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));

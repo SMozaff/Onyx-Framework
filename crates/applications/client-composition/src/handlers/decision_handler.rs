@@ -184,6 +184,122 @@ impl DecisionHandler for ConversationDecisionHandler {
     }
 }
 
+/// Wraps `api_server::handle_command` for `FileAsset`, for every
+/// `FileAssetCommand` variant other than `CreateFileAsset`.
+pub struct FileAssetDecisionHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+    idempotency_store: Arc<dyn IdempotencyStore>,
+}
+
+impl FileAssetDecisionHandler {
+    pub fn new(
+        repo: Arc<dyn Repository>,
+        unit_factory: Arc<dyn UnitOfWorkFactory>,
+        idempotency_store: Arc<dyn IdempotencyStore>,
+    ) -> Self {
+        Self {
+            repo,
+            unit_factory,
+            idempotency_store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DecisionHandler for FileAssetDecisionHandler {
+    async fn handle_decision(
+        &self,
+        payload: serde_json::Value,
+        target_id: ObjectId,
+        operation_id: OperationId,
+        actor: ActorContext,
+        expected_version: ObjectVersion,
+        expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
+        vector_clock: VectorClock,
+        correlation_id: CorrelationId,
+    ) -> Result<CommandResult, api_server::CommandError> {
+        let command: file_domain::FileAssetCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
+
+        api_server::handle_command::<file_domain::FileAsset, _, _, _>(
+            command,
+            target_id,
+            operation_id,
+            actor,
+            expected_version,
+            expected_lifecycle_epoch,
+            expected_authority_epoch,
+            vector_clock,
+            correlation_id,
+            "file_asset",
+            Arc::clone(&self.repo),
+            Arc::clone(&self.unit_factory),
+            Arc::clone(&self.idempotency_store),
+        )
+        .await
+    }
+}
+
+/// Wraps `api_server::handle_command` for `UploadSession`, for every
+/// `UploadSessionCommand` variant other than `StartUpload`.
+pub struct UploadSessionDecisionHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+    idempotency_store: Arc<dyn IdempotencyStore>,
+}
+
+impl UploadSessionDecisionHandler {
+    pub fn new(
+        repo: Arc<dyn Repository>,
+        unit_factory: Arc<dyn UnitOfWorkFactory>,
+        idempotency_store: Arc<dyn IdempotencyStore>,
+    ) -> Self {
+        Self {
+            repo,
+            unit_factory,
+            idempotency_store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DecisionHandler for UploadSessionDecisionHandler {
+    async fn handle_decision(
+        &self,
+        payload: serde_json::Value,
+        target_id: ObjectId,
+        operation_id: OperationId,
+        actor: ActorContext,
+        expected_version: ObjectVersion,
+        expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
+        vector_clock: VectorClock,
+        correlation_id: CorrelationId,
+    ) -> Result<CommandResult, api_server::CommandError> {
+        let command: file_domain::UploadSessionCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
+
+        api_server::handle_command::<file_domain::UploadSession, _, _, _>(
+            command,
+            target_id,
+            operation_id,
+            actor,
+            expected_version,
+            expected_lifecycle_epoch,
+            expected_authority_epoch,
+            vector_clock,
+            correlation_id,
+            "upload_session",
+            Arc::clone(&self.repo),
+            Arc::clone(&self.unit_factory),
+            Arc::clone(&self.idempotency_store),
+        )
+        .await
+    }
+}
+
 /// Wraps `api_server::handle_command` for `Message`, for every
 /// `MessageCommand` variant other than `PostMessage`.
 pub struct MessageDecisionHandler {
