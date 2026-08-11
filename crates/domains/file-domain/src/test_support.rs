@@ -6,7 +6,7 @@
 //! dependency exists between File and any sibling domain, so a small
 //! amount of duplication here is the correct trade, not an oversight.
 
-use platform_contracts::{AggregateRoot, DecisionContext, IdGenerator};
+use platform_contracts::{DecisionContext, IdGenerator};
 use platform_kernel::{
     ActorContext, EventId, ObjectId, OperationId, PolicyDecisionSet, Timestamp, UserId,
     VerifiedAuthority,
