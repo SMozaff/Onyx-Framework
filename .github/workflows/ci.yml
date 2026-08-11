@@ -59,6 +59,16 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
         run: cargo build --workspace --release
+      # Several integration test suites (e.g.
+      # persistence-postgres/tests/concurrency_test.rs) connect straight
+      # to the `postgres` service and operate on `aggregates` et al.,
+      # assuming the schema already exists — they don't run migrations
+      # themselves, the same way an app process wouldn't. The only place
+      # migrations were previously applied was the later "Migration
+      # idempotency and rollback" step, which runs after Test, so the
+      # service container started every prior run with no schema at all.
+      - name: Run database migrations
+        run: cargo run --package migration-tool -- up
       # desktop-shell's secure_storage tests exercise the real `keyring`
       # crate against a live Secret Service, deliberately not mocked (see
       # keyring_adapter.rs's own test doc comments). A bare ubuntu-latest
