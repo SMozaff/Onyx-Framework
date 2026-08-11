@@ -1023,6 +1023,7 @@ dependencies = [
  "api-server",
  "async-trait",
  "communication-domain",
+ "file-domain",
  "mission-domain",
  "persistence-sqlite",
  "platform-contracts",
@@ -1806,6 +1807,18 @@ checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
  "memoffset",
  "rustc_version",
+]
+
+[[package]]
+name = "file-domain"
+version = "1.0.0"
+dependencies = [
+ "platform-contracts",
+ "platform-kernel",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

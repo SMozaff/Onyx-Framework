@@ -360,3 +360,179 @@ async fn app_state_new_wires_conversation_and_message_commands_end_to_end() {
     );
     assert_eq!(message_query["aggregate"]["status"], serde_json::json!("Edited"));
 }
+
+/// Proves the File wiring end to end through the real composition root:
+/// CreateFileAsset, GrantFileAccess, StartUpload, AppendChunk, and
+/// FinalizeUpload all dispatch through `AppState`'s `CommandRegistry`
+/// against real SQLite, and both `GetFileAsset`/`GetUploadSession` find
+/// what was written — the same path `desktop-shell`'s
+/// `execute_command`/`execute_query` Tauri commands and `mobile-core`'s
+/// FFI equivalents actually call. Compiling was never the bar; this is
+/// the evidence the wiring in `app_state.rs` is correct, matching the
+/// rigor already proven for Communication above.
+#[tokio::test]
+async fn app_state_new_wires_file_asset_and_upload_session_commands_end_to_end() {
+    let pool = test_pool().await;
+    let organization_id = OrganizationId::new_random();
+    let state = AppState::new(pool, test_config());
+
+    // 1. Create a file asset.
+    let file_asset_target = ObjectId::new_random();
+    let create_file_asset = CommandEnvelope {
+        target: DomainObjectRef {
+            id: file_asset_target,
+            r#type: "file_asset".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "CreateFileAsset",
+            file_asset_target,
+            organization_id,
+            serde_json::json!({
+                "CreateFileAsset": {
+                    "file_name": "sprint-plan.pdf",
+                    "mime_type": "application/pdf",
+                }
+            }),
+        )
+    };
+    let created = state
+        .command_registry
+        .dispatch(create_file_asset)
+        .await
+        .expect("CreateFileAsset should succeed through the real CommandRegistry");
+    assert_eq!(created["success"], serde_json::json!(true));
+    let file_asset_id: ObjectId =
+        serde_json::from_value(created["file_asset_id"].clone()).unwrap();
+
+    // 2. Grant access to another user — a decision command, proving the
+    // FileAsset DecisionHandler path (load -> decide -> commit) also works.
+    let grantee = test_user_id();
+    let grant_access = CommandEnvelope {
+        target: DomainObjectRef {
+            id: file_asset_id,
+            r#type: "file_asset".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "GrantFileAccess",
+            file_asset_id,
+            organization_id,
+            serde_json::json!({ "GrantFileAccess": { "user_id": grantee } }),
+        )
+    };
+    let grant_result = state
+        .command_registry
+        .dispatch(grant_access)
+        .await
+        .expect("GrantFileAccess should succeed against the freshly created file asset");
+    assert_eq!(grant_result["success"], serde_json::json!(true));
+    assert_eq!(grant_result["new_version"], serde_json::json!(1));
+
+    // 3. GetFileAsset should reflect the granted access.
+    let file_asset_query = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "GetFileAsset".to_string(),
+            target_id: file_asset_id,
+        })
+        .await
+        .expect("GetFileAsset should find the file asset");
+    let access = file_asset_query["aggregate"]["access"]
+        .as_array()
+        .expect("access must be a JSON array");
+    assert_eq!(access.len(), 2, "owner plus the newly granted user");
+
+    // 4. Start an upload session targeting that file asset, well within
+    // the 100 MB cap.
+    let upload_target = ObjectId::new_random();
+    let start_upload = CommandEnvelope {
+        target: DomainObjectRef {
+            id: upload_target,
+            r#type: "upload_session".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "StartUpload",
+            upload_target,
+            organization_id,
+            serde_json::json!({
+                "StartUpload": {
+                    "file_asset_id": file_asset_id,
+                    "total_size": 8,
+                }
+            }),
+        )
+    };
+    let started = state
+        .command_registry
+        .dispatch(start_upload)
+        .await
+        .expect("StartUpload should succeed through the real CommandRegistry");
+    assert_eq!(started["success"], serde_json::json!(true));
+    let upload_session_id: ObjectId =
+        serde_json::from_value(started["upload_session_id"].clone()).unwrap();
+
+    // 5. Append the single chunk covering the declared total.
+    let append_chunk = CommandEnvelope {
+        target: DomainObjectRef {
+            id: upload_session_id,
+            r#type: "upload_session".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "AppendChunk",
+            upload_session_id,
+            organization_id,
+            serde_json::json!({
+                "AppendChunk": {
+                    "chunk_index": 0,
+                    "chunk_size": 8,
+                    "chunk_hash": "chunk-0-hash",
+                }
+            }),
+        )
+    };
+    let appended = state
+        .command_registry
+        .dispatch(append_chunk)
+        .await
+        .expect("AppendChunk should succeed against the freshly started upload session");
+    assert_eq!(appended["success"], serde_json::json!(true));
+
+    // 6. Finalize — proving the UploadSession DecisionHandler path fully
+    // round-trips through real SQLite, not just in-memory state.
+    let finalize_upload = CommandEnvelope {
+        target: DomainObjectRef {
+            id: upload_session_id,
+            r#type: "upload_session".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "FinalizeUpload",
+            upload_session_id,
+            organization_id,
+            serde_json::json!({ "FinalizeUpload": { "final_hash": "final-hash" } }),
+        )
+    };
+    let finalized = state
+        .command_registry
+        .dispatch(finalize_upload)
+        .await
+        .expect("FinalizeUpload should succeed once all declared bytes were received");
+    assert_eq!(finalized["success"], serde_json::json!(true));
+
+    // 7. GetUploadSession should reflect the finalized status.
+    let upload_session_query = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "GetUploadSession".to_string(),
+            target_id: upload_session_id,
+        })
+        .await
+        .expect("GetUploadSession should find the upload session");
+    assert_eq!(
+        upload_session_query["aggregate"]["status"],
+        serde_json::json!("Finalized")
+    );
+}
