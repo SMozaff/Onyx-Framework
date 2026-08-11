@@ -127,11 +127,20 @@ def scan_rust(path: Path) -> str | None:
             mode = "string"
             i += 1
         elif ch == "'":
-            # Lifetimes (`'a`) are not character literals.
-            if nxt.isalpha() or nxt == "_":
+            # Lifetimes (`'a`) are not character literals. Disambiguate by
+            # whether a closing quote actually follows: an escaped literal
+            # (`'\n'`, `'\''`) or a single character immediately followed by
+            # a closing quote (`'A'`, `'_'`, `'0'`) is a char/byte literal;
+            # anything else (`'a`, `'static`) is a lifetime. The previous
+            # `nxt.isalpha() or nxt == "_"` check misclassified alphabetic
+            # or underscore char literals (e.g. `b'A'`, `b'_'`, as seen in
+            # relay_socket.rs's `b'A'..=b'Z' | ... | b'_'` range pattern) as
+            # lifetimes, desynchronizing the delimiter stack for the rest of
+            # the file.
+            if nxt == "\\" or (nxt and nxt != "'" and i + 2 < len(text) and text[i + 2] == "'"):
+                mode = "char"
                 i += 1
             else:
-                mode = "char"
                 i += 1
         elif ch in opens:
             stack.append((ch, i))
