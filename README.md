@@ -31,6 +31,23 @@ cargo test --workspace --release -- --test-threads=1
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+## Windows desktop installer
+
+Windows x64 is the current desktop shipping priority. From
+`crates/bins/desktop-shell`:
+
+```bash
+npm --prefix ui ci
+npm --prefix ui run lint
+npm --prefix ui exec tauri -- build --ci --bundles msi -- --locked
+```
+
+Every pull request builds and retains the `.msi` plus its SHA-256 checksum in
+GitHub Actions. A `v*` tag also attaches both files to the ONYX GitHub
+release. Authenticode signing remains a credentialed release input; the
+workflow produces an unsigned MSI until the Windows certificate is
+provisioned.
+
 ## Architecture
 
 - 8 increments, 27 crates, 6 binaries

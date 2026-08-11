@@ -49,6 +49,45 @@ jobs:
             onyx-*.tar.gz
             onyx-*.tar.gz.asc
 
+  release-desktop-windows:
+    name: Desktop Windows x64 (MSI)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@v2
+      - name: Install desktop UI dependencies
+        run: npm --prefix crates/bins/desktop-shell/ui ci
+      - name: Lint desktop UI
+        run: npm --prefix crates/bins/desktop-shell/ui run lint
+      - name: Build Windows MSI
+        working-directory: crates/bins/desktop-shell
+        run: npm --prefix ui exec tauri -- build --ci --bundles msi -- --locked
+      - name: Verify MSI and write SHA-256 checksum
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem target/release/bundle/msi -Filter *.msi)
+          if ($installers.Count -eq 0) { throw "Tauri produced no MSI installer" }
+          foreach ($installer in $installers) {
+            $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($installer.Name)" | Set-Content "$($installer.FullName).sha256"
+          }
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-x86_64
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/msi/*.msi.sha256
+          if-no-files-found: error
+
   release-images:
     runs-on: ubuntu-24.04
     strategy:
@@ -106,7 +145,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-24.04
-    needs: [release-binaries, release-images]
+    needs: [release-binaries, release-desktop-windows, release-images]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
