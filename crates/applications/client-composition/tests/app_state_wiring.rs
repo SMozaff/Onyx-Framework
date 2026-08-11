@@ -358,7 +358,10 @@ async fn app_state_new_wires_conversation_and_message_commands_end_to_end() {
         message_query["aggregate"]["body"],
         serde_json::json!("edited via wiring test")
     );
-    assert_eq!(message_query["aggregate"]["status"], serde_json::json!("Edited"));
+    assert_eq!(
+        message_query["aggregate"]["status"],
+        serde_json::json!("Edited")
+    );
 }
 
 /// Proves the File wiring end to end through the real composition root:
@@ -402,8 +405,7 @@ async fn app_state_new_wires_file_asset_and_upload_session_commands_end_to_end()
         .await
         .expect("CreateFileAsset should succeed through the real CommandRegistry");
     assert_eq!(created["success"], serde_json::json!(true));
-    let file_asset_id: ObjectId =
-        serde_json::from_value(created["file_asset_id"].clone()).unwrap();
+    let file_asset_id: ObjectId = serde_json::from_value(created["file_asset_id"].clone()).unwrap();
 
     // 2. Grant access to another user — a decision command, proving the
     // FileAsset DecisionHandler path (load -> decide -> commit) also works.

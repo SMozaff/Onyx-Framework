@@ -477,7 +477,10 @@ mod tests {
             ConversationCommand::ArchiveConversation { reason: None },
             &ctx,
         );
-        assert!(matches!(result, Err(ConversationError::InvalidTransition(_))));
+        assert!(matches!(
+            result,
+            Err(ConversationError::InvalidTransition(_))
+        ));
     }
 
     #[test]
@@ -487,7 +490,12 @@ mod tests {
         let new_member = test_user_id();
 
         let events = conversation
-            .decide(ConversationCommand::AddMember { user_id: new_member }, &ctx)
+            .decide(
+                ConversationCommand::AddMember {
+                    user_id: new_member,
+                },
+                &ctx,
+            )
             .expect("AddMember must succeed from Active");
 
         let mut updated = conversation.clone();
@@ -507,7 +515,9 @@ mod tests {
         let existing_member = conversation.members()[0];
 
         let result = conversation.decide(
-            ConversationCommand::AddMember { user_id: existing_member },
+            ConversationCommand::AddMember {
+                user_id: existing_member,
+            },
             &ctx,
         );
         assert!(matches!(result, Err(ConversationError::AlreadyMember(_))));
@@ -518,7 +528,10 @@ mod tests {
         let conversation = active_conversation();
         let ctx = test_context();
         let archived_events = conversation
-            .decide(ConversationCommand::ArchiveConversation { reason: None }, &ctx)
+            .decide(
+                ConversationCommand::ArchiveConversation { reason: None },
+                &ctx,
+            )
             .unwrap();
         let mut archived = conversation.clone();
         for e in &archived_events {
@@ -527,10 +540,15 @@ mod tests {
         assert_eq!(archived.status(), ConversationStatus::Archived);
 
         let result = archived.decide(
-            ConversationCommand::AddMember { user_id: test_user_id() },
+            ConversationCommand::AddMember {
+                user_id: test_user_id(),
+            },
             &ctx,
         );
-        assert!(matches!(result, Err(ConversationError::InvalidTransition(_))));
+        assert!(matches!(
+            result,
+            Err(ConversationError::InvalidTransition(_))
+        ));
     }
 
     #[test]
@@ -561,7 +579,10 @@ mod tests {
         let conversation = active_conversation();
         let ctx = test_context();
         let events = conversation
-            .decide(ConversationCommand::ArchiveConversation { reason: None }, &ctx)
+            .decide(
+                ConversationCommand::ArchiveConversation { reason: None },
+                &ctx,
+            )
             .unwrap();
         let mut archived = conversation.clone();
         for e in &events {
@@ -572,7 +593,10 @@ mod tests {
             ConversationCommand::ArchiveConversation { reason: None },
             &ctx,
         );
-        assert!(matches!(result, Err(ConversationError::InvalidTransition(_))));
+        assert!(matches!(
+            result,
+            Err(ConversationError::InvalidTransition(_))
+        ));
     }
 
     // ---- Message ---------------------------------------------------------
@@ -653,7 +677,9 @@ mod tests {
         let mut edited = message.clone();
         for e in message
             .decide(
-                MessageCommand::EditMessage { new_body: "v2".to_string() },
+                MessageCommand::EditMessage {
+                    new_body: "v2".to_string(),
+                },
                 &ctx,
             )
             .unwrap()
@@ -663,7 +689,9 @@ mod tests {
         assert_eq!(edited.status(), MessageStatus::Edited);
 
         let result = edited.decide(
-            MessageCommand::EditMessage { new_body: "v3".to_string() },
+            MessageCommand::EditMessage {
+                new_body: "v3".to_string(),
+            },
             &ctx,
         );
         assert!(result.is_ok(), "a message may be edited more than once");
@@ -676,7 +704,9 @@ mod tests {
         let mut redacted = message.clone();
         for e in message
             .decide(
-                MessageCommand::RedactMessage { reason: "policy".to_string() },
+                MessageCommand::RedactMessage {
+                    reason: "policy".to_string(),
+                },
                 &ctx,
             )
             .unwrap()
@@ -685,7 +715,9 @@ mod tests {
         }
 
         let result = redacted.decide(
-            MessageCommand::EditMessage { new_body: "too late".to_string() },
+            MessageCommand::EditMessage {
+                new_body: "too late".to_string(),
+            },
             &ctx,
         );
         assert!(matches!(result, Err(MessageError::InvalidTransition(_))));
@@ -709,10 +741,16 @@ mod tests {
         }
 
         assert_eq!(redacted.status(), MessageStatus::Redacted);
-        assert_eq!(redacted.body(), None, "redacted body must not be retrievable");
+        assert_eq!(
+            redacted.body(),
+            None,
+            "redacted body must not be retrievable"
+        );
 
         let result = redacted.decide(
-            MessageCommand::RedactMessage { reason: "again".to_string() },
+            MessageCommand::RedactMessage {
+                reason: "again".to_string(),
+            },
             &ctx,
         );
         assert!(matches!(result, Err(MessageError::InvalidTransition(_))));
@@ -725,7 +763,9 @@ mod tests {
 
         let events = message
             .decide(
-                MessageCommand::AddReaction { emoji_code: "thumbsup".to_string() },
+                MessageCommand::AddReaction {
+                    emoji_code: "thumbsup".to_string(),
+                },
                 &ctx,
             )
             .expect("AddReaction must succeed on a Posted message");
@@ -745,7 +785,9 @@ mod tests {
         let mut reacted = message.clone();
         for e in message
             .decide(
-                MessageCommand::AddReaction { emoji_code: "thumbsup".to_string() },
+                MessageCommand::AddReaction {
+                    emoji_code: "thumbsup".to_string(),
+                },
                 &ctx,
             )
             .unwrap()
@@ -756,11 +798,16 @@ mod tests {
 
         let events = reacted
             .decide(
-                MessageCommand::AddReaction { emoji_code: "thumbsup".to_string() },
+                MessageCommand::AddReaction {
+                    emoji_code: "thumbsup".to_string(),
+                },
                 &ctx,
             )
             .expect("duplicate reaction must not error");
-        assert!(events.is_empty(), "duplicate reaction must be a no-op, not a new event");
+        assert!(
+            events.is_empty(),
+            "duplicate reaction must be a no-op, not a new event"
+        );
     }
 
     #[test]
@@ -770,7 +817,9 @@ mod tests {
         let mut redacted = message.clone();
         for e in message
             .decide(
-                MessageCommand::RedactMessage { reason: "policy".to_string() },
+                MessageCommand::RedactMessage {
+                    reason: "policy".to_string(),
+                },
                 &ctx,
             )
             .unwrap()
@@ -779,7 +828,9 @@ mod tests {
         }
 
         let result = redacted.decide(
-            MessageCommand::AddReaction { emoji_code: "thumbsup".to_string() },
+            MessageCommand::AddReaction {
+                emoji_code: "thumbsup".to_string(),
+            },
             &ctx,
         );
         assert!(matches!(result, Err(MessageError::InvalidTransition(_))));
@@ -792,7 +843,9 @@ mod tests {
         let mut reacted = message.clone();
         for e in message
             .decide(
-                MessageCommand::AddReaction { emoji_code: "thumbsup".to_string() },
+                MessageCommand::AddReaction {
+                    emoji_code: "thumbsup".to_string(),
+                },
                 &ctx,
             )
             .unwrap()
@@ -803,7 +856,9 @@ mod tests {
 
         let events = reacted
             .decide(
-                MessageCommand::RemoveReaction { emoji_code: "thumbsup".to_string() },
+                MessageCommand::RemoveReaction {
+                    emoji_code: "thumbsup".to_string(),
+                },
                 &ctx,
             )
             .expect("RemoveReaction must succeed");
@@ -821,7 +876,9 @@ mod tests {
 
         let events = message
             .decide(
-                MessageCommand::RemoveReaction { emoji_code: "thumbsup".to_string() },
+                MessageCommand::RemoveReaction {
+                    emoji_code: "thumbsup".to_string(),
+                },
                 &ctx,
             )
             .expect("removing a reaction that was never added must not error");
@@ -851,7 +908,9 @@ mod tests {
         let mut m = message.clone();
         for e in message
             .decide(
-                MessageCommand::AddReaction { emoji_code: "thumbsup".to_string() },
+                MessageCommand::AddReaction {
+                    emoji_code: "thumbsup".to_string(),
+                },
                 &ctx,
             )
             .unwrap()

@@ -74,7 +74,12 @@ impl RelayRegistry {
         Self::default()
     }
 
-    async fn register(&self, id: uuid::Uuid, organization_id: String, inbox: mpsc::UnboundedSender<Vec<u8>>) {
+    async fn register(
+        &self,
+        id: uuid::Uuid,
+        organization_id: String,
+        inbox: mpsc::UnboundedSender<Vec<u8>>,
+    ) {
         self.peers.write().await.insert(
             id,
             ConnectedReplica {

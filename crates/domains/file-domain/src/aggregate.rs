@@ -466,7 +466,8 @@ impl AggregateRoot for UploadSession {
                 // Enforced independently of `StartUpload`'s declared-size
                 // check: closes the gap where a client understates its
                 // total up front, then keeps appending past the cap.
-                if projected_total > MAX_FILE_SIZE_BYTES || projected_total > self.declared_total_size
+                if projected_total > MAX_FILE_SIZE_BYTES
+                    || projected_total > self.declared_total_size
                 {
                     return Err(UploadSessionError::FileTooLarge(format!(
                         "appending {chunk_size} bytes would bring the session to {projected_total}, \
@@ -649,7 +650,10 @@ mod tests {
         let new_user = test_user_id();
 
         let events = asset
-            .decide(FileAssetCommand::GrantFileAccess { user_id: new_user }, &ctx)
+            .decide(
+                FileAssetCommand::GrantFileAccess { user_id: new_user },
+                &ctx,
+            )
             .expect("GrantFileAccess must succeed from Active");
         let mut updated = asset.clone();
         for e in &events {
@@ -677,7 +681,10 @@ mod tests {
         let new_user = test_user_id();
         let mut granted = asset.clone();
         for e in asset
-            .decide(FileAssetCommand::GrantFileAccess { user_id: new_user }, &ctx)
+            .decide(
+                FileAssetCommand::GrantFileAccess { user_id: new_user },
+                &ctx,
+            )
             .unwrap()
         {
             granted.apply(&e);
@@ -685,7 +692,10 @@ mod tests {
         assert!(granted.access().contains(&new_user));
 
         let events = granted
-            .decide(FileAssetCommand::RevokeFileAccess { user_id: new_user }, &ctx)
+            .decide(
+                FileAssetCommand::RevokeFileAccess { user_id: new_user },
+                &ctx,
+            )
             .expect("RevokeFileAccess must succeed");
         let mut revoked = granted.clone();
         for e in &events {
@@ -699,7 +709,9 @@ mod tests {
         let asset = active_file_asset();
         let ctx = test_context();
         let result = asset.decide(
-            FileAssetCommand::RevokeFileAccess { user_id: test_user_id() },
+            FileAssetCommand::RevokeFileAccess {
+                user_id: test_user_id(),
+            },
             &ctx,
         );
         assert!(matches!(result, Err(FileAssetError::InvalidAccessState(_))));
@@ -734,14 +746,21 @@ mod tests {
         let ctx = test_context();
         let mut quarantined = asset.clone();
         for e in asset
-            .decide(FileAssetCommand::QuarantineFile { reason: "x".to_string() }, &ctx)
+            .decide(
+                FileAssetCommand::QuarantineFile {
+                    reason: "x".to_string(),
+                },
+                &ctx,
+            )
             .unwrap()
         {
             quarantined.apply(&e);
         }
 
         let result = quarantined.decide(
-            FileAssetCommand::QuarantineFile { reason: "again".to_string() },
+            FileAssetCommand::QuarantineFile {
+                reason: "again".to_string(),
+            },
             &ctx,
         );
         assert!(matches!(result, Err(FileAssetError::InvalidTransition(_))));
@@ -768,14 +787,22 @@ mod tests {
         let ctx = test_context();
         let mut quarantined = asset.clone();
         for e in asset
-            .decide(FileAssetCommand::QuarantineFile { reason: "x".to_string() }, &ctx)
+            .decide(
+                FileAssetCommand::QuarantineFile {
+                    reason: "x".to_string(),
+                },
+                &ctx,
+            )
             .unwrap()
         {
             quarantined.apply(&e);
         }
 
         let result = quarantined.decide(FileAssetCommand::ArchiveFile { reason: None }, &ctx);
-        assert!(result.is_ok(), "a quarantined file must still be archivable");
+        assert!(
+            result.is_ok(),
+            "a quarantined file must still be archivable"
+        );
     }
 
     #[test]
@@ -837,17 +864,25 @@ mod tests {
             },
             &ctx,
         );
-        assert!(result.is_ok(), "the cap itself must be an allowed size, not just below it");
+        assert!(
+            result.is_ok(),
+            "the cap itself must be an allowed size, not just below it"
+        );
     }
 
     #[test]
     fn upload_session_create_called_with_wrong_command_errors() {
         let ctx = test_context();
         let result = UploadSession::create(
-            UploadSessionCommand::FinalizeUpload { final_hash: "x".to_string() },
+            UploadSessionCommand::FinalizeUpload {
+                final_hash: "x".to_string(),
+            },
             &ctx,
         );
-        assert!(matches!(result, Err(UploadSessionError::InvalidTransition(_))));
+        assert!(matches!(
+            result,
+            Err(UploadSessionError::InvalidTransition(_))
+        ));
     }
 
     #[test]
@@ -957,7 +992,9 @@ mod tests {
         for e in finalized
             .clone()
             .decide(
-                UploadSessionCommand::FinalizeUpload { final_hash: "final".to_string() },
+                UploadSessionCommand::FinalizeUpload {
+                    final_hash: "final".to_string(),
+                },
                 &ctx,
             )
             .unwrap()
@@ -974,7 +1011,10 @@ mod tests {
             },
             &ctx,
         );
-        assert!(matches!(result, Err(UploadSessionError::InvalidTransition(_))));
+        assert!(matches!(
+            result,
+            Err(UploadSessionError::InvalidTransition(_))
+        ));
     }
 
     #[test]
@@ -997,7 +1037,9 @@ mod tests {
         }
 
         let result = partial.decide(
-            UploadSessionCommand::FinalizeUpload { final_hash: "final".to_string() },
+            UploadSessionCommand::FinalizeUpload {
+                final_hash: "final".to_string(),
+            },
             &ctx,
         );
         assert!(matches!(result, Err(UploadSessionError::Incomplete(_))));
@@ -1024,7 +1066,9 @@ mod tests {
 
         let events = complete
             .decide(
-                UploadSessionCommand::FinalizeUpload { final_hash: "final-hash".to_string() },
+                UploadSessionCommand::FinalizeUpload {
+                    final_hash: "final-hash".to_string(),
+                },
                 &ctx,
             )
             .expect("FinalizeUpload must succeed once all bytes are received");
@@ -1056,7 +1100,9 @@ mod tests {
         for e in finalized
             .clone()
             .decide(
-                UploadSessionCommand::FinalizeUpload { final_hash: "final".to_string() },
+                UploadSessionCommand::FinalizeUpload {
+                    final_hash: "final".to_string(),
+                },
                 &ctx,
             )
             .unwrap()
@@ -1065,10 +1111,15 @@ mod tests {
         }
 
         let result = finalized.decide(
-            UploadSessionCommand::FinalizeUpload { final_hash: "again".to_string() },
+            UploadSessionCommand::FinalizeUpload {
+                final_hash: "again".to_string(),
+            },
             &ctx,
         );
-        assert!(matches!(result, Err(UploadSessionError::InvalidTransition(_))));
+        assert!(matches!(
+            result,
+            Err(UploadSessionError::InvalidTransition(_))
+        ));
     }
 
     #[test]

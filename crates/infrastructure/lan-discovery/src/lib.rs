@@ -21,8 +21,8 @@ use std::{
 use async_trait::async_trait;
 use platform_kernel::{ObjectId, OrganizationId, ReplicaId, Timestamp};
 use serde::{Deserialize, Serialize};
-use sync_transport::{discovery::PeerInfo, placeholder_types::DiscoveryError, Discovery};
 use socket2::{Domain, Protocol, Socket, Type};
+use sync_transport::{discovery::PeerInfo, placeholder_types::DiscoveryError, Discovery};
 use tokio::{net::UdpSocket, sync::RwLock};
 
 pub const DISCOVERY_PORT: u16 = 47_821;
@@ -214,9 +214,15 @@ mod tests {
             service_name: Some("Lenovo desktop".to_string()),
         };
         let bytes = serde_json::to_vec(&a).unwrap();
-        assert!(bytes.len() < 512, "announcement grew to {} bytes", bytes.len());
+        assert!(
+            bytes.len() < 512,
+            "announcement grew to {} bytes",
+            bytes.len()
+        );
         assert_eq!(
-            serde_json::from_slice::<Announcement>(&bytes).unwrap().sync_port,
+            serde_json::from_slice::<Announcement>(&bytes)
+                .unwrap()
+                .sync_port,
             3000
         );
     }

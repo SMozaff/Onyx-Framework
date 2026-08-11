@@ -273,10 +273,7 @@ impl AppState {
 
         command_registry.register_creation(
             "CreateFileAsset",
-            FileAssetCreationHandler::new(
-                Arc::clone(&file_asset_repo),
-                Arc::clone(&unit_factory),
-            ),
+            FileAssetCreationHandler::new(Arc::clone(&file_asset_repo), Arc::clone(&unit_factory)),
         );
         for command_type in FILE_ASSET_DECISION_COMMANDS {
             command_registry.register_decision(
