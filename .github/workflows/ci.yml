@@ -59,6 +59,25 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
         run: cargo build --workspace --release
+      # desktop-shell's secure_storage tests exercise the real `keyring`
+      # crate against a live Secret Service, deliberately not mocked (see
+      # keyring_adapter.rs's own test doc comments). A bare ubuntu-latest
+      # runner has no D-Bus session bus or Secret Service daemon at all,
+      # so those tests fail with "No default store has been set" — not a
+      # code defect, a missing environment dependency. gnome-keyring is
+      # the standard fix CI pipelines use for the `keyring` crate itself.
+      - name: Start a D-Bus session and unlocked gnome-keyring (for secure_storage tests)
+        run: |
+          sudo apt-get install -y gnome-keyring dbus-x11
+          rm -f "$HOME/.local/share/keyrings/login.keyring"
+          mkdir -p "$HOME/.local/share/keyrings"
+          echo -n "" | gnome-keyring-daemon --unlock --login >/dev/null 2>&1 || true
+          eval "$(dbus-launch --sh-syntax)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_PID=$DBUS_SESSION_BUS_PID" >> "$GITHUB_ENV"
+          eval "$(printf '\n' | gnome-keyring-daemon --unlock --components=secrets --daemonize)"
+          echo "GNOME_KEYRING_CONTROL=$GNOME_KEYRING_CONTROL" >> "$GITHUB_ENV"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
       - name: Test
         run: cargo test --workspace --release -- --test-threads=1
       - name: Docs
