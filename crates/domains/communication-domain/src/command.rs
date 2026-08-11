@@ -60,4 +60,3 @@ pub enum MessageCommand {
         emoji_code: String,
     },
 }
-

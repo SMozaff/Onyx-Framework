@@ -117,7 +117,12 @@ async fn relay_forwards_a_frame_between_two_replicas() {
     // under which this exact exchange silently dropped Bob's frame because
     // Alice had not yet transmitted anything.
     bob_ws
-        .send(Message::Binary(frame(bob, Some(alice), org, b"hello-from-bob")))
+        .send(Message::Binary(frame(
+            bob,
+            Some(alice),
+            org,
+            b"hello-from-bob",
+        )))
         .await
         .unwrap();
 
@@ -133,7 +138,12 @@ async fn relay_forwards_a_frame_between_two_replicas() {
     // Now the reverse direction, which is the case the desktop client
     // actually performs first.
     alice_ws
-        .send(Message::Binary(frame(alice, Some(bob), org, b"hello-from-alice")))
+        .send(Message::Binary(frame(
+            alice,
+            Some(bob),
+            org,
+            b"hello-from-alice",
+        )))
         .await
         .unwrap();
 
@@ -161,19 +171,32 @@ async fn relay_drops_frames_for_an_absent_peer_without_killing_the_sender() {
     // says nothing about Alice's connection — the Outbox is what retries
     // (Part II §7.7.1), so the relay must not tear her down.
     alice_ws
-        .send(Message::Binary(frame(alice, Some(ghost), org, b"into-the-void")))
+        .send(Message::Binary(frame(
+            alice,
+            Some(ghost),
+            org,
+            b"into-the-void",
+        )))
         .await
         .unwrap();
 
     // Still usable afterwards: a second send must succeed.
     alice_ws
-        .send(Message::Binary(frame(alice, Some(ghost), org, b"still-alive")))
+        .send(Message::Binary(frame(
+            alice,
+            Some(ghost),
+            org,
+            b"still-alive",
+        )))
         .await
         .expect("connection should survive an undeliverable frame");
 
     // And nothing should have come back.
     let nothing = tokio::time::timeout(Duration::from_millis(300), alice_ws.next()).await;
-    assert!(nothing.is_err(), "no frame should be delivered for an absent peer");
+    assert!(
+        nothing.is_err(),
+        "no frame should be delivered for an absent peer"
+    );
 }
 
 #[tokio::test]
@@ -190,7 +213,12 @@ async fn relay_closes_connection_on_cross_tenant_frame() {
     // This is a boundary-crossing attempt, not a routing mistake, so the
     // connection must end rather than the frame merely being skipped.
     alice_ws
-        .send(Message::Binary(frame(alice, Some(bob), foreign_org, b"wrong-tenant")))
+        .send(Message::Binary(frame(
+            alice,
+            Some(bob),
+            foreign_org,
+            b"wrong-tenant",
+        )))
         .await
         .unwrap();
 

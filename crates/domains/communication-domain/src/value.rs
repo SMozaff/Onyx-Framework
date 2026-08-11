@@ -111,10 +111,7 @@ impl ReactionCode {
         }
         let bytes = code.as_bytes();
         if bytes.len() > Self::MAX_LEN {
-            return Err(format!(
-                "reaction code exceeds {} bytes",
-                Self::MAX_LEN
-            ));
+            return Err(format!("reaction code exceeds {} bytes", Self::MAX_LEN));
         }
         let mut buf = [0u8; Self::MAX_LEN];
         buf[..bytes.len()].copy_from_slice(bytes);

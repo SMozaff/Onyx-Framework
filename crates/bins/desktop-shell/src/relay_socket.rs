@@ -124,9 +124,7 @@ impl RelaySocket for TungsteniteRelaySocket {
         loop {
             match self.stream.next().await {
                 Some(Ok(Message::Binary(bytes))) => return Ok(bytes),
-                Some(Ok(Message::Close(_))) | None => {
-                    return Err(TransportError::ConnectionLost)
-                }
+                Some(Ok(Message::Close(_))) | None => return Err(TransportError::ConnectionLost),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) => return Err(TransportError::ConnectionLost),
             }
