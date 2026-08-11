@@ -6,21 +6,27 @@ use anyhow::Context;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use testcontainers_modules::{
     postgres::Postgres,
-    testcontainers::{runners::SyncRunner, Container},
+    testcontainers::{runners::AsyncRunner, ContainerAsync},
 };
 
 pub const ORGANIZATION_ID: &str = "11111111-1111-1111-1111-111111111111";
 
 pub struct PostgresHarness {
-    _container: Container<Postgres>,
+    _container: ContainerAsync<Postgres>,
     pub pool: PgPool,
     pub database_url: String,
 }
 
 impl PostgresHarness {
     pub async fn start() -> anyhow::Result<Self> {
-        let container = Postgres::default().start()?;
-        let port = container.get_host_port_ipv4(5432)?;
+        // `start()` is itself an `async fn` running inside the calling
+        // `#[tokio::test]`'s runtime, so it must use `AsyncRunner`, not
+        // `SyncRunner` — the sync runner blocks the current thread on its
+        // own internal Tokio runtime, which panics ("cannot start a
+        // runtime from within a runtime") when nested inside one already
+        // driving async tasks, exactly the failure this replaces.
+        let container = Postgres::default().start().await?;
+        let port = container.get_host_port_ipv4(5432).await?;
         let database_url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
 
         let mut last_error = None;
