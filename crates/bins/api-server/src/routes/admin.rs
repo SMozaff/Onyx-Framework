@@ -44,6 +44,10 @@ pub struct CreateUserRequest {
     pub password: String,
     #[serde(default)]
     pub is_admin: bool,
+    /// Phase 1 (Desktop & Web Completion) addition — see
+    /// `security_application::ports::user_store`'s `is_manager` doc note.
+    #[serde(default)]
+    pub is_manager: bool,
     /// Defaults to the deployment's default tenant when omitted.
     #[serde(default)]
     pub organization_id: Option<String>,
@@ -54,12 +58,18 @@ pub struct SetPasswordRequest {
     pub password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetManagerRequest {
+    pub is_manager: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct UserDto {
     pub id: String,
     pub username: String,
     pub organization_id: String,
     pub is_admin: bool,
+    pub is_manager: bool,
     pub is_active: bool,
 }
 
@@ -72,6 +82,7 @@ impl From<UserRecord> for UserDto {
             username: user.username,
             organization_id: user.organization_id,
             is_admin: user.is_admin,
+            is_manager: user.is_manager,
             is_active: user.is_active,
         }
     }
@@ -161,6 +172,47 @@ async fn require_admin(state: &ApiState, headers: &HeaderMap) -> Result<UserReco
             "NON_RETRYABLE",
             correlation(),
             json!({"message":"Administrator privileges are required"}),
+        ));
+    }
+    Ok(user)
+}
+
+/// Authenticates the caller and confirms they are a Manager **or** an
+/// Admin. Phase 1 addition, gating Policy/Settings administration
+/// (`policy-domain`'s commands) — narrower than `require_admin`'s
+/// user-management gate, per the Manager role's own scope note in
+/// `security_application::ports::user_store`. Admin is accepted too
+/// since Admin is a superset in practice for this workspace (every
+/// deployment needs at least one account that can do everything), not
+/// because Manager formally implies or is implied by Admin — the two
+/// flags remain independent on `UserRecord`.
+///
+/// `#[allow(dead_code)]`: no caller exists yet. This guard is added now,
+/// alongside the role itself, so the Policy/Settings routes (tracked
+/// separately — see `PLAN_Desktop_Web_Completion.md`) have this in place
+/// to call the moment they're written, rather than that work silently
+/// reusing `require_admin` (too broad — see this fn's own doc comment)
+/// or forgetting a guard entirely.
+#[allow(dead_code)]
+async fn require_manager_or_admin(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<UserRecord, ApiError> {
+    let auth = authenticate_headers(state, headers).await?;
+    let user = state
+        .user_store
+        .find_by_id(&auth.user_id)
+        .await
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::unauthorized(correlation()))?;
+    if !user.is_active || !(user.is_admin || user.is_manager) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "MANAGER_OR_ADMIN_REQUIRED",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            correlation(),
+            json!({"message":"Manager or administrator privileges are required"}),
         ));
     }
     Ok(user)
@@ -263,6 +315,12 @@ async fn create_user_record(
         .organization_id
         .unwrap_or_else(|| ORGANIZATION_ID.to_string());
 
+    // is_manager always comes from the payload, even for bootstrap — unlike
+    // is_admin (forced true for bootstrap so the very first account can
+    // administer the system), there is no equivalent reason to force the
+    // narrower Manager role on for the bootstrap account.
+    let is_manager = payload.is_manager;
+
     let record = state
         .user_store
         .create(NewUser {
@@ -271,10 +329,31 @@ async fn create_user_record(
             organization_id,
             password_hash,
             is_admin,
+            is_manager,
         })
         .await
         .map_err(store_error)?;
     Ok(record.into())
+}
+
+/// `POST /api/admin/users/:id/manager` — admin-only Manager-role grant/revoke.
+/// Deliberately admin-only (not manager-or-admin): a Manager must not be
+/// able to grant itself or others additional Manager scope, mirroring how
+/// `is_admin` itself can only be set by an existing admin
+/// (`create_user`/`bootstrap`).
+pub async fn set_manager(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Json(payload): Json<SetManagerRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&state, &headers).await?;
+    state
+        .user_store
+        .set_manager(&user_id, payload.is_manager)
+        .await
+        .map_err(store_error)?;
+    Ok(Json(json!({"success": true})))
 }
 
 /// `GET /api/admin/users` — admin-only listing.

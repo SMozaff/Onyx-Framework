@@ -282,6 +282,10 @@ pub fn router(state: ApiState) -> Router {
             "/api/admin/users/:id/password",
             post(admin::set_user_password),
         )
+        // Phase 1 (Desktop & Web Completion): admin-only Manager-role
+        // grant/revoke. See admin::set_manager's doc comment for why this
+        // stays admin-only rather than manager-or-admin.
+        .route("/api/admin/users/:id/manager", post(admin::set_manager))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/command", command_route)
         .route("/api/query", get(query::query_route))

@@ -26,3 +26,23 @@ pub enum MessageStatus {
     /// Terminal: a redacted message cannot be edited or un-redacted.
     Redacted,
 }
+
+/// A ConnectionRequest's lifecycle status. New in Phase 1 — see
+/// `value::ConnectionRequestId`'s doc comment for the aggregate's
+/// purpose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectionRequestStatus {
+    /// Awaiting the recipient's decision.
+    Pending,
+    /// Accepted; the two users now have a direct connection.
+    /// Terminal — a further request between the same two users, if ever
+    /// wanted again after some other change severs the connection, is a
+    /// new `ConnectionRequest`, not a reopening of this one, keeping the
+    /// history of who connected with whom and when intact (same
+    /// rationale as `LegalHoldStatus::Released` in `policy-domain`).
+    Accepted,
+    /// Declined by the recipient. Terminal.
+    Declined,
+    /// Withdrawn by the sender before the recipient decided. Terminal.
+    Revoked,
+}

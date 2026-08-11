@@ -31,7 +31,11 @@ impl MessageId {
 }
 
 /// What kind of conversation this is. Per §4.7.2: "channels, mission
-/// discussions, direct conversations, and threaded messaging."
+/// discussions, direct conversations, and threaded messaging" — plus
+/// `Supergroup` and `SubTeam`, added per the explicit product decision
+/// in `PLAN_Desktop_Web_Completion.md` §7.1: "Supergroup is a
+/// Communication-domain concept only (a wide Conversation), not an
+/// Organization structural entity."
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConversationType {
     /// A one-to-one conversation between exactly two members.
@@ -39,6 +43,17 @@ pub enum ConversationType {
     /// A multi-member channel, optionally scoped to a Mission via
     /// `ContextLink` (Part I §4.7.6) rather than embedded ownership.
     Channel,
+    /// A wide, org-scoped conversation created by a Manager or Admin.
+    /// Membership here is the prerequisite for joining any `SubTeam`
+    /// that references it as `parent_supergroup` — see
+    /// `Conversation::create`'s and `AddMember`'s doc comments for the
+    /// enforced invariant. An Organization may contain more than one
+    /// Supergroup (confirmed, not a 1:1 org-to-supergroup mapping).
+    Supergroup,
+    /// A smaller team/group nested within exactly one Supergroup.
+    /// `Conversation.parent_supergroup` is required (`Some`) if and only
+    /// if `conversation_type` is `SubTeam` — enforced at construction.
+    SubTeam,
 }
 
 /// Text content of a message. A newtype rather than a bare `String` per
@@ -122,6 +137,21 @@ impl ReactionCode {
     pub fn as_str(&self) -> &str {
         let len = self.0.iter().position(|&b| b == 0).unwrap_or(Self::MAX_LEN);
         std::str::from_utf8(&self.0[..len]).unwrap_or("")
+    }
+}
+
+/// The identity of a ConnectionRequest aggregate. New in Phase 1 — see
+/// `PLAN_Desktop_Web_Completion.md` §7.1: a User-to-User contact/connection
+/// model, independent of any Conversation, so two users can establish a
+/// direct relationship (and, from it, start a `Direct` conversation)
+/// without one having to already share a `Channel`/`Supergroup`/`SubTeam`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ConnectionRequestId(pub ObjectId);
+
+impl ConnectionRequestId {
+    /// Generates a new random connection request identifier.
+    pub fn new_random() -> Self {
+        Self(ObjectId::new_random())
     }
 }
 

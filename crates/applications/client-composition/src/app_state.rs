@@ -32,11 +32,14 @@ use sync_transport::{CompositeDiscovery, TransportSelector};
 
 use crate::command_registry::CommandRegistry;
 use crate::event_bus::EventBus;
+use crate::file_upload::FileUploadCoordinator;
 use crate::handlers::{
+    ConnectionRequestCreationHandler, ConnectionRequestDecisionHandler,
     ConversationCreationHandler, ConversationDecisionHandler, FileAssetCreationHandler,
-    FileAssetDecisionHandler, MessageCreationHandler, MessageDecisionHandler,
-    MissionCreationHandler, MissionDecisionHandler, TaskCreationHandler, TaskDecisionHandler,
-    UploadSessionCreationHandler, UploadSessionDecisionHandler,
+    FileAssetDecisionHandler, LegalHoldCreationHandler, LegalHoldDecisionHandler,
+    MessageCreationHandler, MessageDecisionHandler, MissionCreationHandler,
+    MissionDecisionHandler, PolicyCreationHandler, PolicyDecisionHandler, TaskCreationHandler,
+    TaskDecisionHandler, UploadSessionCreationHandler, UploadSessionDecisionHandler,
 };
 use crate::query_registry::{LoadAggregateHandler, QueryRegistry};
 use crate::sync_agent::{SyncAgent, SyncAgentConfig};
@@ -116,6 +119,29 @@ const FILE_ASSET_DECISION_COMMANDS: &[&str] = &[
 /// instance correctly serves both of them.
 const UPLOAD_SESSION_DECISION_COMMANDS: &[&str] = &["AppendChunk", "FinalizeUpload"];
 
+/// Every `PolicyCommand` variant other than `CreatePolicy`. Phase 1
+/// addition. See [`MISSION_DECISION_COMMANDS`]'s doc comment for why one
+/// handler instance correctly serves all of them.
+const POLICY_DECISION_COMMANDS: &[&str] = &[
+    "CreatePolicyVersion",
+    "PublishPolicyVersion",
+    "EvaluatePolicy",
+    "RegisterViolation",
+    "RetirePolicy",
+];
+
+/// Every `LegalHoldCommand` variant other than `ApplyLegalHold`. Phase 1
+/// addition.
+const LEGAL_HOLD_DECISION_COMMANDS: &[&str] = &["ReleaseLegalHold"];
+
+/// Every `ConnectionRequestCommand` variant other than
+/// `SendConnectionRequest`. Phase 1 addition.
+const CONNECTION_REQUEST_DECISION_COMMANDS: &[&str] = &[
+    "AcceptConnectionRequest",
+    "DeclineConnectionRequest",
+    "RevokeConnectionRequest",
+];
+
 /// Configuration `AppState::new` needs beyond the database pool itself.
 /// Not specified by any prior increment.
 pub struct AppStateConfig {
@@ -151,6 +177,11 @@ pub struct AppStateConfig {
     /// delivered workspace yet either; same caller-supplies-it rationale
     /// as `cloud_relay_auth_provider`.
     pub cloud_relay_socket_factory: Arc<dyn sync_transport::cloud_relay::RelaySocketFactory>,
+    /// Local-disk root for [`local_blob_storage::LocalBlobStore`] — see
+    /// `query_application::BlobStore`'s doc comment for why this exists
+    /// (Phase 1 addition). The composing client (desktop-shell) supplies
+    /// a real, writable directory; tests use a `tempfile::TempDir`.
+    pub blob_store_root: std::path::PathBuf,
 }
 
 /// The composition root. Held for the client process's lifetime,
@@ -161,6 +192,11 @@ pub struct AppState {
     pub query_registry: Arc<QueryRegistry>,
     pub event_bus: Arc<EventBus>,
     pub sync_agent: Arc<SyncAgent>,
+    /// Phase 1 (Desktop & Web Completion) addition — see
+    /// `file_upload`'s module doc comment for why file uploads need a
+    /// dedicated coordinator rather than going through
+    /// `command_registry` like every other command.
+    pub file_upload_coordinator: Arc<FileUploadCoordinator>,
 
     /// Kept for tests / diagnostics that need to bypass the registries
     /// and query the raw pool directly (e.g. row-count assertions). Not
@@ -192,7 +228,17 @@ impl AppState {
     /// since the optimistic-concurrency version check still protects
     /// against double-application), but a real gap a future increment
     /// or amendment should close with a genuine SQLite-backed store.
-    pub fn new(pool: SqlitePool, config: AppStateConfig) -> Self {
+    ///
+    /// # `async` (Phase 1 addition)
+    /// Was previously synchronous; now `async` because
+    /// [`local_blob_storage::LocalBlobStore::open`] needs to create
+    /// `config.blob_store_root` on disk if it doesn't already exist,
+    /// which is an I/O operation. Every existing call site (desktop-shell,
+    /// this crate's own tests) already runs inside an async context
+    /// (Tauri commands, `#[tokio::test]`), so this is a straightforward
+    /// `.await` addition at each call site, not a structural change to
+    /// how `AppState` is used.
+    pub async fn new(pool: SqlitePool, config: AppStateConfig) -> Self {
         let mission_repo: Arc<dyn query_application::Repository> =
             Arc::new(SqliteRepository::new(pool.clone(), "mission"));
         let task_repo: Arc<dyn query_application::Repository> =
@@ -205,10 +251,34 @@ impl AppState {
             Arc::new(SqliteRepository::new(pool.clone(), "file_asset"));
         let upload_session_repo: Arc<dyn query_application::Repository> =
             Arc::new(SqliteRepository::new(pool.clone(), "upload_session"));
+        // Phase 1 (Desktop & Web Completion) additions.
+        let policy_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "policy"));
+        let legal_hold_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "legal_hold"));
+        let connection_request_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "connection_request"));
         let unit_factory: Arc<dyn query_application::UnitOfWorkFactory> =
             Arc::new(SqliteUnitOfWorkFactory::new(pool.clone()));
         let idempotency_store: Arc<dyn IdempotencyStore> =
             Arc::new(InMemoryIdempotencyStore::new());
+
+        // Phase 1 (Desktop & Web Completion) addition.
+        let blob_store: Arc<dyn query_application::BlobStore> = Arc::new(
+            local_blob_storage::LocalBlobStore::open(&config.blob_store_root)
+                .await
+                .expect(
+                    "blob store root must be creatable; a client that cannot write to its own \
+                     configured data directory has a deeper problem than this constructor can \
+                     recover from",
+                ),
+        );
+        let file_upload_coordinator = Arc::new(FileUploadCoordinator::new(
+            Arc::clone(&file_asset_repo),
+            Arc::clone(&upload_session_repo),
+            Arc::clone(&unit_factory),
+            Arc::clone(&blob_store),
+        ));
 
         let mut command_registry = CommandRegistry::new();
         command_registry.register_creation(
@@ -303,6 +373,53 @@ impl AppState {
             );
         }
 
+        // Phase 1 (Desktop & Web Completion) additions.
+        command_registry.register_creation(
+            "CreatePolicy",
+            PolicyCreationHandler::new(Arc::clone(&policy_repo), Arc::clone(&unit_factory)),
+        );
+        for command_type in POLICY_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                PolicyDecisionHandler::new(
+                    Arc::clone(&policy_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
+        command_registry.register_creation(
+            "ApplyLegalHold",
+            LegalHoldCreationHandler::new(Arc::clone(&legal_hold_repo), Arc::clone(&unit_factory)),
+        );
+        for command_type in LEGAL_HOLD_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                LegalHoldDecisionHandler::new(
+                    Arc::clone(&legal_hold_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
+        command_registry.register_creation(
+            "SendConnectionRequest",
+            ConnectionRequestCreationHandler::new(
+                Arc::clone(&connection_request_repo),
+                Arc::clone(&unit_factory),
+            ),
+        );
+        for command_type in CONNECTION_REQUEST_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                ConnectionRequestDecisionHandler::new(
+                    Arc::clone(&connection_request_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
+
         let mut query_registry = QueryRegistry::new();
         query_registry.register(
             "GetMission",
@@ -324,6 +441,19 @@ impl AppState {
         query_registry.register(
             "GetUploadSession",
             LoadAggregateHandler::new(Arc::clone(&upload_session_repo)),
+        );
+        // Phase 1 (Desktop & Web Completion) additions.
+        query_registry.register(
+            "GetPolicy",
+            LoadAggregateHandler::new(Arc::clone(&policy_repo)),
+        );
+        query_registry.register(
+            "GetLegalHold",
+            LoadAggregateHandler::new(Arc::clone(&legal_hold_repo)),
+        );
+        query_registry.register(
+            "GetConnectionRequest",
+            LoadAggregateHandler::new(Arc::clone(&connection_request_repo)),
         );
 
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));
@@ -375,6 +505,7 @@ impl AppState {
             query_registry: Arc::new(query_registry),
             event_bus,
             sync_agent,
+            file_upload_coordinator,
             pool,
         }
     }

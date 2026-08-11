@@ -122,6 +122,85 @@ async fn get_sync_status(
     serde_json::to_value(&status).map_err(|e| ShellError::Command(e.to_string()))
 }
 
+/// Uploads a file from the local filesystem. Phase 1 (Desktop & Web
+/// Completion) addition — see `client_composition::file_upload`'s module
+/// doc comment for why this is a dedicated command rather than another
+/// `execute_command` command_type.
+///
+/// Takes a filesystem **path** rather than the file's bytes: the webview
+/// would otherwise have to read the file into JS memory and ship it
+/// through Tauri's IPC (which JSON-encodes its arguments), costing a full
+/// extra copy plus base64-ish inflation for what can be up to a 100 MB
+/// file (`file_domain::value::MAX_FILE_SIZE_BYTES`). Reading it here, in
+/// Rust, on the native side avoids that entirely.
+#[tauri::command]
+async fn upload_file(
+    state: tauri::State<'_, Arc<AppState>>,
+    path: String,
+    organization_id: OrganizationId,
+    user_id: ObjectId,
+    device_id: ObjectId,
+) -> Result<serde_json::Value, ShellError> {
+    let content = tokio::fs::read(&path)
+        .await
+        .map_err(|e| ShellError::InvalidArgument(format!("reading {path}: {e}")))?;
+
+    let file_name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("untitled")
+        .to_string();
+
+    // No MIME sniffing library is a dependency of this workspace, and
+    // guessing a type from the extension alone would be a half-measure
+    // that silently mislabels files. `file_domain::value::MimeType` only
+    // validates non-emptiness (see its own doc comment), so a correct,
+    // honest default is the generic binary type; a real content-type
+    // detector is a follow-up, flagged rather than faked here.
+    let mime_type = "application/octet-stream".to_string();
+
+    let actor = platform_kernel::ActorContext {
+        user_id,
+        device_id,
+        organization_id,
+    };
+
+    let outcome = state
+        .file_upload_coordinator
+        .upload_new_file(actor, file_name, mime_type, &content)
+        .await
+        .map_err(|e| ShellError::Command(e.to_string()))?;
+
+    serde_json::to_value(&outcome).map_err(|e| ShellError::Command(e.to_string()))
+}
+
+/// Downloads a previously-uploaded file's content by its content hash,
+/// writing it to `destination_path`. Returns the number of bytes
+/// written, or an `InvalidArgument` error if no blob is stored for that
+/// hash (e.g. the `FileAsset` was created through a path that never
+/// uploaded real content).
+#[tauri::command]
+async fn download_file(
+    state: tauri::State<'_, Arc<AppState>>,
+    content_hash: String,
+    destination_path: String,
+) -> Result<u64, ShellError> {
+    let content = state
+        .file_upload_coordinator
+        .download(&content_hash)
+        .await
+        .map_err(|e| ShellError::Command(e.to_string()))?
+        .ok_or_else(|| {
+            ShellError::InvalidArgument(format!("no stored content for hash {content_hash}"))
+        })?;
+
+    tokio::fs::write(&destination_path, &content)
+        .await
+        .map_err(|e| ShellError::Storage(format!("writing {destination_path}: {e}")))?;
+
+    Ok(content.len() as u64)
+}
+
 /// Stores a secret via the platform `SecureStorage` adapter (Team Prompt
 /// 5 §3.1). `value` is accepted as a UTF-8 string over IPC — the
 /// underlying port stores raw bytes (`&[u8]`), so this command narrows
@@ -181,6 +260,11 @@ pub fn run() {
                 .map_err(|e| format!("failed to resolve app data directory: {e}"))?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("onyx.sqlite");
+            // Phase 1 (Desktop & Web Completion): file content lives
+            // alongside the SQLite database in the same app data
+            // directory. `LocalBlobStore::open` creates this itself if
+            // absent, so no `create_dir_all` is needed here.
+            let blob_store_root = data_dir.join("blobs");
 
             // AppState::new needs an already-connected pool; building one
             // requires async I/O, which `setup` (a sync closure) cannot
@@ -265,9 +349,10 @@ pub fn run() {
                     cloud_relay_socket_factory: Arc::new(
                         relay_socket::TungsteniteRelaySocketFactory::new(local_replica),
                     ),
+                    blob_store_root,
                 };
 
-                let state = Arc::new(AppState::new(pool, config));
+                let state = Arc::new(AppState::new(pool, config).await);
                 app_handle_for_state.manage(state);
                 app_handle_for_state.manage(storage);
             });
@@ -282,6 +367,8 @@ pub fn run() {
             store_secret,
             get_secret,
             delete_secret,
+            upload_file,
+            download_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -19,6 +19,7 @@
 pub mod app_state;
 pub mod command_registry;
 pub mod event_bus;
+pub mod file_upload;
 pub mod handlers;
 pub mod query_registry;
 pub mod sync_agent;
@@ -28,6 +29,7 @@ pub use command_registry::{
     CommandDispatchError, CommandRegistry, CreationHandler, DecisionHandler,
 };
 pub use event_bus::{EventBus, EventFilter, EventStreamId};
+pub use file_upload::{FileUploadCoordinator, FileUploadError, UploadOutcome};
 pub use handlers::{
     MissionCreationHandler, MissionDecisionHandler, TaskCreationHandler, TaskDecisionHandler,
 };

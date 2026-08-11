@@ -1,7 +1,11 @@
-//! Domain events emitted by the Conversation and Message aggregates.
-//! Source: Part I §4.7.5.
+//! Domain events emitted by the Conversation, Message, and
+//! ConnectionRequest aggregates.
+//! Source: Part I §4.7.5, plus Phase 1 additions.
 
-use crate::value::{ConversationId, ConversationType, MessageId, ReactionCode, RedactionReason};
+use crate::value::{
+    ConnectionRequestId, ConversationId, ConversationType, MessageId, ReactionCode,
+    RedactionReason,
+};
 use platform_kernel::{Timestamp, UserId};
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +18,9 @@ pub enum ConversationEvent {
         conversation_id: ConversationId,
         /// What kind of conversation this is.
         conversation_type: ConversationType,
+        /// Which Supergroup this sub-team is nested under, if
+        /// `conversation_type` is `SubTeam`. Always `None` otherwise.
+        parent_supergroup: Option<ConversationId>,
         /// The creating actor, who becomes the first member.
         created_by: UserId,
         /// When the conversation was created.
@@ -84,5 +91,37 @@ pub enum MessageEvent {
         emoji_code: ReactionCode,
         /// When.
         removed_at: Timestamp,
+    },
+}
+
+/// Events emitted by the ConnectionRequest aggregate. New in Phase 1 —
+/// see `value::ConnectionRequestId`'s doc comment.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ConnectionRequestEvent {
+    /// A connection request was sent.
+    ConnectionRequestSent {
+        /// The new request's identity.
+        connection_request_id: ConnectionRequestId,
+        /// Who sent it.
+        sender_id: UserId,
+        /// Who it's to.
+        recipient_id: UserId,
+        /// When.
+        sent_at: Timestamp,
+    },
+    /// The recipient accepted.
+    ConnectionRequestAccepted {
+        /// When.
+        accepted_at: Timestamp,
+    },
+    /// The recipient declined.
+    ConnectionRequestDeclined {
+        /// When.
+        declined_at: Timestamp,
+    },
+    /// The sender revoked the request.
+    ConnectionRequestRevoked {
+        /// When.
+        revoked_at: Timestamp,
     },
 }

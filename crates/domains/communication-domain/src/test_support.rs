@@ -16,8 +16,8 @@ use platform_kernel::{
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::aggregate::{Conversation, Message};
-use crate::command::{ConversationCommand, MessageCommand};
+use crate::aggregate::{ConnectionRequest, Conversation, Message};
+use crate::command::{ConnectionRequestCommand, ConversationCommand, MessageCommand};
 use crate::value::ConversationType;
 
 /// A deterministic, counter-based `IdGenerator` for tests. See
@@ -88,6 +88,37 @@ pub fn active_conversation() -> Conversation {
     let events = Conversation::create(
         ConversationCommand::CreateConversation {
             conversation_type: ConversationType::Channel,
+            parent_supergroup: None,
+        },
+        &ctx,
+    )
+    .expect("create must succeed");
+    Conversation::from_created_event(&events[0])
+}
+
+/// A freshly created, `Active` Supergroup conversation with one member
+/// (the creator).
+pub fn active_supergroup() -> Conversation {
+    let ctx = test_context();
+    let events = Conversation::create(
+        ConversationCommand::CreateConversation {
+            conversation_type: ConversationType::Supergroup,
+            parent_supergroup: None,
+        },
+        &ctx,
+    )
+    .expect("create must succeed");
+    Conversation::from_created_event(&events[0])
+}
+
+/// A freshly created, `Active` SubTeam conversation nested under
+/// `parent`.
+pub fn active_sub_team(parent: crate::value::ConversationId) -> Conversation {
+    let ctx = test_context();
+    let events = Conversation::create(
+        ConversationCommand::CreateConversation {
+            conversation_type: ConversationType::SubTeam,
+            parent_supergroup: Some(parent),
         },
         &ctx,
     )
@@ -108,4 +139,18 @@ pub fn posted_message() -> Message {
     )
     .expect("create must succeed");
     Message::from_created_event(&events[0])
+}
+
+/// A freshly sent, `Pending` connection request from `test_context()`'s
+/// actor to a fresh random recipient.
+pub fn pending_connection_request() -> ConnectionRequest {
+    let ctx = test_context();
+    let events = ConnectionRequest::create(
+        ConnectionRequestCommand::SendConnectionRequest {
+            recipient_id: test_user_id(),
+        },
+        &ctx,
+    )
+    .expect("create must succeed");
+    ConnectionRequest::from_created_event(&events[0])
 }

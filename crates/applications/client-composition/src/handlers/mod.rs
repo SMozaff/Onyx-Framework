@@ -28,12 +28,14 @@ mod creation_handler;
 mod decision_handler;
 
 pub use creation_handler::{
-    ConversationCreationHandler, FileAssetCreationHandler, MessageCreationHandler,
-    MissionCreationHandler, TaskCreationHandler, UploadSessionCreationHandler,
+    ConnectionRequestCreationHandler, ConversationCreationHandler, FileAssetCreationHandler,
+    LegalHoldCreationHandler, MessageCreationHandler, MissionCreationHandler,
+    PolicyCreationHandler, TaskCreationHandler, UploadSessionCreationHandler,
 };
 pub use decision_handler::{
-    ConversationDecisionHandler, FileAssetDecisionHandler, MessageDecisionHandler,
-    MissionDecisionHandler, TaskDecisionHandler, UploadSessionDecisionHandler,
+    ConnectionRequestDecisionHandler, ConversationDecisionHandler, FileAssetDecisionHandler,
+    LegalHoldDecisionHandler, MessageDecisionHandler, MissionDecisionHandler,
+    PolicyDecisionHandler, TaskDecisionHandler, UploadSessionDecisionHandler,
 };
 
 use platform_contracts::{DecisionContext, IdGenerator};
@@ -68,7 +70,7 @@ impl IdGenerator for RandomIdGenerator {
 /// permissive per Team 1's ruling, real policy evaluation deferred to
 /// Increment 7). Shared by both `creation_handler.rs` implementations,
 /// which is why it lives here rather than in either of them.
-pub(super) fn creation_decision_context(actor: ActorContext) -> DecisionContext {
+pub(crate) fn creation_decision_context(actor: ActorContext) -> DecisionContext {
     DecisionContext {
         actor,
         authority: VerifiedAuthority,

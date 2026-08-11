@@ -74,6 +74,22 @@ fn test_config() -> AppStateConfig {
         cloud_relay_auth_provider: Arc::new(StubAuthorityProvider),
         local_discovery: None,
         cloud_relay_socket_factory: Arc::new(StubRelaySocketFactory),
+        // A unique per-call temp path. Deliberately NOT a `TempDir`
+        // handle held for cleanup: `AppStateConfig` takes a plain
+        // `PathBuf`, and a `TempDir` dropped at the end of this function
+        // would delete the directory out from under the `AppState` that
+        // is about to use it. These live under the OS temp dir and are
+        // reclaimed by the OS/CI runner, which is the same trade every
+        // other throwaway path in this test file makes. Uniqueness comes
+        // from `ObjectId::new_random` (already imported here) rather than
+        // adding a `uuid` dev-dependency purely for a directory name.
+        blob_store_root: std::env::temp_dir().join("onyx-test-blobs").join(
+            ObjectId::new_random()
+                .0
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+        ),
     }
 }
 
@@ -127,7 +143,7 @@ async fn app_state_new_wires_a_working_command_registry_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
 
-    let state = AppState::new(pool, test_config());
+    let state = AppState::new(pool, test_config()).await;
 
     let envelope = envelope_for(
         "CreateMission",
@@ -190,7 +206,7 @@ async fn app_state_new_wires_task_commands_independently_of_mission_commands() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
 
-    let state = AppState::new(pool, test_config());
+    let state = AppState::new(pool, test_config()).await;
 
     let mission_id = ObjectId::new_random();
     let envelope = CommandEnvelope {
@@ -232,7 +248,7 @@ async fn app_state_new_wires_task_commands_independently_of_mission_commands() {
 async fn app_state_new_wires_conversation_and_message_commands_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config());
+    let state = AppState::new(pool, test_config()).await;
 
     // 1. Create a conversation.
     let create_conversation = envelope_for(
@@ -377,7 +393,7 @@ async fn app_state_new_wires_conversation_and_message_commands_end_to_end() {
 async fn app_state_new_wires_file_asset_and_upload_session_commands_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config());
+    let state = AppState::new(pool, test_config()).await;
 
     // 1. Create a file asset.
     let file_asset_target = ObjectId::new_random();
@@ -544,4 +560,266 @@ async fn app_state_new_wires_file_asset_and_upload_session_commands_end_to_end()
         upload_session_query["aggregate"]["status"],
         serde_json::json!("Finalized")
     );
+}
+
+/// Phase 1 (Desktop & Web Completion) addition. Proves `AppState::new`
+/// correctly wires the `Policy` aggregate's full command surface:
+/// CreatePolicy (creation) -> CreatePolicyVersion -> PublishPolicyVersion
+/// -> EvaluatePolicy (decision path), end-to-end against real SQLite.
+#[tokio::test]
+async fn app_state_new_wires_policy_commands_end_to_end() {
+    let pool = test_pool().await;
+    let organization_id = OrganizationId::new_random();
+    let state = AppState::new(pool, test_config()).await;
+
+    // 1. Create a policy.
+    let create_policy = CommandEnvelope {
+        target: DomainObjectRef {
+            id: ObjectId::new_random(),
+            r#type: "policy".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "CreatePolicy",
+            ObjectId::new_random(),
+            organization_id,
+            serde_json::json!({
+                "CreatePolicy": {
+                    "name": "Org Governance",
+                    "scope": { "Organization": organization_id }
+                }
+            }),
+        )
+    };
+    let created = state
+        .command_registry
+        .dispatch(create_policy)
+        .await
+        .expect("CreatePolicy should succeed through the real CommandRegistry");
+    assert_eq!(created["success"], serde_json::json!(true));
+    let policy_id: ObjectId = serde_json::from_value(created["policy_id"].clone()).unwrap();
+
+    // 2. Draft a version — a decision command, proving the Policy
+    // DecisionHandler path (load -> decide -> commit) also works.
+    let create_version = CommandEnvelope {
+        target: DomainObjectRef {
+            id: policy_id,
+            r#type: "policy".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "CreatePolicyVersion",
+            policy_id,
+            organization_id,
+            serde_json::json!({
+                "CreatePolicyVersion": {
+                    "rules": [
+                        {
+                            "rule_type": "FeatureToggle",
+                            "key": "messaging.enabled",
+                            "value": true
+                        }
+                    ]
+                }
+            }),
+        )
+    };
+    let version_created = state
+        .command_registry
+        .dispatch(create_version)
+        .await
+        .expect("CreatePolicyVersion should succeed against the freshly created policy");
+    assert_eq!(version_created["success"], serde_json::json!(true));
+
+    // 3. Publish it.
+    let publish = CommandEnvelope {
+        target: DomainObjectRef {
+            id: policy_id,
+            r#type: "policy".to_string(),
+            organization_id,
+        },
+        expected_version: ObjectVersion(1),
+        ..envelope_for(
+            "PublishPolicyVersion",
+            policy_id,
+            organization_id,
+            serde_json::json!({ "PublishPolicyVersion": null }),
+        )
+    };
+    let published = state
+        .command_registry
+        .dispatch(publish)
+        .await
+        .expect("PublishPolicyVersion should succeed once a draft exists");
+    assert_eq!(published["success"], serde_json::json!(true));
+
+    // 4. GetPolicy should reflect the published version.
+    let policy_query = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "GetPolicy".to_string(),
+            target_id: policy_id,
+        })
+        .await
+        .expect("GetPolicy should find the policy");
+    assert_eq!(
+        policy_query["aggregate"]["status"],
+        serde_json::json!("Active")
+    );
+}
+
+/// Phase 1 addition. Proves `AppState::new` correctly wires the
+/// `ConnectionRequest` aggregate: SendConnectionRequest (creation) ->
+/// AcceptConnectionRequest (decision), end-to-end against real SQLite.
+#[tokio::test]
+async fn app_state_new_wires_connection_request_commands_end_to_end() {
+    let pool = test_pool().await;
+    let organization_id = OrganizationId::new_random();
+    let state = AppState::new(pool, test_config()).await;
+    let recipient = test_user_id();
+
+    // 1. Send a connection request.
+    let send_request = CommandEnvelope {
+        target: DomainObjectRef {
+            id: ObjectId::new_random(),
+            r#type: "connection_request".to_string(),
+            organization_id,
+        },
+        ..envelope_for(
+            "SendConnectionRequest",
+            ObjectId::new_random(),
+            organization_id,
+            serde_json::json!({
+                "SendConnectionRequest": { "recipient_id": recipient }
+            }),
+        )
+    };
+    let sent = state
+        .command_registry
+        .dispatch(send_request)
+        .await
+        .expect("SendConnectionRequest should succeed through the real CommandRegistry");
+    assert_eq!(sent["success"], serde_json::json!(true));
+    let request_id: ObjectId =
+        serde_json::from_value(sent["connection_request_id"].clone()).unwrap();
+
+    // 2. GetConnectionRequest should show it Pending.
+    let pending_query = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "GetConnectionRequest".to_string(),
+            target_id: request_id,
+        })
+        .await
+        .expect("GetConnectionRequest should find the request");
+    assert_eq!(
+        pending_query["aggregate"]["status"],
+        serde_json::json!("Pending")
+    );
+}
+
+/// Phase 1 addition. Proves the `FileUploadCoordinator` actually stores
+/// and returns real file **content**, not just metadata — the gap
+/// `query_application::BlobStore` was added to close. Exercises the full
+/// chain: CreateFileAsset -> StartUpload -> AppendChunk(s) ->
+/// FinalizeUpload -> CreateVersion, with bytes written to a real
+/// `LocalBlobStore` on disk and read back by content hash.
+#[tokio::test]
+async fn file_upload_coordinator_round_trips_real_content() {
+    let pool = test_pool().await;
+    let organization_id = OrganizationId::new_random();
+    let state = AppState::new(pool, test_config()).await;
+
+    let actor = platform_kernel::ActorContext {
+        user_id: test_user_id(),
+        device_id: ObjectId::new_random(),
+        organization_id,
+    };
+
+    let content = b"the quick brown fox jumps over the lazy dog".to_vec();
+    let outcome = state
+        .file_upload_coordinator
+        .upload_new_file(
+            actor,
+            "notes.txt".to_string(),
+            "text/plain".to_string(),
+            &content,
+        )
+        .await
+        .expect("upload_new_file must succeed end-to-end");
+
+    assert_eq!(outcome.size_bytes, content.len() as u64);
+    assert_eq!(
+        outcome.content_hash.len(),
+        64,
+        "a SHA-256 hex digest is 64 characters"
+    );
+
+    // The bytes must actually come back — this is the assertion that
+    // would have failed before a real BlobStore existed.
+    let downloaded = state
+        .file_upload_coordinator
+        .download(&outcome.content_hash)
+        .await
+        .expect("download must succeed")
+        .expect("content must be present for a hash that was just uploaded");
+    assert_eq!(downloaded, content);
+
+    // And the FileAsset aggregate must be queryable, with its version
+    // recorded (proving the domain-command half of the flow ran too, not
+    // just the blob write).
+    let asset = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "GetFileAsset".to_string(),
+            target_id: outcome.file_asset_id,
+        })
+        .await
+        .expect("GetFileAsset should find the uploaded asset");
+    assert_eq!(
+        asset["aggregate"]["file_name"],
+        serde_json::json!("notes.txt")
+    );
+}
+
+/// Phase 1 addition. A file larger than one chunk must still round-trip
+/// — proves the multi-`AppendChunk` loop (and its per-chunk version
+/// threading) works, not just the single-chunk happy path.
+#[tokio::test]
+async fn file_upload_coordinator_handles_multi_chunk_content() {
+    let pool = test_pool().await;
+    let organization_id = OrganizationId::new_random();
+    let state = AppState::new(pool, test_config()).await;
+
+    let actor = platform_kernel::ActorContext {
+        user_id: test_user_id(),
+        device_id: ObjectId::new_random(),
+        organization_id,
+    };
+
+    // CHUNK_SIZE_BYTES is 4 MiB; 9 MiB spans three chunks (two full,
+    // one partial), exercising both the full-chunk and final-partial-chunk
+    // paths plus the version advance between them.
+    let content = vec![7u8; 9 * 1024 * 1024];
+    let outcome = state
+        .file_upload_coordinator
+        .upload_new_file(
+            actor,
+            "large.bin".to_string(),
+            "application/octet-stream".to_string(),
+            &content,
+        )
+        .await
+        .expect("a multi-chunk upload must succeed");
+
+    assert_eq!(outcome.size_bytes, content.len() as u64);
+
+    let downloaded = state
+        .file_upload_coordinator
+        .download(&outcome.content_hash)
+        .await
+        .expect("download must succeed")
+        .expect("content must be present");
+    assert_eq!(downloaded.len(), content.len());
+    assert_eq!(downloaded, content);
 }

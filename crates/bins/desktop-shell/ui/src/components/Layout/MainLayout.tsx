@@ -9,6 +9,9 @@ const NAV_ITEMS = [
   { to: "/missions", label: "Missions", end: false },
   { to: "/tasks", label: "Tasks", end: false },
   { to: "/approvals", label: "Approvals", end: false },
+  { to: "/messaging", label: "Messaging", end: false },
+  { to: "/files", label: "Files", end: false },
+  { to: "/settings", label: "Settings", end: false },
 ];
 
 const linkClasses = (isActive: boolean) =>

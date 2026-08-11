@@ -16,6 +16,16 @@
 //! user-management endpoints — it intentionally does **not** model roles or
 //! per-user permissions. Adding those later is an additive change to
 //! `UserRecord` and does not alter this trait's shape.
+//!
+//! # `is_manager` (added, Phase 1 — Desktop & Web Completion)
+//! Exactly the additive change the paragraph above anticipated. A distinct
+//! Manager role, separate from Admin and narrower in scope — gates
+//! Policy/Settings administration (feature toggles, thresholds, legal
+//! hold, etc.; see `policy-domain`) without granting the full
+//! user-management power `is_admin` carries. Not a ranked "Admin >
+//! Manager" hierarchy: the two flags are independent booleans, so a user
+//! can be a Manager without being an Admin (the common case) or, in
+//! principle, both. See `PLAN_Desktop_Web_Completion.md` §7 item 3.
 
 use async_trait::async_trait;
 
@@ -35,6 +45,9 @@ pub struct UserRecord {
     /// Gates the user-management endpoints only. Not a general authorization
     /// role — see the scope boundary note above.
     pub is_admin: bool,
+    /// Gates Policy/Settings administration. Independent of `is_admin` —
+    /// see this module's `is_manager` doc note above.
+    pub is_manager: bool,
     /// Soft-disable. A disabled user must fail authentication exactly as an
     /// unknown user does, without a distinguishable error.
     pub is_active: bool,
@@ -51,6 +64,7 @@ pub struct NewUser {
     pub organization_id: String,
     pub password_hash: String,
     pub is_admin: bool,
+    pub is_manager: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -80,6 +94,11 @@ pub trait UserStore: Send + Sync {
     async fn list(&self) -> Result<Vec<UserRecord>, UserStoreError>;
 
     async fn set_active(&self, user_id: &str, is_active: bool) -> Result<(), UserStoreError>;
+
+    /// Grants or revokes the Manager role. Admin-only, same as every other
+    /// user-management mutation — see `api_server::routes::admin`'s
+    /// `require_admin` guard.
+    async fn set_manager(&self, user_id: &str, is_manager: bool) -> Result<(), UserStoreError>;
 
     async fn set_password_hash(
         &self,

@@ -377,3 +377,180 @@ impl CreationHandler for MessageCreationHandler {
         Ok(result)
     }
 }
+
+/// Creates a `Policy` from a `CreatePolicy` command via
+/// `Policy::create()`. See [`MissionCreationHandler`] for the shared
+/// implementation notes (including the flagged gap: no outbox message
+/// registered for creation events yet). Phase 1 (Desktop & Web
+/// Completion) addition.
+pub struct PolicyCreationHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+}
+
+impl PolicyCreationHandler {
+    pub fn new(repo: Arc<dyn Repository>, unit_factory: Arc<dyn UnitOfWorkFactory>) -> Self {
+        Self { repo, unit_factory }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreationHandler for PolicyCreationHandler {
+    async fn handle_creation(
+        &self,
+        payload: serde_json::Value,
+        actor: ActorContext,
+        operation_id: OperationId,
+        _correlation_id: CorrelationId,
+        _vector_clock: VectorClock,
+    ) -> Result<CommandResult, CreationError> {
+        let command: policy_domain::PolicyCommand = serde_json::from_value(payload)?;
+        let organization_id = actor.organization_id;
+        let ctx = creation_decision_context(actor);
+
+        let events = policy_domain::Policy::create(command, &ctx)
+            .map_err(|e| CreationError::Domain(e.to_string()))?;
+        let policy = policy_domain::Policy::from_created_event(&events[0]);
+        let aggregate_state = serde_json::to_value(&policy)?;
+
+        let mut unit = self
+            .unit_factory
+            .create(organization_id)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        self.repo
+            .commit(aggregate_state, &[], &mut *unit)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        let result = serde_json::json!({
+            "success": true,
+            "operation_id": operation_id,
+            "policy_id": policy.id().0,
+        });
+        unit.register_idempotency_result(operation_id, result.clone());
+        unit.commit()
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        Ok(result)
+    }
+}
+
+/// Creates a `LegalHold` from an `ApplyLegalHold` command via
+/// `LegalHold::create()`. See [`MissionCreationHandler`] for the shared
+/// implementation notes. Phase 1 addition.
+pub struct LegalHoldCreationHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+}
+
+impl LegalHoldCreationHandler {
+    pub fn new(repo: Arc<dyn Repository>, unit_factory: Arc<dyn UnitOfWorkFactory>) -> Self {
+        Self { repo, unit_factory }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreationHandler for LegalHoldCreationHandler {
+    async fn handle_creation(
+        &self,
+        payload: serde_json::Value,
+        actor: ActorContext,
+        operation_id: OperationId,
+        _correlation_id: CorrelationId,
+        _vector_clock: VectorClock,
+    ) -> Result<CommandResult, CreationError> {
+        let command: policy_domain::LegalHoldCommand = serde_json::from_value(payload)?;
+        let organization_id = actor.organization_id;
+        let ctx = creation_decision_context(actor);
+
+        let events = policy_domain::LegalHold::create(command, &ctx)
+            .map_err(|e| CreationError::Domain(e.to_string()))?;
+        let legal_hold = policy_domain::LegalHold::from_created_event(&events[0]);
+        let aggregate_state = serde_json::to_value(&legal_hold)?;
+
+        let mut unit = self
+            .unit_factory
+            .create(organization_id)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        self.repo
+            .commit(aggregate_state, &[], &mut *unit)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        let result = serde_json::json!({
+            "success": true,
+            "operation_id": operation_id,
+            "legal_hold_id": legal_hold.id().0,
+        });
+        unit.register_idempotency_result(operation_id, result.clone());
+        unit.commit()
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        Ok(result)
+    }
+}
+
+/// Creates a `ConnectionRequest` from a `SendConnectionRequest` command
+/// via `ConnectionRequest::create()`. See [`MissionCreationHandler`] for
+/// the shared implementation notes. Phase 1 addition.
+pub struct ConnectionRequestCreationHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+}
+
+impl ConnectionRequestCreationHandler {
+    pub fn new(repo: Arc<dyn Repository>, unit_factory: Arc<dyn UnitOfWorkFactory>) -> Self {
+        Self { repo, unit_factory }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreationHandler for ConnectionRequestCreationHandler {
+    async fn handle_creation(
+        &self,
+        payload: serde_json::Value,
+        actor: ActorContext,
+        operation_id: OperationId,
+        _correlation_id: CorrelationId,
+        _vector_clock: VectorClock,
+    ) -> Result<CommandResult, CreationError> {
+        let command: communication_domain::ConnectionRequestCommand =
+            serde_json::from_value(payload)?;
+        let organization_id = actor.organization_id;
+        let ctx = creation_decision_context(actor);
+
+        let events = communication_domain::ConnectionRequest::create(command, &ctx)
+            .map_err(|e| CreationError::Domain(e.to_string()))?;
+        let request = communication_domain::ConnectionRequest::from_created_event(&events[0]);
+        let aggregate_state = serde_json::to_value(&request)?;
+
+        let mut unit = self
+            .unit_factory
+            .create(organization_id)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        self.repo
+            .commit(aggregate_state, &[], &mut *unit)
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        let result = serde_json::json!({
+            "success": true,
+            "operation_id": operation_id,
+            "connection_request_id": request.id().0,
+        });
+        unit.register_idempotency_result(operation_id, result.clone());
+        unit.commit()
+            .await
+            .map_err(|e| CreationError::Persistence(e.to_string()))?;
+
+        Ok(result)
+    }
+}

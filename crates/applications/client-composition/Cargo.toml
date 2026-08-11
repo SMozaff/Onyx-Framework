@@ -13,10 +13,12 @@ mission-domain.workspace = true
 work-domain.workspace = true
 communication-domain.workspace = true
 file-domain.workspace = true
+policy-domain.workspace = true
 synchronization-domain.workspace = true
 sync-transport.workspace = true
 api-server.workspace = true
 persistence-sqlite.workspace = true
+local-blob-storage.workspace = true
 sqlx.workspace = true
 async-trait.workspace = true
 serde.workspace = true
@@ -25,6 +27,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

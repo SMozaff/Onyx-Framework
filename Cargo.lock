@@ -1024,13 +1024,16 @@ dependencies = [
  "async-trait",
  "communication-domain",
  "file-domain",
+ "local-blob-storage",
  "mission-domain",
  "persistence-sqlite",
  "platform-contracts",
  "platform-kernel",
+ "policy-domain",
  "query-application",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "sync-transport",
  "synchronization-domain",
@@ -3131,6 +3134,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
+name = "local-blob-storage"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "query-application",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4210,6 +4224,18 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide",
+]
+
+[[package]]
+name = "policy-domain"
+version = "1.0.0"
+dependencies = [
+ "platform-contracts",
+ "platform-kernel",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

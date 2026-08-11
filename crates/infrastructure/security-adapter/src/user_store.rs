@@ -67,6 +67,7 @@ fn record_from_pg_row(row: &sqlx::postgres::PgRow) -> Result<UserRecord, UserSto
         organization_id: organization_id.to_string(),
         password_hash: row.try_get("password_hash").map_err(infrastructure)?,
         is_admin: row.try_get("is_admin").map_err(infrastructure)?,
+        is_manager: row.try_get("is_manager").map_err(infrastructure)?,
         is_active: row.try_get("is_active").map_err(infrastructure)?,
     })
 }
@@ -80,7 +81,7 @@ fn parse_uuid(value: &str, field: &str) -> Result<uuid::Uuid, UserStoreError> {
 impl UserStore for PostgresUserStore {
     async fn find_by_username(&self, username: &str) -> Result<Option<UserRecord>, UserStoreError> {
         let row = sqlx::query(
-            "SELECT id, username, organization_id, password_hash, is_admin, is_active \
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, is_active \
              FROM users WHERE LOWER(username) = $1",
         )
         .bind(username.to_lowercase())
@@ -92,7 +93,7 @@ impl UserStore for PostgresUserStore {
 
     async fn find_by_id(&self, user_id: &str) -> Result<Option<UserRecord>, UserStoreError> {
         let row = sqlx::query(
-            "SELECT id, username, organization_id, password_hash, is_admin, is_active \
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, is_active \
              FROM users WHERE id = $1",
         )
         .bind(parse_uuid(user_id, "user_id")?)
@@ -104,14 +105,15 @@ impl UserStore for PostgresUserStore {
 
     async fn create(&self, user: NewUser) -> Result<UserRecord, UserStoreError> {
         sqlx::query(
-            "INSERT INTO users (id, username, organization_id, password_hash, is_admin) \
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO users (id, username, organization_id, password_hash, is_admin, is_manager) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(parse_uuid(&user.user_id, "user_id")?)
         .bind(user.username.to_lowercase())
         .bind(parse_uuid(&user.organization_id, "organization_id")?)
         .bind(&user.password_hash)
         .bind(user.is_admin)
+        .bind(user.is_manager)
         .execute(&self.pool)
         .await
         .map_err(insert_error)?;
@@ -121,13 +123,14 @@ impl UserStore for PostgresUserStore {
             organization_id: user.organization_id,
             password_hash: user.password_hash,
             is_admin: user.is_admin,
+            is_manager: user.is_manager,
             is_active: true,
         })
     }
 
     async fn list(&self) -> Result<Vec<UserRecord>, UserStoreError> {
         let rows = sqlx::query(
-            "SELECT id, username, organization_id, password_hash, is_admin, is_active \
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, is_active \
              FROM users ORDER BY username",
         )
         .fetch_all(&self.pool)
@@ -141,6 +144,20 @@ impl UserStore for PostgresUserStore {
             sqlx::query("UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1")
                 .bind(parse_uuid(user_id, "user_id")?)
                 .bind(is_active)
+                .execute(&self.pool)
+                .await
+                .map_err(infrastructure)?;
+        if result.rows_affected() == 0 {
+            return Err(UserStoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn set_manager(&self, user_id: &str, is_manager: bool) -> Result<(), UserStoreError> {
+        let result =
+            sqlx::query("UPDATE users SET is_manager = $2, updated_at = NOW() WHERE id = $1")
+                .bind(parse_uuid(user_id, "user_id")?)
+                .bind(is_manager)
                 .execute(&self.pool)
                 .await
                 .map_err(infrastructure)?;
@@ -194,6 +211,7 @@ fn record_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> Result<UserRecord, U
     // SQLite stores the booleans as INTEGER (see the migration), so they are
     // read as i64 and normalised here rather than relying on driver coercion.
     let is_admin: i64 = row.try_get("is_admin").map_err(infrastructure)?;
+    let is_manager: i64 = row.try_get("is_manager").map_err(infrastructure)?;
     let is_active: i64 = row.try_get("is_active").map_err(infrastructure)?;
     Ok(UserRecord {
         user_id: row.try_get("id").map_err(infrastructure)?,
@@ -201,6 +219,7 @@ fn record_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> Result<UserRecord, U
         organization_id: row.try_get("organization_id").map_err(infrastructure)?,
         password_hash: row.try_get("password_hash").map_err(infrastructure)?,
         is_admin: is_admin != 0,
+        is_manager: is_manager != 0,
         is_active: is_active != 0,
     })
 }
@@ -209,7 +228,7 @@ fn record_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> Result<UserRecord, U
 impl UserStore for SqliteUserStore {
     async fn find_by_username(&self, username: &str) -> Result<Option<UserRecord>, UserStoreError> {
         let row = sqlx::query(
-            "SELECT id, username, organization_id, password_hash, is_admin, is_active \
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, is_active \
              FROM users WHERE LOWER(username) = ?1",
         )
         .bind(username.to_lowercase())
@@ -221,7 +240,7 @@ impl UserStore for SqliteUserStore {
 
     async fn find_by_id(&self, user_id: &str) -> Result<Option<UserRecord>, UserStoreError> {
         let row = sqlx::query(
-            "SELECT id, username, organization_id, password_hash, is_admin, is_active \
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, is_active \
              FROM users WHERE id = ?1",
         )
         .bind(user_id)
@@ -234,14 +253,15 @@ impl UserStore for SqliteUserStore {
     async fn create(&self, user: NewUser) -> Result<UserRecord, UserStoreError> {
         let now = now_millis();
         sqlx::query(
-            "INSERT INTO users (id, username, organization_id, password_hash, is_admin, is_active, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)",
+            "INSERT INTO users (id, username, organization_id, password_hash, is_admin, is_manager, is_active, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)",
         )
         .bind(&user.user_id)
         .bind(user.username.to_lowercase())
         .bind(&user.organization_id)
         .bind(&user.password_hash)
         .bind(i64::from(user.is_admin))
+        .bind(i64::from(user.is_manager))
         .bind(now)
         .execute(&self.pool)
         .await
@@ -252,13 +272,14 @@ impl UserStore for SqliteUserStore {
             organization_id: user.organization_id,
             password_hash: user.password_hash,
             is_admin: user.is_admin,
+            is_manager: user.is_manager,
             is_active: true,
         })
     }
 
     async fn list(&self) -> Result<Vec<UserRecord>, UserStoreError> {
         let rows = sqlx::query(
-            "SELECT id, username, organization_id, password_hash, is_admin, is_active \
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, is_active \
              FROM users ORDER BY username",
         )
         .fetch_all(&self.pool)
@@ -275,6 +296,21 @@ impl UserStore for SqliteUserStore {
             .execute(&self.pool)
             .await
             .map_err(infrastructure)?;
+        if result.rows_affected() == 0 {
+            return Err(UserStoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn set_manager(&self, user_id: &str, is_manager: bool) -> Result<(), UserStoreError> {
+        let result =
+            sqlx::query("UPDATE users SET is_manager = ?2, updated_at = ?3 WHERE id = ?1")
+                .bind(user_id)
+                .bind(i64::from(is_manager))
+                .bind(now_millis())
+                .execute(&self.pool)
+                .await
+                .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -325,6 +361,7 @@ mod tests {
                 organization_id TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
                 is_admin INTEGER NOT NULL DEFAULT 0,
+                is_manager INTEGER NOT NULL DEFAULT 0,
                 is_active INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL)",
@@ -346,6 +383,7 @@ mod tests {
             organization_id: "11111111-1111-1111-1111-111111111111".to_string(),
             password_hash: hash.to_string(),
             is_admin,
+            is_manager: false,
         }
     }
 
@@ -435,6 +473,42 @@ mod tests {
         );
         assert_eq!(
             store.set_password_hash(&missing, "x").await.unwrap_err(),
+            UserStoreError::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn set_manager_applies_and_detects_missing() {
+        let store = store().await;
+        let user = store
+            .create(new_user("operator", "h", false))
+            .await
+            .unwrap();
+        assert!(!user.is_manager);
+
+        store.set_manager(&user.user_id, true).await.unwrap();
+        assert!(
+            store
+                .find_by_id(&user.user_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_manager
+        );
+
+        // Independent of is_admin — granting Manager does not grant Admin.
+        assert!(
+            !store
+                .find_by_id(&user.user_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_admin
+        );
+
+        let missing = uuid::Uuid::new_v4().to_string();
+        assert_eq!(
+            store.set_manager(&missing, true).await.unwrap_err(),
             UserStoreError::NotFound
         );
     }

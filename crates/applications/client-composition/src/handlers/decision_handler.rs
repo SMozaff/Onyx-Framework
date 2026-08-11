@@ -357,3 +357,179 @@ impl DecisionHandler for MessageDecisionHandler {
         .await
     }
 }
+
+/// Wraps `api_server::handle_command` for `Policy`, for every
+/// `PolicyCommand` variant other than `CreatePolicy`. Phase 1 addition.
+pub struct PolicyDecisionHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+    idempotency_store: Arc<dyn IdempotencyStore>,
+}
+
+impl PolicyDecisionHandler {
+    pub fn new(
+        repo: Arc<dyn Repository>,
+        unit_factory: Arc<dyn UnitOfWorkFactory>,
+        idempotency_store: Arc<dyn IdempotencyStore>,
+    ) -> Self {
+        Self {
+            repo,
+            unit_factory,
+            idempotency_store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DecisionHandler for PolicyDecisionHandler {
+    async fn handle_decision(
+        &self,
+        payload: serde_json::Value,
+        target_id: ObjectId,
+        operation_id: OperationId,
+        actor: ActorContext,
+        expected_version: ObjectVersion,
+        expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
+        vector_clock: VectorClock,
+        correlation_id: CorrelationId,
+    ) -> Result<CommandResult, api_server::CommandError> {
+        let command: policy_domain::PolicyCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
+
+        api_server::handle_command::<policy_domain::Policy, _, _, _>(
+            command,
+            target_id,
+            operation_id,
+            actor,
+            expected_version,
+            expected_lifecycle_epoch,
+            expected_authority_epoch,
+            vector_clock,
+            correlation_id,
+            "policy",
+            Arc::clone(&self.repo),
+            Arc::clone(&self.unit_factory),
+            Arc::clone(&self.idempotency_store),
+        )
+        .await
+    }
+}
+
+/// Wraps `api_server::handle_command` for `LegalHold`, for every
+/// `LegalHoldCommand` variant other than `ApplyLegalHold`. Phase 1
+/// addition.
+pub struct LegalHoldDecisionHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+    idempotency_store: Arc<dyn IdempotencyStore>,
+}
+
+impl LegalHoldDecisionHandler {
+    pub fn new(
+        repo: Arc<dyn Repository>,
+        unit_factory: Arc<dyn UnitOfWorkFactory>,
+        idempotency_store: Arc<dyn IdempotencyStore>,
+    ) -> Self {
+        Self {
+            repo,
+            unit_factory,
+            idempotency_store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DecisionHandler for LegalHoldDecisionHandler {
+    async fn handle_decision(
+        &self,
+        payload: serde_json::Value,
+        target_id: ObjectId,
+        operation_id: OperationId,
+        actor: ActorContext,
+        expected_version: ObjectVersion,
+        expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
+        vector_clock: VectorClock,
+        correlation_id: CorrelationId,
+    ) -> Result<CommandResult, api_server::CommandError> {
+        let command: policy_domain::LegalHoldCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
+
+        api_server::handle_command::<policy_domain::LegalHold, _, _, _>(
+            command,
+            target_id,
+            operation_id,
+            actor,
+            expected_version,
+            expected_lifecycle_epoch,
+            expected_authority_epoch,
+            vector_clock,
+            correlation_id,
+            "legal_hold",
+            Arc::clone(&self.repo),
+            Arc::clone(&self.unit_factory),
+            Arc::clone(&self.idempotency_store),
+        )
+        .await
+    }
+}
+
+/// Wraps `api_server::handle_command` for `ConnectionRequest`, for every
+/// `ConnectionRequestCommand` variant other than `SendConnectionRequest`.
+/// Phase 1 addition.
+pub struct ConnectionRequestDecisionHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+    idempotency_store: Arc<dyn IdempotencyStore>,
+}
+
+impl ConnectionRequestDecisionHandler {
+    pub fn new(
+        repo: Arc<dyn Repository>,
+        unit_factory: Arc<dyn UnitOfWorkFactory>,
+        idempotency_store: Arc<dyn IdempotencyStore>,
+    ) -> Self {
+        Self {
+            repo,
+            unit_factory,
+            idempotency_store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DecisionHandler for ConnectionRequestDecisionHandler {
+    async fn handle_decision(
+        &self,
+        payload: serde_json::Value,
+        target_id: ObjectId,
+        operation_id: OperationId,
+        actor: ActorContext,
+        expected_version: ObjectVersion,
+        expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
+        vector_clock: VectorClock,
+        correlation_id: CorrelationId,
+    ) -> Result<CommandResult, api_server::CommandError> {
+        let command: communication_domain::ConnectionRequestCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
+
+        api_server::handle_command::<communication_domain::ConnectionRequest, _, _, _>(
+            command,
+            target_id,
+            operation_id,
+            actor,
+            expected_version,
+            expected_lifecycle_epoch,
+            expected_authority_epoch,
+            vector_clock,
+            correlation_id,
+            "connection_request",
+            Arc::clone(&self.repo),
+            Arc::clone(&self.unit_factory),
+            Arc::clone(&self.idempotency_store),
+        )
+        .await
+    }
+}
