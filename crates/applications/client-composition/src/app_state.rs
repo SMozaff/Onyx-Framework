@@ -37,9 +37,9 @@ use crate::handlers::{
     ConnectionRequestCreationHandler, ConnectionRequestDecisionHandler,
     ConversationCreationHandler, ConversationDecisionHandler, FileAssetCreationHandler,
     FileAssetDecisionHandler, LegalHoldCreationHandler, LegalHoldDecisionHandler,
-    MessageCreationHandler, MessageDecisionHandler, MissionCreationHandler,
-    MissionDecisionHandler, PolicyCreationHandler, PolicyDecisionHandler, TaskCreationHandler,
-    TaskDecisionHandler, UploadSessionCreationHandler, UploadSessionDecisionHandler,
+    MessageCreationHandler, MessageDecisionHandler, MissionCreationHandler, MissionDecisionHandler,
+    PolicyCreationHandler, PolicyDecisionHandler, TaskCreationHandler, TaskDecisionHandler,
+    UploadSessionCreationHandler, UploadSessionDecisionHandler,
 };
 use crate::query_registry::{LoadAggregateHandler, QueryRegistry};
 use crate::sync_agent::{SyncAgent, SyncAgentConfig};

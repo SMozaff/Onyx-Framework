@@ -298,14 +298,13 @@ impl UserStore for PostgresUserStore {
             }
         }
 
-        let result = sqlx::query(
-            "UPDATE users SET parent_user_id = $2, updated_at = NOW() WHERE id = $1",
-        )
-        .bind(target)
-        .bind(parent)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| insert_error_with_fk(e, "parent_user_id"))?;
+        let result =
+            sqlx::query("UPDATE users SET parent_user_id = $2, updated_at = NOW() WHERE id = $1")
+                .bind(target)
+                .bind(parent)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| insert_error_with_fk(e, "parent_user_id"))?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -400,8 +399,7 @@ fn record_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> Result<UserRecord, U
     let is_active: i64 = row.try_get("is_active").map_err(infrastructure)?;
     let class_raw: Option<String> = row.try_get("class").map_err(infrastructure)?;
     let class = parse_class(class_raw)?;
-    let parent_user_id: Option<String> =
-        row.try_get("parent_user_id").map_err(infrastructure)?;
+    let parent_user_id: Option<String> = row.try_get("parent_user_id").map_err(infrastructure)?;
     Ok(UserRecord {
         user_id: row.try_get("id").map_err(infrastructure)?,
         username: row.try_get("username").map_err(infrastructure)?,
@@ -507,14 +505,13 @@ impl UserStore for SqliteUserStore {
     }
 
     async fn set_manager(&self, user_id: &str, is_manager: bool) -> Result<(), UserStoreError> {
-        let result =
-            sqlx::query("UPDATE users SET is_manager = ?2, updated_at = ?3 WHERE id = ?1")
-                .bind(user_id)
-                .bind(i64::from(is_manager))
-                .bind(now_millis())
-                .execute(&self.pool)
-                .await
-                .map_err(infrastructure)?;
+        let result = sqlx::query("UPDATE users SET is_manager = ?2, updated_at = ?3 WHERE id = ?1")
+            .bind(user_id)
+            .bind(i64::from(is_manager))
+            .bind(now_millis())
+            .execute(&self.pool)
+            .await
+            .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -624,7 +621,10 @@ mod tests {
         // by actually running this test suite after the fix, not
         // assumed to work from the `foreign_keys(true)` change alone.
         let options = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(format!("file:security_adapter_test_{}?mode=memory&cache=shared", uuid::Uuid::new_v4()))
+            .filename(format!(
+                "file:security_adapter_test_{}?mode=memory&cache=shared",
+                uuid::Uuid::new_v4()
+            ))
             .foreign_keys(true);
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
@@ -801,10 +801,7 @@ mod tests {
     #[tokio::test]
     async fn set_class_applies_and_detects_missing() {
         let store = store().await;
-        let user = store
-            .create(new_user("staffer", "h", false))
-            .await
-            .unwrap();
+        let user = store.create(new_user("staffer", "h", false)).await.unwrap();
         assert_eq!(user.class, None);
 
         store
@@ -912,8 +909,14 @@ mod tests {
         let b = store.create(new_user("b", "h", false)).await.unwrap();
         let c = store.create(new_user("c", "h", false)).await.unwrap();
 
-        store.set_parent(&b.user_id, Some(&a.user_id)).await.unwrap();
-        store.set_parent(&c.user_id, Some(&b.user_id)).await.unwrap();
+        store
+            .set_parent(&b.user_id, Some(&a.user_id))
+            .await
+            .unwrap();
+        store
+            .set_parent(&c.user_id, Some(&b.user_id))
+            .await
+            .unwrap();
 
         assert_eq!(
             store

@@ -169,7 +169,10 @@ async fn set_class_updates_and_can_clear_to_null() {
         .json()
         .await
         .unwrap();
-    let cleared = users_after_clear.iter().find(|u| u["id"] == user_id).unwrap();
+    let cleared = users_after_clear
+        .iter()
+        .find(|u| u["id"] == user_id)
+        .unwrap();
     assert_eq!(cleared["class"], serde_json::Value::Null);
 }
 

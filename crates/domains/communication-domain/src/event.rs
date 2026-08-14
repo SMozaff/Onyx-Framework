@@ -3,8 +3,7 @@
 //! Source: Part I §4.7.5, plus Phase 1 additions.
 
 use crate::value::{
-    ConnectionRequestId, ConversationId, ConversationType, MessageId, ReactionCode,
-    RedactionReason,
+    ConnectionRequestId, ConversationId, ConversationType, MessageId, ReactionCode, RedactionReason,
 };
 use platform_kernel::{Timestamp, UserId};
 use serde::{Deserialize, Serialize};

@@ -335,10 +335,7 @@ pub fn router(state: ApiState) -> Router {
         // confirmed visibility/editing rules.
         .route("/api/profiles", get(profiles::list_profiles))
         .route("/api/profiles/:owner_id", get(profiles::get_profile))
-        .route(
-            "/api/admin/profiles",
-            put(profiles::upsert_profile_route),
-        )
+        .route("/api/admin/profiles", put(profiles::upsert_profile_route))
         .route(
             "/api/admin/profiles/import",
             post(profiles::batch::import_profiles),

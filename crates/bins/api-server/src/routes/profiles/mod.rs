@@ -31,9 +31,7 @@ use axum::{
 };
 use platform_contracts::{AggregateRoot, DecisionContext};
 use platform_kernel::{ActorContext, PolicyDecisionSet, Timestamp, VerifiedAuthority};
-use profile_domain::{
-    BasicIdentity, OrganizationalInfo, ProfileCommand, StaffProfile, WorkStats,
-};
+use profile_domain::{BasicIdentity, OrganizationalInfo, ProfileCommand, StaffProfile, WorkStats};
 use security_application::UserClass;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -176,8 +174,8 @@ async fn load_profile(
     let Some(loaded) = loaded else {
         return Ok(None);
     };
-    let profile: StaffProfile =
-        serde_json::from_value(loaded.aggregate).map_err(|e| infrastructure_error(e.to_string()))?;
+    let profile: StaffProfile = serde_json::from_value(loaded.aggregate)
+        .map_err(|e| infrastructure_error(e.to_string()))?;
     Ok(Some(profile))
 }
 
@@ -486,8 +484,8 @@ pub async fn upsert_profile_route(
     let admin = require_admin(&state, &headers).await?;
     let organization_id = uuid::Uuid::parse_str(&admin.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
-    let admin_uuid = uuid::Uuid::parse_str(&admin.user_id)
-        .map_err(|_| domain_error("invalid admin user id"))?;
+    let admin_uuid =
+        uuid::Uuid::parse_str(&admin.user_id).map_err(|_| domain_error("invalid admin user id"))?;
     let profile = upsert_profile(
         &state,
         &platform_kernel::ObjectId(*admin_uuid.as_bytes()),
