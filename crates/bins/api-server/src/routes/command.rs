@@ -267,6 +267,17 @@ pub async fn command_route(
     let expected_target_type = match envelope.command_type.as_str() {
         "notification.Acknowledge" => "notification",
         "approval.Approve" | "approval.Reject" => "approval",
+        // Policy/LegalHold (added 2026-08-14 for the Admin platform —
+        // `admin-shell` is a thin HTTP client, so Policy administration
+        // has to be reachable over `/api/command`, not only through
+        // `client-composition`'s separate registry that desktop-shell
+        // uses. See DECISIONS.md's "Admin Platform" section.)
+        "policy.CreatePolicyVersion"
+        | "policy.PublishPolicyVersion"
+        | "policy.EvaluatePolicy"
+        | "policy.RegisterViolation"
+        | "policy.RetirePolicy" => "policy",
+        "legal_hold.ReleaseLegalHold" => "legal_hold",
         _ => {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
@@ -298,6 +309,32 @@ pub async fn command_route(
         organization_id: parse_object_id(&auth.organization_id)?,
     };
     let vector_clock = parse_vector_clock(&envelope.vector_clock.entries)?;
+
+    // Validated up front, before the dispatch block below, specifically
+    // so a malformed payload becomes a real 400 — inside that block the
+    // error type is `CommandError`, which cannot express an
+    // `ApiError`/HTTP status, so validation there would have to either
+    // silently coerce bad input or panic. Only `policy.CreatePolicyVersion`
+    // carries a structurally-typed payload today; every other supported
+    // command's payload is plain strings read with `unwrap_or_default`.
+    let policy_rules: Vec<policy_domain::value::PolicyRule> =
+        if envelope.command_type == "policy.CreatePolicyVersion" {
+            match envelope.payload.get("rules").cloned() {
+                Some(raw) => serde_json::from_value(raw).map_err(|e| {
+                    ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "INVALID_PAYLOAD",
+                        "DOMAIN",
+                        "NON_RETRYABLE",
+                        envelope.correlation_id.clone(),
+                        json!({"message": format!("invalid 'rules' payload: {e}")}),
+                    )
+                })?,
+                None => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
     let was_duplicate = state
         .idempotency_store
         .get(&operation_id)
@@ -383,6 +420,143 @@ pub async fn command_route(
                     correlation_id,
                     "approval",
                     Arc::clone(&state.approval_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            "policy.CreatePolicyVersion" => {
+                // `policy_rules` was parsed and validated before this
+                // block — see its declaration above for why validation
+                // cannot happen here.
+                crate::handle_command::<policy_domain::Policy, _, _, _>(
+                    policy_domain::PolicyCommand::CreatePolicyVersion {
+                        rules: policy_rules.clone(),
+                    },
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "policy",
+                    Arc::clone(&state.policy_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            "policy.PublishPolicyVersion" => {
+                crate::handle_command::<policy_domain::Policy, _, _, _>(
+                    policy_domain::PolicyCommand::PublishPolicyVersion,
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "policy",
+                    Arc::clone(&state.policy_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            "policy.EvaluatePolicy" => {
+                let rule_key = envelope
+                    .payload
+                    .get("rule_key")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                crate::handle_command::<policy_domain::Policy, _, _, _>(
+                    policy_domain::PolicyCommand::EvaluatePolicy { rule_key },
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "policy",
+                    Arc::clone(&state.policy_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            "policy.RegisterViolation" => {
+                let rule_key = envelope
+                    .payload
+                    .get("rule_key")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let reason = envelope
+                    .payload
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                crate::handle_command::<policy_domain::Policy, _, _, _>(
+                    policy_domain::PolicyCommand::RegisterViolation { rule_key, reason },
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "policy",
+                    Arc::clone(&state.policy_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            "policy.RetirePolicy" => {
+                crate::handle_command::<policy_domain::Policy, _, _, _>(
+                    policy_domain::PolicyCommand::RetirePolicy,
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "policy",
+                    Arc::clone(&state.policy_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            "legal_hold.ReleaseLegalHold" => {
+                let reason = envelope
+                    .payload
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                crate::handle_command::<policy_domain::LegalHold, _, _, _>(
+                    policy_domain::LegalHoldCommand::ReleaseLegalHold { reason },
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "legal_hold",
+                    Arc::clone(&state.legal_hold_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
                 )

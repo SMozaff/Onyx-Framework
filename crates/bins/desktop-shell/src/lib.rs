@@ -273,9 +273,18 @@ pub fn run() {
             // inside `setup`'s synchronous closure.
             let app_handle_for_state = app_handle.clone();
             tauri::async_runtime::block_on(async move {
+                let options = sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&db_path)
+                    .create_if_missing(true)
+                    // Phase A fix (User Hierarchy) — see the matching
+                    // comment in api-server/src/routes/mod.rs for full
+                    // rationale: without this, SQLite silently ignores
+                    // every foreign key in this schema, including
+                    // users.parent_user_id.
+                    .foreign_keys(true);
                 let pool = SqlitePoolOptions::new()
                     .max_connections(1)
-                    .connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
+                    .connect_with(options)
                     .await
                     .expect("failed to open onyx.sqlite");
 

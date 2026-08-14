@@ -37,6 +37,17 @@ pub struct LoginUser {
     pub id: String,
     pub username: String,
     pub organization_id: String,
+    /// Added 2026-08-14 for the Admin platform (`admin-shell`), so a
+    /// client can show "you don't have admin access" immediately after
+    /// login rather than only discovering it via a 403 on the first
+    /// admin action. Additive — `web-ui`/`desktop-shell` simply ignore
+    /// fields they don't read; this does not change the meaning of any
+    /// existing field.
+    pub is_admin: bool,
+    /// See `is_admin` above — same rationale, for `UserClass`-gated
+    /// capabilities (e.g. work-stats visibility, once a UI checks it
+    /// client-side). Wire format matches `UserClass::as_str()`.
+    pub class: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +152,8 @@ pub async fn login(
             id: user.user_id,
             username: user.username,
             organization_id: user.organization_id,
+            is_admin: user.is_admin,
+            class: user.class.map(|c| c.as_str().to_string()),
         },
     }))
 }

@@ -1,0 +1,31 @@
+{
+  "productName": "ONYX Admin",
+  "version": "1.0.0",
+  "identifier": "com.onyx.admin",
+  "build": {
+    "frontendDist": "ui/dist",
+    "devUrl": "http://localhost:5174",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ONYX Admin",
+        "width": 1280,
+        "height": 800
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  }
+}

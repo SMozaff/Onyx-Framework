@@ -27,7 +27,7 @@ use axum::{
     Json,
 };
 use security_adapter::constant_time_eq;
-use security_application::{NewUser, UserRecord, UserStoreError};
+use security_application::{NewUser, UserClass, UserRecord, UserStoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -46,8 +46,19 @@ pub struct CreateUserRequest {
     pub is_admin: bool,
     /// Phase 1 (Desktop & Web Completion) addition — see
     /// `security_application::ports::user_store`'s `is_manager` doc note.
+    /// **Deprecated** — see `class` below.
     #[serde(default)]
     pub is_manager: bool,
+    /// Phase A (User Hierarchy) addition. Confirmed usable at creation
+    /// time (design doc §5 question 2). Wire format matches
+    /// `UserClass::as_str()`/`UserClass::parse()` — e.g.
+    /// `"top_level_manager"`, `"team_leader"`.
+    #[serde(default)]
+    pub class: Option<String>,
+    /// Phase A addition. The new user's parent (owning Manager) in the
+    /// reporting-line tree, if known at creation time.
+    #[serde(default)]
+    pub parent_user_id: Option<String>,
     /// Defaults to the deployment's default tenant when omitted.
     #[serde(default)]
     pub organization_id: Option<String>,
@@ -63,6 +74,27 @@ pub struct SetManagerRequest {
     pub is_manager: bool,
 }
 
+/// Phase A (User Hierarchy) addition. `class: None` clears the user's
+/// class back to unclassified — this is a real, distinct action, not
+/// merely "no class provided" (see `UserRecord::class`'s doc comment on
+/// why `None` is meaningful), so the field is not `#[serde(default)]`:
+/// the caller must say `"class": null` explicitly to clear it, rather
+/// than omitting the field and having that silently mean the same
+/// thing as clearing.
+#[derive(Debug, Deserialize)]
+pub struct SetClassRequest {
+    pub class: Option<String>,
+}
+
+/// Phase A addition. Same "explicit null, not an omittable default"
+/// reasoning as `SetClassRequest` — clearing a user's parent is a real
+/// action (e.g. correcting an org chart), not indistinguishable from
+/// "field not sent."
+#[derive(Debug, Deserialize)]
+pub struct SetParentRequest {
+    pub parent_user_id: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct UserDto {
     pub id: String,
@@ -70,6 +102,8 @@ pub struct UserDto {
     pub organization_id: String,
     pub is_admin: bool,
     pub is_manager: bool,
+    pub class: Option<String>,
+    pub parent_user_id: Option<String>,
     pub is_active: bool,
 }
 
@@ -83,6 +117,8 @@ impl From<UserRecord> for UserDto {
             organization_id: user.organization_id,
             is_admin: user.is_admin,
             is_manager: user.is_manager,
+            class: user.class.map(|c| c.as_str().to_string()),
+            parent_user_id: user.parent_user_id,
             is_active: user.is_active,
         }
     }
@@ -109,6 +145,22 @@ fn store_error(error: UserStoreError) -> ApiError {
             "NON_RETRYABLE",
             correlation(),
             json!({}),
+        ),
+        UserStoreError::ParentNotFound => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "PARENT_USER_NOT_FOUND",
+            "VALIDATION",
+            "NON_RETRYABLE",
+            correlation(),
+            json!({"message":"The specified parent user does not exist"}),
+        ),
+        UserStoreError::ParentCycle => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "PARENT_CYCLE",
+            "VALIDATION",
+            "NON_RETRYABLE",
+            correlation(),
+            json!({"message":"That assignment would create a cycle in the reporting line"}),
         ),
         UserStoreError::Infrastructure(message) => {
             tracing::error!(error = %message, "user store failure");
@@ -150,12 +202,66 @@ fn password_error(error: security_adapter::PasswordError) -> ApiError {
     }
 }
 
+/// Authenticates the caller and confirms their `UserClass` is one of
+/// `allowed` (Admin always passes regardless of `allowed`, matching
+/// `require_manager_or_admin`'s "Admin is a practical superset"
+/// rationale below). Phase A (User Hierarchy) addition — see
+/// `IMPLEMENTATION_PLAN_User_Hierarchy.md` §2 A.5.
+///
+/// Deliberately takes an explicit allow-list rather than a single
+/// minimum rank compared with `>=`: per `UserClass`'s own doc comment,
+/// the confirmed hierarchy is not a strict linear order for permission
+/// purposes (Team Leader's real-but-narrow authority, design doc §2.2,
+/// does not sit at a single comparable point next to Senior Manager's
+/// differently-shaped authority) — every call site should state exactly
+/// which classes it means, not lean on an ordering that does not
+/// actually hold for every rule.
+///
+/// First real caller (2026-08-13): `routes::profiles`'s work-stats
+/// visibility gate (`[UserClass::TopLevelManager]` — see
+/// `DECISIONS.md`'s "Staff Profiles" section for the confirmed
+/// visibility rule). `#[allow(dead_code)]` removed accordingly.
+pub(super) async fn require_class(
+    state: &ApiState,
+    headers: &HeaderMap,
+    allowed: &[UserClass],
+) -> Result<UserRecord, ApiError> {
+    let auth = authenticate_headers(state, headers).await?;
+    let user = state
+        .user_store
+        .find_by_id(&auth.user_id)
+        .await
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::unauthorized(correlation()))?;
+    let permitted = user.is_admin || user.class.is_some_and(|c| allowed.contains(&c));
+    if !user.is_active || !permitted {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "CLASS_REQUIRED",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            correlation(),
+            json!({"message":"Your account's class does not permit this action"}),
+        ));
+    }
+    Ok(user)
+}
+
 /// Authenticates the caller and confirms they are an admin.
 ///
 /// The `is_admin` flag is re-read from the store rather than trusted from the
 /// token: a token minted before an admin was demoted must not retain admin
 /// power until it expires.
-async fn require_admin(state: &ApiState, headers: &HeaderMap) -> Result<UserRecord, ApiError> {
+///
+/// `pub(super)`: reused by `routes::profiles` for the batch import/export
+/// and profile-edit routes, which are also confirmed Admin-only (staff
+/// profile requirement, 2026-08-13 — "access for modifications for
+/// admin"). Kept as one implementation rather than a second copy in
+/// `profiles.rs`.
+pub(super) async fn require_admin(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<UserRecord, ApiError> {
     let auth = authenticate_headers(state, headers).await?;
     let user = state
         .user_store
@@ -320,6 +426,7 @@ async fn create_user_record(
     // administer the system), there is no equivalent reason to force the
     // narrower Manager role on for the bootstrap account.
     let is_manager = payload.is_manager;
+    let class = parse_class_field(payload.class.as_deref())?;
 
     let record = state
         .user_store
@@ -330,10 +437,33 @@ async fn create_user_record(
             password_hash,
             is_admin,
             is_manager,
+            class,
+            parent_user_id: payload.parent_user_id,
         })
         .await
         .map_err(store_error)?;
     Ok(record.into())
+}
+
+/// Parses a `class` field's wire-format string into a [`UserClass`],
+/// returning a 400 `ApiError` for an unrecognized value rather than
+/// silently treating it as `None` — a caller who mistypes
+/// `"team-leader"` for `"team_leader"` should get a clear rejection,
+/// not a request that silently succeeds with no class assigned.
+fn parse_class_field(raw: Option<&str>) -> Result<Option<UserClass>, ApiError> {
+    match raw {
+        None => Ok(None),
+        Some(s) => UserClass::parse(s).map(Some).ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "INVALID_CLASS",
+                "VALIDATION",
+                "NON_RETRYABLE",
+                correlation(),
+                json!({"message": format!("Unrecognized class: {s}")}),
+            )
+        }),
+    }
 }
 
 /// `POST /api/admin/users/:id/manager` — admin-only Manager-role grant/revoke.
@@ -341,6 +471,12 @@ async fn create_user_record(
 /// able to grant itself or others additional Manager scope, mirroring how
 /// `is_admin` itself can only be set by an existing admin
 /// (`create_user`/`bootstrap`).
+///
+/// **Deprecated** — see `set_class` below. Kept operational during the
+/// migration window (see `security_application`'s `is_manager` doc
+/// note); not yet removed since the backfill decision for existing
+/// `is_manager = true` users has not been made
+/// (`IMPLEMENTATION_PLAN_User_Hierarchy.md` §2 A.3).
 pub async fn set_manager(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -351,6 +487,46 @@ pub async fn set_manager(
     state
         .user_store
         .set_manager(&user_id, payload.is_manager)
+        .await
+        .map_err(store_error)?;
+    Ok(Json(json!({"success": true})))
+}
+
+/// `POST /api/admin/users/:id/class` — admin-only class assignment.
+/// Admin-only per design doc §1: "no one else could add or remove users
+/// or change user's class and types." Supersedes `set_manager` for new
+/// integrations — see that function's doc comment.
+pub async fn set_class(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Json(payload): Json<SetClassRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&state, &headers).await?;
+    let class = parse_class_field(payload.class.as_deref())?;
+    state
+        .user_store
+        .set_class(&user_id, class)
+        .await
+        .map_err(store_error)?;
+    Ok(Json(json!({"success": true})))
+}
+
+/// `POST /api/admin/users/:id/parent` — admin-only reporting-line
+/// assignment. Admin-only for the same reason as `set_class` above —
+/// the reporting line determines who verifies whose Todo/Target lists
+/// (design doc §4) and who a staff loan's "real owner" is (design doc
+/// §2.1), so it carries the same weight as class assignment itself.
+pub async fn set_parent(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Json(payload): Json<SetParentRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&state, &headers).await?;
+    state
+        .user_store
+        .set_parent(&user_id, payload.parent_user_id.as_deref())
         .await
         .map_err(store_error)?;
     Ok(Json(json!({"success": true})))

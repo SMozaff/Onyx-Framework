@@ -9,6 +9,7 @@ members = [
     "crates/domains/communication-domain",
     "crates/domains/file-domain",
     "crates/domains/policy-domain",
+    "crates/domains/profile-domain",
     "crates/applications/query-application",
     "crates/applications/worker-application",
     "crates/applications/client-composition",
@@ -28,6 +29,7 @@ members = [
     "crates/bins/migration-tool",
     "crates/bins/sync-agent",
     "crates/bins/desktop-shell",
+    "crates/bins/admin-shell",
     "crates/mobile-core",
     "crates/kernel/platform-contracts-ext",
     "crates/synchronization/crdt",
@@ -57,10 +59,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "uuid", "chrono", "json", "migrate"] }
 chrono = { version = "0.4", features = ["serde"] }
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.7", features = ["ws", "multipart"] }
 base64 = "0.21"
 hmac = "0.12"
 sha2 = "0.10"
+csv = "1.3"
 tower-http = { version = "0.6", features = ["cors"] }
 futures-util = "0.3"
 
@@ -86,6 +89,7 @@ work-domain = { path = "crates/domains/work-domain" }
 communication-domain = { path = "crates/domains/communication-domain" }
 file-domain = { path = "crates/domains/file-domain" }
 policy-domain = { path = "crates/domains/policy-domain" }
+profile-domain = { path = "crates/domains/profile-domain" }
 query-application = { path = "crates/applications/query-application" }
 worker-application = { path = "crates/applications/worker-application" }
 client-composition = { path = "crates/applications/client-composition" }
@@ -97,6 +101,7 @@ background-jobs = { path = "crates/infrastructure/background-jobs" }
 
 api-server = { path = "crates/bins/api-server" }
 desktop-shell = { path = "crates/bins/desktop-shell" }
+admin-shell = { path = "crates/bins/admin-shell" }
 mobile-core = { path = "crates/mobile-core" }
 persistence-common = { path = "crates/infrastructure/persistence-common" }
 persistence-postgres = { path = "crates/infrastructure/persistence-postgres" }
@@ -121,7 +126,7 @@ anyhow = "1"
 # existing convention (all shared deps centralized at workspace level).
 quinn = "0.10"
 rustls = "0.21"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json", "multipart"] }
 tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots"] }
 libc = "0.2"
 objc = "0.2"

@@ -259,6 +259,92 @@ backend command/query surface for all of it is now wired and verified.
 
 ---
 
+## `BlobStore` port + `local-blob-storage` + `FileUploadCoordinator` — Complete
+
+**The gap:** confirmed by search before building anything — `file-domain`
+tracks upload metadata (chunk hashes, sizes, sequencing) but never
+touches actual file bytes, by design (no I/O in a domain crate). Nothing
+in the delivered workspace stored real file content anywhere. Flagged
+to the user rather than silently built around; user chose "build a real
+local-disk adapter now" over a metadata-only shell.
+
+**New port:** `query_application::BlobStore` (`put`/`get`/`exists`/
+`delete`, keyed by content hash via a new `BlobKey` newtype). Content-
+addressed by design — two uploads with identical bytes share one stored
+blob. Deliberately does not depend on `file-domain` (domain crates don't
+depend on each other, §5.2); speaks in a hash-string vocabulary the
+composing handler is responsible for keeping consistent with
+`file_domain::value::ContentHash`.
+
+**New crate: `local-blob-storage`** — a real, working local-disk
+implementation. Content-addressed, sharded by 2-hex-char prefix
+(avoids one huge flat directory). Durable writes via temp-file-then-
+`rename()` (atomic on POSIX, same filesystem/shard dir). Idempotent
+`put` (matches the port's documented contract — a retried write after a
+crash must not fail). Path-traversal-safe (`BlobKey` is caller-supplied,
+ultimately from a claimed hash before this store has verified anything,
+so it is validated as hex-only before ever touching the filesystem, not
+trusted as a safe path component). **9/9 tests pass, clippy clean.**
+
+**New: `FileUploadCoordinator`** (`client-composition::file_upload`) —
+the piece that actually ties bytes to the domain commands. Given raw
+bytes + a file name + MIME type: creates a `FileAsset`, starts an
+`UploadSession`, chunks the content (4MiB chunks), computes each
+chunk's real SHA-256 hash, writes each chunk to `BlobStore`, drives
+`AppendChunk` per chunk and `FinalizeUpload` through
+`api_server::handle_command` (reusing its version/epoch-conflict and
+event-envelope logic rather than hand-rolling it), stores the whole
+file under its own content hash too (current readers download by
+overall hash, not by chunk), and records the result via `CreateVersion`
+on the `FileAsset`. Also exposes `download(content_hash)`.
+
+**Explicit design choices:**
+- Lives in `client-composition`, not `desktop-shell` — per the explicit
+  product decision that this should be a shared, composable piece
+  (consistent with how every other cross-cutting concern in this crate
+  works), not duplicated per native client.
+- A dedicated coordinator rather than more `CommandRegistry` entries —
+  a real upload is an inherently multi-step, byte-carrying sequence
+  that doesn't fit the one-command-per-JSON-envelope shape every other
+  registered handler uses; documented in the module's own doc comment
+  rather than silently forcing a bad fit.
+- Uses a fresh, empty `IdempotencyStore` per coordinator (not
+  `AppState`'s shared one) — each step within one upload already uses a
+  distinct `OperationId` by construction, so cross-step idempotency
+  caching would never hit; documented as a deliberate no-op, not an
+  oversight.
+- Does not yet support uploading a new version of an *existing*
+  `FileAsset` — flagged in the coordinator's own doc comment, not
+  silently omitted; no Phase 1 UI workflow needs it yet.
+
+**Breaking change, fully propagated:** `AppState::new()` is now `async`
+(`LocalBlobStore::open` needs to create its root directory, which is
+I/O). Updated at every call site: `desktop-shell/src/lib.rs`'s one real
+caller, and all 8 call sites across `client-composition`'s own test
+suite. Every existing caller already ran inside an async context (Tauri
+commands, `#[tokio::test]`), so this was a mechanical `.await` addition,
+not a structural change to how `AppState` is used.
+
+**Verified end-to-end** with two new real-content integration tests in
+`tests/app_state_wiring.rs`:
+`file_upload_coordinator_round_trips_real_content` (single-chunk upload,
+asserting the downloaded bytes exactly match what was uploaded) and
+`file_upload_coordinator_handles_multi_chunk_content` (content larger
+than one 4MiB chunk, asserting correct reassembly across chunk
+boundaries).
+
+**Verification:**
+```
+cargo build --package local-blob-storage    # clean
+cargo test --package local-blob-storage     # 9 tests, 0 failures
+cargo build --package client-composition --package api-server   # clean
+cargo test --package client-composition     # 30 tests, 0 failures (28 prior + 2 new file-upload end-to-end)
+cargo clippy --package client-composition --package local-blob-storage \
+  --all-targets -- -D warnings              # clean
+```
+
+---
+
 ## Desktop UI + real file storage — Complete
 
 ### `BlobStore` port + `local-blob-storage` adapter (new)
@@ -394,3 +480,392 @@ target needs are now installed in this sandbox (`libgtk-3-dev`,
 `libwebkit2gtk-4.1-dev`, `libsoup-3.0-dev`,
 `libjavascriptcoregtk-4.1-dev`), so `desktop-shell` is verifiable here —
 the blocker noted in earlier sections of this document is resolved.
+
+---
+
+## Phase A — User Hierarchy: class + reporting-line data model — Complete
+
+Per `DESIGN_User_Hierarchy_Chain_of_Authority.md` §2-§2.3 and
+`IMPLEMENTATION_PLAN_User_Hierarchy.md` §2. Supersedes `is_manager`
+(kept during a deliberate two-step migration window — see below) with a
+real class hierarchy and a reporting-line tree.
+
+**New migrations** (`20260107000000_add_user_class_hierarchy`, Postgres
++ SQLite): additive `class` (nullable TEXT, Postgres `CHECK`-constrained
+to the five confirmed class values) and self-referential
+`parent_user_id` on `users`. Deliberately does **not** drop
+`is_manager` in this migration — per the plan's own flag, the backfill
+decision (what class do existing `is_manager = true` users become) is a
+real operational judgment call, not something to silently pick a
+default for. Flagged, not resolved, in this pass.
+
+**Found and documented a real, pre-existing gap while writing the
+SQLite migration:** SQLite foreign keys are never enabled anywhere in
+this codebase (no connection sets `PRAGMA foreign_keys = ON`), so
+`parent_user_id`'s `REFERENCES` clause is decorative on SQLite only —
+confirmed by grep before writing the comment, not assumed. This makes
+the application-level parent-existence check in `SqliteUserStore`
+load-bearing, not a backstop, unlike on Postgres where the database
+itself also enforces it.
+
+**Port (`security-application`):** new `UserClass` enum (exactly the 5
+confirmed classes — Top-level Manager, Senior Manager, Team Leader,
+Supervisor, Staff; Admin and Allfather are deliberately **not**
+variants — see the enum's doc comment for why), with stable
+`as_str()`/`parse()` wire format. `UserRecord`/`NewUser` gained
+`class`/`parent_user_id`. New `UserStoreError` variants
+`ParentNotFound`/`ParentCycle`. New trait methods `set_class`/
+`set_parent`. `is_manager` marked `#[deprecated]` in doc comments
+(kept operational, not removed).
+
+**Adapters (`security-adapter`):** both Postgres and SQLite fully
+implement the new port surface, including real cycle-detection logic
+(`is_ancestor`, a bounded ancestor-chain walk, fail-closed on excessive
+depth) — no database constraint can express "no cycles in a
+self-referential tree," so this is genuinely application-level, tested
+application-level, not assumed correct. **24/24 tests pass**, including
+`set_parent_rejects_indirect_cycle` (A→B→C, then reject A's parent
+becoming C — exercises the ancestor walk, not just the trivial
+self-reference case). Clippy clean.
+
+**`api-server`:** new `SetClassRequest`/`SetParentRequest` DTOs (both
+take `Option<String>` **without** `#[serde(default)]` on the inner
+option's clearing semantics — an explicit `null` is required to clear a
+class/parent, distinct from omitting the field, since clearing is a
+real, deliberate action). New admin-only `POST /api/admin/users/:id/class`
+and `POST /api/admin/users/:id/parent` routes. New `require_class`
+permission guard — deliberately an explicit allow-list per call site
+rather than a `>=` rank comparison, because `UserClass`'s own ordering
+is not a true linear hierarchy for permission purposes (documented on
+the enum itself). Not yet called anywhere (`#[allow(dead_code)]`,
+matching the precedent already set by `require_manager_or_admin`) —
+ready for Phases C-E's not-yet-built routes.
+
+**New end-to-end HTTP test suite**
+(`tests/user_hierarchy_admin_routes.rs`), matching the project's own
+"compiling is not evidence" testing philosophy
+(`relay_switchboard.rs`'s stated approach) — 7 tests against a real
+bound server and real SQLite: class set at creation, class update and
+explicit-null clearing, invalid-class rejection, parent linking,
+self-reference rejection, nonexistent-parent rejection, and
+unauthenticated-request rejection. **7/7 pass.**
+
+**Verification:**
+```
+cargo build --package security-application                                  # clean
+cargo build --package security-adapter                                      # clean
+cargo test --package security-adapter                                       # 24 tests, 0 failures
+cargo clippy --package security-adapter --package security-application \
+  --all-targets -- -D warnings                                              # clean
+cargo build --package api-server                                            # clean
+cargo test --package api-server                                             # 10 tests, 0 failures (3 pre-existing + 7 new)
+cargo clippy --package api-server --all-targets -- -D warnings              # clean
+```
+
+**Not yet done (tracked in `IMPLEMENTATION_PLAN_User_Hierarchy.md`):**
+the `is_manager` → `class` backfill decision and follow-up migration
+that actually drops `is_manager`; Phase B (Allfather, blocked on the
+person's confirmation of where it architecturally lives); Phase C
+(staff loans); Phase D (`todo-domain` crate); Phase E (escalation);
+Phase F (UI for all of the above).
+
+---
+
+## Phase A follow-up fixes — Complete
+
+Two gaps flagged (not resolved) when Phase A first shipped. Both
+resolved 2026-08-13 per explicit person decisions.
+
+### SQLite foreign-key enforcement — fixed
+
+**Decision:** turn it on (low effort, real defense-in-depth benefit, no
+identified downside since nothing was relying on FK violations being
+silently tolerated).
+
+Both real production SQLite pool-creation sites now set
+`SqliteConnectOptions::foreign_keys(true)` — this is a per-connection
+setting, not database-wide, so it must be attached to the
+`SqliteConnectOptions` every pooled connection is opened with, not run
+as a one-time `PRAGMA` query against a single connection (which would
+be lost the moment the pool opened a second connection):
+- `api_server::routes::mod` — the shared `api-server`/Web pool.
+- `desktop_shell::lib` — desktop's own local `onyx.sqlite` pool. Also
+  switched from `SqlitePoolOptions::connect(url_string)` to
+  `.connect_with(SqliteConnectOptions)`, since the URL-string form has
+  no way to attach this option.
+
+**Caught and fixed a real test-fixture bug while verifying this, not
+just assumed the fix worked:** `security-adapter`'s in-memory test
+fixture initially used `SqliteConnectOptions::new().filename(":memory:")`,
+which — unlike the special-cased `"sqlite::memory:"` URL string sqlx
+recognizes — gives **every pooled connection its own separate, empty
+in-memory database**. With the pool's default (>1) connection limit,
+this meant `CREATE TABLE` landed on one connection while a later query
+could hit a different, empty one — surfaced immediately as `"no such
+table: main.users"` across 16 of 24 tests the first time this was run,
+not discovered in review. Fixed with a named, shared-cache in-memory
+database (`file:...?mode=memory&cache=shared`) plus `max_connections(1)`
+as a second layer of protection against the same class of bug.
+
+**Verification:**
+```
+cargo test --package security-adapter                          # 24 tests, 0 failures (FK enforcement genuinely active)
+cargo clippy --package security-adapter --all-targets -- -D warnings   # clean
+cargo build --package api-server                                # clean
+cargo test --package api-server                                 # 10 tests, 0 failures — including set_parent_rejects_nonexistent_parent_over_http, which now exercises real DB-level rejection, not just the application-level check
+cargo clippy --package api-server --all-targets -- -D warnings  # clean
+cargo check --package desktop-shell                             # clean
+```
+
+### `is_manager` → `class` backfill — decided, documented, not automated
+
+**Decision:** manual reclassification by an Admin, not auto-promotion.
+Rationale given: safer (no class is asserted that wasn't actually
+decided by a person), and there is no live production user base yet
+making the manual step costly.
+
+**Not code** — this is an operational/data decision, not something to
+implement as a migration default. Documented as a runbook:
+`docs/runbooks/user-class-migration.md`, covering: what existing
+`is_manager = true` users experience immediately after this deploys
+(no capability lost, no capability gained until reclassified), the
+step-by-step `curl`/API sequence for an Admin to list, decide, and
+assign class + parent per user, and an explicit note that this runbook
+does not itself decide when `is_manager` gets dropped — that is
+deferred to a later migration once every affected user is reclassified.
+
+---
+
+## Staff Profiles — Complete
+
+Requested 2026-08-13: "a full detailed profile page for each Staff
+member... shows info publicly and access for modifications for admin,"
+followed by "capability to import or export staff list profiles by
+admin access as a batch for an organization."
+
+### Confirmed spec
+
+**Visibility (public/gated split):**
+- Basic identity (full name, photo, job title, contact info) and
+  organizational info (department, class label, reporting line,
+  team memberships) — public to every authenticated user in the
+  organization.
+- Work stats (assigned/completed item counts, target summary) —
+  visible **only** to `UserClass::TopLevelManager` and Admin.
+
+**Editing:** Admin-only, every field, no exceptions — a separate
+admin-only editing interface, not inline on the public view.
+
+**Batch import/export:**
+- Formats: CSV and JSON, both directions.
+- Mandatory row fields: `user_id`, `full_name`, `contact_email`,
+  `contact_phone`, `job_title`, `department` — a row missing any of
+  these is rejected.
+- `user_id` must reference an **already-existing account** — import
+  creates/updates profiles, never accounts.
+- Upsert semantics: a row whose `user_id` matches an existing profile
+  updates it; an unmatched `user_id` creates a new profile.
+- Row-level failures are skipped, not batch-fatal — the rest of the
+  batch still imports, and every row's outcome (created/updated/failed
+  + reason) is reported back.
+- Admin-only, no exceptions.
+
+**Explicitly deferred (confirmed by the person before building):**
+work-stats section has no real data source yet — `work-domain::Task`
+has no assignee field, and the Todo/Target domain that would populate
+this
+(`IMPLEMENTATION_PLAN_User_Hierarchy.md` Phase D) doesn't exist. Rather
+than fake numbers or block the whole profile feature, `WorkStats` is
+built with an explicit `unavailable()` state distinct from a real zero
+— see `profile_domain::value::WorkStats`'s doc comment.
+
+### New crate: `profile-domain`
+
+`StaffProfile` aggregate (`BasicIdentity`, `OrganizationalInfo`,
+`WorkStats` sections), following the exact `AggregateRoot` pattern
+every other domain crate in this workspace uses — `create()`/`decide()`/
+`apply()`, full inline test coverage, `#![deny(missing_docs)]`.
+Deliberately does not depend on `security-application` or `file-domain`
+(domain crates stay independent, §5.2) — `photo_blob_key` is a plain
+string key the composing application resolves, and `class_label`/
+`parent_display_name` are denormalized display copies with an explicit
+documented sync obligation, not live joins.
+
+Admin-only editing is enforced at the same `context.authority` seam
+every other domain uses — real per-role enforcement
+(`UserClass`/`is_admin` checks specifically) is the composing
+application's job, matching this workspace's established precedent.
+
+**9/9 tests pass, clippy clean.**
+
+### `api-server` wiring
+
+New `profile_repo: Arc<dyn Repository>` on `ApiState`, constructed the
+same way as `notification_repo`/`approval_repo` (both Postgres and
+SQLite branches). New route module `routes::profiles` (+ nested
+`routes::profiles::batch`):
+
+- `GET /api/profiles` — list all profiles in the caller's org, public
+  fields only.
+- `GET /api/profiles/:owner_id` — single profile. Returns one of two
+  DTOs (`PublicProfileDto` or `ProfileDtoWithStats`) depending on
+  whether `require_class(&[UserClass::TopLevelManager])` passes for the
+  caller — the gate is a **type-level split**, not a field conditionally
+  nulled out, specifically to avoid leaking "stats exist but you can't
+  see them" vs. "no stats recorded" as distinguishable outcomes to an
+  unauthorized viewer.
+- `PUT /api/admin/profiles` — admin-only single upsert.
+- `POST /api/admin/profiles/import` — admin-only batch import
+  (multipart `file` field, CSV or JSON by content-type, falls back to
+  CSV). Returns an `ImportSummary` with a per-row `RowResult`
+  (`Created`/`Updated`/`Failed { reason }`), in input order.
+- `GET /api/admin/profiles/export?format=csv|json` — admin-only
+  whole-org export.
+
+`routes::admin::require_admin` and `require_class` were widened from
+private to `pub(super)` so `routes::profiles` could reuse them rather
+than duplicating auth logic — `require_class` gained its first real
+caller here (previously `#[allow(dead_code)]`, added ahead of its first
+use during Phase A).
+
+**No `Repository::load`-by-field capability exists** (that trait only
+supports load-by-id) — `find_by_owner`/whole-org listing instead scan
+the shared `aggregates` projection table directly via raw SQL, filtered
+by `aggregate_type = 'staff_profile'`, reusing the same table/pattern
+`query_handler.rs`'s own list-style queries already use, rather than
+inventing a second query mechanism.
+
+**A real bug found and fixed via testing, not just reasoning about the
+code:** the first version of `find_by_owner` compared
+`state["owner_id"].as_str()` against a UUID string and always got
+`None` — `ObjectId(pub [u8; 16])`'s derived `Serialize` produces a JSON
+array of 16 numbers, not a string (confirmed by reading
+`platform_kernel::identifiers` directly, not assumed). This meant every
+upsert silently created a duplicate profile instead of updating the
+existing one. Caught immediately by
+`upsert_creates_then_updates_a_profile`'s assertion that exactly one
+profile exists per owner after two upserts — it failed with `left: 2,
+right: 1` on the first real test run. Fixed by comparing byte arrays
+instead of strings; regression-tested by the same test now passing.
+
+**Verified end-to-end** with 6 new HTTP integration tests
+(`tests/staff_profile_routes.rs`, same "compiling is not evidence"
+philosophy as this project's existing test suites): upsert-creates-
+then-updates (the test that caught the bug above), public view
+correctness, admin-required enforcement on both the single-upsert and
+import routes, JSON import with mixed success/failure rows (including
+asserting the exact created/updated/failed counts), and a full CSV
+import → export round-trip confirming `team_memberships`'
+`;`-delimited encoding survives the round trip intact.
+
+**Verification:**
+```
+cargo build --package profile-domain                          # clean
+cargo test --package profile-domain                            # 9 tests, 0 failures
+cargo clippy --package profile-domain --all-targets -- -D warnings   # clean
+cargo build --package api-server                                # clean
+cargo test --package api-server                                 # 16 tests, 0 failures (10 prior + 6 new profile routes)
+cargo clippy --package api-server --all-targets -- -D warnings  # clean
+```
+
+**Not yet done:** `client-composition`/desktop wiring (this went
+through `api-server` directly, since import/export is an Admin/API-
+driven operation, not something desktop needs a separate
+implementation of — `profile-domain` itself is client-composition-
+ready whenever a Desktop UI is wanted, following the exact same wiring
+pattern already used for `policy-domain`). No UI (Desktop or Web) for
+viewing/editing/importing/exporting profiles yet. Work-stats population
+blocked on `IMPLEMENTATION_PLAN_User_Hierarchy.md` Phase D, as
+documented above.
+
+---
+
+## Admin Platform (`admin-shell`) — In Progress
+
+Requested 2026-08-14: "separate the Admin platform — login, full
+access, changes go through all platforms via the server."
+
+### Confirmed decisions
+- **Form:** a separate Tauri desktop app, distinct from `desktop-shell`.
+- **Architecture:** **thin HTTP client** — talks directly to
+  `api-server` over the network, no local SQLite, no sync engine, no
+  embedded `client-composition`. This is what makes "changes go through
+  all platforms via the server" true by construction: the app has no
+  local state that could diverge.
+- **Scope:** (1) user management, (2) Policy/Settings, (3) staff profile
+  admin edit + batch import/export. Confirmed complete for now.
+- **Admin capability is to be REMOVED from the existing Desktop/Web UI**
+  once this app works — deliberately deferred until then, so the
+  capability is never absent from both places at once.
+
+### Done and verified
+- `admin-shell` Rust/Tauri crate — scaffolded, registered in the
+  workspace, `cargo check` clean. Deliberately minimal (~40 lines):
+  no `AppState`, no DB pool, no Tauri command surface for
+  domain commands, since the webview calls `api-server` over HTTP
+  directly. Only native capability added is a file-picker plugin, for
+  the batch profile import flow.
+- `/api/auth/login` extended with `is_admin` and `class` (additive —
+  `web-ui`/`desktop-shell` ignore fields they don't read), so the Admin
+  platform can show "you don't have admin access" immediately after
+  login rather than only via a 403 on the first action. All 16
+  pre-existing api-server tests still pass.
+- **Policy/LegalHold command + query support added to `api-server`** —
+  see "the two-registry gap" below.
+- `admin-ui` React app scaffolded: Tauri-matching Vite/TS config (port
+  5174 so both desktop apps can run dev servers simultaneously), auth
+  store/HTTP client/command+query wrappers ported from `web-ui`'s
+  established working patterns, `App.tsx` with a two-layer gate
+  (authenticated → is_admin), `Login.tsx`, `MainLayout.tsx`,
+  `Users.tsx` (list/create/class/parent/activate-deactivate, verified
+  against real route paths and handler return types).
+
+### The two-registry gap — found and closed for Policy
+`api-server` and `client-composition` maintain **separate** command/
+query registries. Policy/LegalHold had been wired into
+`client-composition` (which `desktop-shell` embeds) in an earlier
+session, but `api-server` supported only `notification.Acknowledge`,
+`approval.Approve`, `approval.Reject`. A thin HTTP client therefore
+could not administer Policy at all — discovered before porting the
+Settings UI, not after.
+
+Added to `api-server`: `policy.CreatePolicyVersion`,
+`policy.PublishPolicyVersion`, `policy.EvaluatePolicy`,
+`policy.RegisterViolation`, `policy.RetirePolicy`,
+`legal_hold.ReleaseLegalHold`, plus `policy.list/detail` and
+`legal_hold.list/detail` on the query side, plus `policy_repo` and
+`legal_hold_repo` on `ApiState` (both Postgres and SQLite branches).
+
+**Deliberately NOT added:** `CreatePolicy` and `ApplyLegalHold`. Both
+are *creation* commands, routed through `Aggregate::create()` rather
+than `decide()`, so they cannot go through `handle_command` the way
+every other arm in that match does. They need a separate creation path
+(like `routes::profiles`'s own upsert handler) — flagged here rather
+than faked.
+
+**A real limitation, documented at the call site:** the dispatch block's
+error type is `CommandError`, which cannot express an HTTP status, so
+payload validation cannot happen inside it. `policy.CreatePolicyVersion`'s
+structurally-typed `rules` payload is therefore parsed and validated
+*before* the block, returning a real 400 on malformed input. Every other
+supported command reads plain strings with `unwrap_or_default`.
+
+**Verification:**
+```
+cargo check --package admin-shell                               # clean
+cargo build --package api-server                                # clean, no warnings
+cargo test --package api-server                                 # 16 tests, 0 failures
+cargo clippy --package api-server --all-targets -- -D warnings  # clean
+```
+
+### Not yet done
+- `Settings.tsx` (Policy/LegalHold UI) — backend is now ready, the page
+  itself is not written. Porting from `desktop-shell`'s 706-line version
+  requires converting every `Id16` (`number[]`, the raw `ObjectId` serde
+  form Tauri IPC uses) to a plain UUID string, which is what
+  `api-server`'s HTTP routes speak. Creation flows will also need the
+  separate `CreatePolicy`/`ApplyLegalHold` path noted above.
+- `Profiles.tsx` — not started. Backend fully ready and tested.
+- `npm install` / `tsc` never run on `admin-ui` — **nothing in the React
+  app has been type-checked or built yet.**
+- Removing admin screens from `desktop-shell` — correctly deferred.

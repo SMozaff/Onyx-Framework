@@ -46,6 +46,9 @@ audit-application.workspace = true
 observability-adapter.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
+profile-domain.workspace = true
+policy-domain.workspace = true
+csv.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true

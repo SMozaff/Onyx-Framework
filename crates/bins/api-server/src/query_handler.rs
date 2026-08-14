@@ -80,6 +80,10 @@ pub async fn execute_query(
         "notification.list" => "notification",
         "approval.list" => "approval",
         "report.detail" => "report",
+        // Added 2026-08-14 for the Admin platform — see
+        // routes::command's matching comment.
+        "policy.list" | "policy.detail" => "policy",
+        "legal_hold.list" | "legal_hold.detail" => "legal_hold",
         _ => return Ok(empty_result()),
     };
 

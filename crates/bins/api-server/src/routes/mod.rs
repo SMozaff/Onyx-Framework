@@ -5,6 +5,7 @@ pub mod admin;
 pub mod auth;
 pub mod command;
 pub mod events;
+pub mod profiles;
 pub mod query;
 pub mod relay;
 
@@ -22,7 +23,7 @@ use axum::{
     http::{HeaderMap, Method, StatusCode},
     middleware,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use observability_adapter::{HashChainAuditWriter, Metrics};
@@ -73,6 +74,18 @@ pub struct ApiState {
     /// Identity store backing `/api/auth/login` (audit finding H-01).
     /// Replaces the former `DEFAULT_USERNAME`/`DEFAULT_PASSWORD` constants.
     pub user_store: Arc<dyn UserStore>,
+    /// Repository for `profile_domain::StaffProfile`. Backs the staff
+    /// profile view/edit routes and the batch import/export feature —
+    /// see `routes::profiles`.
+    pub profile_repo: Arc<dyn Repository>,
+    /// Repository for `policy_domain::Policy`. Added 2026-08-14 so the
+    /// Admin platform (`admin-shell`, a thin HTTP client) can
+    /// administer Policy over `/api/command` — `client-composition`'s
+    /// registry, which desktop-shell uses, is a separate wiring path
+    /// that this crate does not share.
+    pub policy_repo: Arc<dyn Repository>,
+    /// Repository for `policy_domain::LegalHold`. See `policy_repo`.
+    pub legal_hold_repo: Arc<dyn Repository>,
     /// Argon2id hasher. Held on state rather than constructed per request:
     /// building it derives a dummy hash, which is deliberately expensive.
     pub password_hasher: Arc<PasswordHasher>,
@@ -89,6 +102,9 @@ pub struct ApiState {
 /// reused elsewhere.
 type StorageBackendHandles = (
     ProjectionPool,
+    Arc<dyn Repository>,
+    Arc<dyn Repository>,
+    Arc<dyn Repository>,
     Arc<dyn Repository>,
     Arc<dyn Repository>,
     Arc<dyn UnitOfWorkFactory>,
@@ -112,6 +128,9 @@ impl ApiState {
             projection_pool,
             notification_repo,
             approval_repo,
+            profile_repo,
+            policy_repo,
+            legal_hold_repo,
             unit_factory,
             idempotency_store,
             sqlite_pool,
@@ -128,13 +147,27 @@ impl ApiState {
                 ProjectionPool::Postgres(pool.clone()),
                 Arc::new(PostgresRepository::new(pool.clone(), "notification")),
                 Arc::new(PostgresRepository::new(pool.clone(), "approval")),
+                Arc::new(PostgresRepository::new(pool.clone(), "staff_profile")),
+                Arc::new(PostgresRepository::new(pool.clone(), "policy")),
+                Arc::new(PostgresRepository::new(pool.clone(), "legal_hold")),
                 Arc::new(PostgresUnitOfWorkFactory::new(pool.clone())),
                 Arc::new(PostgresIdempotencyStore::new(pool.clone())),
                 None,
                 Some(pool),
             )
         } else {
-            let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
+            let options = SqliteConnectOptions::from_str(database_url)?
+                .create_if_missing(true)
+                // Phase A fix (User Hierarchy): without this, SQLite
+                // never enforces the FK on users.parent_user_id (or any
+                // other FK in this schema) — confirmed by grep before
+                // this fix that no connection anywhere set this pragma,
+                // documented as a real gap in DECISIONS.md. Per-
+                // connection, not database-wide, so it must be set here
+                // on every connection the pool opens, not as a one-time
+                // PRAGMA query against a single connection that would
+                // be lost once the pool cycles connections.
+                .foreign_keys(true);
             let pool = SqlitePoolOptions::new()
                 .max_connections(if database_url.contains(":memory:") {
                     1
@@ -151,6 +184,9 @@ impl ApiState {
                 ProjectionPool::Sqlite(pool.clone()),
                 Arc::new(SqliteRepository::new(pool.clone(), "notification")),
                 Arc::new(SqliteRepository::new(pool.clone(), "approval")),
+                Arc::new(SqliteRepository::new(pool.clone(), "staff_profile")),
+                Arc::new(SqliteRepository::new(pool.clone(), "policy")),
+                Arc::new(SqliteRepository::new(pool.clone(), "legal_hold")),
                 Arc::new(SqliteUnitOfWorkFactory::new(pool.clone())),
                 Arc::new(SqliteIdempotencyStore::new(pool.clone())),
                 Some(pool),
@@ -221,6 +257,9 @@ impl ApiState {
             projection_pool,
             notification_repo,
             approval_repo,
+            profile_repo,
+            policy_repo,
+            legal_hold_repo,
             unit_factory,
             idempotency_store,
             events,
@@ -286,6 +325,28 @@ pub fn router(state: ApiState) -> Router {
         // grant/revoke. See admin::set_manager's doc comment for why this
         // stays admin-only rather than manager-or-admin.
         .route("/api/admin/users/:id/manager", post(admin::set_manager))
+        // Phase A (User Hierarchy): admin-only class + reporting-line
+        // assignment. Supersedes /manager above — see admin::set_class's
+        // and admin::set_parent's doc comments.
+        .route("/api/admin/users/:id/class", post(admin::set_class))
+        .route("/api/admin/users/:id/parent", post(admin::set_parent))
+        // Staff profiles (2026-08-13): public view/list, admin-only
+        // upsert and batch import/export. See routes::profiles for the
+        // confirmed visibility/editing rules.
+        .route("/api/profiles", get(profiles::list_profiles))
+        .route("/api/profiles/:owner_id", get(profiles::get_profile))
+        .route(
+            "/api/admin/profiles",
+            put(profiles::upsert_profile_route),
+        )
+        .route(
+            "/api/admin/profiles/import",
+            post(profiles::batch::import_profiles),
+        )
+        .route(
+            "/api/admin/profiles/export",
+            get(profiles::batch::export_profiles),
+        )
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/command", command_route)
         .route("/api/query", get(query::query_route))
