@@ -713,10 +713,10 @@ Team Leader who performed the check returned the full record including
 
 ### 11.6 — What remains, accurately as of 2026-08-16
 
-- **No UI work** — `desktop-shell`, `admin-shell`, `web-ui` have no
-  todo/target/loan screens. Explicitly out of scope for this session's
-  work, per the person's own choice. This is now the largest remaining
-  piece of user-facing work for this feature.
+- ~~No UI work~~ — **partially closed 2026-08-16, see §11.7.**
+  `web-ui` now has a working Todo/Target list UI (create, submit,
+  verify/reject/escalate). `desktop-shell` and `admin-shell` still have
+  no todo/target/loan screens, and Staff Loans has no UI anywhere yet.
 - **Phase E's actual escalation routing/target-selection logic** —
   `EscalateTodoList`/`EscalateTargetList` record that escalation was
   invoked and why; nothing resolves *who* an escalation goes to. D.4's
@@ -736,5 +736,53 @@ Team Leader who performed the check returned the full record including
 - **Phase B.4** (how a new org's first Admin credential reaches the
   customer) — unchanged, still small and open, unrelated to this
   session's work.
+
+### 11.7 — First UI slice: Todo/Target lists in `web-ui` — 2026-08-16
+
+`web-ui/src/pages/TodoTargets/` (new): list + create + detail, with
+Submit and the three verifier-gated actions (Verify with outcome +
+always-optional comment, Reject, Escalate — both requiring a reason).
+Placed in `web-ui`, not `admin-shell`: `admin-shell`'s entire route
+tree requires `is_admin` (`App.tsx`'s `AdminOnlyLayout`), which would
+wrongly exclude the Staff/Manager users design doc §4.0.1 confirms this
+feature is for. `web-ui` has no such gate.
+
+**Scope**: self-authored creation only (`owner` is always the current
+user) — assigning a list to someone else needs a user-id picker this UI
+doesn't have yet, deferred rather than faked. No Staff Loans UI yet.
+
+**D.5 built into the display, not just the backend**: `ListDetail.tsx`
+distinguishes `team_leader_pre_check` being entirely absent (no
+pre-check yet) from the object being present with `notes` specifically
+omitted (a pre-check happened, its substance is hidden from this
+viewer) — collapsing those into one "nothing to show" state would have
+been a real, if subtle, UX regression against what D.5 is trying to
+protect.
+
+**Two real mistakes made and caught during this work, not glossed
+over**:
+1. An early draft invented CSS classes that don't exist in this
+   codebase (`tab-toggle`, `button-active`, `card-list-compact`) plus a
+   fabricated external link — caught by grepping `styles.css` directly
+   and reading working precedent pages instead of trusting the first
+   draft.
+2. Adding `'draft'` to `StatusBadge`'s `'info'` tone bucket broke a
+   pre-existing frozen wire-contract test
+   (`tests/unit/contracts.test.ts`) that locks `statusTone('draft')` to
+   `'neutral'` — caught by actually running `npx vitest run`, not
+   assumed correct from the diff. Fixed by leaving `'draft'` out of
+   every explicit bucket so the pre-existing `'neutral'` fallback
+   applies, which was already correct for both Mission/Task's `draft`
+   and `TodoList`'s `Draft`.
+
+**Verified**: `npm install` (542 packages), `npx tsc -b` (zero errors),
+`npx vite build` (515 modules, production build succeeds), `npx vitest
+run` (130 passed, 7 skipped — pre-existing `e2e/real-server.test.ts`,
+needs a live backend, unrelated to this change).
+
+**Not verified**: ESLint — no `eslint.config.*`/`.eslintrc*` exists
+anywhere in this repository checkout (confirmed by search). A
+pre-existing gap, not something invented here to work around it.
+
 
 

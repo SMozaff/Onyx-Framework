@@ -1229,3 +1229,65 @@ either sandbox (no Docker daemon/socket available in this one, nor in
 Manus's). This is a pre-existing gap in the broader workspace's test
 infrastructure, not something this feature introduced or is
 responsible for closing.
+
+---
+
+## First UI slice: Todo/Target lists in web-ui — 2026-08-16
+
+Following the backend work and its live-Postgres verification (previous
+two entries), a first UI slice was built for Todo/Target lists —
+create, submit, verify/reject/escalate — closing part of the "no UI
+work" gap flagged in the status report.
+
+**Home: `web-ui`, not `admin-shell`.** Confirmed by reading
+`admin-shell`'s `App.tsx` before writing anything: its entire route
+tree sits behind `AdminOnlyLayout`, which requires `is_admin`. Design
+doc §4.0.1 confirms Todo/Target creation is bidirectional (Staff or
+Manager) — an Admin-only home would incorrectly exclude the people this
+feature is actually for. `web-ui` has no such gate, only authentication,
+and already talks to `api-server` over the same HTTP surface this
+session built against.
+
+**Scope of this slice**: self-authored creation only (the current user
+creates a list/target for themselves), submit, and the three
+verifier-gated actions (verify with outcome + optional comment, reject
+with reason, escalate with reason). Assigning a list to a *different*
+owner (`ManagerAssigned` origin) needs a user picker this UI doesn't
+have yet — deliberately deferred as a follow-up, not a corner cut.
+Staff Loans has no UI yet.
+
+**A real regression found and fixed during this work**: an early draft
+added `'draft'` to `StatusBadge`'s `'info'` tone bucket. A pre-existing
+frozen wire-contract test (`tests/unit/contracts.test.ts`) locks
+`statusTone('draft')` to `'neutral'` — this broke it. Caught by
+actually running `npx vitest run`, not assumed correct from the diff
+alone; fixed by leaving `'draft'` out of every explicit bucket so it
+falls through to the existing `'neutral'` default, which was already
+correct.
+
+**Also caught and corrected before that**: an initial draft of the new
+page components invented several CSS classes that don't exist in this
+codebase (`tab-toggle`, `button-active`, `card-list-compact`) and one
+fabricated external link. Caught by grepping `styles.css` directly and
+reading working precedent files (`Missions/MissionList.tsx`,
+`Missions/MissionDetail.tsx`, `Approvals/index.tsx`,
+`admin-shell`'s `Settings.tsx`) rather than trusting the first draft —
+rewritten to use only classes confirmed present in the stylesheet.
+
+**Verified**: `npm install` (542 packages), `npx tsc -b` (zero type
+errors), `npx vite build` (515 modules, production build succeeds),
+`npx vitest run` (130 tests passed, 7 skipped — pre-existing
+`e2e/real-server.test.ts` tests that need a live backend, unrelated to
+this change).
+
+**Not verified**: ESLint. This checkout has no `eslint.config.*` or
+`.eslintrc*` file anywhere in the repository — confirmed by search, a
+pre-existing gap in the checkout, not something this change introduced
+or attempted to paper over by inventing a config.
+
+**Files**: `web-ui/src/pages/TodoTargets/` (new: `index.tsx`,
+`CreateListForm.tsx`, `ListCard.tsx`, `ListDetail.tsx`,
+`DecisionDialog.tsx`); extended `types/query.ts`, `types/command.ts`,
+`hooks/useCommand.ts`, `components/StatusBadge/index.tsx`; registered
+in `App.tsx` (route `/todos`) and `components/Layout/Sidebar.tsx` (nav
+link "Todos & Targets").

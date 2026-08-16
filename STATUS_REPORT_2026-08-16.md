@@ -21,11 +21,19 @@ Everything the original 2026-08-16 report listed, plus:
   the row. Fixed with a backward-compatible `recipient_id` field; the
   new test asserts the exact recipient set, not just a row count, so
   this can't silently regress.
-- Re-verified in this sandbox after pulling the fix back in: `worker`
-  and `api-server` packages both compile clean, clippy clean, and all
-  previously-passing tests (42 todo-domain, 24 security, 22 api-server)
-  still pass, plus the new Postgres test correctly no-ops when
-  `DATABASE_URL` is absent.
+- **First UI slice: Todo/Target lists in `web-ui`** — create, submit,
+  verify/reject/escalate, correctly placed outside `admin-shell`'s
+  admin-only route gate (design doc §4.0.1 confirms this feature is for
+  Staff and Managers, not just Admins). D.5's redaction is reflected in
+  the UI itself, not just the API. Verified: `tsc -b` clean, production
+  build succeeds, 130/130 relevant tests pass. A regression this UI
+  work introduced (breaking a pre-existing frozen status-tone contract)
+  was caught by the test suite and fixed before commit.
+- Re-verified in this sandbox after pulling the Postgres fix back in:
+  `worker` and `api-server` packages both compile clean, clippy clean,
+  and all previously-passing tests (42 todo-domain, 24 security, 22
+  api-server) still pass, plus the new Postgres test correctly no-ops
+  when `DATABASE_URL` is absent.
 
 ---
 
@@ -51,7 +59,8 @@ reports; runbook exists: `docs/runbooks/user-class-migration.md`).
 
 | Item | Status |
 |---|---|
-| **Todo/Target/StaffLoan UI** (Desktop, Admin, or Web) | Backend fully built, wired, and now live-tested end to end including real PostgreSQL — zero UI code. **This is now the single largest remaining piece of work for this feature.** |
+| **Todo/Target UI in `web-ui`** | **Done** — create, submit, verify/reject/escalate, live-verified end to end. Self-authored creation only; `ManagerAssigned` creation (assigning a list to someone else) needs a user picker, deferred. |
+| **Staff Loans UI** (any app) | Not started. Backend (request/approve/decline/extend/end, plus the background notification job) is fully built and live-tested; zero UI. **This is now the largest remaining piece of user-facing work for this feature.** |
 | **Escalation mechanism** (Phase E) — routing/target-selection | Design confirmed. Commands exist to record that escalation was invoked; nothing resolves *who* it goes to. |
 | Work-stats real data | Unchanged — placeholder until this feature's UI exists to generate real data. |
 | Web messaging (Phase 2 of original plan) | Never started, unchanged. |
@@ -61,6 +70,11 @@ reports; runbook exists: `docs/runbooks/user-class-migration.md`).
 
 - `admin-shell`'s app icon reuses the main product icon — cosmetic, unchanged.
 - `IdempotencyStore` is in-memory only — unchanged.
+- **No ESLint configuration exists anywhere in this repository
+  checkout** (`eslint.config.*`/`.eslintrc*`, confirmed by search) —
+  `web-ui/package.json`'s `lint` script cannot run as a result. A
+  pre-existing gap, discovered while verifying the new UI work, not
+  introduced by it.
 - **Workspace-wide Docker-backed E2E suite (Testcontainers) could not be
   run** in either build sandbox used for this feature (no Docker
   daemon/socket in either). Not introduced by or specific to this
@@ -75,10 +89,11 @@ reports; runbook exists: `docs/runbooks/user-class-migration.md`).
 
 ## Bottom line
 
-The Todo/Target/StaffLoan backend is now fully built, wired into the
-real HTTP API, and live-tested end to end — including, as of this
-update, the one piece that genuinely required a real database to
-verify. A real bug was found and fixed along the way rather than
-shipped silently. The feature's backend work is complete; UI is the
-clear next step whenever you're ready for it.
+The Todo/Target/StaffLoan backend is fully built, wired into the real
+HTTP API, and live-tested end to end, including the one piece that
+genuinely required a real database to verify. A first UI slice now
+exists for Todo/Target lists in `web-ui`, live-verified via a real
+build and test run — with a real regression it introduced caught and
+fixed before commit, not shipped silently. What's left: Staff Loans UI
+(the single largest remaining piece), and Phase E's escalation routing.
 
