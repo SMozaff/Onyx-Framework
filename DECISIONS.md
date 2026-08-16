@@ -1291,3 +1291,21 @@ or attempted to paper over by inventing a config.
 `hooks/useCommand.ts`, `components/StatusBadge/index.tsx`; registered
 in `App.tsx` (route `/todos`) and `components/Layout/Sidebar.tsx` (nav
 link "Todos & Targets").
+
+---
+
+## Two remaining product decisions resolved — 2026-08-16
+
+**B.4 — first Admin credential delivery: invite email with a setup
+link.** Not a temporary password shown once at creation time. No code
+built yet for this — it's a detail of Phase B.1–B.2's provisioning
+action, which itself hasn't been built. Recorded so the eventual
+implementation doesn't need to re-ask this question.
+
+**Admin-screen removal from `desktop-shell`/`web-ui`: confirmed, go
+ahead.** This had been deliberately held since the Admin Platform
+(`admin-shell`) was first built, pending confirmation it works in
+practice. That precondition has since been met repeatedly this session
+— live-tested, 25 passing `api-server` tests, real HTTP round trips —
+so the person confirmed removal should proceed now. See the next
+commit for the actual removal.

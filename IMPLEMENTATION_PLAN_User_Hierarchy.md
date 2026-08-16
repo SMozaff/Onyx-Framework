@@ -199,11 +199,20 @@ routes through that org's own Policy — a follow-up to specify as a
 Policy rule shape, not a reason to resurrect the standing-account
 design.
 
-### B.4 — Open, non-blocking
+### B.4 — Resolved 2026-08-16: invite email with a setup link
 
 How the newly-provisioned org's first Admin credential reaches the
-customer (temporary password vs. invite/email flow) is not yet decided.
-Does not block building B.1–B.2.
+customer. **Decided: an invite email containing a setup link** — not a
+temporary password shown once at creation time. No bootstrap-flow code
+exists yet for this; when Phase B.1–B.2's org-provisioning action is
+built, the last step should send this email rather than surface a
+password anywhere (in a UI, a log, or an API response), consistent with
+this workspace's general posture of not handling credentials outside a
+proper auth flow. Specific mechanics (which email-sending
+infrastructure, the setup link's expiry, whether the link itself
+authenticates the first login or just gates password creation) are
+still open and should be resolved when this part of Phase B is
+actually built, not now.
 
 ---
 
@@ -465,8 +474,9 @@ per feature, not assumed to inherit that precedent automatically).
 
 ## 8. What this plan deliberately does not start yet
 
-- Phase B.4 (how a newly-provisioned org's first Admin credential
-  reaches the customer) is small and non-blocking but still open.
+- ~~Phase B.4~~ — **resolved 2026-08-16**, see B.4 above. The
+  provisioning action itself (B.1–B.2) still needs to be built to
+  actually send the invite email this decision specifies.
 - The application-layer integration work listed in §10 below (build
   progress) — verifier-resolution logic, Team Leader pre-check
   redaction, escalation routing, the loan-expiry background job, and
@@ -733,9 +743,9 @@ Team Leader who performed the check returned the full record including
   in that sandbox either). Not part of this feature's own scope, but
   worth noting as a still-open verification gap for the workspace more
   broadly, unrelated to Todo/Target/StaffLoan specifically.
-- **Phase B.4** (how a new org's first Admin credential reaches the
-  customer) — unchanged, still small and open, unrelated to this
-  session's work.
+- ~~Phase B.4~~ — **resolved 2026-08-16**, see B.4 above: invite email
+  with a setup link. The provisioning action itself (B.1–B.2) still
+  needs building to actually send it.
 
 ### 11.7 — First UI slice: Todo/Target lists in `web-ui` — 2026-08-16
 
