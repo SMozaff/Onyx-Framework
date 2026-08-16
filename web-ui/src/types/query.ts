@@ -119,3 +119,61 @@ export interface DashboardProjection {
   pending_approvals: number;
   activity: ActivityItem[];
 }
+
+/**
+ * Shared status values for `TodoList`/`TargetList` — see
+ * `todo_domain::state_machine::ListStatus`. Serialized PascalCase, same
+ * as every other Rust enum this workspace's projections expose over
+ * HTTP (confirmed live: `"status":"Verified"`, not `"verified"`) —
+ * kept as the literal wire values rather than lowercased, since
+ * `StatusBadge` normalizes case itself.
+ */
+export type TodoListStatus =
+  | 'Draft'
+  | 'Submitted'
+  | 'TeamLeaderPreChecked'
+  | 'Verified'
+  | 'Rejected'
+  | 'Escalated';
+
+export type ListOrigin = 'ManagerAssigned' | 'StaffAuthored';
+
+export type VerificationOutcome = 'Flawless' | 'WithDeficiencies';
+
+export interface TodoItemProjection {
+  item_id: string;
+  description: string;
+}
+
+/**
+ * A Team Leader pre-check as it appears over `/api/query`. `notes` is
+ * `string | undefined` rather than `string | null` because the server
+ * *omits* the key entirely for a Staff viewer of their own list (D.5
+ * redaction — see `api_server::query_handler::redact_team_leader_pre_check_for_viewer`),
+ * rather than sending `null` — the UI must not assume the field's
+ * absence means no pre-check happened; `existsButHidden` distinguishes
+ * that from "no pre-check recorded at all" (the whole
+ * `team_leader_pre_check` object being absent).
+ */
+export interface TeamLeaderPreCheckProjection {
+  checked_by: string;
+  checked_at: number;
+  notes?: string;
+}
+
+export interface TodoListProjection extends VersionedProjection {
+  owner: string;
+  origin: ListOrigin;
+  items: TodoItemProjection[];
+  status: TodoListStatus;
+  team_leader_pre_check?: TeamLeaderPreCheckProjection;
+}
+
+export interface TargetListProjection extends VersionedProjection {
+  owner: string;
+  origin: ListOrigin;
+  description: string;
+  time_window: { start_at: number; end_at: number };
+  status: TodoListStatus;
+  team_leader_pre_check?: TeamLeaderPreCheckProjection;
+}

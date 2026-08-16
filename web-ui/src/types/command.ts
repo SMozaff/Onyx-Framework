@@ -70,7 +70,18 @@ export interface CommandResult<T = unknown> {
 }
 
 export interface CommandInput<T = unknown> {
-  command_type: 'notification.Acknowledge' | 'approval.Approve' | 'approval.Reject';
+  command_type:
+    | 'notification.Acknowledge'
+    | 'approval.Approve'
+    | 'approval.Reject'
+    | 'todo_list.SubmitTodoList'
+    | 'todo_list.VerifyTodoList'
+    | 'todo_list.RejectTodoList'
+    | 'todo_list.EscalateTodoList'
+    | 'target_list.SubmitTargetList'
+    | 'target_list.VerifyTargetList'
+    | 'target_list.RejectTargetList'
+    | 'target_list.EscalateTargetList';
   target: DomainObjectRef;
   expected_version: number;
   expected_lifecycle_epoch: number;
