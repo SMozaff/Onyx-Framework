@@ -1,0 +1,31 @@
+pluginManagement {
+    def flutterSdkPath = {
+        def properties = new Properties()
+        file("local.properties").withInputStream { properties.load(it) }
+        def flutterSdkPath = properties.getProperty("flutter.sdk")
+        assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
+        return flutterSdkPath
+    }()
+    includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
+    // Opt-in mirrors for networks where dl.google.com does not resolve, which
+    // otherwise fails plugin lookup outright. Off by default so CI and every
+    // normal network keep resolving straight from the canonical repositories
+    // and never depend on a third-party host; set ONYX_GRADLE_MIRRORS=1 to
+    // put them in front on a machine that needs them.
+    repositories {
+        if (System.getenv("ONYX_GRADLE_MIRRORS") == "1") {
+            maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
+            maven { url "https://maven.aliyun.com/repository/google" }
+            maven { url "https://maven.aliyun.com/repository/public" }
+        }
+        google(); mavenCentral(); gradlePluginPortal()
+    }
+}
+
+plugins {
+    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+    id "com.android.application" version "8.6.0" apply false
+    id "org.jetbrains.kotlin.android" version "2.0.20" apply false
+}
+
+include ":app"

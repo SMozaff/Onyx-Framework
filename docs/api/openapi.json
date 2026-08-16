@@ -1,0 +1,1049 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ONYX Web Thin Client API",
+    "version": "1.0.0",
+    "description": "Frozen Team 6 HTTP and WebSocket contract. Authority is supplied by the bearer access_token JWT; actor and authority proof are enriched server-side."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3000"
+    }
+  ],
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session invalidated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/command": {
+      "post": {
+        "operationId": "executeCommand",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEnvelope"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/query": {
+      "get": {
+        "operationId": "executeQuery",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "query",
+            "required": true,
+            "description": "base64url(JSON QueryEnvelope)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Projection query result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "operationId": "subscribeEvents",
+        "description": "WebSocket upgrade endpoint. Connect with ws(s)://host/api/events?token={access_token}, then send the EventSubscription message.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "organization_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in",
+          "user"
+        ],
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "LogoutRequest": {
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "properties": {
+          "refresh_token": {
+            "type": "string"
+          }
+        }
+      },
+      "DomainObjectRef": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "organization_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "notification",
+              "approval",
+              "mission",
+              "task",
+              "timeline",
+              "report"
+            ]
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ActorContext": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "device_id",
+          "organization_id"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string",
+            "example": "web-client"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "AuthorityScope": {
+        "type": "object",
+        "required": [
+          "organization_id",
+          "object_type",
+          "object_id",
+          "command_types",
+          "delegation_depth"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "object_type": {
+            "type": "string"
+          },
+          "object_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "command_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "delegation_depth": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AuthorityProof": {
+        "type": "object",
+        "description": "Internal canonical proof. For browser requests this is extracted from the bearer JWT and need not be sent in the body.",
+        "required": [
+          "proof_type",
+          "scope",
+          "issued_at",
+          "expires_at",
+          "signature"
+        ],
+        "properties": {
+          "proof_type": {
+            "type": "string",
+            "enum": [
+              "JWT",
+              "PASETO",
+              "DelegationChain"
+            ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AuthorityScope"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "signature": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "VectorClock": {
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "CommandEnvelope": {
+        "type": "object",
+        "required": [
+          "command_id",
+          "operation_id",
+          "command_type",
+          "schema_version",
+          "target",
+          "expected_version",
+          "expected_lifecycle_epoch",
+          "expected_authority_epoch",
+          "issued_at",
+          "vector_clock",
+          "correlation_id",
+          "causation_id",
+          "payload"
+        ],
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "command_type": {
+            "type": "string",
+            "enum": [
+              "notification.Acknowledge",
+              "approval.Approve",
+              "approval.Reject"
+            ]
+          },
+          "schema_version": {
+            "type": "string",
+            "enum": [
+              "1.0"
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/DomainObjectRef"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expected_lifecycle_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expected_authority_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "actor": {
+            "$ref": "#/components/schemas/ActorContext"
+          },
+          "authority_proof": {
+            "$ref": "#/components/schemas/AuthorityProof"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "vector_clock": {
+            "$ref": "#/components/schemas/VectorClock"
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "causation_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "CommandError": {
+        "type": "object",
+        "required": [
+          "code",
+          "category",
+          "retryability",
+          "safe_details",
+          "correlation_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "DOMAIN",
+              "AUTHORITY",
+              "CONCURRENCY",
+              "INFRASTRUCTURE"
+            ]
+          },
+          "retryability": {
+            "type": "string",
+            "enum": [
+              "RETRYABLE",
+              "NON_RETRYABLE",
+              "TRANSIENT"
+            ]
+          },
+          "safe_details": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "correlation_id": {
+            "type": "string"
+          }
+        }
+      },
+      "DomainEventEnvelope": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "aggregate_ref",
+          "aggregate_version",
+          "lifecycle_epoch",
+          "authority_epoch",
+          "operation_id",
+          "actor",
+          "occurred_at",
+          "recorded_at",
+          "vector_clock",
+          "correlation_id",
+          "causation_id",
+          "payload"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "aggregate_ref": {
+            "$ref": "#/components/schemas/DomainObjectRef"
+          },
+          "aggregate_version": {
+            "type": "integer"
+          },
+          "lifecycle_epoch": {
+            "type": "integer"
+          },
+          "authority_epoch": {
+            "type": "integer"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/ActorContext"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "vector_clock": {
+            "$ref": "#/components/schemas/VectorClock"
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "causation_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "CommandResult": {
+        "type": "object",
+        "required": [
+          "success",
+          "operation_id",
+          "events"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "new_version": {
+            "type": "integer"
+          },
+          "new_lifecycle_epoch": {
+            "type": "integer"
+          },
+          "new_authority_epoch": {
+            "type": "integer"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainEventEnvelope"
+            }
+          },
+          "result": {},
+          "error": {
+            "$ref": "#/components/schemas/CommandError"
+          }
+        }
+      },
+      "QueryEnvelope": {
+        "type": "object",
+        "required": [
+          "query_id",
+          "query_type",
+          "schema_version",
+          "organization_id",
+          "filters"
+        ],
+        "properties": {
+          "query_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "query_type": {
+            "type": "string",
+            "enum": [
+              "dashboard.summary",
+              "mission.list",
+              "mission.detail",
+              "task.list",
+              "task.detail",
+              "timeline.list",
+              "notification.list",
+              "approval.list",
+              "report.detail"
+            ]
+          },
+          "schema_version": {
+            "type": "string",
+            "enum": [
+              "1.0"
+            ]
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/ActorContext"
+          },
+          "authority_proof": {
+            "$ref": "#/components/schemas/AuthorityProof"
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "sort_by": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          }
+        }
+      },
+      "Freshness": {
+        "type": "object",
+        "required": [
+          "projection_version",
+          "last_updated_at",
+          "is_stale"
+        ],
+        "properties": {
+          "projection_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "is_stale": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QueryResponse": {
+        "type": "object",
+        "required": [
+          "query_id",
+          "data",
+          "has_more",
+          "next_cursor",
+          "freshness"
+        ],
+        "properties": {
+          "query_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "data": {
+            "type": "array",
+            "items": {}
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          },
+          "error": {
+            "$ref": "#/components/schemas/CommandError"
+          }
+        }
+      },
+      "EventSubscription": {
+        "type": "object",
+        "required": [
+          "type",
+          "filter"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "subscribe"
+            ]
+          },
+          "filter": {
+            "type": "object",
+            "required": [
+              "organization_id"
+            ],
+            "properties": {
+              "event_types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "aggregate_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "BadRequest",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            },
+            "example": {
+              "error": {
+                "code": "VALIDATION_ERROR",
+                "category": "DOMAIN",
+                "retryability": "NON_RETRYABLE",
+                "safe_details": {},
+                "correlation_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            },
+            "example": {
+              "error": {
+                "code": "UNAUTHORIZED",
+                "category": "DOMAIN",
+                "retryability": "NON_RETRYABLE",
+                "safe_details": {},
+                "correlation_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Forbidden",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            },
+            "example": {
+              "error": {
+                "code": "FORBIDDEN",
+                "category": "DOMAIN",
+                "retryability": "NON_RETRYABLE",
+                "safe_details": {},
+                "correlation_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "NotFound",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            },
+            "example": {
+              "error": {
+                "code": "NOT_FOUND",
+                "category": "DOMAIN",
+                "retryability": "NON_RETRYABLE",
+                "safe_details": {},
+                "correlation_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            },
+            "example": {
+              "error": {
+                "code": "VERSION_CONFLICT",
+                "category": "DOMAIN",
+                "retryability": "NON_RETRYABLE",
+                "safe_details": {},
+                "correlation_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "RateLimited",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            },
+            "example": {
+              "error": {
+                "code": "RATE_LIMITED",
+                "category": "DOMAIN",
+                "retryability": "NON_RETRYABLE",
+                "safe_details": {},
+                "correlation_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          }
+        }
+      },
+      "ServerError": {
+        "description": "ServerError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            },
+            "example": {
+              "error": {
+                "code": "INTERNAL_ERROR",
+                "category": "DOMAIN",
+                "retryability": "NON_RETRYABLE",
+                "safe_details": {},
+                "correlation_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

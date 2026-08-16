@@ -1,0 +1,254 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, 'feature/**', 'fix/**' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: onyx
+          POSTGRES_PASSWORD: onyx
+          POSTGRES_DB: onyx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U onyx -d onyx"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://onyx:onyx@127.0.0.1:5432/onyx
+      ONYX_DATABASE_KIND: postgres
+      ONYX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+          components: clippy, rustfmt
+      # desktop-shell (Tauri) links against GTK/WebKit. Without this the
+      # `cargo build --workspace` step below fails on a bare runner image
+      # with "gdk-3.0 not found" — reproduced directly during the audit.
+      - name: Install desktop-shell native dependencies (Tauri/GTK)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Ensure rustfmt is installed
+        run: rustup component add rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --workspace --release
+      # Several integration test suites (e.g.
+      # persistence-postgres/tests/concurrency_test.rs) connect straight
+      # to the `postgres` service and operate on `aggregates` et al.,
+      # assuming the schema already exists — they don't run migrations
+      # themselves, the same way an app process wouldn't. The only place
+      # migrations were previously applied was the later "Migration
+      # idempotency and rollback" step, which runs after Test, so the
+      # service container started every prior run with no schema at all.
+      - name: Run database migrations
+        run: cargo run --package migration-tool -- up
+      # desktop-shell's secure_storage tests exercise the real `keyring`
+      # crate against a live Secret Service, deliberately not mocked (see
+      # keyring_adapter.rs's own test doc comments). A bare ubuntu-latest
+      # runner has no D-Bus session bus or Secret Service daemon at all,
+      # so those tests fail with "No default store has been set" — not a
+      # code defect, a missing environment dependency. gnome-keyring is
+      # the standard fix CI pipelines use for the `keyring` crate itself.
+      - name: Start a D-Bus session and unlocked gnome-keyring (for secure_storage tests)
+        run: |
+          sudo apt-get install -y gnome-keyring dbus-x11
+          rm -f "$HOME/.local/share/keyrings/login.keyring"
+          mkdir -p "$HOME/.local/share/keyrings"
+          echo -n "" | gnome-keyring-daemon --unlock --login >/dev/null 2>&1 || true
+          eval "$(dbus-launch --sh-syntax)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_PID=$DBUS_SESSION_BUS_PID" >> "$GITHUB_ENV"
+          eval "$(printf '\n' | gnome-keyring-daemon --unlock --components=secrets --daemonize)"
+          echo "GNOME_KEYRING_CONTROL=$GNOME_KEYRING_CONTROL" >> "$GITHUB_ENV"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+      - name: Test
+        run: cargo test --workspace --release -- --test-threads=1
+      - name: Docs
+        run: cargo doc --workspace --no-deps
+      - name: Migration idempotency and rollback
+        run: |
+          cargo run --package migration-tool -- up
+          cargo run --package migration-tool -- up
+          cargo run --package migration-tool -- status
+          cargo run --package migration-tool -- down --target 0
+          cargo run --package migration-tool -- up
+      - name: Contract verification
+        run: bash scripts/verify/verify_team7.sh && bash scripts/verify/verify_team8.sh
+
+  deploy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.3
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.3
+      - name: Helm lint
+        run: |
+          helm lint deploy/helm/onyx-api
+          helm lint deploy/helm/onyx-worker
+          helm lint deploy/helm/onyx-sync-agent
+      - name: Terraform validate
+        run: |
+          terraform -chdir=deploy/terraform init -backend=false
+          terraform -chdir=deploy/terraform validate
+      - name: Docker build
+        run: |
+          docker build -f deploy/docker/api-server.Dockerfile .
+          docker build -f deploy/docker/worker.Dockerfile .
+          docker build -f deploy/docker/sync-agent.Dockerfile .
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npm run type-check
+      - run: npm test
+      - run: npm run test:a11y
+      - run: npm run feature-audit
+      - run: npm run build
+      - run: npm run bundle-check
+
+  load-smoke:
+    runs-on: ubuntu-latest
+    needs: check
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: onyx
+          POSTGRES_PASSWORD: onyx
+          POSTGRES_DB: onyx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U onyx -d onyx"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: grafana/setup-k6-action@v1
+      - name: Start API
+        env:
+          ONYX_ENV: test
+          ONYX_TEST_MODE: "1"
+          ONYX_COMMAND_RATE_LIMIT: "1000000"
+          ONYX_BIND: 127.0.0.1:3000
+          DATABASE_URL: sqlite://load-test.db?mode=rwc
+          ONYX_GOVERNANCE_DATABASE_URL: postgres://onyx:onyx@127.0.0.1:5432/onyx
+        run: |
+          cargo run --package api-server >api.log 2>&1 &
+          echo $! > api.pid
+          for i in {1..60}; do curl -fsS http://127.0.0.1:3000/health && break; sleep 1; done
+      - run: k6 run tests/load/smoke-test.js --vus 100 --duration 60s
+      - if: always()
+        run: kill "$(cat api.pid)" || true
+
+  mobile-dart:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Complete Flutter-owned platform scaffold
+        run: bash tool/ensure_platform_scaffold.sh
+      - run: flutter pub get
+      - run: flutter pub upgrade
+      - name: Apply automatic fixes (dart fix)
+        run: dart fix --apply || true
+      - name: Analyze (allow warnings for now)
+        run: flutter analyze --no-fatal-warnings
+      - run: flutter test
+      - name: Mobile structural contract
+        working-directory: .
+        run: bash scripts/verify/verify_mobile.sh
+
+  mobile-android:
+    runs-on: ubuntu-latest
+    needs: mobile-dart
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: bash mobile/tool/ensure_platform_scaffold.sh
+      - run: bash mobile/tool/build_rust_android.sh
+      - working-directory: mobile
+        run: flutter pub get
+      - working-directory: mobile
+        run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onyx-mobile-android-debug
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+
+  mobile-ios:
+    runs-on: macos-latest
+    needs: mobile-dart
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: bash mobile/tool/ensure_platform_scaffold.sh
+      - run: bash mobile/tool/build_rust_ios.sh
+      - working-directory: mobile
+        run: flutter pub get
+      - working-directory: mobile/ios
+        run: pod install
+      - working-directory: mobile
+        run: flutter build ios --simulator

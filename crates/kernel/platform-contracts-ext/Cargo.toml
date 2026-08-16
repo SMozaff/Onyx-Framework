@@ -1,0 +1,12 @@
+[package]
+name = "platform-contracts-ext"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Local Team-3 copy of platform-contracts, additively extended with AggregateRoot::conflict_pending() and ConflictPendingMarker per Architectural Ruling Q2 (Team 3 Initiation — Contract Reconciliation). Not the authoritative platform-contracts crate; Team 1 owns that. This copy exists solely so Increment 3 can compile against a conflict_pending() method that Team 1's delivered crate does not yet have."
+
+[dependencies]
+platform-kernel = { path = "../platform-kernel" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"

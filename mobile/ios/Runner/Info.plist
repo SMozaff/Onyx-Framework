@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key><string>ONYX</string>
+    <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>onyx_mobile</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$(FLUTTER_BUILD_NAME)</string>
+    <key>CFBundleVersion</key><string>$(FLUTTER_BUILD_NUMBER)</string>
+    <key>LSRequiresIPhoneOS</key><true/>
+    <key>UILaunchStoryboardName</key><string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key><string>Main</string>
+    <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+    <key>UIBackgroundModes</key><array><string>fetch</string><string>processing</string><string>bluetooth-central</string><string>bluetooth-peripheral</string></array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key><array><string>com.onyx.sync</string></array>
+    <key>NSBluetoothAlwaysUsageDescription</key><string>ONYX uses Bluetooth to synchronize authorized mission data with nearby devices.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>ONYX uses the local network for peer-to-peer synchronization.</string>
+    <key>NSBonjourServices</key><array><string>_onyx._tcp</string></array>
+</dict>
+</plist>

@@ -1,0 +1,119 @@
+name: ONYX Signed Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+  actions: read
+jobs:
+  release-binaries:
+    strategy:
+      matrix:
+        include:
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu}
+          - {os: macos-14, target: aarch64-apple-darwin}
+          - {os: windows-2022, target: x86_64-pc-windows-msvc}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
+      - uses: Swatinem/rust-cache@v2
+      - name: Resolve frozen dependency graph
+        run: cargo generate-lockfile
+      - run: cargo build --locked --release --target ${{ matrix.target }} -p api-server -p worker -p migration-tool -p sync-agent
+      - name: Package binaries
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/api-server* artifacts/ || true
+          cp target/${{ matrix.target }}/release/worker* artifacts/ || true
+          cp target/${{ matrix.target }}/release/migration-tool* artifacts/ || true
+          cp target/${{ matrix.target }}/release/sync-agent* artifacts/ || true
+          tar -czf "onyx-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" -C artifacts .
+      - name: Import GPG signing key
+        uses: crazy-max/ghaction-import-gpg@v7
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+      - name: GPG-sign binary package
+        shell: bash
+        run: gpg --batch --yes --armor --detach-sign "onyx-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: |
+            onyx-*.tar.gz
+            onyx-*.tar.gz.asc
+
+  release-images:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix: {service: [api-server, worker, sync-agent, migration-tool]}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v4
+      - name: Build and push immutable image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/${{ matrix.service }}.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}:${{ github.ref_name }}
+          provenance: true
+          sbom: true
+      - name: Attest image provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Cosign image digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Download Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@v0
+      - name: Generate SPDX 2.3 JSON SBOM
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}@${{ steps.build.outputs.digest }}
+        run: |
+          "${{ steps.syft.outputs.cmd }}" "$IMAGE" -o "spdx-json@2.3=onyx-${{ matrix.service }}.spdx.json"
+          test "$(jq -r .spdxVersion onyx-${{ matrix.service }}.spdx.json)" = "SPDX-2.3"
+      - name: Attest image SBOM
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: onyx-${{ matrix.service }}.spdx.json
+          push-to-registry: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.service }}
+          path: onyx-${{ matrix.service }}.spdx.json
+
+  publish:
+    runs-on: ubuntu-24.04
+    needs: [release-binaries, release-images]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {path: release-assets, merge-multiple: true}
+      - uses: actions/attest@v4
+        with: {subject-path: "release-assets/**"}
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/**

@@ -1,0 +1,19 @@
+allprojects {
+    // Same opt-in mirrors as settings.gradle — see the comment there. That
+    // block covers plugin resolution and this one dependency resolution;
+    // Gradle keeps the two repository lists separate, so both need it.
+    repositories {
+        if (System.getenv("ONYX_GRADLE_MIRRORS") == "1") {
+            maven { url "https://maven.aliyun.com/repository/google" }
+            maven { url "https://maven.aliyun.com/repository/public" }
+        }
+        google(); mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects { project.evaluationDependsOn(":app") }
+tasks.register("clean", Delete) { delete rootProject.buildDir }

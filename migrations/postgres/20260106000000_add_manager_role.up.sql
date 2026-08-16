@@ -1,0 +1,14 @@
+-- ONYX Phase 1 (Desktop & Web Completion), decision item 3: a distinct
+-- Manager role, separate from Admin, narrower permissions. Additive per
+-- `security_application::ports::user_store::UserStore`'s own doc comment
+-- ("Adding [roles] later is an additive change to UserRecord and does
+-- not alter this trait's shape").
+--
+-- Deliberately a second boolean column, not a replacement of is_admin
+-- with an enum/role table: Admin and Manager are not mutually exclusive
+-- tiers of one ranked role (an Admin is not merely "a bigger Manager"),
+-- and every existing is_admin check (e.g. the audit's H-01 user-
+-- management gating) continues to work unmodified. A fuller
+-- role/permission model was explicitly declined in favor of this
+-- narrower addition — see PLAN_Desktop_Web_Completion.md §7 item 3.
+ALTER TABLE users ADD COLUMN is_manager BOOLEAN NOT NULL DEFAULT FALSE;

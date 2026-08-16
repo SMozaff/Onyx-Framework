@@ -1,0 +1,26 @@
+[package]
+name = "crdt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "CRDT taxonomy (OR-Set, LWW-Register, MV-Register, PN-Counter, RGA), append-only causal log, and tombstone GC. Pure domain logic — no I/O, no async runtime. Depends on Team 1's real platform-kernel (per Architectural Ruling Q1, Team 3 Initiation)."
+
+[dependencies]
+platform-kernel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+rand = { workspace = true }
+
+[[test]]
+name = "determinism"
+path = "../../../tests/property/crdt_determinism.rs"
+harness = true
+
+[[test]]
+name = "tombstone_gc"
+path = "../../../tests/integration/tombstone_gc_tests.rs"
+harness = true

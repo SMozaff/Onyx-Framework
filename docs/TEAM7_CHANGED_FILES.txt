@@ -1,0 +1,81 @@
+# Team 7 Change Manifest
+
+New files: 56
+Modified files: 14
+Deleted files: 0
+
+## New
+- `TEAM7_README.md`
+- `TEAM7_VERIFICATION.md`
+- `crates/applications/audit-application/Cargo.toml`
+- `crates/applications/audit-application/src/lib.rs`
+- `crates/applications/audit-application/src/ports/audit_writer.rs`
+- `crates/applications/audit-application/src/ports/integrity.rs`
+- `crates/applications/audit-application/src/ports/mod.rs`
+- `crates/applications/security-application/Cargo.toml`
+- `crates/applications/security-application/src/lib.rs`
+- `crates/applications/security-application/src/ports/authority_verifier.rs`
+- `crates/applications/security-application/src/ports/mod.rs`
+- `crates/applications/security-application/src/ports/rate_limiter.rs`
+- `crates/applications/security-application/src/ports/secret_provider.rs`
+- `crates/applications/worker-application/src/ports/job_queue.rs`
+- `crates/bins/api-server/src/middleware/mod.rs`
+- `crates/bins/api-server/src/middleware/rate_limit.rs`
+- `crates/bins/worker/src/job_runner.rs`
+- `crates/bins/worker/src/lib.rs`
+- `crates/bins/worker/src/scheduler_loop.rs`
+- `crates/bins/worker/src/snapshot_loop.rs`
+- `crates/infrastructure/background-jobs/Cargo.toml`
+- `crates/infrastructure/background-jobs/src/lib.rs`
+- `crates/infrastructure/background-jobs/src/postgres_queue.rs`
+- `crates/infrastructure/background-jobs/src/sqlite_queue.rs`
+- `crates/infrastructure/observability-adapter/Cargo.toml`
+- `crates/infrastructure/observability-adapter/src/audit.rs`
+- `crates/infrastructure/observability-adapter/src/lib.rs`
+- `crates/infrastructure/observability-adapter/src/logging.rs`
+- `crates/infrastructure/observability-adapter/src/metrics.rs`
+- `crates/infrastructure/observability-adapter/src/tracing.rs`
+- `crates/infrastructure/security-adapter/Cargo.toml`
+- `crates/infrastructure/security-adapter/src/authority.rs`
+- `crates/infrastructure/security-adapter/src/lib.rs`
+- `crates/infrastructure/security-adapter/src/rate_limiter.rs`
+- `crates/infrastructure/security-adapter/src/secret_provider.rs`
+- `crates/team7-integration-tests/Cargo.toml`
+- `crates/team7-integration-tests/src/lib.rs`
+- `crates/team7-integration-tests/tests/integration.rs`
+- `migrations/postgres/20260103000000_add_job_queue.down.sql`
+- `migrations/postgres/20260103000000_add_job_queue.up.sql`
+- `migrations/postgres/20260104000000_add_rate_limit.down.sql`
+- `migrations/postgres/20260104000000_add_rate_limit.up.sql`
+- `migrations/sqlite/20260103000000_add_job_queue.down.sql`
+- `migrations/sqlite/20260103000000_add_job_queue.up.sql`
+- `migrations/sqlite/20260104000000_add_rate_limit.down.sql`
+- `migrations/sqlite/20260104000000_add_rate_limit.up.sql`
+- `scripts/verify/verify_team7.sh`
+- `scripts/verify/verify_team7_static.py`
+- `tests/integration/audit_integrity_tests.rs`
+- `tests/integration/authority_verifier_tests.rs`
+- `tests/integration/job_queue_tests.rs`
+- `tests/integration/log_redaction_tests.rs`
+- `tests/integration/rate_limiter_tests.rs`
+- `tests/integration/scheduler_tests.rs`
+- `tests/integration/secret_rotation_tests.rs`
+- `tests/integration/tracing_tests.rs`
+
+## Modified
+- `Cargo.toml`
+- `DECISIONS.md`
+- `Structure.md`
+- `crates/applications/worker-application/src/ports/mod.rs`
+- `crates/bins/api-server/Cargo.toml`
+- `crates/bins/api-server/src/command_handler.rs`
+- `crates/bins/api-server/src/lib.rs`
+- `crates/bins/api-server/src/main.rs`
+- `crates/bins/api-server/src/routes/auth.rs`
+- `crates/bins/api-server/src/routes/command.rs`
+- `crates/bins/api-server/src/routes/mod.rs`
+- `crates/bins/migration-tool/src/main.rs`
+- `crates/bins/worker/Cargo.toml`
+- `crates/bins/worker/src/main.rs`
+
+## Deleted

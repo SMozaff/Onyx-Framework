@@ -1,0 +1,42 @@
+[package]
+name = "desktop-shell"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "desktop_shell_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "desktop-shell"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+client-composition.workspace = true
+platform-kernel.workspace = true
+platform-contracts.workspace = true
+query-application.workspace = true
+persistence-sqlite.workspace = true
+sync-transport.workspace = true
+lan-discovery.workspace = true
+tauri = { version = "2.11", features = [] }
+keyring = { version = "4", features = ["v1"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+sqlx.workspace = true
+async-trait.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

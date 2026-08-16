@@ -1,0 +1,45 @@
+[package]
+name = "synchronization-domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "SynchronizationSession lifecycle, MergeStrategy dispatcher, ConflictRecord aggregate, and event-sourced escalation. Depends on Team 1's real platform-kernel/platform-contracts (Architectural Ruling Q1) plus the local platform-contracts-ext extension (Ruling Q2)."
+
+[dependencies]
+platform-kernel = { workspace = true }
+platform-contracts = { workspace = true }
+platform-contracts-ext = { workspace = true }
+crdt = { workspace = true }
+query-application = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+proptest = { workspace = true }
+rand = { workspace = true }
+sync-test-utils = { workspace = true }
+
+[[test]]
+name = "conflict"
+path = "../../../tests/integration/conflict_tests.rs"
+harness = true
+
+[[test]]
+name = "escalation"
+path = "../../../tests/integration/escalation_tests.rs"
+harness = true
+
+[[test]]
+name = "replay_window"
+path = "../../../tests/integration/replay_window_tests.rs"
+harness = true
+
+[[test]]
+name = "session"
+path = "../../../tests/integration/session_tests.rs"
+harness = true

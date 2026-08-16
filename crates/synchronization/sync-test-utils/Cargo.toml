@@ -1,0 +1,20 @@
+[package]
+name = "sync-test-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Shared test mocks (in-memory Repository/UnitOfWorkFactory/ConflictRepository) and proptest generators for crdt and synchronization-domain test suites, built against Team 1's real platform-kernel/platform-contracts."
+
+[dependencies]
+platform-kernel = { workspace = true }
+platform-contracts = { workspace = true }
+platform-contracts-ext = { workspace = true }
+query-application = { workspace = true }
+crdt = { workspace = true }
+synchronization-domain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+proptest = { workspace = true }
+rand = { workspace = true }

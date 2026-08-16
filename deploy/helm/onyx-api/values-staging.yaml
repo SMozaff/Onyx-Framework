@@ -1,0 +1,4 @@
+replicaCount: 2
+image: {tag: "staging"}
+ingress: {host: api.staging.onyx.example.com, tlsSecret: onyx-api-staging-tls}
+autoscaling: {minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 75}

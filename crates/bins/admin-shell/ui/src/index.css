@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* ONYX design tokens — deliberately minimal (a functional operations
+   console, not a marketing site). Tailwind v4 is CSS-first: this
+   @theme block is the entire "theme config" (no tailwind.config.js —
+   see DECISIONS.md for why: Tailwind v4 removed the JS config file in
+   favor of this, verified against the real, current Tailwind docs
+   before setting the project up this way). */
+@theme {
+  --color-onyx-bg: #0b0d12;
+  --color-onyx-surface: #14171f;
+  --color-onyx-surface-hover: #1b1f2a;
+  --color-onyx-border: #262b38;
+  --color-onyx-text: #e4e6eb;
+  --color-onyx-text-dim: #8b93a7;
+  --color-onyx-accent: #4f8cff;
+
+  --color-onyx-status-draft: #8b93a7;
+  --color-onyx-status-active: #4f8cff;
+  --color-onyx-status-review: #d9a441;
+  --color-onyx-status-approved: #3fb27f;
+  --color-onyx-status-blocked: #e5484d;
+  --color-onyx-status-closed: #5c6270;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-onyx-bg);
+  color: var(--color-onyx-text);
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}

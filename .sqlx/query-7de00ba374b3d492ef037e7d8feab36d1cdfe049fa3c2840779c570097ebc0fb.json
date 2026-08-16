@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox SET published = TRUE, lease_token = NULL, lease_expires_at = NULL WHERE outbox_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7de00ba374b3d492ef037e7d8feab36d1cdfe049fa3c2840779c570097ebc0fb"
+}

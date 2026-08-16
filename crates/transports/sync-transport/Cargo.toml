@@ -1,0 +1,54 @@
+[package]
+name = "sync-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# Exposes MockTransport and PeerInfo::dummy()/dummy_no_endpoints() so the
+# separate tests/integration/*.rs binaries can use them. See DECISIONS.md.
+test-support = []
+
+[dependencies]
+platform-kernel = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+
+[dev-dependencies]
+# tokio is a dev-dependency only: it drives the test runtime
+# (#[tokio::test]) but production code never names it directly, per Team
+# Prompt 4 §8.1's explicit constraint (distinct from messaging-adapter,
+# which does use tokio directly in production per its own contract).
+tokio = { workspace = true }
+sync-transport = { path = ".", features = ["test-support"] }
+rcgen = { workspace = true }
+# Test-only: enables rustls's insecure cert-verification bypass, used by
+# tests/quic_nat_tests.rs to talk to its own self-signed test certificate.
+# The code that USES this feature already lives entirely in
+# tests/quic_nat_tests.rs (a separate integration test binary, never in
+# src/), so it was never reachable from library code by file location.
+#
+# Verified empirically (not assumed) that `cargo build --lib` / `cargo
+# check --lib` do NOT see this feature (real production/release builds are
+# unaffected), but `cargo test` DOES unify it into the lib target's build
+# of the `rustls` crate, because Cargo unifies a dependency's features
+# across [dependencies] and [dev-dependencies] within one package. This
+# means the ITEMS gated behind `dangerous_configuration` (e.g.
+# `rustls::client::ServerCertVerifier`) become resolvable from anywhere in
+# this package, including src/, for the duration of a `cargo test` build —
+# though nothing in src/ actually references them. A `#[cfg(test)]` guard
+# would not change this: the leak is a property of which features `rustls`
+# itself is compiled with, not of which of *our* modules are cfg-gated.
+# Accepted as low risk since production/release builds are unaffected.
+rustls = { workspace = true, features = ["dangerous_configuration"] }
+
+[lints.clippy]
+all = "warn"
