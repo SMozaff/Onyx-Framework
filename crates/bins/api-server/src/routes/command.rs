@@ -211,6 +211,43 @@ impl AggregateRoot for ApprovalAggregate {
     }
 }
 
+/// Confirms the caller is a Team Leader (or Admin) — the class design
+/// doc §2.2 confirms carries "real, standing... authority to pre-check
+/// Todo/Target items" (see
+/// `security_application::ports::user_store::UserClass::TeamLeader`'s
+/// own doc comment). **Added 2026-08-16, closing a real gap**: this
+/// crate's own `todo_list.*`/`target_list.*` dispatch comment
+/// previously stated `RecordTeamLeaderPreCheck` is "not gated here" —
+/// true for verifier authority (D.4, correctly not required, since a
+/// pre-check never gates verification per design doc §2.2), but that
+/// reasoning had silently conflated "does this action gate
+/// verification" with "who may perform this action" — the *class*
+/// requirement (only a Team Leader may record one) had no check at
+/// all, meaning any authenticated user could record a pre-check on any
+/// list. This helper closes that gap without touching the non-gating
+/// behavior, which remains correct and unchanged.
+async fn require_team_leader_or_admin(
+    state: &ApiState,
+    actor: &ActorContext,
+) -> Result<(), crate::CommandError> {
+    let user_id = uuid::Uuid::from_bytes(actor.user_id.0).to_string();
+    let user = state
+        .user_store
+        .find_by_id(&user_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or_else(|| crate::CommandError::Domain("actor not found".to_string()))?;
+    let permitted =
+        user.is_admin || user.class == Some(security_application::UserClass::TeamLeader);
+    if permitted {
+        Ok(())
+    } else {
+        Err(crate::CommandError::Domain(
+            "only a Team Leader (or Admin) may record a pre-check".to_string(),
+        ))
+    }
+}
+
 /// Loads the `todo_list`/`target_list` aggregate at `target_id` and
 /// confirms the caller (`actor`) is an authorized verifier for its
 /// `owner`, per `verifier_resolution::is_authorized_verifier` (D.4).
@@ -677,18 +714,20 @@ pub async fn command_route(
             // Verifier authorization (D.4, added 2026-08-16): only
             // `VerifyTodoList`/`RejectTodoList`/`EscalateTodoList`
             // require the caller to be an authorized verifier per
-            // `verifier_resolution::is_authorized_verifier` — the other
-            // todo_list.* commands (AddItem, SubmitTodoList,
-            // RecordTeamLeaderPreCheck) are performed by the owner or a
-            // Team Leader, not a verifying Manager, and are not gated
-            // here (per design doc §4.0.1's bidirectional-creation rule
-            // and §2.2's non-gating pre-check). This check loads the
-            // current aggregate state first specifically to read
-            // `owner` — the same load `handle_command` performs
-            // internally moments later, so this is a real second read,
-            // accepted as the simplest correct implementation rather
-            // than threading owner-lookup through `handle_command`'s
-            // generic signature.
+            // `verifier_resolution::is_authorized_verifier` — `AddItem`/
+            // `SubmitTodoList` are performed by the owner (design doc
+            // §4.0.1's bidirectional-creation rule), not a verifying
+            // Manager, and are not gated here. `RecordTeamLeaderPreCheck`
+            // has its own, separate class-based gate below
+            // (`require_team_leader_or_admin`, added 2026-08-16) — see
+            // that function's doc comment for why this was a real gap
+            // this dispatch comment previously described incorrectly.
+            // This check loads the current aggregate state first
+            // specifically to read `owner` — the same load
+            // `handle_command` performs internally moments later, so
+            // this is a real second read, accepted as the simplest
+            // correct implementation rather than threading owner-lookup
+            // through `handle_command`'s generic signature.
             cmd if cmd.starts_with("todo_list.") => {
                 if matches!(
                     envelope.command_type.as_str(),
@@ -697,6 +736,9 @@ pub async fn command_route(
                         | "todo_list.EscalateTodoList"
                 ) {
                     require_verifier_authority(&state, &actor, target_id, "todo_list").await?;
+                }
+                if envelope.command_type == "todo_list.RecordTeamLeaderPreCheck" {
+                    require_team_leader_or_admin(&state, &actor).await?;
                 }
                 let command: todo_domain::TodoListCommand =
                     serde_json::from_value(envelope.payload.clone()).map_err(|e| {
@@ -727,6 +769,9 @@ pub async fn command_route(
                         | "target_list.EscalateTargetList"
                 ) {
                     require_verifier_authority(&state, &actor, target_id, "target_list").await?;
+                }
+                if envelope.command_type == "target_list.RecordTeamLeaderPreCheck" {
+                    require_team_leader_or_admin(&state, &actor).await?;
                 }
                 let command: todo_domain::TargetListCommand =
                     serde_json::from_value(envelope.payload.clone()).map_err(|e| {
