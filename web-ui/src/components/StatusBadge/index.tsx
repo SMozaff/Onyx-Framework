@@ -11,12 +11,17 @@ const labels: Record<string, string> = {
   // itself is PascalCase ("TeamLeaderPreChecked", "Verified", etc.).
   draft: 'Draft', submitted: 'Submitted', teamleaderprechecked: 'Pre-checked',
   verified: 'Verified', escalated: 'Escalated',
+  // StaffLoan (todo_domain::state_machine::StaffLoanStatus). 'active'
+  // is already defined above (Mission/Task) and applies unchanged here
+  // too — a loan being Active genuinely is the same "success" tone.
+  requested: 'Requested', declined: 'Declined', extended: 'Extended',
+  ended: 'Ended', expired: 'Expired',
 };
 
 export function statusTone(status: string): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
-  if (['active', 'approved', 'acknowledged', 'online', 'connected', 'complete', 'verified'].includes(status)) return 'success';
-  if (['paused', 'pending', 'blocked', 'connecting', 'upcoming', 'submitted', 'teamleaderprechecked'].includes(status)) return 'warning';
-  if (['rejected', 'halted', 'critical', 'disconnected', 'failed', 'escalated'].includes(status)) return 'danger';
+  if (['active', 'approved', 'acknowledged', 'online', 'connected', 'complete', 'verified', 'extended'].includes(status)) return 'success';
+  if (['paused', 'pending', 'blocked', 'connecting', 'upcoming', 'submitted', 'teamleaderprechecked', 'requested'].includes(status)) return 'warning';
+  if (['rejected', 'halted', 'critical', 'disconnected', 'failed', 'escalated', 'declined'].includes(status)) return 'danger';
   if (['syncing', 'processing'].includes(status)) return 'info';
   // 'draft' is intentionally absent from every bucket above and falls
   // through to 'neutral' below — a frozen wire-contract test
@@ -26,7 +31,9 @@ export function statusTone(status: string): 'success' | 'warning' | 'danger' | '
   // that contract. `TodoList`'s `Draft` status lowercases to the same
   // 'draft' key that Mission/Task already used, so no separate handling
   // is needed — the existing neutral fallback is already correct for
-  // both.
+  // both. `StaffLoan`'s terminal 'Ended'/'Expired' also fall through to
+  // neutral — deliberately not 'danger': ending a loan (early or on
+  // schedule) is a normal outcome per design doc §2.1, not a failure.
   return 'neutral';
 }
 

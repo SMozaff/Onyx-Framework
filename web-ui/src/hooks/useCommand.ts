@@ -5,6 +5,7 @@ import type {
   ApprovalProjection,
   ListOrigin,
   NotificationProjection,
+  StaffLoanProjection,
   TargetListProjection,
   TodoListProjection,
   VerificationOutcome,
@@ -202,6 +203,98 @@ export function useDecideList(kind: 'todo_list' | 'target_list') {
       const verb =
         variables.decision === 'verify' ? 'Verified' : variables.decision === 'reject' ? 'Rejected' : 'Escalated';
       showToast(`${verb}.`, 'success');
+    },
+    onError: (error) => showToast(normalizeError(error).message, 'error'),
+  });
+}
+
+/**
+ * Request a new `StaffLoan` — routed through the dedicated REST route
+ * (`POST /api/todo/staff-loans`), not `/api/command`: `RequestStaffLoan`
+ * is `create()`-routed, same reason `useCreateTodoList`/
+ * `useCreateTargetList` above bypass `executeCommand`. Starts in
+ * `Requested`, awaiting the real owner's approval via
+ * `useDecideStaffLoan` below — design doc §2.1.
+ */
+export function useRequestStaffLoan() {
+  const client = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: (input: {
+      staff_user_id: string;
+      real_owner_id: string;
+      borrowing_manager_id: string;
+      start_at_ms: number;
+      end_at_ms: number;
+    }) => apiClient.post<{ staff_loan_id: string }>('/api/todo/staff-loans', input).then((r) => r.data),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['staff_loan.list'] });
+      showToast('Staff loan requested.', 'success');
+    },
+    onError: (error) => showToast(normalizeError(error).message, 'error'),
+  });
+}
+
+/**
+ * Approve/decline/extend/end a `StaffLoan`. Deliberately does not
+ * cover `ExpireStaffLoan` — per `todo_domain::command::StaffLoanCommand`'s
+ * own doc comment, that command is invoked only by the scheduled
+ * background job (design doc §2.1's advance-warning/expiry job), never
+ * by a user action, so no UI surface exists for it here.
+ *
+ * Design doc §2.1's three distinct approval gates, resolved
+ * 2026-08-16, are not enforced client-side — the same rule this file's
+ * other decision hooks follow: the server is the source of truth
+ * (`ApproveStaffLoan`/`DeclineStaffLoan` are real-owner-only,
+ * `ExtendStaffLoan` requires the staff member's own approval,
+ * `EndStaffLoanEarly` requires no approval from anyone), and an
+ * unauthorized caller gets a real domain error back, surfaced via the
+ * existing toast path.
+ */
+export function useDecideStaffLoan() {
+  const client = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: ({
+      loan,
+      decision,
+      reason,
+      newEndAtMs,
+    }: {
+      loan: StaffLoanProjection;
+      decision: 'approve' | 'decline' | 'extend' | 'end';
+      reason?: string;
+      newEndAtMs?: number;
+    }) => {
+      const commandType =
+        decision === 'approve'
+          ? 'staff_loan.ApproveStaffLoan'
+          : decision === 'decline'
+            ? 'staff_loan.DeclineStaffLoan'
+            : decision === 'extend'
+              ? 'staff_loan.ExtendStaffLoan'
+              : 'staff_loan.EndStaffLoanEarly';
+      const payload =
+        decision === 'approve' || decision === 'end'
+          ? commandType.split('.')[1]
+          : decision === 'decline'
+            ? { DeclineStaffLoan: { reason: reason ?? '' } }
+            : { ExtendStaffLoan: { new_end_at: Math.round((newEndAtMs ?? 0) * 1_000_000) } };
+      return executeCommand({
+        command_type: commandType,
+        target: { id: loan.id, type: 'staff_loan', organization_id: organizationId() },
+        expected_version: loan.version,
+        expected_lifecycle_epoch: loan.lifecycle_epoch,
+        expected_authority_epoch: loan.authority_epoch,
+        payload,
+      });
+    },
+    onSuccess: async (_, variables) => {
+      await client.invalidateQueries({ queryKey: ['staff_loan.list'] });
+      const verbs: Record<typeof variables.decision, string> = {
+        approve: 'Approved', decline: 'Declined', extend: 'Extended', end: 'Ended',
+      };
+      showToast(`${verbs[variables.decision]}.`, 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });

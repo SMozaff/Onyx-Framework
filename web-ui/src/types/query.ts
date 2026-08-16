@@ -177,3 +177,18 @@ export interface TargetListProjection extends VersionedProjection {
   status: TodoListStatus;
   team_leader_pre_check?: TeamLeaderPreCheckProjection;
 }
+
+/**
+ * Wire status values for `StaffLoan` — see
+ * `todo_domain::state_machine::StaffLoanStatus`. Same PascalCase
+ * convention as `TodoListStatus` above.
+ */
+export type StaffLoanStatus = 'Requested' | 'Declined' | 'Active' | 'Extended' | 'Ended' | 'Expired';
+
+export interface StaffLoanProjection extends VersionedProjection {
+  staff_user_id: string;
+  real_owner_id: string;
+  borrowing_manager_id: string;
+  window: { start_at: number; end_at: number };
+  status: StaffLoanStatus;
+}

@@ -81,7 +81,11 @@ export interface CommandInput<T = unknown> {
     | 'target_list.SubmitTargetList'
     | 'target_list.VerifyTargetList'
     | 'target_list.RejectTargetList'
-    | 'target_list.EscalateTargetList';
+    | 'target_list.EscalateTargetList'
+    | 'staff_loan.ApproveStaffLoan'
+    | 'staff_loan.DeclineStaffLoan'
+    | 'staff_loan.ExtendStaffLoan'
+    | 'staff_loan.EndStaffLoanEarly';
   target: DomainObjectRef;
   expected_version: number;
   expected_lifecycle_epoch: number;
