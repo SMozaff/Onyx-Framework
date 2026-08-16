@@ -28,6 +28,10 @@ pub struct NotificationAggregate {
     pub message: String,
     pub priority: String,
     pub status: String,
+    /// The user this notification is addressed to. Legacy notifications
+    /// predate recipient targeting, so they deserialize as `None`.
+    #[serde(default)]
+    pub recipient_id: Option<String>,
     pub source_id: String,
     pub source_type: String,
     pub created_at: String,
@@ -694,10 +698,10 @@ pub async fn command_route(
                 ) {
                     require_verifier_authority(&state, &actor, target_id, "todo_list").await?;
                 }
-                let command: todo_domain::TodoListCommand = serde_json::from_value(
-                    envelope.payload.clone(),
-                )
-                .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?;
+                let command: todo_domain::TodoListCommand =
+                    serde_json::from_value(envelope.payload.clone()).map_err(|e| {
+                        crate::CommandError::Domain(format!("invalid payload: {e}"))
+                    })?;
                 crate::handle_command::<todo_domain::TodoList, _, _, _>(
                     command,
                     target_id,
@@ -724,10 +728,10 @@ pub async fn command_route(
                 ) {
                     require_verifier_authority(&state, &actor, target_id, "target_list").await?;
                 }
-                let command: todo_domain::TargetListCommand = serde_json::from_value(
-                    envelope.payload.clone(),
-                )
-                .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?;
+                let command: todo_domain::TargetListCommand =
+                    serde_json::from_value(envelope.payload.clone()).map_err(|e| {
+                        crate::CommandError::Domain(format!("invalid payload: {e}"))
+                    })?;
                 crate::handle_command::<todo_domain::TargetList, _, _, _>(
                     command,
                     target_id,
@@ -746,10 +750,10 @@ pub async fn command_route(
                 .await
             }
             cmd if cmd.starts_with("staff_loan.") => {
-                let command: todo_domain::StaffLoanCommand = serde_json::from_value(
-                    envelope.payload.clone(),
-                )
-                .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?;
+                let command: todo_domain::StaffLoanCommand =
+                    serde_json::from_value(envelope.payload.clone()).map_err(|e| {
+                        crate::CommandError::Domain(format!("invalid payload: {e}"))
+                    })?;
                 crate::handle_command::<todo_domain::StaffLoan, _, _, _>(
                     command,
                     target_id,

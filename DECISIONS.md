@@ -1165,3 +1165,67 @@ screens. Also unbuilt, unchanged from `todo_domain::lib`'s own
 documented scope: Phase E's escalation routing/target-selection logic
 (only the recording commands exist), and any Postgres-specific runtime
 verification of the C.3 job (see caveat above).
+
+---
+
+## Live PostgreSQL verification of C.3 (staff-loan background job) — closed 2026-08-16
+
+Following the previous entry's explicit caveat (C.3's raw SQL never run
+against a live Postgres, no Postgres available in the build sandbox),
+the code was handed off to a Manus AI agent with access to a real
+Postgres instance, via a git bundle (`onyx-todo-domain.bundle`) built
+on the same commit lineage.
+
+**Result: verified, and a real bug was found and fixed.**
+
+Manus provisioned PostgreSQL 16.14, applied the repository's migrations,
+and wrote a new live integration test —
+`worker::staff_loan_scheduler::postgres_integration_tests::staff_loan_warning_and_expiry_round_trip_on_postgres`
+— that inserts a real `staff_loan` row and drives both the
+advance-warning and expiry paths end to end against the database,
+asserting on actual persisted state rather than mocked behavior. The
+test is a documented no-op when `DATABASE_URL` is unset or
+non-Postgres (confirmed by re-running `cargo test --package worker`
+without `DATABASE_URL` set: the test completes in ~0ms, not skipped
+silently but printing why).
+
+**Bug found**: `job_runner.rs`'s notification-insertion loop computed
+each recipient's user id (staff member, real owner, borrowing manager)
+correctly via `staff_loan_recipients()`, but then discarded it with
+`let _ = recipient_id;` before writing the notification row — so all
+three notifications were inserted with no field identifying who they
+were addressed to. This was a real defect in the original
+implementation, not a testing artifact.
+
+**Fix**: added `recipient_id: Option<String>` to
+`api_server::routes::command::NotificationAggregate`, marked
+`#[serde(default)]` so existing/legacy notifications without the field
+still deserialize correctly, and threaded the real recipient id through
+`insert_notification()` in both the advance-warning and expiry
+handlers. The new Postgres test asserts the exact set of three
+recipient ids (via `BTreeSet` comparison against the staff member's,
+real owner's, and borrowing manager's actual ids) for both
+notification types, not just a count — so a regression here would be
+caught, not just "3 rows exist."
+
+**Re-verified in this sandbox** after pulling Manus's changes back in:
+`cargo check --package worker`, `cargo clippy --package worker -- -D
+warnings`, and `cargo check`/`clippy`/`test --package api-server` (22
+tests, matching Manus's reported count) all pass clean from a cold
+build cache. `cargo test --package worker` without `DATABASE_URL` set
+correctly no-ops the new test rather than failing.
+
+**Status**: the C.3 background job is now fully verified — compiled,
+clippy-clean, unit-tested (`todo-domain`'s 42 tests covering the domain
+logic it depends on), and live-tested against a real PostgreSQL
+instance for both its scan and execution paths. See
+`IMPLEMENTATION_PLAN_User_Hierarchy.md` §11.3 for the updated technical
+detail (the original caveat text is kept, collapsed, for the historical
+record rather than deleted).
+
+**Remaining, unrelated to this feature**: the workspace's
+Docker-backed Testcontainers `e2e` test package could not be run in
+either sandbox (no Docker daemon/socket available in this one, nor in
+Manus's). This is a pre-existing gap in the broader workspace's test
+infrastructure, not something this feature introduced or is
+responsible for closing.

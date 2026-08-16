@@ -605,8 +605,38 @@ SQL plus a `domain_events`/`outbox` insert — the same "mutate
 `execute_timeline_trigger` already established, not a new one invented
 for this feature.
 
-**Verification status — explicit, not overstated**: compiles clean,
-clippy clean. The exact JSON shape this SQL depends on
+**Verification status — updated 2026-08-16 (live Postgres, via Manus AI
+agent handoff)**: this job was subsequently verified against a real
+PostgreSQL 16.14 instance, closing the gap flagged when this section
+was first written (see the superseded caveat text kept below for the
+record). A new test,
+`worker::staff_loan_scheduler::postgres_integration_tests::staff_loan_warning_and_expiry_round_trip_on_postgres`,
+inserts a real `staff_loan` row, drives both the advance-warning and
+expiry paths end to end against a live database, and asserts on the
+actual persisted state — `jsonb_set` correctly adding the new
+top-level `advance_warning_sent_at` key, the warning-dedup guard
+correctly suppressing a second job on a repeat scan, `status` flipping
+to `Expired`, and both `domain_events`/`outbox` rows landing correctly.
+The test is a documented no-op when `DATABASE_URL` is unset or
+non-Postgres, so it doesn't affect ordinary `cargo test` runs.
+
+**A real bug was found and fixed during this verification**: the
+worker's notification-insertion loop computed each recipient's id
+correctly but then discarded it before writing the notification row
+(`let _ = recipient_id;`), so all three notifications (staff member,
+real owner, borrowing manager) were inserted with no way to tell who
+they were for. Fixed by adding a backward-compatible
+`recipient_id: Option<String>` field to `NotificationAggregate`
+(`#[serde(default)]`, so existing notifications without it still
+deserialize) and actually persisting it. The new Postgres test asserts
+the exact recipient id set for both the warning and expiry
+notifications, not just the count, so this class of bug can't recur
+silently.
+
+<details>
+<summary>Superseded caveat, kept for the record (as originally written, before live verification)</summary>
+
+Compiles clean, clippy clean. The exact JSON shape this SQL depends on
 (`state->>'status'` as a bare string, `state->'window'->>'end_at'` as a
 nested bare integer) was confirmed against `todo_domain::StaffLoan`'s
 real serialized output via a throwaway integration test, not assumed.
@@ -619,6 +649,8 @@ explicitly rather than implied to be covered by the other testing done
 this session — before relying on this job in a Postgres-backed
 deployment, run it once against a real database and confirm the two
 `UPDATE ... jsonb_set(...)` statements behave as documented.
+
+</details>
 
 ### 11.4 — D.4, verifier-resolution
 
@@ -683,16 +715,24 @@ Team Leader who performed the check returned the full record including
 
 - **No UI work** — `desktop-shell`, `admin-shell`, `web-ui` have no
   todo/target/loan screens. Explicitly out of scope for this session's
-  work, per the person's own choice.
+  work, per the person's own choice. This is now the largest remaining
+  piece of user-facing work for this feature.
 - **Phase E's actual escalation routing/target-selection logic** —
   `EscalateTodoList`/`EscalateTargetList` record that escalation was
   invoked and why; nothing resolves *who* an escalation goes to. D.4's
   verifier-resolution module has a documented gap here rather than a
   silent one.
-- **The C.3 background job's SQL, unverified against real Postgres** —
-  see §11.3's caveat above. This is the one piece of this session's
-  work that was not live-tested, and should be the first thing checked
-  before this job runs against a production Postgres deployment.
+- ~~The C.3 background job's SQL, unverified against real Postgres~~
+  — **closed 2026-08-16**, via a follow-up handoff to a Manus AI agent
+  with access to a real Postgres instance. See §11.3's updated text
+  above for the live verification and the real recipient-persistence
+  bug it found and fixed.
+- **Docker-backed E2E test suite could not be run** — the Manus
+  verification pass reached the Testcontainers-based `e2e` package but
+  could not execute those 4 journeys (no Docker daemon/socket available
+  in that sandbox either). Not part of this feature's own scope, but
+  worth noting as a still-open verification gap for the workspace more
+  broadly, unrelated to Todo/Target/StaffLoan specifically.
 - **Phase B.4** (how a new org's first Admin credential reaches the
   customer) — unchanged, still small and open, unrelated to this
   session's work.

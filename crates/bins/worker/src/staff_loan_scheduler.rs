@@ -51,7 +51,10 @@ pub const ADVANCE_WARNING_LEAD: Duration = Duration::from_secs(60 * 60 * 60); //
 /// risking missing it.
 pub const STAFF_LOAN_SCAN_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
-pub async fn run_staff_loan_scheduler(queue: std::sync::Arc<dyn JobQueue>, pool: PgPool) -> anyhow::Result<()> {
+pub async fn run_staff_loan_scheduler(
+    queue: std::sync::Arc<dyn JobQueue>,
+    pool: PgPool,
+) -> anyhow::Result<()> {
     loop {
         let enqueued = staff_loan_scan_tick_postgres(queue.as_ref(), &pool, Utc::now()).await?;
         if enqueued > 0 {
@@ -154,10 +157,7 @@ async fn enqueue_staff_loan_job(
     job_type: &str,
 ) -> anyhow::Result<()> {
     let organization_uuid = uuid::Uuid::parse_str(organization_id)?;
-    let staff_user_id = state
-        .get("staff_user_id")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let staff_user_id = state.get("staff_user_id").cloned().unwrap_or(Value::Null);
     let real_owner_id = state.get("real_owner_id").cloned().unwrap_or(Value::Null);
     let borrowing_manager_id = state
         .get("borrowing_manager_id")
@@ -190,4 +190,214 @@ async fn enqueue_staff_loan_job(
 
 fn chrono_to_nanos(dt: DateTime<Utc>) -> i64 {
     dt.timestamp_nanos_opt().unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod postgres_integration_tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+    use background_jobs::PostgresJobQueue;
+    use sqlx::postgres::PgPoolOptions;
+    use worker_application::JobQueue;
+
+    /// Executes the scheduler and its two staff-loan job handlers against a
+    /// real PostgreSQL database when `DATABASE_URL` is supplied. The test is
+    /// intentionally a no-op for ordinary developer runs without PostgreSQL;
+    /// CI or an explicit live-Postgres run supplies the connection URL.
+    #[tokio::test]
+    async fn staff_loan_warning_and_expiry_round_trip_on_postgres() -> anyhow::Result<()> {
+        let Ok(database_url) = std::env::var("DATABASE_URL") else {
+            eprintln!(
+                "skipping live PostgreSQL staff-loan integration test: DATABASE_URL is unset"
+            );
+            return Ok(());
+        };
+        if !database_url.starts_with("postgres") {
+            eprintln!("skipping live PostgreSQL staff-loan integration test: DATABASE_URL is not PostgreSQL");
+            return Ok(());
+        }
+
+        let pool = PgPoolOptions::new()
+            .max_connections(4)
+            .connect(&database_url)
+            .await?;
+        let queue = PostgresJobQueue::new(pool.clone());
+        let organization_id = uuid::Uuid::new_v4();
+        let staff_loan_id = uuid::Uuid::new_v4();
+        let staff_user_id = uuid::Uuid::new_v4();
+        let real_owner_id = uuid::Uuid::new_v4();
+        let borrowing_manager_id = uuid::Uuid::new_v4();
+        let now = Utc::now();
+        let future_end_at = chrono_to_nanos(now + chrono::Duration::days(1));
+
+        let state = json!({
+            "public_id": staff_loan_id.to_string(),
+            "status": "Active",
+            "staff_user_id": staff_user_id.as_bytes(),
+            "real_owner_id": real_owner_id.as_bytes(),
+            "borrowing_manager_id": borrowing_manager_id.as_bytes(),
+            "window": {
+                "start_at": chrono_to_nanos(now - chrono::Duration::days(1)),
+                "end_at": future_end_at,
+            },
+        });
+        sqlx::query(
+            "INSERT INTO aggregates (id, aggregate_type, organization_id, version, lifecycle_epoch, authority_epoch, state, updated_at) \
+             VALUES ($1, 'staff_loan', $2, 1, 0, 0, $3, NOW())",
+        )
+        .bind(staff_loan_id)
+        .bind(organization_id)
+        .bind(&state)
+        .execute(&pool)
+        .await?;
+
+        // A loan ending within the 2.5-day window receives exactly one
+        // durable advance-warning job.
+        assert_eq!(staff_loan_scan_tick_postgres(&queue, &pool, now).await?, 1);
+        let warning_jobs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM jobs \
+             WHERE organization_id = $1 AND job_type = 'StaffLoanAdvanceWarning'",
+        )
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(warning_jobs, 1);
+
+        let mut claimed = queue.claim("staff-loan-postgres-test", 8, 60).await?;
+        assert_eq!(claimed.len(), 1);
+        let warning_job = claimed.pop().expect("one warning job was claimed");
+        assert_eq!(warning_job.job_type, "StaffLoanAdvanceWarning");
+        crate::job_runner::execute_staff_loan_advance_warning(&pool, &warning_job).await?;
+        queue
+            .complete(warning_job.id, &warning_job.lease_token)
+            .await?;
+
+        // The JSONB update must add a new top-level key to a state object
+        // that did not contain it before executing the warning handler.
+        let warning_sent_at: Option<i64> = sqlx::query_scalar(
+            "SELECT (state->>'advance_warning_sent_at')::bigint \
+             FROM aggregates WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(staff_loan_id)
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert!(warning_sent_at.is_some());
+
+        let warning_notifications: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM aggregates \
+             WHERE organization_id = $1 AND aggregate_type = 'notification' \
+               AND state->>'title' = 'Staff loan ending soon'",
+        )
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(warning_notifications, 3);
+        let expected_recipients = BTreeSet::from([
+            staff_user_id.to_string(),
+            real_owner_id.to_string(),
+            borrowing_manager_id.to_string(),
+        ]);
+        let warning_recipients: BTreeSet<String> = sqlx::query_scalar(
+            "SELECT state->>'recipient_id' FROM aggregates \
+             WHERE organization_id = $1 AND aggregate_type = 'notification' \
+               AND state->>'title' = 'Staff loan ending soon'",
+        )
+        .bind(organization_id)
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .collect();
+        assert_eq!(warning_recipients, expected_recipients);
+
+        // The persisted marker prevents a second scheduler tick from
+        // enqueuing another advance-warning job.
+        assert_eq!(staff_loan_scan_tick_postgres(&queue, &pool, now).await?, 0);
+        let warning_jobs_after_second_tick: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM jobs \
+             WHERE organization_id = $1 AND job_type = 'StaffLoanAdvanceWarning'",
+        )
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(warning_jobs_after_second_tick, 1);
+
+        // Move the same active loan into the past and drive the expiry path.
+        let past_end_at = chrono_to_nanos(now - chrono::Duration::days(1));
+        sqlx::query(
+            "UPDATE aggregates \
+             SET state = jsonb_set(state, '{window,end_at}', to_jsonb($3::bigint), true) \
+             WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(staff_loan_id)
+        .bind(organization_id)
+        .bind(past_end_at)
+        .execute(&pool)
+        .await?;
+
+        assert_eq!(staff_loan_scan_tick_postgres(&queue, &pool, now).await?, 1);
+        let mut claimed = queue.claim("staff-loan-postgres-test", 8, 60).await?;
+        assert_eq!(claimed.len(), 1);
+        let expiry_job = claimed.pop().expect("one expiry job was claimed");
+        assert_eq!(expiry_job.job_type, "StaffLoanExpiry");
+        crate::job_runner::execute_staff_loan_expiry(&pool, &expiry_job).await?;
+        queue
+            .complete(expiry_job.id, &expiry_job.lease_token)
+            .await?;
+
+        let status: String = sqlx::query_scalar(
+            "SELECT state->>'status' FROM aggregates WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(staff_loan_id)
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(status, "Expired");
+
+        let expiry_events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM domain_events \
+             WHERE aggregate_id = $1 AND organization_id = $2 \
+               AND event_type = 'staff_loan.StaffLoanExpired'",
+        )
+        .bind(staff_loan_id)
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(expiry_events, 1);
+
+        let expiry_outbox: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM outbox \
+             WHERE aggregate_id = $1::text AND organization_id = $2 \
+               AND event_type = 'staff_loan.StaffLoanExpired'",
+        )
+        .bind(staff_loan_id)
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(expiry_outbox, 1);
+
+        let expiry_notifications: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM aggregates \
+             WHERE organization_id = $1 AND aggregate_type = 'notification' \
+               AND state->>'title' = 'Staff loan ended'",
+        )
+        .bind(organization_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(expiry_notifications, 3);
+        let expiry_recipients: BTreeSet<String> = sqlx::query_scalar(
+            "SELECT state->>'recipient_id' FROM aggregates \
+             WHERE organization_id = $1 AND aggregate_type = 'notification' \
+               AND state->>'title' = 'Staff loan ended'",
+        )
+        .bind(organization_id)
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .collect();
+        assert_eq!(expiry_recipients, expected_recipients);
+
+        Ok(())
+    }
 }

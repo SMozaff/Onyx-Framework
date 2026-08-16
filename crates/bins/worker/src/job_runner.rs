@@ -170,7 +170,10 @@ async fn execute_snapshot_job(pool: &PgPool, job: &ClaimedJob) -> anyhow::Result
 /// since `NotificationAggregate` has no multi-recipient shape (see this
 /// crate's own `execute_timeline_trigger` precedent: each aggregate
 /// type here is a plain row, not a fan-out abstraction).
-async fn execute_staff_loan_advance_warning(pool: &PgPool, job: &ClaimedJob) -> anyhow::Result<()> {
+pub(crate) async fn execute_staff_loan_advance_warning(
+    pool: &PgPool,
+    job: &ClaimedJob,
+) -> anyhow::Result<()> {
     let staff_loan_id = required_string(&job.payload, "staff_loan_id")?;
     let organization_id = uuid::Uuid::from_bytes(job.organization_id.0).to_string();
 
@@ -198,6 +201,7 @@ async fn execute_staff_loan_advance_warning(pool: &PgPool, job: &ClaimedJob) -> 
         insert_notification(
             &mut tx,
             &organization_id,
+            recipient_id,
             "Staff loan ending soon",
             &format!(
                 "A staff loan (as {recipient_role}) is scheduled to end within the next few days. \
@@ -208,7 +212,6 @@ async fn execute_staff_loan_advance_warning(pool: &PgPool, job: &ClaimedJob) -> 
             "staff_loan",
         )
         .await?;
-        let _ = recipient_id; // recorded in message context only — see this fn's doc comment on NotificationAggregate's shape.
     }
 
     let sent_at_nanos = Timestamp::now().0 as i64;
@@ -233,7 +236,10 @@ async fn execute_staff_loan_advance_warning(pool: &PgPool, job: &ClaimedJob) -> 
 /// precedent as `execute_timeline_trigger` mutating `aggregates.state`
 /// directly rather than round-tripping through the domain crate's
 /// in-process types).
-async fn execute_staff_loan_expiry(pool: &PgPool, job: &ClaimedJob) -> anyhow::Result<()> {
+pub(crate) async fn execute_staff_loan_expiry(
+    pool: &PgPool,
+    job: &ClaimedJob,
+) -> anyhow::Result<()> {
     let staff_loan_id = required_string(&job.payload, "staff_loan_id")?;
     let organization_id = uuid::Uuid::from_bytes(job.organization_id.0).to_string();
 
@@ -264,6 +270,7 @@ async fn execute_staff_loan_expiry(pool: &PgPool, job: &ClaimedJob) -> anyhow::R
         insert_notification(
             &mut tx,
             &organization_id,
+            recipient_id,
             "Staff loan ended",
             &format!(
                 "A staff loan (as {recipient_role}) has reached its scheduled end date and is now closed."
@@ -273,7 +280,6 @@ async fn execute_staff_loan_expiry(pool: &PgPool, job: &ClaimedJob) -> anyhow::R
             "staff_loan",
         )
         .await?;
-        let _ = recipient_id;
     }
 
     let event_id = uuid::Uuid::new_v4();
@@ -368,6 +374,7 @@ fn object_id_json_to_uuid_string(value: &Value) -> Option<String> {
 async fn insert_notification(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     organization_id: &str,
+    recipient_id: &str,
     title: &str,
     message: &str,
     priority: &str,
@@ -381,6 +388,7 @@ async fn insert_notification(
         "message": message,
         "priority": priority,
         "status": "unacknowledged",
+        "recipient_id": recipient_id,
         "source_id": source_id,
         "source_type": source_type,
         "created_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
