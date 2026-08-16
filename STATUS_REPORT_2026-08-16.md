@@ -1,39 +1,44 @@
-# ONYX — Status Report (2026-08-16, updated)
+# ONYX — Status Report (2026-08-16, final)
 
-Supersedes the earlier same-day version. The one P0 item it listed —
-C.3's background-job SQL never verified against a live Postgres — is
-now closed. See `DECISIONS.md`'s "Live PostgreSQL verification of C.3"
-entry and `IMPLEMENTATION_PLAN_User_Hierarchy.md` §11.3 for full detail.
+Supersedes all earlier same-day versions. This update closes out the
+remaining items from the prior report: Staff Loans UI, the two
+smaller Todo/Target UI gaps, the two open product decisions, and a
+real authorization bug found along the way.
 
-## Done, verified, tested (as of today)
+## Done, verified, tested (as of this update)
 
-Everything the original 2026-08-16 report listed, plus:
+Everything the prior 2026-08-16 reports listed, plus:
 
-- **C.3, the staff-loan background job, now live-verified against real
-  PostgreSQL 16.14** — via a git-bundle handoff to a Manus AI agent
-  with Postgres access this sandbox lacked. A real integration test
-  (`staff_loan_scheduler::postgres_integration_tests::staff_loan_warning_and_expiry_round_trip_on_postgres`)
-  drives both the advance-warning and expiry paths against a live
-  database and asserts on actual persisted state.
-- **A real bug found and fixed in that process**: notifications were
-  being inserted with no recipient field at all — the code computed
-  each recipient's id correctly but then discarded it before writing
-  the row. Fixed with a backward-compatible `recipient_id` field; the
-  new test asserts the exact recipient set, not just a row count, so
-  this can't silently regress.
-- **First UI slice: Todo/Target lists in `web-ui`** — create, submit,
-  verify/reject/escalate, correctly placed outside `admin-shell`'s
-  admin-only route gate (design doc §4.0.1 confirms this feature is for
-  Staff and Managers, not just Admins). D.5's redaction is reflected in
-  the UI itself, not just the API. Verified: `tsc -b` clean, production
-  build succeeds, 130/130 relevant tests pass. A regression this UI
-  work introduced (breaking a pre-existing frozen status-tone contract)
-  was caught by the test suite and fixed before commit.
-- Re-verified in this sandbox after pulling the Postgres fix back in:
-  `worker` and `api-server` packages both compile clean, clippy clean,
-  and all previously-passing tests (42 todo-domain, 24 security, 22
-  api-server) still pass, plus the new Postgres test correctly no-ops
-  when `DATABASE_URL` is absent.
+- **Staff Loans UI** (`web-ui/src/pages/StaffLoans/`) — request,
+  approve, decline, extend, end. Role-appropriate actions per loan,
+  matching design doc §2.1's three approval gates exactly. Verified:
+  `tsc -b` clean, production build succeeds, all 130 relevant tests
+  pass.
+- **A real, pre-existing authorization gap found and fixed**:
+  `RecordTeamLeaderPreCheck` had no server-side class check at all —
+  any authenticated user could record a pre-check on any list, despite
+  `UserClass::TeamLeader` being the class design doc §2.2 says carries
+  this authority. Fixed with a new `require_team_leader_or_admin` gate,
+  live-verified against a real server (rejected as an unclassed user,
+  accepted after promotion to `team_leader`), and covered by 3 new
+  permanent integration tests.
+- **Two remaining Todo/Target UI gaps closed**: adding an item to a
+  Draft `TodoList`, and recording a Team Leader pre-check from the UI
+  (now gated by the fix above).
+- **Two outstanding product decisions resolved, by the person
+  directly**: first-Admin credentials will be delivered via invite
+  email with a setup link (not a temp password); admin-screen removal
+  from `desktop-shell`/`web-ui` is confirmed and done.
+- **Duplicate admin UI removed**: `desktop-shell`'s `Settings.tsx`
+  (Policy/LegalHold administration using a placeholder, unauthenticated
+  session) deleted, along with its route and nav entry. `web-ui` had no
+  equivalent to remove. `desktop-shell`'s UI re-verified clean
+  (`tsc -b`, production build) after the removal.
+- **Full fresh re-verification of everything**, from a clean install/
+  build cache: `todo-domain` (42 tests), `security-adapter`/
+  `security-application` (24 tests), `api-server` (25 tests, up from
+  22 — the 3 new authorization tests), `worker` (compiles clean),
+  `web-ui` (`tsc -b` clean, production build succeeds, 130 tests pass).
 
 ---
 
@@ -41,28 +46,30 @@ Everything the original 2026-08-16 report listed, plus:
 
 ### 🔴 P0 — Blocking / correctness risk
 
-*(none from this feature — the sole P0 item is closed, see above)*
+*(none — the only P0 this feature ever had, the C.3 Postgres
+verification, was closed earlier this session)*
 
 The general `is_manager` → `class` backfill remains a real, low-urgency
-operational gap unrelated to this feature (unchanged from prior
-reports; runbook exists: `docs/runbooks/user-class-migration.md`).
+operational gap unrelated to this feature (runbook exists:
+`docs/runbooks/user-class-migration.md`).
 
 ### 🟠 P1 — Explicit product decisions still needed from you
 
 | Item | Blocks |
 |---|---|
 | **Escalation's scope** — confirmed "almost every authority," but exactly which approval points beyond Todo/Target and staff-loans need it is unconfirmed | Phase E design and, downstream, D.4's escalation-widening (currently a documented gap, not silently stubbed) |
-| Admin capability removal from `desktop-shell`/`web-ui` | Deliberately held until confirmed working in practice — unchanged |
-| How a newly-provisioned org's first Admin credential reaches the customer (Phase B.4) | Small, non-blocking, still open |
+
+Both other P1 items from earlier reports (admin-screen removal timing,
+first-Admin credential delivery) are now resolved — see above.
 
 ### 🟡 P2 — Designed but not built
 
 | Item | Status |
 |---|---|
-| **Todo/Target UI in `web-ui`** | **Done** — create, submit, verify/reject/escalate, live-verified end to end. Self-authored creation only; `ManagerAssigned` creation (assigning a list to someone else) needs a user picker, deferred. |
-| **Staff Loans UI** (any app) | Not started. Backend (request/approve/decline/extend/end, plus the background notification job) is fully built and live-tested; zero UI. **This is now the largest remaining piece of user-facing work for this feature.** |
+| **`ManagerAssigned` list/loan creation** (assigning to someone else) | Needs a user-id picker neither `TodoTargets/CreateListForm.tsx` nor `StaffLoans/CreateLoanForm.tsx` has yet — both currently take raw UUID input for other parties, or self-only creation. A natural, contained follow-up. |
 | **Escalation mechanism** (Phase E) — routing/target-selection | Design confirmed. Commands exist to record that escalation was invoked; nothing resolves *who* it goes to. |
-| Work-stats real data | Unchanged — placeholder until this feature's UI exists to generate real data. |
+| Phase B.1–B.2 (the org-provisioning action itself) | Design resolved (§2.4, §3 of the implementation plan); no code built. B.4 (this update) specifies what the last step should do once B.1–B.2 exist. |
+| Work-stats real data | Unchanged — placeholder until this feature generates real data at scale. |
 | Web messaging (Phase 2 of original plan) | Never started, unchanged. |
 | Flutter mobile (Phase 3) | Frozen, unchanged. |
 
@@ -71,29 +78,28 @@ reports; runbook exists: `docs/runbooks/user-class-migration.md`).
 - `admin-shell`'s app icon reuses the main product icon — cosmetic, unchanged.
 - `IdempotencyStore` is in-memory only — unchanged.
 - **No ESLint configuration exists anywhere in this repository
-  checkout** (`eslint.config.*`/`.eslintrc*`, confirmed by search) —
-  `web-ui/package.json`'s `lint` script cannot run as a result. A
-  pre-existing gap, discovered while verifying the new UI work, not
-  introduced by it.
-- **Workspace-wide Docker-backed E2E suite (Testcontainers) could not be
-  run** in either build sandbox used for this feature (no Docker
-  daemon/socket in either). Not introduced by or specific to this
-  feature — a pre-existing gap in the broader workspace's test
-  infrastructure, worth knowing about but not blocking this work.
-- Disk-space constraints required aggressive `target/` cleanup multiple
-  times across both sandboxes used for this feature — not a code
-  defect, but expect a cold build cache if resuming work in a similarly
-  constrained environment.
+  checkout** — a pre-existing gap, unrelated to and not fixed by this
+  work, discovered while verifying the UI.
+- **Workspace-wide Docker-backed E2E suite (Testcontainers) could not
+  be run** in any build sandbox used across this feature's work (no
+  Docker daemon/socket available in any of them). Pre-existing,
+  unrelated to this feature specifically.
+- Disk-space constraints required aggressive `target/`/`node_modules`
+  cleanup repeatedly across this feature's work — not a code defect,
+  expect a cold build cache if resuming in a similarly constrained
+  environment.
 
 ---
 
 ## Bottom line
 
-The Todo/Target/StaffLoan backend is fully built, wired into the real
-HTTP API, and live-tested end to end, including the one piece that
-genuinely required a real database to verify. A first UI slice now
-exists for Todo/Target lists in `web-ui`, live-verified via a real
-build and test run — with a real regression it introduced caught and
-fixed before commit, not shipped silently. What's left: Staff Loans UI
-(the single largest remaining piece), and Phase E's escalation routing.
+Todo/Target lists and Staff Loans now have complete, live-verified
+backends and working UIs in `web-ui`. A real, previously-undetected
+authorization gap (anyone could record a Team Leader pre-check) was
+found and closed with a permanent regression test, not left for later.
+Both outstanding product decisions from earlier reports are resolved
+and the duplicate admin UI is removed. What's left is either a small,
+contained UI follow-up (a user picker for assigning lists/loans to
+someone else) or genuinely new work outside this feature's original
+scope (Phase E's escalation routing, Phase B's provisioning action).
 
