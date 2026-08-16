@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import StatusBadge from '../../components/StatusBadge';
 import { useAuthStore } from '../../stores/authStore';
-import { useDecideList, useSubmitList } from '../../hooks/useCommand';
+import { useAddTodoItem, useDecideList, useRecordPreCheck, useSubmitList } from '../../hooks/useCommand';
 import type { TargetListProjection, TodoListProjection, VerificationOutcome } from '../../types/query';
 import DecisionDialog from './DecisionDialog';
 
@@ -13,20 +13,28 @@ type ListItem = TodoListProjection | TargetListProjection;
  * exists — respecting D.5's redaction (see the `notes` handling below,
  * which must distinguish "no pre-check" from "pre-check exists but
  * substance is hidden from you") — and the actions available at the
- * list's current status: Submit (Draft only, by the owner), and
- * Verify/Reject/Escalate (Submitted or TeamLeaderPreChecked, gated
- * server-side by D.4's verifier-resolution — a caller who isn't
- * authorized gets a real error from the server, surfaced via the
- * existing toast path, not pre-validated here).
+ * list's current status: adding an item and Submit (Draft only, by the
+ * owner), recording a pre-check (Submitted only, gated server-side to
+ * the Team Leader class — see `require_team_leader_or_admin`, not
+ * pre-validated client-side, same posture as every other server-gated
+ * action here), and Verify/Reject/Escalate (Submitted or
+ * TeamLeaderPreChecked, gated server-side by D.4's verifier-resolution).
  */
 export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
   const user = useAuthStore((state) => state.user);
   const submit = useSubmitList(kind);
   const decide = useDecideList(kind);
+  const addItem = useAddTodoItem();
+  const recordPreCheck = useRecordPreCheck(kind);
   const [dialog, setDialog] = useState<'verify' | 'reject' | 'escalate' | null>(null);
+  const [newItemText, setNewItemText] = useState('');
+  const [preCheckOpen, setPreCheckOpen] = useState(false);
+  const [preCheckNotes, setPreCheckNotes] = useState('');
 
   const isOwner = user?.id === list.owner;
   const canSubmit = list.status === 'Draft';
+  const canAddItem = kind === 'todo_list' && list.status === 'Draft' && isOwner;
+  const canRecordPreCheck = list.status === 'Submitted';
   const canDecide = list.status === 'Submitted' || list.status === 'TeamLeaderPreChecked';
 
   function confirmDecision(payload: { outcome?: VerificationOutcome; comment?: string; reason?: string }) {
@@ -52,7 +60,7 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
       </div>
 
       {kind === 'todo_list' ? (
-        <TodoItems list={list as TodoListProjection} />
+        <TodoItems list={list as TodoListProjection} canAddItem={canAddItem} addItem={addItem} />
       ) : (
         <TargetWindow list={list as TargetListProjection} />
       )}
@@ -69,6 +77,47 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
       </dl>
 
       <PreCheckSection list={list} />
+
+      {canRecordPreCheck ? (
+        <div className="detail-section">
+          <h3>Team Leader pre-check</h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Optional, informal, and does not gate verification. Only available to Team Leaders.
+          </p>
+          {preCheckOpen ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              <textarea
+                value={preCheckNotes}
+                onChange={(e) => setPreCheckNotes(e.target.value)}
+                placeholder="Notes (visible to Managers, hidden from the list owner)"
+                rows={3}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="button-secondary" type="button" onClick={() => setPreCheckOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="button-primary"
+                  type="button"
+                  disabled={recordPreCheck.isPending || !preCheckNotes.trim()}
+                  onClick={() =>
+                    recordPreCheck.mutate(
+                      { list, notes: preCheckNotes },
+                      { onSuccess: () => { setPreCheckOpen(false); setPreCheckNotes(''); } },
+                    )
+                  }
+                >
+                  {recordPreCheck.isPending ? 'Recording…' : 'Record pre-check'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button className="button-secondary" type="button" onClick={() => setPreCheckOpen(true)}>
+              Record a pre-check
+            </button>
+          )}
+        </div>
+      ) : null}
 
       <div className="detail-section">
         <h3>Actions</h3>
@@ -108,7 +157,20 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
   );
 }
 
-function TodoItems({ list }: { list: TodoListProjection }) {
+function TodoItems({
+  list,
+  canAddItem,
+  addItem,
+}: {
+  list: TodoListProjection;
+  canAddItem: boolean;
+  addItem: ReturnType<typeof useAddTodoItem>;
+}) {
+  const [text, setText] = useState('');
+  function submit() {
+    if (!text.trim()) return;
+    addItem.mutate({ list, description: text.trim() }, { onSuccess: () => setText('') });
+  }
   return (
     <div className="detail-section">
       <h3>Items</h3>
@@ -121,6 +183,14 @@ function TodoItems({ list }: { list: TodoListProjection }) {
           ))}
         </ul>
       )}
+      {canAddItem ? (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add another item" />
+          <button className="button-secondary" type="button" onClick={submit} disabled={addItem.isPending || !text.trim()}>
+            Add
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

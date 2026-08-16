@@ -103,6 +103,69 @@ export function useCreateTargetList() {
 }
 
 /**
+ * Adds an item to a `Draft` `TodoList`. `TargetList` has no equivalent
+ * — a target is described by `description`, not discrete items (design
+ * doc §4.0.2), so this hook is `TodoList`-only, unlike `useSubmitList`/
+ * `useDecideList` above which serve both kinds. Server rejects this
+ * once the list is no longer `Draft` (`todo_domain`'s own
+ * `AddItem` doc comment: "Rejected once the list has been submitted").
+ */
+export function useAddTodoItem() {
+  const client = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: ({ list, description }: { list: TodoListProjection; description: string }) =>
+      executeCommand({
+        command_type: 'todo_list.AddItem',
+        target: { id: list.id, type: 'todo_list', organization_id: organizationId() },
+        expected_version: list.version,
+        expected_lifecycle_epoch: list.lifecycle_epoch,
+        expected_authority_epoch: list.authority_epoch,
+        payload: { AddItem: { item: { item_id: crypto.randomUUID(), description } } },
+      }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['todo_list.list'] });
+      showToast('Item added.', 'success');
+    },
+    onError: (error) => showToast(normalizeError(error).message, 'error'),
+  });
+}
+
+/**
+ * Records a Team Leader pre-check on a `Submitted` `TodoList`/
+ * `TargetList`. Gated server-side to the `team_leader` class (or
+ * Admin) — see `api_server::routes::command::require_team_leader_or_admin`,
+ * added 2026-08-16 to close a real authorization gap this command
+ * previously had none of. Not pre-validated client-side for the same
+ * reason `useDecideList`/`useDecideStaffLoan` don't pre-validate their
+ * own gates: the server is the source of truth, and an unauthorized
+ * caller gets a real domain error surfaced via the existing toast path.
+ */
+export function useRecordPreCheck(kind: 'todo_list' | 'target_list') {
+  const client = useQueryClient();
+  const commandType =
+    kind === 'todo_list' ? 'todo_list.RecordTeamLeaderPreCheck' : 'target_list.RecordTeamLeaderPreCheck';
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: ({ list, notes }: { list: TodoListProjection | TargetListProjection; notes: string }) =>
+      executeCommand({
+        command_type: commandType,
+        target: { id: list.id, type: kind, organization_id: organizationId() },
+        expected_version: list.version,
+        expected_lifecycle_epoch: list.lifecycle_epoch,
+        expected_authority_epoch: list.authority_epoch,
+        payload: { RecordTeamLeaderPreCheck: { notes } },
+      }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: [`${kind}.list`] });
+      await client.invalidateQueries({ queryKey: [`${kind}.detail`] });
+      showToast('Pre-check recorded.', 'success');
+    },
+    onError: (error) => showToast(normalizeError(error).message, 'error'),
+  });
+}
+
+/**
  * Submit a `TodoList`/`TargetList` — the owner (Staff, or the Manager
  * who assigned it) moves it from Draft to Submitted. Both aggregates
  * share this same command shape (design doc §4.0.2's confirmed shared
