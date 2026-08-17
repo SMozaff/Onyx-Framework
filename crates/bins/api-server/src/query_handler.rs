@@ -261,13 +261,16 @@ pub fn normalize_public_state_for_test(value: &mut Value) {
     normalize_public_state(value);
 }
 
+
+
+
 fn normalize_public_state(value: &mut Value) {
     let Some(object) = value.as_object_mut() else {
         return;
     };
 
     // Retained for forward-compatibility, though `public_id` is not
-    // actually present on any aggregate today (confirmed by search) —
+    // actually present on any aggregate today (confirmed by search) --
     // removing this silently would be a second, separate change from
     // the id-array fix below, so it stays as documented dead weight
     // rather than being pulled out in this same pass.
@@ -279,11 +282,35 @@ fn normalize_public_state(value: &mut Value) {
 
     if let Some(id) = public_id {
         object.insert("id".to_string(), Value::String(id));
-        return;
+    } else if let Some(uuid_string) = object.get("id").and_then(object_id_array_to_uuid_string) {
+        object.insert("id".to_string(), Value::String(uuid_string));
     }
 
-    if let Some(uuid_string) = object.get("id").and_then(object_id_array_to_uuid_string) {
-        object.insert("id".to_string(), Value::String(uuid_string));
+    // Extended 2026-08-17: normalize every top-level field, not just
+    // `id`. A real, live bug was found in this session's own
+    // StaffLoansPage UI (`staff_user_id === user.id` comparing a raw
+    // byte array to a UUID string, silently never matching) -- the same
+    // root cause the doc comment above already describes for `id`
+    // ("this was silently broken for every aggregate type... not just
+    // newly-added ones"), just not yet fixed for every *field*.
+    // ObjectId is always a 16-byte array in this codebase (confirmed:
+    // `platform_kernel::ObjectId(pub [u8; 16])`), so any field shaped
+    // this way is always an id worth normalizing -- deliberately
+    // structural/shape-based, not a per-field-name allowlist, matching
+    // this function's existing `id`-handling philosophy. Top-level
+    // only (not recursive into nested objects/arrays like
+    // `team_leader_pre_check.checked_by` or `items[].item_id`) -- no
+    // known nested id field is compared against a UUID string
+    // client-side today, so recursing is deferred until a real need
+    // appears rather than built speculatively.
+    let keys: Vec<String> = object.keys().cloned().collect();
+    for key in keys {
+        if key == "id" {
+            continue; // already handled above
+        }
+        if let Some(uuid_string) = object.get(&key).and_then(object_id_array_to_uuid_string) {
+            object.insert(key, Value::String(uuid_string));
+        }
     }
 }
 
