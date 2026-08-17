@@ -157,6 +157,7 @@ dependencies = [
  "hmac",
  "messaging-adapter",
  "mission-domain",
+ "notification-domain",
  "observability-adapter",
  "persistence-postgres",
  "persistence-sqlite",
@@ -1044,6 +1045,7 @@ dependencies = [
  "file-domain",
  "local-blob-storage",
  "mission-domain",
+ "notification-domain",
  "persistence-sqlite",
  "platform-contracts",
  "platform-kernel",
@@ -3446,6 +3448,18 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "notification-domain"
+version = "1.0.0"
+dependencies = [
+ "chrono",
+ "platform-contracts",
+ "platform-kernel",
+ "serde",
+ "thiserror 1.0.69",
+ "uuid",
 ]
 
 [[package]]

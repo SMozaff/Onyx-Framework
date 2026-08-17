@@ -823,3 +823,137 @@ async fn file_upload_coordinator_handles_multi_chunk_content() {
     assert_eq!(downloaded.len(), content.len());
     assert_eq!(downloaded, content);
 }
+
+/// Proves desktop-native notification wiring through the same real SQLite
+/// composition root used by Tauri: recipient-filtered inbox query,
+/// acknowledgement decision, persisted state transition, and the existing
+/// outbox-to-event-bus path that backs `onyx:event`.
+#[tokio::test]
+async fn app_state_wires_notification_inbox_acknowledgement_and_events() {
+    let pool = test_pool().await;
+    let organization_id = OrganizationId::new_random();
+    let recipient_id = test_user_id();
+    let other_recipient_id = ObjectId::new_random();
+    let notification_id = ObjectId::new_random();
+    let other_notification_id = ObjectId::new_random();
+
+    async fn seed_notification(
+        pool: &sqlx::SqlitePool,
+        id: ObjectId,
+        organization_id: OrganizationId,
+        recipient_id: ObjectId,
+        title: &str,
+    ) {
+        let state = serde_json::json!({
+            "id": id,
+            "public_id": format!("notification-{title}"),
+            "title": title,
+            "message": "A desktop action requires your attention.",
+            "priority": "normal",
+            "status": "unacknowledged",
+            "recipient_id": recipient_id.to_string(),
+            "source_id": "source-1",
+            "source_type": "task",
+            "created_at": "2026-08-17T00:00:00.000Z",
+            "acknowledged_at": null,
+            "version": 0,
+            "lifecycle_epoch": 0,
+            "authority_epoch": 0,
+        })
+        .to_string();
+
+        sqlx::query(
+            "INSERT INTO aggregates \
+             (id, aggregate_type, version, lifecycle_epoch, authority_epoch, state, updated_at, organization_id) \
+             VALUES (?, 'notification', 0, 0, 0, ?, 0, ?)",
+        )
+        .bind(id.0.to_vec())
+        .bind(state)
+        .bind(organization_id.0.to_vec())
+        .execute(pool)
+        .await
+        .expect("notification fixture should seed into the real SQLite replica");
+    }
+
+    seed_notification(
+        &pool,
+        notification_id,
+        organization_id,
+        recipient_id,
+        "Assigned review",
+    )
+    .await;
+    seed_notification(
+        &pool,
+        other_notification_id,
+        organization_id,
+        other_recipient_id,
+        "Someone else's review",
+    )
+    .await;
+
+    let mut config = test_config();
+    config.organization_id = organization_id;
+    config.sync_agent_config.outbox_poll_interval = std::time::Duration::from_millis(20);
+    let state = Arc::new(AppState::new(pool, config).await);
+
+    let inbox = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "ListNotifications".to_string(),
+            target_id: recipient_id,
+        })
+        .await
+        .expect("ListNotifications should use the real local SQLite replica");
+    let notifications = inbox["aggregate"]["notifications"]
+        .as_array()
+        .expect("inbox response should contain a notification array");
+    assert_eq!(notifications.len(), 1);
+    assert_eq!(notifications[0]["id"], serde_json::json!(notification_id));
+
+    let mut subscription = state
+        .event_bus
+        .subscribe(client_composition::event_bus::EventFilter {
+            organization_id,
+            event_types: None,
+        });
+    let event_pump = tokio::spawn(Arc::clone(&state.sync_agent).run());
+
+    let mut acknowledgement = envelope_for(
+        "Acknowledge",
+        notification_id,
+        organization_id,
+        serde_json::json!("Acknowledge"),
+    );
+    acknowledgement.target.r#type = "notification".to_string();
+    acknowledgement.authority_proof.scope.object_type = "notification".to_string();
+    let result = state
+        .command_registry
+        .dispatch(acknowledgement)
+        .await
+        .expect("Acknowledge should dispatch through the notification handler");
+    assert_eq!(result["success"], serde_json::json!(true));
+
+    let refreshed = state
+        .query_registry
+        .dispatch(client_composition::query_registry::QueryEnvelope {
+            query_type: "ListNotifications".to_string(),
+            target_id: recipient_id,
+        })
+        .await
+        .expect("notification inbox should remain queryable after acknowledgement");
+    assert_eq!(
+        refreshed["aggregate"]["notifications"][0]["status"],
+        serde_json::json!("acknowledged")
+    );
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.recv())
+        .await
+        .expect("notification acknowledgement should reach the existing event bus")
+        .expect("event subscription should remain open");
+    assert_eq!(
+        event["aggregate_ref"]["type"],
+        serde_json::json!("notification")
+    );
+    event_pump.abort();
+}

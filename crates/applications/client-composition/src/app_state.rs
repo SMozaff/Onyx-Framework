@@ -37,11 +37,11 @@ use crate::handlers::{
     ConnectionRequestCreationHandler, ConnectionRequestDecisionHandler,
     ConversationCreationHandler, ConversationDecisionHandler, FileAssetCreationHandler,
     FileAssetDecisionHandler, LegalHoldCreationHandler, LegalHoldDecisionHandler,
-    MessageCreationHandler, MessageDecisionHandler, MissionCreationHandler,
-    MissionDecisionHandler, PolicyCreationHandler, PolicyDecisionHandler, TaskCreationHandler,
+    MessageCreationHandler, MessageDecisionHandler, MissionCreationHandler, MissionDecisionHandler,
+    NotificationDecisionHandler, PolicyCreationHandler, PolicyDecisionHandler, TaskCreationHandler,
     TaskDecisionHandler, UploadSessionCreationHandler, UploadSessionDecisionHandler,
 };
-use crate::query_registry::{LoadAggregateHandler, QueryRegistry};
+use crate::query_registry::{ListNotificationsHandler, LoadAggregateHandler, QueryRegistry};
 use crate::sync_agent::{SyncAgent, SyncAgentConfig};
 
 /// Every `MissionCommand` variant other than `CreateMission` (see
@@ -141,6 +141,9 @@ const CONNECTION_REQUEST_DECISION_COMMANDS: &[&str] = &[
     "DeclineConnectionRequest",
     "RevokeConnectionRequest",
 ];
+
+/// Every decision supported by an existing notification aggregate.
+const NOTIFICATION_DECISION_COMMANDS: &[&str] = &["Acknowledge"];
 
 /// Configuration `AppState::new` needs beyond the database pool itself.
 /// Not specified by any prior increment.
@@ -258,6 +261,8 @@ impl AppState {
             Arc::new(SqliteRepository::new(pool.clone(), "legal_hold"));
         let connection_request_repo: Arc<dyn query_application::Repository> =
             Arc::new(SqliteRepository::new(pool.clone(), "connection_request"));
+        let notification_repo: Arc<dyn query_application::Repository> =
+            Arc::new(SqliteRepository::new(pool.clone(), "notification"));
         let unit_factory: Arc<dyn query_application::UnitOfWorkFactory> =
             Arc::new(SqliteUnitOfWorkFactory::new(pool.clone()));
         let idempotency_store: Arc<dyn IdempotencyStore> =
@@ -419,6 +424,16 @@ impl AppState {
                 ),
             );
         }
+        for command_type in NOTIFICATION_DECISION_COMMANDS {
+            command_registry.register_decision(
+                *command_type,
+                NotificationDecisionHandler::new(
+                    Arc::clone(&notification_repo),
+                    Arc::clone(&unit_factory),
+                    Arc::clone(&idempotency_store),
+                ),
+            );
+        }
 
         let mut query_registry = QueryRegistry::new();
         query_registry.register(
@@ -454,6 +469,14 @@ impl AppState {
         query_registry.register(
             "GetConnectionRequest",
             LoadAggregateHandler::new(Arc::clone(&connection_request_repo)),
+        );
+        query_registry.register(
+            "GetNotification",
+            LoadAggregateHandler::new(Arc::clone(&notification_repo)),
+        );
+        query_registry.register(
+            "ListNotifications",
+            ListNotificationsHandler::new(pool.clone(), config.organization_id),
         );
 
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));

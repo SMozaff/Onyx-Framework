@@ -13,7 +13,7 @@ use platform_kernel::{
     ObjectId, ObjectVersion, OperationId, OrganizationId, PolicyDecisionSet, ReplicaId,
     SchemaVersion, Timestamp, VectorClock, VerifiedAuthority,
 };
-use query_application::{IdempotencyStore, Repository, UnitOfWorkFactory};
+use query_application::{IdempotencyStore, OutboxMessage, Repository, UnitOfWorkFactory};
 use serde::{de::DeserializeOwned, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -215,9 +215,11 @@ where
     for (i, event) in events.into_iter().enumerate() {
         aggregate.apply(&event);
 
+        let event_id = EventId::new_random();
+        let event_type = format!("{aggregate_type_name}.event.{i}");
         let envelope = DomainEventEnvelope {
-            event_id: EventId::new_random(),
-            event_type: format!("{aggregate_type_name}.event.{i}"),
+            event_id,
+            event_type: event_type.clone(),
             schema_version: SchemaVersion::new("1.0"),
             aggregate_ref: aggregate_ref.clone(),
             aggregate_version: ObjectVersion(current_version.0 + 1 + i as u64),
@@ -239,7 +241,17 @@ where
             },
             payload: event,
         };
-        event_values.push(serde_json::to_value(&envelope)?);
+        let serialized = serde_json::to_value(&envelope)?;
+        unit.register_outbox(OutboxMessage {
+            event_id,
+            event_type,
+            aggregate_id: target_id.to_string(),
+            organization_id,
+            payload: serde_json::to_vec(&serialized)?,
+            vector_clock: vector_clock.clone(),
+            occurred_at: now,
+        });
+        event_values.push(serialized);
     }
 
     // Step 9 (ruling H3): serialize the aggregate's state AFTER every

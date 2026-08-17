@@ -533,3 +533,63 @@ impl DecisionHandler for ConnectionRequestDecisionHandler {
         .await
     }
 }
+
+/// Wraps `api_server::handle_command` for `NotificationAggregate`.
+/// Notifications are created by upstream workflow producers or synchronized
+/// into a local replica; the desktop client only dispatches acknowledgement
+/// decisions against the addressed notification.
+pub struct NotificationDecisionHandler {
+    repo: Arc<dyn Repository>,
+    unit_factory: Arc<dyn UnitOfWorkFactory>,
+    idempotency_store: Arc<dyn IdempotencyStore>,
+}
+
+impl NotificationDecisionHandler {
+    pub fn new(
+        repo: Arc<dyn Repository>,
+        unit_factory: Arc<dyn UnitOfWorkFactory>,
+        idempotency_store: Arc<dyn IdempotencyStore>,
+    ) -> Self {
+        Self {
+            repo,
+            unit_factory,
+            idempotency_store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DecisionHandler for NotificationDecisionHandler {
+    async fn handle_decision(
+        &self,
+        payload: serde_json::Value,
+        target_id: ObjectId,
+        operation_id: OperationId,
+        actor: ActorContext,
+        expected_version: ObjectVersion,
+        expected_lifecycle_epoch: LifecycleEpoch,
+        expected_authority_epoch: platform_kernel::AuthorityEpoch,
+        vector_clock: VectorClock,
+        correlation_id: CorrelationId,
+    ) -> Result<CommandResult, api_server::CommandError> {
+        let command: notification_domain::NotificationCommand =
+            serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
+
+        api_server::handle_command::<notification_domain::NotificationAggregate, _, _, _>(
+            command,
+            target_id,
+            operation_id,
+            actor,
+            expected_version,
+            expected_lifecycle_epoch,
+            expected_authority_epoch,
+            vector_clock,
+            correlation_id,
+            "notification",
+            Arc::clone(&self.repo),
+            Arc::clone(&self.unit_factory),
+            Arc::clone(&self.idempotency_store),
+        )
+        .await
+    }
+}

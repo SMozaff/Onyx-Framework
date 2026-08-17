@@ -20,90 +20,9 @@ use super::{
     authenticate_headers, parse_object_id, web_device_object_id, ApiError, ApiState, CommandRequest,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationAggregate {
-    pub id: ObjectId,
-    pub public_id: String,
-    pub title: String,
-    pub message: String,
-    pub priority: String,
-    pub status: String,
-    /// The user this notification is addressed to. Legacy notifications
-    /// predate recipient targeting, so they deserialize as `None`.
-    #[serde(default)]
-    pub recipient_id: Option<String>,
-    pub source_id: String,
-    pub source_type: String,
-    pub created_at: String,
-    pub acknowledged_at: Option<String>,
-    pub version: ObjectVersion,
-    pub lifecycle_epoch: LifecycleEpoch,
-    pub authority_epoch: AuthorityEpoch,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NotificationCommand {
-    Acknowledge,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NotificationEvent {
-    Acknowledged { acknowledged_at: String },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum NotificationError {
-    #[error("notification already acknowledged")]
-    AlreadyAcknowledged,
-}
-
-impl AggregateRoot for NotificationAggregate {
-    type Id = ObjectId;
-    type Command = NotificationCommand;
-    type Event = NotificationEvent;
-    type Error = NotificationError;
-
-    fn id(&self) -> &Self::Id {
-        &self.id
-    }
-
-    fn version(&self) -> ObjectVersion {
-        self.version
-    }
-
-    fn lifecycle_epoch(&self) -> LifecycleEpoch {
-        self.lifecycle_epoch
-    }
-
-    fn authority_epoch(&self) -> AuthorityEpoch {
-        self.authority_epoch
-    }
-
-    fn decide(
-        &self,
-        command: Self::Command,
-        context: &DecisionContext,
-    ) -> Result<Vec<Self::Event>, Self::Error> {
-        match command {
-            NotificationCommand::Acknowledge if self.status == "acknowledged" => {
-                Err(NotificationError::AlreadyAcknowledged)
-            }
-            NotificationCommand::Acknowledge => Ok(vec![NotificationEvent::Acknowledged {
-                acknowledged_at: timestamp_to_iso(context.trusted_now.0),
-            }]),
-        }
-    }
-
-    fn apply(&mut self, event: &Self::Event) {
-        match event {
-            NotificationEvent::Acknowledged { acknowledged_at } => {
-                self.status = "acknowledged".to_string();
-                self.acknowledged_at = Some(acknowledged_at.clone());
-                self.version = self.version.next();
-            }
-        }
-    }
-}
+pub use notification_domain::{
+    NotificationAggregate, NotificationCommand, NotificationError, NotificationEvent,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalAggregate {
