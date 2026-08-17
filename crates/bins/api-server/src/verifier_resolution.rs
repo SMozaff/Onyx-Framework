@@ -19,16 +19,19 @@
 //!   This uses `todo_domain::StaffLoan::grants_verification_authority_to`
 //!   directly — the one piece of this logic that already lived on the
 //!   aggregate itself (see that method's own doc comment for why).
-//! - **Phase E escalation widening: deliberately NOT built.** Phase E
-//!   (`IMPLEMENTATION_PLAN_User_Hierarchy.md` §6) has no code yet — only
-//!   `EscalateTodoList`/`EscalateTargetList` commands that record *that*
-//!   escalation occurred, with no routing/target-selection logic to
-//!   call into. Adding a stub here that always returns "no additional
-//!   verifier" for an escalated list would be actively misleading (it
-//!   would look like escalation was handled when it silently does
-//!   nothing) — so this module's public function is scoped to
-//!   non-escalated resolution only, and its doc comment says so
-//!   explicitly rather than pretending completeness.
+//! - **Phase E escalation widening: built.** Confirmed by the person
+//!   2026-08-16: once a specific list is `Escalated`, its own
+//!   `escalated_to` (set by
+//!   `escalation_resolution::resolve_escalation_target` at the moment
+//!   escalation was invoked) **replaces** the tree parent as that
+//!   list's sole authorized verifier — matching the design doc's own
+//!   language, "an escalated authority" replacing "the parent Manager."
+//!   This widening is necessarily per-list, not per-owner like the
+//!   other two: it requires knowing the *specific list's* escalation
+//!   state, so `resolve_verifiers` takes an optional
+//!   `escalated_to: Option<ObjectId>` parameter the caller supplies
+//!   from the list it already has loaded, rather than this module
+//!   re-deriving it from a fresh lookup.
 //!
 //! This module deliberately depends on both `security_application`
 //! (for the tree) and `todo_domain` (for loans) but is not itself part
@@ -65,6 +68,10 @@ pub enum VerifierReason {
     /// The borrowing manager named on an active/extended `StaffLoan`
     /// covering this owner.
     LoanBorrowingManager,
+    /// This specific list's `escalated_to` target (Phase E) — replaces
+    /// `TreeParent` for this list only, per design doc §4.1's "an
+    /// escalated authority" replacing "the parent Manager."
+    EscalationTarget,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +90,13 @@ pub enum VerifierResolutionError {
 /// `owner_id`, within `organization_id`. See this module's doc comment
 /// for exactly which widenings are and are not included.
 ///
+/// `escalated_to`: pass `Some(target)` when the *specific list* being
+/// resolved for is currently `Escalated` with that target (read it off
+/// the loaded `TodoList`/`TargetList` via its own `escalated_to()`
+/// accessor) — this replaces the tree parent for this call, per Phase
+/// E's confirmed semantics. Pass `None` for a non-escalated list, which
+/// preserves this function's exact prior behavior.
+///
 /// Returns an empty `Vec` (not an error) if `owner_id` has no tree
 /// parent and no active loan — an owner with genuinely no authorized
 /// verifier is a real, valid state the caller must handle (e.g. a
@@ -93,27 +107,39 @@ pub async fn resolve_verifiers(
     organization_id: uuid::Uuid,
     user_store: &Arc<dyn UserStore>,
     staff_loan_repo_pool: &ProjectionPool,
+    escalated_to: Option<ObjectId>,
 ) -> Result<Vec<AuthorizedVerifier>, VerifierResolutionError> {
     let mut verifiers = Vec::new();
 
-    // --- Phase A: tree parent ---
-    let owner_uuid = uuid::Uuid::from_bytes(owner_id.0);
-    let owner_record = user_store
-        .find_by_id(&owner_uuid.to_string())
-        .await
-        .map_err(|e| VerifierResolutionError::UserStore(e.to_string()))?;
-    if let Some(owner_record) = &owner_record {
-        if let Some(parent_id) = &owner_record.parent_user_id {
-            if let Ok(parent_uuid) = uuid::Uuid::parse_str(parent_id) {
-                verifiers.push(AuthorizedVerifier {
-                    user_id: ObjectId(*parent_uuid.as_bytes()),
-                    reason: VerifierReason::TreeParent,
-                });
+    // --- Phase E: escalation widening (replaces the tree parent) ---
+    if let Some(escalation_target) = escalated_to {
+        verifiers.push(AuthorizedVerifier {
+            user_id: escalation_target,
+            reason: VerifierReason::EscalationTarget,
+        });
+    } else {
+        // --- Phase A: tree parent (only when NOT escalated) ---
+        let owner_uuid = uuid::Uuid::from_bytes(owner_id.0);
+        let owner_record = user_store
+            .find_by_id(&owner_uuid.to_string())
+            .await
+            .map_err(|e| VerifierResolutionError::UserStore(e.to_string()))?;
+        if let Some(owner_record) = &owner_record {
+            if let Some(parent_id) = &owner_record.parent_user_id {
+                if let Ok(parent_uuid) = uuid::Uuid::parse_str(parent_id) {
+                    verifiers.push(AuthorizedVerifier {
+                        user_id: ObjectId(*parent_uuid.as_bytes()),
+                        reason: VerifierReason::TreeParent,
+                    });
+                }
             }
         }
     }
 
-    // --- Phase C: active-loan widening ---
+    // --- Phase C: active-loan widening (unaffected by escalation —
+    // still applies regardless of whether this specific list has been
+    // escalated, since a loan concerns the owner generally, not one
+    // list's verification state) ---
     let rows = fetch_rows(staff_loan_repo_pool, organization_id, Some("staff_loan"))
         .await
         .map_err(|e| VerifierResolutionError::Projection(e.to_string()))?;
@@ -147,16 +173,23 @@ pub async fn resolve_verifiers(
 /// common "check one specific actor" call shape (e.g. a route handler
 /// deciding whether to accept a `VerifyTodoList` command from the
 /// caller), rather than every call site re-implementing the `.any(...)`
-/// check.
+/// check. See `resolve_verifiers`'s doc comment for `escalated_to`.
 pub async fn is_authorized_verifier(
     candidate: ObjectId,
     owner_id: ObjectId,
     organization_id: uuid::Uuid,
     user_store: &Arc<dyn UserStore>,
     staff_loan_repo_pool: &ProjectionPool,
+    escalated_to: Option<ObjectId>,
 ) -> Result<bool, VerifierResolutionError> {
-    let verifiers =
-        resolve_verifiers(owner_id, organization_id, user_store, staff_loan_repo_pool).await?;
+    let verifiers = resolve_verifiers(
+        owner_id,
+        organization_id,
+        user_store,
+        staff_loan_repo_pool,
+        escalated_to,
+    )
+    .await?;
     Ok(verifiers.iter().any(|v| v.user_id == candidate))
 }
 

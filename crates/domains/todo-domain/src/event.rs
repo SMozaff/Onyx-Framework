@@ -82,6 +82,10 @@ pub enum TodoListEvent {
         reason: String,
         /// Who invoked escalation.
         escalated_by: UserId,
+        /// Who the escalation routes to — one level up the tree from
+        /// the normal verifier. See
+        /// `command::TodoListCommand::EscalateTodoList`'s doc comment.
+        escalated_to: UserId,
         /// When.
         escalated_at: Timestamp,
     },
@@ -153,6 +157,9 @@ pub enum TargetListEvent {
         reason: String,
         /// Who invoked escalation.
         escalated_by: UserId,
+        /// See `TodoListEvent::TodoListEscalated`'s `escalated_to` doc
+        /// comment — identical rationale.
+        escalated_to: UserId,
         /// When.
         escalated_at: Timestamp,
     },

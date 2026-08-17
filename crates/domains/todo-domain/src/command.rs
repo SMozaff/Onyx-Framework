@@ -73,6 +73,15 @@ pub enum TodoListCommand {
     EscalateTodoList {
         /// Why escalation was invoked.
         reason: String,
+        /// Who the escalation routes to. Resolved by the application
+        /// layer before this command is issued — `todo-domain` has no
+        /// access to the org tree needed to compute "one level up from
+        /// the normal verifier" (design doc §4.1, resolved 2026-08-16:
+        /// escalation routes to the verifying Manager's own parent, one
+        /// further hop up the same tree D.4's `verifier_resolution`
+        /// already walks). See
+        /// `api_server::escalation_resolution::resolve_escalation_target`.
+        escalated_to: UserId,
     },
 }
 
@@ -137,6 +146,9 @@ pub enum TargetListCommand {
     EscalateTargetList {
         /// Why.
         reason: String,
+        /// See `TodoListCommand::EscalateTodoList`'s `escalated_to` doc
+        /// comment — identical rationale.
+        escalated_to: UserId,
     },
 }
 

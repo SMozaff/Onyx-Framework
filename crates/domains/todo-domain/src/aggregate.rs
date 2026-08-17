@@ -68,6 +68,11 @@ pub struct TodoList {
     /// visibility rule this field's *consumers* (not this crate) must
     /// enforce.
     team_leader_pre_check: Option<crate::value::TeamLeaderPreCheck>,
+    /// Who this list's escalation (if any) was routed to. `None` unless
+    /// `status` is `Escalated`. See
+    /// `command::TodoListCommand::EscalateTodoList`'s doc comment for
+    /// why this is supplied by the caller rather than computed here.
+    escalated_to: Option<UserId>,
 }
 
 impl TodoList {
@@ -132,6 +137,7 @@ impl TodoList {
             items: items.clone(),
             created_by: *created_by,
             team_leader_pre_check: None,
+            escalated_to: None,
         }
     }
 
@@ -166,6 +172,12 @@ impl TodoList {
         self.team_leader_pre_check.as_ref()
     }
 
+    /// Who this list's escalation was routed to, if `status` is
+    /// `Escalated`. `None` otherwise.
+    pub fn escalated_to(&self) -> Option<UserId> {
+        self.escalated_to
+    }
+
     fn invalid(&self, command: &str) -> TodoError {
         TodoError::InvalidTransition(format!("{command} from {:?}", self.status))
     }
@@ -193,6 +205,17 @@ impl AggregateRoot for TodoList {
         self.authority_epoch
     }
 
+    /// `Verify`/`Reject`/`Escalate` all accept `ListStatus::Escalated`
+    /// as a starting status, alongside `Submitted`/`TeamLeaderPreChecked`
+    /// -- added 2026-08-16 after live end-to-end testing surfaced a real
+    /// bug: `VerifyTodoList` was rejected from `Escalated`, meaning an
+    /// escalation target (per design doc section 4.1, resolved
+    /// 2026-08-16) could never actually act on what was escalated to
+    /// them. Escalate also accepting `Escalated` supports E.1's
+    /// confirmed "step-by-step, not a jump" re-escalation -- a stuck
+    /// Senior Manager can escalate the same list one hop further, and
+    /// each `TodoListEscalated` event simply overwrites `escalated_to`
+    /// with the new target (see `apply()` below).
     fn decide(
         &self,
         command: Self::Command,
@@ -235,7 +258,7 @@ impl AggregateRoot for TodoList {
             },
 
             TodoListCommand::VerifyTodoList { outcome, comment } => match self.status {
-                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked => {
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
                     Ok(vec![TodoListEvent::TodoListVerified {
                         outcome,
                         comment,
@@ -247,7 +270,7 @@ impl AggregateRoot for TodoList {
             },
 
             TodoListCommand::RejectTodoList { reason } => match self.status {
-                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked => {
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
                     Ok(vec![TodoListEvent::TodoListRejected {
                         reason,
                         rejected_by: context.actor.user_id,
@@ -257,11 +280,15 @@ impl AggregateRoot for TodoList {
                 _ => Err(self.invalid("RejectTodoList")),
             },
 
-            TodoListCommand::EscalateTodoList { reason } => match self.status {
-                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked => {
+            TodoListCommand::EscalateTodoList {
+                reason,
+                escalated_to,
+            } => match self.status {
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
                     Ok(vec![TodoListEvent::TodoListEscalated {
                         reason,
                         escalated_by: context.actor.user_id,
+                        escalated_to,
                         escalated_at: context.trusted_now,
                     }])
                 }
@@ -308,8 +335,9 @@ impl AggregateRoot for TodoList {
                 self.status = ListStatus::Rejected;
                 self.lifecycle_epoch = self.lifecycle_epoch.advance();
             }
-            TodoListEvent::TodoListEscalated { .. } => {
+            TodoListEvent::TodoListEscalated { escalated_to, .. } => {
                 self.status = ListStatus::Escalated;
+                self.escalated_to = Some(*escalated_to);
                 self.authority_epoch = self.authority_epoch.advance();
             }
         }
@@ -342,6 +370,8 @@ pub struct TargetList {
     /// See `TodoList::team_leader_pre_check`'s doc comment — identical
     /// rationale, identical shape.
     team_leader_pre_check: Option<crate::value::TeamLeaderPreCheck>,
+    /// See `TodoList::escalated_to`'s doc comment — identical rationale.
+    escalated_to: Option<UserId>,
 }
 
 impl TargetList {
@@ -417,6 +447,7 @@ impl TargetList {
             time_window: *time_window,
             created_by: *created_by,
             team_leader_pre_check: None,
+            escalated_to: None,
         }
     }
 
@@ -439,6 +470,11 @@ impl TargetList {
     /// rationale.
     pub fn team_leader_pre_check(&self) -> Option<&crate::value::TeamLeaderPreCheck> {
         self.team_leader_pre_check.as_ref()
+    }
+
+    /// See `TodoList::escalated_to`'s doc comment — identical rationale.
+    pub fn escalated_to(&self) -> Option<UserId> {
+        self.escalated_to
     }
 
     /// What hitting this target means, free text.
@@ -473,6 +509,9 @@ impl AggregateRoot for TargetList {
         self.authority_epoch
     }
 
+    /// See `TodoList::decide`'s doc comment on accepting
+    /// `ListStatus::Escalated` -- identical rationale and fix, added
+    /// 2026-08-16.
     fn decide(
         &self,
         command: Self::Command,
@@ -507,7 +546,7 @@ impl AggregateRoot for TargetList {
             },
 
             TargetListCommand::VerifyTargetList { outcome, comment } => match self.status {
-                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked => {
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
                     // Design doc §4.0.2, resolved 2026-08-16: hit/miss
                     // is judged only once the window has closed.
                     if context.trusted_now < self.time_window.end_at {
@@ -524,7 +563,7 @@ impl AggregateRoot for TargetList {
             },
 
             TargetListCommand::RejectTargetList { reason } => match self.status {
-                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked => {
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
                     Ok(vec![TargetListEvent::TargetListRejected {
                         reason,
                         rejected_by: context.actor.user_id,
@@ -534,11 +573,15 @@ impl AggregateRoot for TargetList {
                 _ => Err(self.invalid("RejectTargetList")),
             },
 
-            TargetListCommand::EscalateTargetList { reason } => match self.status {
-                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked => {
+            TargetListCommand::EscalateTargetList {
+                reason,
+                escalated_to,
+            } => match self.status {
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
                     Ok(vec![TargetListEvent::TargetListEscalated {
                         reason,
                         escalated_by: context.actor.user_id,
+                        escalated_to,
                         escalated_at: context.trusted_now,
                     }])
                 }
@@ -576,8 +619,9 @@ impl AggregateRoot for TargetList {
                 self.status = ListStatus::Rejected;
                 self.lifecycle_epoch = self.lifecycle_epoch.advance();
             }
-            TargetListEvent::TargetListEscalated { .. } => {
+            TargetListEvent::TargetListEscalated { escalated_to, .. } => {
                 self.status = ListStatus::Escalated;
+                self.escalated_to = Some(*escalated_to);
                 self.authority_epoch = self.authority_epoch.advance();
             }
         }
@@ -1104,16 +1148,19 @@ mod tests {
     fn escalate_submitted_todo_list_succeeds() {
         let mut list = submitted_todo_list();
         let ctx = test_context();
+        let escalation_target = test_user_id();
         let events = list
             .decide(
                 TodoListCommand::EscalateTodoList {
                     reason: "Parent manager unreachable".to_string(),
+                    escalated_to: escalation_target,
                 },
                 &ctx,
             )
             .expect("escalate must succeed");
         apply_all(&mut list, &events);
         assert_eq!(list.status(), ListStatus::Escalated);
+        assert_eq!(list.escalated_to(), Some(escalation_target));
     }
 
     #[test]
@@ -1176,6 +1223,163 @@ mod tests {
             .expect("pre-check data must be stored on the aggregate");
         assert_eq!(recorded.notes, "Target looks achievable");
         assert_eq!(recorded.checked_by, ctx.actor.user_id);
+    }
+
+
+    #[test]
+    fn escalated_todo_list_can_be_verified() {
+        // Regression test for a real bug found via live end-to-end
+        // testing 2026-08-16: VerifyTodoList was rejected from
+        // Escalated, meaning the escalation target could never act on
+        // what was escalated to them.
+        let mut list = submitted_todo_list();
+        let ctx = test_context();
+        let escalation_target = test_user_id();
+        let escalate_events = list
+            .decide(
+                TodoListCommand::EscalateTodoList {
+                    reason: "Parent manager unreachable".to_string(),
+                    escalated_to: escalation_target,
+                },
+                &ctx,
+            )
+            .expect("escalate must succeed");
+        apply_all(&mut list, &escalate_events);
+        assert_eq!(list.status(), ListStatus::Escalated);
+
+        let verify_events = list
+            .decide(
+                TodoListCommand::VerifyTodoList {
+                    outcome: VerificationOutcome::Flawless,
+                    comment: None,
+                },
+                &ctx,
+            )
+            .expect("verify must succeed from Escalated -- this is the whole point of escalation");
+        apply_all(&mut list, &verify_events);
+        assert_eq!(list.status(), ListStatus::Verified);
+    }
+
+    #[test]
+    fn escalated_todo_list_can_be_rejected() {
+        let mut list = submitted_todo_list();
+        let ctx = test_context();
+        let escalate_events = list
+            .decide(
+                TodoListCommand::EscalateTodoList {
+                    reason: "Parent manager unreachable".to_string(),
+                    escalated_to: test_user_id(),
+                },
+                &ctx,
+            )
+            .expect("escalate must succeed");
+        apply_all(&mut list, &escalate_events);
+
+        let reject_events = list
+            .decide(
+                TodoListCommand::RejectTodoList {
+                    reason: "Not acceptable even at this level".to_string(),
+                },
+                &ctx,
+            )
+            .expect("reject must succeed from Escalated");
+        apply_all(&mut list, &reject_events);
+        assert_eq!(list.status(), ListStatus::Rejected);
+    }
+
+    #[test]
+    fn escalated_todo_list_can_be_re_escalated() {
+        // E.1's confirmed "step-by-step, not a jump" re-escalation --
+        // a stuck escalation target can escalate the same list one hop
+        // further, and the new escalated_to overwrites the old one.
+        let mut list = submitted_todo_list();
+        let ctx = test_context();
+        let first_target = test_user_id();
+        let first_events = list
+            .decide(
+                TodoListCommand::EscalateTodoList {
+                    reason: "First escalation".to_string(),
+                    escalated_to: first_target,
+                },
+                &ctx,
+            )
+            .expect("first escalate must succeed");
+        apply_all(&mut list, &first_events);
+        assert_eq!(list.escalated_to(), Some(first_target));
+
+        let second_target = test_user_id();
+        assert_ne!(first_target, second_target);
+        let second_events = list
+            .decide(
+                TodoListCommand::EscalateTodoList {
+                    reason: "Still stuck, escalating further".to_string(),
+                    escalated_to: second_target,
+                },
+                &ctx,
+            )
+            .expect("re-escalate must succeed from Escalated");
+        apply_all(&mut list, &second_events);
+        assert_eq!(list.status(), ListStatus::Escalated);
+        assert_eq!(
+            list.escalated_to(),
+            Some(second_target),
+            "re-escalation must overwrite escalated_to with the new target, not keep the old one"
+        );
+    }
+
+    #[test]
+    fn escalate_submitted_target_list_succeeds() {
+        let mut list = submitted_target_list();
+        let ctx = test_context();
+        let escalation_target = test_user_id();
+        let events = list
+            .decide(
+                TargetListCommand::EscalateTargetList {
+                    reason: "Parent manager unreachable".to_string(),
+                    escalated_to: escalation_target,
+                },
+                &ctx,
+            )
+            .expect("escalate must succeed");
+        apply_all(&mut list, &events);
+        assert_eq!(list.status(), ListStatus::Escalated);
+        assert_eq!(list.escalated_to(), Some(escalation_target));
+    }
+
+    #[test]
+    fn escalated_target_list_can_be_verified() {
+        // Same regression coverage as escalated_todo_list_can_be_verified,
+        // for TargetList's independent decide() guard. Must verify
+        // after the window closes (WindowNotClosed still applies
+        // regardless of escalation -- escalation changes who may
+        // verify, not when).
+        let mut list = submitted_target_list();
+        let window = list.time_window();
+        let ctx = test_context_at(window.end_at);
+        let escalation_target = test_user_id();
+        let escalate_events = list
+            .decide(
+                TargetListCommand::EscalateTargetList {
+                    reason: "Parent manager unreachable".to_string(),
+                    escalated_to: escalation_target,
+                },
+                &ctx,
+            )
+            .expect("escalate must succeed");
+        apply_all(&mut list, &escalate_events);
+        assert_eq!(list.status(), ListStatus::Escalated);
+
+        let verify_events = list
+            .decide(
+                TargetListCommand::VerifyTargetList {
+                    outcome: VerificationOutcome::Flawless,
+                    comment: None,
+                },
+                &ctx,
+            )
+            .expect("verify must succeed from Escalated after the window closes");
+        apply_all(&mut list, &verify_events);
+        assert_eq!(list.status(), ListStatus::Verified);
     }
 
     #[test]
