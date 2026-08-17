@@ -1531,3 +1531,60 @@ and 31 client-composition tests, including
 native UI completed `npx tsc -b` with zero errors and `npx vite build`
 successfully (41 modules). No desktop-shell UI automated-test harness
 exists in this workspace; none was invented for this scoped feature.
+
+---
+
+## Desktop app CI — build for Linux, macOS, and Windows — 2026-08-17
+
+Confirmed a real gap by reading the actual workflow files, not
+assuming: `ci.yml`'s `check` job compiled `desktop-shell` on Linux
+only, via a plain `cargo build --workspace` — a compile-error check,
+never invoking Tauri's bundler. `release.yml`'s existing 3-platform
+matrix (`release-binaries`) only ever built the server-side binaries
+(`api-server`/`worker`/`migration-tool`/`sync-agent`); `desktop-shell`
+was never in that job's package list. Net result: no CI job anywhere
+in this repo produced an installable desktop app, on any platform,
+despite `tauri.conf.json` already declaring `"targets": "all"`.
+
+**Fixed**: added `release-desktop` to `release.yml` — a 3-platform
+matrix (`ubuntu-24.04`, `macos-14`, `windows-2022`, matching
+`release-binaries`' own OS choices exactly) using
+`tauri-apps/tauri-action` to actually invoke the bundler and produce
+`.deb`/`.AppImage` (Linux), `.dmg` (macOS), and `.msi`/NSIS `.exe`
+(Windows). Every Linux system dependency was taken directly from
+`ci.yml`'s own already-proven install list, not re-derived. Every
+non-obvious `tauri-action` input (`projectPath`, `args`, `tauriScript`,
+and the "omit `tagName`/`releaseName`/`releaseId` to build only, no
+release interaction" behavior) was checked against the action's own
+documentation before use — this repo's `publish` job already owns
+assembling the final GitHub release, so `tauri-action` must not also
+try to create one.
+
+**Two real mistakes were caught during review and fixed before
+committing**, not left in: a job-level `working-directory` default
+combined with a `.`-override step does not resolve to the repo root
+the way it was first written (GitHub Actions resolves relative
+`working-directory` settings relative to the already-set default, not
+the workspace root); and the bundle-locating step's path plus the
+macOS bundle list were both wrong on the first pass (this is a Cargo
+workspace, so build output lands in the workspace-root `target/`, not
+a per-crate one — and `.app` is a directory, not a file, so it can't
+be found by a `-type f` search alongside `.dmg`). Both fixed before
+this change was committed.
+
+**Explicit, undecided gap, not silently assumed away**: real code
+signing (Apple Developer ID + notarization for macOS, Azure Key Vault
+or equivalent for Windows) needs secrets this repo does not yet have.
+The macOS signing step is `continue-on-error: true` with Tauri's own
+documented ad-hoc-signing fallback, so an unsigned build still
+succeeds — but it will show a Gatekeeper warning on macOS and a
+SmartScreen warning on Windows until real signing is configured. That
+is separate follow-up work, not something to invent credentials for
+here.
+
+**Not run**: GitHub Actions cannot execute inside this build sandbox.
+This was verified by careful manual review — cross-referencing every
+non-obvious `tauri-action` input and Tauri's own CI documentation, and
+catching the two real mistakes above during that review — not by an
+actual CI run. The workflow only triggers on `push: tags: ["v*"]`
+(unchanged), so it has not run automatically either.
