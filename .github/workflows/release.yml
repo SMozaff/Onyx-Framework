@@ -126,7 +126,11 @@ jobs:
         with:
           projectPath: crates/bins/desktop-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          tauriScript: npx tauri
+          # The CLI is declared in ui/package.json rather than at the
+          # desktop-shell root. `--prefix ui` therefore resolves the
+          # locked local executable while the action still runs with
+          # desktop-shell as the Tauri project directory.
+          tauriScript: npx --prefix ui tauri
       - name: Locate bundle output
         shell: bash
         run: |
