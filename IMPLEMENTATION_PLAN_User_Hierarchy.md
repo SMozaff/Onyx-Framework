@@ -858,3 +858,37 @@ recorded, the code isn't written). The workspace's Docker-based E2E
 suite gap is now closed — see the "Docker availability for the e2e
 suite" entry in `DECISIONS.md` (2026-08-17): 4/4 runnable journeys
 pass, 3 ignored for their own declared, unrelated reasons.
+
+### 11.9 — Remaining web-ui picker and escalation workflows — 2026-08-17
+
+**Resolved the user-directory boundary before building picker UI.** The
+existing `GET /api/admin/users` remains admin-only because it exposes
+full administrative account data. The new `GET /api/users` is an
+ordinary authenticated route that returns only `{ id, username }` for
+active users in the requesting token's organization. It is covered by a
+real HTTP test that proves an ordinary user can call it, the response
+does not contain admin/hierarchy fields, inactive and foreign-tenant
+accounts are absent, and unauthenticated access receives HTTP 401.
+
+**Built one reusable searchable `UserPicker` and wired both workflows.**
+Todo/Target creation now offers **For myself** (`StaffAuthored`) or
+**Assign to someone else** (`ManagerAssigned`, picked owner). StaffLoan
+creation now uses it for staff member, real owner, and borrowing manager
+rather than accepting raw UUIDs. The client preserves the required rule
+that real owner and borrowing manager differ.
+
+**Built actionable escalation visibility instead of a read-only inbox.**
+Todo/Target pages add an **Escalated to you** filter; selecting an item
+opens the established detail panel, with Verify/Reject/Escalate enabled
+for the matching `escalated_to` user. StaffLoans add the matching filter
+and show Approve/Decline for the escalation target on a Requested loan.
+The client-side choices match the already-verified API authorization
+rules and remain convenience only; the server is still the authority
+boundary.
+
+**New UI regression coverage:**
+`web-ui/tests/integration/ui_gap_workflows.test.tsx` covers user-picker
+search/selection, Todo escalation filtering plus decision controls, and
+StaffLoan escalation filtering plus Approve/Decline controls using the
+real pages and production query hooks. Full API and web-ui validation is
+recorded in the final task report.

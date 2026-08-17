@@ -90,6 +90,22 @@ async fn create_user(
         .to_string()
 }
 
+async fn login_token(http: &reqwest::Client, base: &str, username: &str) -> String {
+    let login: serde_json::Value = http
+        .post(format!("{base}/api/auth/login"))
+        .json(&serde_json::json!({"username": username, "password": "a-fine-password-1"}))
+        .send()
+        .await
+        .expect("login request")
+        .json()
+        .await
+        .expect("login body");
+    login["access_token"]
+        .as_str()
+        .expect("access token")
+        .to_string()
+}
+
 #[tokio::test]
 async fn class_can_be_set_at_creation_and_read_back() {
     let (addr, token) = start_server("class-creation").await;
@@ -169,7 +185,10 @@ async fn set_class_updates_and_can_clear_to_null() {
         .json()
         .await
         .unwrap();
-    let cleared = users_after_clear.iter().find(|u| u["id"] == user_id).unwrap();
+    let cleared = users_after_clear
+        .iter()
+        .find(|u| u["id"] == user_id)
+        .unwrap();
     assert_eq!(cleared["class"], serde_json::Value::Null);
 }
 
@@ -281,4 +300,74 @@ async fn class_and_parent_routes_reject_unauthenticated_requests() {
         .await
         .unwrap();
     assert_eq!(parent_response.status(), 401);
+}
+
+#[tokio::test]
+async fn authenticated_user_can_list_reduced_active_picker_identities() {
+    let (addr, admin_token) = start_server("picker-identities").await;
+    let http = reqwest::Client::new();
+    let base = format!("http://{addr}");
+
+    let picker_user_id = create_user(
+        &http,
+        &base,
+        &admin_token,
+        "picker-staff",
+        serde_json::json!({}),
+    )
+    .await;
+    let inactive_user_id = create_user(
+        &http,
+        &base,
+        &admin_token,
+        "picker-inactive",
+        serde_json::json!({}),
+    )
+    .await;
+    let foreign_user_id = create_user(
+        &http,
+        &base,
+        &admin_token,
+        "picker-foreign",
+        serde_json::json!({"organization_id": "33333333-3333-3333-3333-333333333333"}),
+    )
+    .await;
+
+    let deactivation = http
+        .post(format!(
+            "{base}/api/admin/users/{inactive_user_id}/deactivate"
+        ))
+        .bearer_auth(&admin_token)
+        .send()
+        .await
+        .expect("deactivate request");
+    assert!(deactivation.status().is_success());
+
+    let staff_token = login_token(&http, &base, "picker-staff").await;
+    let response = http
+        .get(format!("{base}/api/users"))
+        .bearer_auth(&staff_token)
+        .send()
+        .await
+        .expect("picker users request");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let users: Vec<serde_json::Value> = response.json().await.expect("picker users body");
+
+    let picker = users
+        .iter()
+        .find(|user| user["id"] == picker_user_id)
+        .expect("ordinary authenticated user is visible");
+    assert_eq!(picker["username"], serde_json::json!("picker-staff"));
+    assert!(picker.get("is_admin").is_none());
+    assert!(picker.get("class").is_none());
+    assert!(picker.get("parent_user_id").is_none());
+    assert!(users.iter().all(|user| user["id"] != inactive_user_id));
+    assert!(users.iter().all(|user| user["id"] != foreign_user_id));
+
+    let unauthenticated = http
+        .get(format!("{base}/api/users"))
+        .send()
+        .await
+        .expect("unauthenticated picker request");
+    assert_eq!(unauthenticated.status(), reqwest::StatusCode::UNAUTHORIZED);
 }

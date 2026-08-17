@@ -8,7 +8,8 @@ import type { StaffLoanProjection } from '../../types/query';
  * actions the *current* user's relationship to this specific loan
  * makes available. Design doc §2.1's three approval gates are
  * reflected directly in which buttons render for which viewer:
- * - Approve/Decline: only the real owner, only while `Requested`.
+ * - Approve/Decline: the real owner while un-escalated, or the current
+ *   escalation target once the decision has been escalated, while `Requested`.
  * - Extend: only the staff member being loaned, only while `Active`
  *   or `Extended` (their own approval is what extension means, per
  *   the confirmed rule — there is no separate "request extension"
@@ -31,8 +32,10 @@ export default function LoanCard({ loan, currentUserId }: { loan: StaffLoanProje
   const isRealOwner = currentUserId === loan.real_owner_id;
   const isBorrowingManager = currentUserId === loan.borrowing_manager_id;
   const isStaffMember = currentUserId === loan.staff_user_id;
+  const isEscalationTarget = currentUserId !== null && currentUserId === loan.escalated_to;
+  const isCurrentDecisionMaker = loan.escalated_to ? isEscalationTarget : isRealOwner;
 
-  const canApproveOrDecline = isRealOwner && loan.status === 'Requested';
+  const canApproveOrDecline = isCurrentDecisionMaker && loan.status === 'Requested';
   const canExtend = isStaffMember && (loan.status === 'Active' || loan.status === 'Extended');
   const canEnd = (isRealOwner || isBorrowingManager) && (loan.status === 'Active' || loan.status === 'Extended');
 
@@ -51,7 +54,7 @@ export default function LoanCard({ loan, currentUserId }: { loan: StaffLoanProje
       <div className="notification-content">
         <div className="card-title-row">
           <h3>
-            Loan {isStaffMember ? '(you are on loan)' : isRealOwner ? '(your report)' : isBorrowingManager ? '(borrowed by you)' : ''}
+            Loan {isEscalationTarget ? '(escalated to you)' : isStaffMember ? '(you are on loan)' : isRealOwner ? '(your report)' : isBorrowingManager ? '(borrowed by you)' : ''}
           </h3>
           <StatusBadge status={loan.status} />
         </div>
@@ -65,6 +68,12 @@ export default function LoanCard({ loan, currentUserId }: { loan: StaffLoanProje
             <dd>{new Date(loan.window.end_at / 1_000_000).toLocaleString()}</dd>
           </div>
         </dl>
+
+        {isEscalationTarget ? (
+          <p className="muted" style={{ margin: '10px 0 0' }}>
+            This approval decision was escalated to you.
+          </p>
+        ) : null}
 
         {canApproveOrDecline || canExtend || canEnd ? (
           <div className="approval-actions" style={{ marginTop: 12, flexWrap: 'wrap' }}>

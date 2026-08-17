@@ -24,11 +24,12 @@ import LoanCard from './LoanCard';
 export default function StaffLoansPage() {
   const query = useOnyxQuery<StaffLoanProjection>('staff_loan.list');
   const user = useAuthStore((state) => state.user);
-  const [filter, setFilter] = useState<'all' | 'mine'>('all');
+  const [filter, setFilter] = useState<'all' | 'mine' | 'escalated'>('all');
 
   const loans = useMemo(() => {
     const all = query.data?.data ?? [];
     if (filter === 'all' || !user) return all;
+    if (filter === 'escalated') return all.filter((loan) => loan.escalated_to === user.id);
     return all.filter(
       (loan) =>
         loan.staff_user_id === user.id || loan.real_owner_id === user.id || loan.borrowing_manager_id === user.id,
@@ -45,9 +46,10 @@ export default function StaffLoansPage() {
         </div>
         <label className="filter-label">
           Show
-          <select value={filter} onChange={(e) => setFilter(e.target.value as 'all' | 'mine')}>
+          <select value={filter} onChange={(e) => setFilter(e.target.value as 'all' | 'mine' | 'escalated')}>
             <option value="all">All loans</option>
             <option value="mine">Involving me</option>
+            <option value="escalated">Escalated to you</option>
           </select>
         </label>
       </header>
@@ -63,7 +65,11 @@ export default function StaffLoansPage() {
           <div className="skeleton-list" />
         ) : loans.length === 0 ? (
           <p style={{ color: 'var(--muted)', padding: '12px 4px' }}>
-            {filter === 'mine' ? "No loans involve you yet." : 'No loans yet. Request one above.'}
+            {filter === 'mine'
+              ? 'No loans involve you yet.'
+              : filter === 'escalated'
+                ? 'No loan approvals have been escalated to you.'
+                : 'No loans yet. Request one above.'}
           </p>
         ) : (
           <div className="card-list">

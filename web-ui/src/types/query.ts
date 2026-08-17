@@ -166,6 +166,8 @@ export interface TodoListProjection extends VersionedProjection {
   origin: ListOrigin;
   items: TodoItemProjection[];
   status: TodoListStatus;
+  /** Present while an escalated decision is assigned to another manager. */
+  escalated_to?: string | null;
   team_leader_pre_check?: TeamLeaderPreCheckProjection;
 }
 
@@ -175,6 +177,8 @@ export interface TargetListProjection extends VersionedProjection {
   description: string;
   time_window: { start_at: number; end_at: number };
   status: TodoListStatus;
+  /** Present while an escalated decision is assigned to another manager. */
+  escalated_to?: string | null;
   team_leader_pre_check?: TeamLeaderPreCheckProjection;
 }
 
@@ -191,4 +195,6 @@ export interface StaffLoanProjection extends VersionedProjection {
   borrowing_manager_id: string;
   window: { start_at: number; end_at: number };
   status: StaffLoanStatus;
+  /** The current escalation decision-maker, when approval was escalated. */
+  escalated_to?: string | null;
 }

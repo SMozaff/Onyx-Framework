@@ -532,6 +532,40 @@ pub async fn set_parent(
     Ok(Json(json!({"success": true})))
 }
 
+/// Reduced identity shape used by non-admin assignment and staff-loan
+/// pickers. Administrative privilege, class, reporting-line, and account
+/// activation details are deliberately absent from this wire contract.
+#[derive(Debug, Serialize)]
+pub struct PickerUserDto {
+    pub id: String,
+    pub username: String,
+}
+
+/// `GET /api/users` — authenticated, same-organization active-user list.
+///
+/// This is deliberately distinct from `/api/admin/users`: ordinary Staff and
+/// Managers need enough identity information to name a colleague in an
+/// assignment or staff-loan request, but they do not need administrative
+/// attributes. Filtering to the bearer token's organization prevents this
+/// route from becoming a cross-tenant directory, and inactive accounts are
+/// omitted because they cannot participate in new work.
+pub async fn list_picker_users(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<PickerUserDto>>, ApiError> {
+    let authenticated = authenticate_headers(&state, &headers).await?;
+    let users = state.user_store.list().await.map_err(store_error)?;
+    let visible = users
+        .into_iter()
+        .filter(|user| user.organization_id == authenticated.organization_id && user.is_active)
+        .map(|user| PickerUserDto {
+            id: user.user_id,
+            username: user.username,
+        })
+        .collect();
+    Ok(Json(visible))
+}
+
 /// `GET /api/admin/users` — admin-only listing.
 pub async fn list_users(
     State(state): State<ApiState>,

@@ -333,6 +333,10 @@ pub fn router(state: ApiState) -> Router {
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/ready", get(readiness))
         .route("/api/auth/login", post(auth::login))
+        // Lightweight active-user identities for ordinary authenticated
+        // assignment and staff-loan pickers. Unlike `/api/admin/users`,
+        // this route intentionally returns no privilege or hierarchy data.
+        .route("/api/users", get(admin::list_picker_users))
         // Bootstrap is intentionally unauthenticated; it self-closes once any
         // user exists and requires ONYX_BOOTSTRAP_TOKEN. See routes::admin.
         .route("/api/admin/bootstrap", post(admin::bootstrap))
@@ -363,10 +367,7 @@ pub fn router(state: ApiState) -> Router {
         // confirmed visibility/editing rules.
         .route("/api/profiles", get(profiles::list_profiles))
         .route("/api/profiles/:owner_id", get(profiles::get_profile))
-        .route(
-            "/api/admin/profiles",
-            put(profiles::upsert_profile_route),
-        )
+        .route("/api/admin/profiles", put(profiles::upsert_profile_route))
         .route(
             "/api/admin/profiles/import",
             post(profiles::batch::import_profiles),
