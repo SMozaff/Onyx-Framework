@@ -796,3 +796,60 @@ pre-existing gap, not something invented here to work around it.
 
 
 
+
+### 11.8 — Staff-loan command authorization + `web-ui` filter verification — 2026-08-17
+
+Closed via a second, tightly-scoped Manus handoff after the escalation
+work (§11.4 update, staff-loan escalation) surfaced a documented gap:
+`staff_loan.*` commands over `/api/command` had no server-side
+authorization check, only the domain crate's generic authority stub.
+
+**Reproduced first, then fixed**: an unrelated user's `ApproveStaffLoan`
+returned HTTP 200 before the fix — confirmed as a real defect, not
+assumed from the code comment alone. New `require_staff_loan_authority`
+in `routes/command.rs` loads the persisted `StaffLoan` and enforces
+design doc §2.1's three gates per command (Approve/Decline/Escalate →
+current decision-maker via `StaffLoan::grants_approval_authority_to()`;
+Extend → the staff member only; EndEarly → either manager, no approval;
+Expire → rejected outright from this route, worker-only). Denial
+responses use the `"not permitted"` convention for a proper HTTP 403.
+
+New test file `crates/bins/api-server/tests/staff_loan_authorization.rs`
+(3 tests, real HTTP against a real server): unrelated user rejected for
+both Approve and Decline, real owner accepted, escalation target
+accepted after the real owner escalates (with the follow-up request
+correctly bumping `expected_authority_epoch` to `1`, since escalation
+advances it — this is the same authority-epoch contract
+`StaffLoanEscalated`'s `apply()` already established).
+
+**Also verified in the same pass**: the `web-ui` "Involving me" filter
+on `StaffLoansPage`, written earlier this session against what turned
+out to be a broken wire shape (fixed generically by the id-normalization
+change), now genuinely works — confirmed by a new page-level integration
+test (`web-ui/tests/integration/staff_loans_filter.test.tsx`) that
+renders the real page through its production query hook rather than
+asserting only against a raw API response. **This test file was not
+transferred back into this build sandbox** (only the two Rust files
+were) — its existence and passing status are reported here on Manus's
+word, not independently re-run here.
+
+**Verified in this build sandbox** after pulling the fix back in:
+`cargo check`/`clippy --package api-server --tests -- -D warnings`
+clean; the new test file's 3 tests pass; full `api-server` suite is
+28/28 (4 + 3 + 3 + 8 + 3 + 7 across the six test binaries), matching
+Manus's reported count exactly.
+
+**Status: this closes every gap flagged in §11.6/the second handoff.**
+The Todo/Target/StaffLoan feature set — domain logic, HTTP wiring,
+D.4/D.5, Phase E escalation (routing, widening, staff-loan variant),
+the C.3 background job (live-verified against real PostgreSQL), field
+normalization, and now staff-loan command authorization — is fully
+built and verified end to end, with real tests (unit, HTTP-integration,
+and live-server) behind every piece rather than compile checks alone.
+
+What remains, unchanged from earlier reports: no "escalated to you"
+UI view; a user picker for `ManagerAssigned` list/loan creation;
+Phase B's actual org-provisioning action (the invite-email decision is
+recorded, the code isn't written); the workspace's Docker-based E2E
+suite still can't run in any sandbox used so far (no Docker daemon
+available in any of them, unrelated to this feature).

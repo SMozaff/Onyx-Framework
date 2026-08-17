@@ -1309,3 +1309,76 @@ practice. That precondition has since been met repeatedly this session
 — live-tested, 25 passing `api-server` tests, real HTTP round trips —
 so the person confirmed removal should proceed now. See the next
 commit for the actual removal.
+
+---
+
+## Staff-loan approval authorization gap — closed via Manus verification — 2026-08-17
+
+Following the previous handoff's explicit gap ("staff_loan.* commands
+have no real server-side authorization check"), the code was handed to
+Manus with a tightly-scoped prompt covering exactly that gap plus one
+other item (the `web-ui` "Involving me" filter, against the
+already-fixed id-normalization). Both were confirmed and closed.
+
+**Confirmed real, then fixed**: an unrelated authenticated user could
+send `ApproveStaffLoan` over the real HTTP API and receive HTTP 200 —
+reproduced first, then fixed, not assumed. A new
+`require_staff_loan_authority` helper in `routes/command.rs` loads the
+persisted `StaffLoan` before dispatch and enforces design doc §2.1's
+three approval gates per command:
+
+- `ApproveStaffLoan`/`DeclineStaffLoan`/`EscalateStaffLoan`: the
+  current decision-maker — the real owner, or the loan's
+  `escalated_to` once escalated — via
+  `StaffLoan::grants_approval_authority_to()`, which already existed
+  from the escalation work but had never actually been called from the
+  HTTP dispatch path.
+- `ExtendStaffLoan`: the staff member being loaned, and only them.
+- `EndStaffLoanEarly`: the real owner or the borrowing manager, no
+  approval required (per design doc §2.1 — "canceling alone is a
+  normal thing").
+- `ExpireStaffLoan`: rejected outright from `/api/command` — this
+  transition is worker-only (the scheduled background job calls it
+  directly against the database), no end-user token is ever a valid
+  authority for it.
+
+Denial responses use the existing `"not permitted"` message
+convention so the command-error mapper returns HTTP 403, matching
+every other authorization rejection in this codebase rather than the
+generic HTTP 400 a plain domain-rule violation gets.
+
+**New test coverage**:
+`crates/bins/api-server/tests/staff_loan_authorization.rs` — 3 real
+HTTP tests against a real spawned server: an unrelated user rejected
+for both approval and decline, the real owner accepted, and the
+escalation target accepted after the real owner escalates (correctly
+supplying the incremented `expected_authority_epoch` on the follow-up
+approval, since escalation advances it).
+
+**Re-verified in this sandbox** after pulling the fix back in:
+`cargo check`/`clippy --tests` clean, the new test file's 3 tests pass,
+and the full `api-server` suite (28 tests total, matching Manus's
+reported count) passes with no regressions.
+
+**Also confirmed in the same handoff**: the `web-ui` "Involving me"
+filter on `StaffLoansPage` (written earlier this session against what
+turned out to be a broken wire shape, then indirectly fixed by the
+generic id-normalization change) was verified to actually work now,
+via a new page-level integration test
+(`web-ui/tests/integration/staff_loans_filter.test.tsx`) that renders
+the real page through its production query hook and confirms the
+correct three loans remain selected after toggling the filter. Full
+`web-ui` suite: 131 passed, 7 skipped (pre-existing live-backend
+tests), matching the expected count. **Note**: only the Rust source
+files (`command.rs`, `staff_loan_authorization.rs`) were transferred
+back into this sandbox and re-verified directly; the `web-ui` test
+file itself was not transferred, so its presence/passing is reported
+here on Manus's word, not independently re-confirmed in this sandbox.
+
+**Status**: both items from the second handoff are closed. The
+StaffLoan/escalation feature set built this session is now fully
+verified — domain logic, HTTP wiring, D.4/D.5, escalation routing and
+widening for both Todo/Target and staff loans, the C.3 background job
+(live Postgres), field normalization, and now staff-loan command
+authorization — with real tests behind every piece, not just compile
+checks.
