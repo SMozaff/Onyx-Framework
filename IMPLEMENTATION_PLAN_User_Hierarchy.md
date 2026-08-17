@@ -737,12 +737,16 @@ Team Leader who performed the check returned the full record including
   with access to a real Postgres instance. See §11.3's updated text
   above for the live verification and the real recipient-persistence
   bug it found and fixed.
-- **Docker-backed E2E test suite could not be run** — the Manus
-  verification pass reached the Testcontainers-based `e2e` package but
-  could not execute those 4 journeys (no Docker daemon/socket available
-  in that sandbox either). Not part of this feature's own scope, but
-  worth noting as a still-open verification gap for the workspace more
-  broadly, unrelated to Todo/Target/StaffLoan specifically.
+- ~~Docker-backed E2E test suite could not be run~~ — **resolved
+  2026-08-17.** Confirmed not a fixed limitation: Manus was asked
+  directly whether Docker could be enabled at all, installed a local
+  Docker Engine, worked around one sandbox-specific daemon config
+  issue (legacy iptables `raw` table unsupported — fixed with
+  `dockerd --iptables=false --ip6tables=false`, no test-harness
+  changes), and ran the real `all_journeys.rs` suite: 4 passed, 0
+  failed, 3 ignored (each for its own declared, unrelated reason —
+  other teams' client/mobile work not yet production-complete). See
+  the dated `DECISIONS.md` entry for the full per-journey result.
 - ~~Phase B.4~~ — **resolved 2026-08-16**, see B.4 above: invite email
   with a setup link. The provisioning action itself (B.1–B.2) still
   needs building to actually send it.
@@ -850,6 +854,7 @@ and live-server) behind every piece rather than compile checks alone.
 What remains, unchanged from earlier reports: no "escalated to you"
 UI view; a user picker for `ManagerAssigned` list/loan creation;
 Phase B's actual org-provisioning action (the invite-email decision is
-recorded, the code isn't written); the workspace's Docker-based E2E
-suite still can't run in any sandbox used so far (no Docker daemon
-available in any of them, unrelated to this feature).
+recorded, the code isn't written). The workspace's Docker-based E2E
+suite gap is now closed — see the "Docker availability for the e2e
+suite" entry in `DECISIONS.md` (2026-08-17): 4/4 runnable journeys
+pass, 3 ignored for their own declared, unrelated reasons.

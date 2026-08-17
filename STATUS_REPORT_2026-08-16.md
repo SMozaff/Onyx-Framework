@@ -80,10 +80,13 @@ first-Admin credential delivery) are now resolved — see above.
 - **No ESLint configuration exists anywhere in this repository
   checkout** — a pre-existing gap, unrelated to and not fixed by this
   work, discovered while verifying the UI.
-- **Workspace-wide Docker-backed E2E suite (Testcontainers) could not
-  be run** in any build sandbox used across this feature's work (no
-  Docker daemon/socket available in any of them). Pre-existing,
-  unrelated to this feature specifically.
+- ~~Workspace-wide Docker-backed E2E suite could not be run~~ —
+  **resolved 2026-08-17**. Confirmed not a fixed limitation: asked
+  directly, Manus installed a local Docker Engine, worked around one
+  sandbox-specific daemon config issue with no test-code changes, and
+  ran the real suite — 4/4 runnable journeys pass, 3 ignored for their
+  own declared reasons (other teams' client/mobile work, unrelated to
+  this feature). See `DECISIONS.md` for the full per-journey result.
 - Disk-space constraints required aggressive `target/`/`node_modules`
   cleanup repeatedly across this feature's work — not a code defect,
   expect a cold build cache if resuming in a similarly constrained

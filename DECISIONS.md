@@ -1382,3 +1382,54 @@ widening for both Todo/Target and staff loans, the C.3 background job
 (live Postgres), field normalization, and now staff-loan command
 authorization — with real tests behind every piece, not just compile
 checks.
+
+---
+
+## Docker availability for the e2e suite — confirmed usable — 2026-08-17
+
+Following the previous entry's honest "reported unavailable, not
+independently re-checked" caveat, Manus was asked directly whether
+Docker could be enabled in its sandbox at all, in any form, before
+treating the earlier "no Docker daemon" report as a fixed limitation.
+
+**Answer: yes, Docker is usable.** Not preinstalled or pre-started, but
+the sandbox permitted a local Docker Engine install (`docker.io`,
+Engine 29.1.3) and a manually-launched daemon. One real, sandbox-specific
+snag came up and was resolved without touching the test harness: the
+default daemon configuration tried to program a legacy iptables `raw`
+table the sandbox doesn't support, which broke container networking;
+starting `dockerd --iptables=false --ip6tables=false` fixed it. This is
+a daemon configuration adaptation, not a code change — `test_harness.rs`
+was not modified, and the earlier handoff's explicit instruction not to
+patch the harness unless Docker was genuinely unavailable in every form
+was correctly respected (it wasn't needed).
+
+**The real `crates/team8-e2e-tests/tests/all_journeys.rs` suite was
+then actually run** (`cargo test --package e2e --test all_journeys --
+--nocapture`), from a full source compile, against real
+Testcontainers-managed containers:
+
+- `journey_1_mission_lifecycle` — passed
+- `journey_2_task_workflow` — passed
+- `journey_3_conflict_resolution` — passed
+- `journey_4_approval_workflow` — passed
+- `journey_5_notification_sync` — ignored (test's own message: "Team 5
+  client event integration is not production-complete")
+- `journey_6_p2p_sync` — ignored ("requires signed Team 5
+  desktop/mobile clients and radio adapters")
+- `journey_7_background_sync` — ignored ("requires Team 5 iOS
+  BGTask and Android WorkManager release builds")
+
+**4 passed, 0 failed, 3 ignored**, all in 10.67 seconds after
+compilation. The three ignored journeys are ignored by the tests'
+*own* declared reasons — genuine feature-incompleteness in other
+teams' work (client/mobile), unrelated to Docker, unrelated to this
+session's Todo/Target/StaffLoan work, and not something to chase down
+here.
+
+**Status**: this closes the "Docker/e2e suite could not be run"
+item that had been carried as an open gap across every status report
+and handoff since it was first noticed. It was a real environment gap
+in the specific sandboxes used earlier, not a fixed or permanent
+limitation of the workspace itself — confirmed by actually trying,
+not assumed either way.
