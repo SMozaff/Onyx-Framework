@@ -218,4 +218,26 @@ pub enum StaffLoanCommand {
     /// so the job's action is a real, auditable domain command rather
     /// than a side-channel mutation.
     ExpireStaffLoan,
+    /// Escalates a `Requested` loan's approval decision — design doc
+    /// E.2 (resolved 2026-08-16): "any decision made by a Senior
+    /// Manager or Top-level Manager" is escalatable, and staff-loan
+    /// approval is explicitly listed as an example. Stays `Requested`
+    /// (not a separate terminal status) — `escalated_to` widens who
+    /// may `ApproveStaffLoan`/`DeclineStaffLoan` to include the real
+    /// owner's own parent, mirroring
+    /// `TodoListCommand::EscalateTodoList`'s "replaces, doesn't
+    /// duplicate" semantics exactly. Confirmed by the person
+    /// 2026-08-16: the escalation target gains authority to
+    /// approve/decline **in the real owner's place**, not merely a
+    /// notification with no effect on who may act.
+    EscalateStaffLoan {
+        /// Why.
+        reason: String,
+        /// Who the escalation routes to — one level up the tree from
+        /// the real owner (or, on re-escalation, one level up from the
+        /// current `escalated_to`). Resolved by the application layer,
+        /// same reason as `TodoListCommand::EscalateTodoList`'s
+        /// `escalated_to` field — see that field's doc comment.
+        escalated_to: UserId,
+    },
 }

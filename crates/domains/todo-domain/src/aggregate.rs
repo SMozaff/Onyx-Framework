@@ -652,6 +652,10 @@ pub struct StaffLoan {
     real_owner_id: UserId,
     borrowing_manager_id: UserId,
     window: LoanWindow,
+    /// Who this loan's approval decision has been escalated to, if
+    /// any. `None` unless `EscalateStaffLoan` has been applied. See
+    /// `command::StaffLoanCommand::EscalateStaffLoan`'s doc comment.
+    escalated_to: Option<UserId>,
 }
 
 impl StaffLoan {
@@ -725,6 +729,7 @@ impl StaffLoan {
             real_owner_id: *real_owner_id,
             borrowing_manager_id: *borrowing_manager_id,
             window: *window,
+            escalated_to: None,
         }
     }
 
@@ -763,6 +768,31 @@ impl StaffLoan {
     pub fn grants_verification_authority_to(&self, manager_id: UserId) -> bool {
         matches!(self.status, StaffLoanStatus::Active | StaffLoanStatus::Extended)
             && (manager_id == self.real_owner_id || manager_id == self.borrowing_manager_id)
+    }
+
+    /// Who this loan's approval decision has been escalated to, if any.
+    pub fn escalated_to(&self) -> Option<UserId> {
+        self.escalated_to
+    }
+
+    /// Whether `manager_id` may currently `ApproveStaffLoan`/
+    /// `DeclineStaffLoan` this `Requested` loan: the real owner always
+    /// may (design doc §2.1), and if this loan has been escalated, the
+    /// escalation target may **instead** — confirmed by the person
+    /// 2026-08-16: escalating a stuck loan request gives the escalation
+    /// target real authority to decide in the real owner's place, not
+    /// merely a notification. Mirrors
+    /// `verifier_resolution`'s "escalation target replaces the normal
+    /// authority for this specific item" rule from the Todo/Target side
+    /// of Phase E, applied here to the loan's own approval decision.
+    pub fn grants_approval_authority_to(&self, manager_id: UserId) -> bool {
+        if self.status != StaffLoanStatus::Requested {
+            return false;
+        }
+        match self.escalated_to {
+            Some(target) => manager_id == target,
+            None => manager_id == self.real_owner_id,
+        }
     }
 
     fn invalid(&self, command: &str) -> StaffLoanError {
@@ -868,6 +898,26 @@ impl AggregateRoot for StaffLoan {
                 }
                 _ => Err(self.invalid("ExpireStaffLoan")),
             },
+
+            // Design doc E.2, resolved 2026-08-16: staff-loan approval
+            // is escalatable. Only valid from `Requested` -- every
+            // other status is already a resolved decision (Active,
+            // Declined, etc.) with nothing left to escalate. Supports
+            // re-escalation the same way TodoList/TargetList do: a
+            // second `EscalateStaffLoan` while already escalated simply
+            // overwrites `escalated_to` (see `apply()` below).
+            StaffLoanCommand::EscalateStaffLoan {
+                reason,
+                escalated_to,
+            } => match self.status {
+                StaffLoanStatus::Requested => Ok(vec![StaffLoanEvent::StaffLoanEscalated {
+                    reason,
+                    escalated_by: context.actor.user_id,
+                    escalated_to,
+                    escalated_at: context.trusted_now,
+                }]),
+                _ => Err(self.invalid("EscalateStaffLoan")),
+            },
         }
     }
 
@@ -902,6 +952,14 @@ impl AggregateRoot for StaffLoan {
                 self.status = StaffLoanStatus::Expired;
                 self.authority_epoch = self.authority_epoch.advance();
                 self.lifecycle_epoch = self.lifecycle_epoch.advance();
+            }
+            StaffLoanEvent::StaffLoanEscalated { escalated_to, .. } => {
+                // Status stays Requested -- escalation widens/replaces
+                // who may approve/decline, it does not itself resolve
+                // the decision. See `grants_approval_authority_to`'s
+                // doc comment.
+                self.escalated_to = Some(*escalated_to);
+                self.authority_epoch = self.authority_epoch.advance();
             }
         }
         self.version = self.version.next();
@@ -1709,5 +1767,148 @@ mod tests {
             .expect("expire must succeed");
         apply_all(&mut loan, &events);
         assert!(!loan.grants_verification_authority_to(loan.real_owner_id()));
+    }
+
+    #[test]
+    fn escalate_requested_staff_loan_succeeds() {
+        let mut loan = requested_staff_loan();
+        let ctx = test_context();
+        let escalation_target = test_user_id();
+        let events = loan
+            .decide(
+                StaffLoanCommand::EscalateStaffLoan {
+                    reason: "Real owner unreachable".to_string(),
+                    escalated_to: escalation_target,
+                },
+                &ctx,
+            )
+            .expect("escalate must succeed");
+        apply_all(&mut loan, &events);
+        assert_eq!(
+            loan.status(),
+            StaffLoanStatus::Requested,
+            "escalation widens who may decide, it does not itself resolve the decision"
+        );
+        assert_eq!(loan.escalated_to(), Some(escalation_target));
+    }
+
+    #[test]
+    fn escalate_active_staff_loan_is_rejected() {
+        // Only a stuck (Requested) approval decision can be escalated
+        // -- an already-decided loan has nothing left to escalate.
+        let loan = active_staff_loan();
+        let ctx = test_context();
+        let result = loan.decide(
+            StaffLoanCommand::EscalateStaffLoan {
+                reason: "irrelevant".to_string(),
+                escalated_to: test_user_id(),
+            },
+            &ctx,
+        );
+        assert!(matches!(result, Err(StaffLoanError::InvalidTransition(_))));
+    }
+
+    #[test]
+    fn escalation_target_gains_approval_authority_in_place_of_real_owner() {
+        // Confirmed by the person 2026-08-16: the escalation target
+        // gains real authority to approve/decline, not merely a
+        // notification.
+        let mut loan = requested_staff_loan();
+        let ctx = test_context();
+        let escalation_target = test_user_id();
+        let events = loan
+            .decide(
+                StaffLoanCommand::EscalateStaffLoan {
+                    reason: "Real owner unreachable".to_string(),
+                    escalated_to: escalation_target,
+                },
+                &ctx,
+            )
+            .expect("escalate must succeed");
+        apply_all(&mut loan, &events);
+
+        assert!(
+            loan.grants_approval_authority_to(escalation_target),
+            "the escalation target must gain approval authority"
+        );
+        assert!(
+            !loan.grants_approval_authority_to(loan.real_owner_id()),
+            "the real owner must lose approval authority once escalated -- \
+             the escalation target decides in their place, per the person's \
+             explicit confirmation, not alongside them"
+        );
+    }
+
+    #[test]
+    fn unescalated_requested_loan_grants_approval_authority_only_to_real_owner() {
+        let loan = requested_staff_loan();
+        assert!(loan.grants_approval_authority_to(loan.real_owner_id()));
+        assert!(!loan.grants_approval_authority_to(loan.borrowing_manager_id()));
+        assert!(!loan.grants_approval_authority_to(test_user_id()));
+    }
+
+    #[test]
+    fn escalation_target_can_approve_the_loan() {
+        let mut loan = requested_staff_loan();
+        let ctx = test_context();
+        let escalation_target = test_user_id();
+        let escalate_events = loan
+            .decide(
+                StaffLoanCommand::EscalateStaffLoan {
+                    reason: "Real owner unreachable".to_string(),
+                    escalated_to: escalation_target,
+                },
+                &ctx,
+            )
+            .expect("escalate must succeed");
+        apply_all(&mut loan, &escalate_events);
+
+        // decide()'s own authority check is the generic stub (see this
+        // crate's established precedent -- the composing application
+        // enforces grants_approval_authority_to before dispatch), so
+        // ApproveStaffLoan itself succeeds regardless of actor here;
+        // this test confirms the state transition still works normally
+        // once escalated, which is the mechanism grants_approval_authority_to
+        // is meant to gate access to.
+        let approve_events = loan
+            .decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
+            .expect("approve must still succeed from Requested after escalation");
+        apply_all(&mut loan, &approve_events);
+        assert_eq!(loan.status(), StaffLoanStatus::Active);
+    }
+
+    #[test]
+    fn re_escalating_a_staff_loan_overwrites_the_target() {
+        let mut loan = requested_staff_loan();
+        let ctx = test_context();
+        let first_target = test_user_id();
+        let first_events = loan
+            .decide(
+                StaffLoanCommand::EscalateStaffLoan {
+                    reason: "First escalation".to_string(),
+                    escalated_to: first_target,
+                },
+                &ctx,
+            )
+            .expect("first escalate must succeed");
+        apply_all(&mut loan, &first_events);
+        assert_eq!(loan.escalated_to(), Some(first_target));
+
+        let second_target = test_user_id();
+        assert_ne!(first_target, second_target);
+        let second_events = loan
+            .decide(
+                StaffLoanCommand::EscalateStaffLoan {
+                    reason: "Still stuck".to_string(),
+                    escalated_to: second_target,
+                },
+                &ctx,
+            )
+            .expect("re-escalate must succeed from Requested");
+        apply_all(&mut loan, &second_events);
+        assert_eq!(loan.status(), StaffLoanStatus::Requested);
+        assert_eq!(loan.escalated_to(), Some(second_target));
+        assert!(!loan.grants_approval_authority_to(first_target));
+        assert!(loan.grants_approval_authority_to(second_target));
     }
 }

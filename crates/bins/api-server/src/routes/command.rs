@@ -426,6 +426,81 @@ fn parse_escalated_to_field(aggregate: &Value) -> Option<ObjectId> {
     Some(ObjectId(bytes))
 }
 
+/// Parses a `StaffLoan` aggregate's `real_owner_id` field out of its
+/// raw JSON state. Same shape/rationale as `parse_owner_field`, kept
+/// separate since `StaffLoan` has no `owner` field at all (it has
+/// `staff_user_id`/`real_owner_id`/`borrowing_manager_id` instead).
+fn parse_real_owner_id_field(aggregate: &Value) -> Result<ObjectId, crate::CommandError> {
+    let bytes = aggregate
+        .get("real_owner_id")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            crate::CommandError::Domain("aggregate state missing 'real_owner_id' field".to_string())
+        })?;
+    if bytes.len() != 16 {
+        return Err(crate::CommandError::Domain(
+            "'real_owner_id' field is not a 16-byte object id".to_string(),
+        ));
+    }
+    let mut id_bytes = [0u8; 16];
+    for (i, b) in bytes.iter().enumerate() {
+        id_bytes[i] = b
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| {
+                crate::CommandError::Domain("invalid 'real_owner_id' byte".to_string())
+            })?;
+    }
+    Ok(ObjectId(id_bytes))
+}
+
+/// Resolves and constructs a full `StaffLoanCommand::EscalateStaffLoan`
+/// for `/api/command`'s dispatch. Same rationale as
+/// `resolve_todo_list_escalation_command`: `escalated_to` is
+/// server-resolved, not client-supplied. "The current decision-maker"
+/// is the real owner on a first escalation, or the loan's existing
+/// `escalated_to` on a re-escalation — see design doc E.1's confirmed
+/// "step-by-step" chaining, applied here to staff-loan approval per
+/// E.2's confirmation that it is escalatable.
+async fn resolve_staff_loan_escalation_command(
+    state: &ApiState,
+    target_id: ObjectId,
+    payload: &Value,
+) -> Result<todo_domain::StaffLoanCommand, crate::CommandError> {
+    let loaded = state
+        .staff_loan_repo
+        .load(&target_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or(crate::CommandError::NotFound(target_id))?;
+    let current_decision_maker = match parse_escalated_to_field(&loaded.aggregate) {
+        Some(existing_target) => existing_target,
+        None => parse_real_owner_id_field(&loaded.aggregate)?,
+    };
+    let escalated_to = crate::escalation_resolution::resolve_escalation_target(
+        current_decision_maker,
+        &state.user_store,
+    )
+    .await
+    .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+    .ok_or_else(|| {
+        crate::CommandError::Domain(
+            "nothing to escalate to -- the current decision-maker has no manager above them"
+                .to_string(),
+        )
+    })?;
+    let reason = payload
+        .get("EscalateStaffLoan")
+        .and_then(|v| v.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(todo_domain::StaffLoanCommand::EscalateStaffLoan {
+        reason,
+        escalated_to,
+    })
+}
+
 /// Returns `Ok(())` if authorized; a `403`-mapped `CommandError`
 /// otherwise. `aggregate_type` selects which repository to load from
 /// (`"todo_list"` or `"target_list"`) — both aggregates carry an
@@ -570,6 +645,7 @@ pub async fn command_route(
         | "staff_loan.DeclineStaffLoan"
         | "staff_loan.ExtendStaffLoan"
         | "staff_loan.EndStaffLoanEarly"
+        | "staff_loan.EscalateStaffLoan"
         | "staff_loan.ExpireStaffLoan" => "staff_loan",
         _ => {
             return Err(ApiError::new(
@@ -966,11 +1042,31 @@ pub async fn command_route(
                 )
                 .await
             }
+            // NOTE on authorization here (pre-existing, not introduced
+            // by this change): unlike todo_list./target_list.'s
+            // dispatch above, this arm has no server-side check that
+            // the caller is actually the real owner (for Approve/
+            // Decline), the staff member (for Extend), or either
+            // manager (for EndEarly) -- design doc §2.1's three
+            // approval gates are enforced only by the domain crate's
+            // generic authority stub, same class of gap
+            // `require_team_leader_or_admin` closed for
+            // RecordTeamLeaderPreCheck. Flagged here rather than
+            // silently expanded into scope -- fixing it is a
+            // self-contained follow-up (a `StaffLoan::grants_*`-style
+            // check per command, mirroring `grants_approval_authority_to`
+            // added below for escalation specifically), not bundled
+            // into this escalation change.
             cmd if cmd.starts_with("staff_loan.") => {
                 let command: todo_domain::StaffLoanCommand =
-                    serde_json::from_value(envelope.payload.clone()).map_err(|e| {
-                        crate::CommandError::Domain(format!("invalid payload: {e}"))
-                    })?;
+                    if envelope.command_type == "staff_loan.EscalateStaffLoan" {
+                        resolve_staff_loan_escalation_command(&state, target_id, &envelope.payload)
+                            .await?
+                    } else {
+                        serde_json::from_value(envelope.payload.clone()).map_err(|e| {
+                            crate::CommandError::Domain(format!("invalid payload: {e}"))
+                        })?
+                    };
                 crate::handle_command::<todo_domain::StaffLoan, _, _, _>(
                     command,
                     target_id,

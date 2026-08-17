@@ -236,4 +236,17 @@ pub enum StaffLoanEvent {
         /// `IMPLEMENTATION_PLAN_User_Hierarchy.md` C.3).
         expired_at: Timestamp,
     },
+    /// The loan's approval decision was escalated. See
+    /// `command::StaffLoanCommand::EscalateStaffLoan`'s doc comment.
+    StaffLoanEscalated {
+        /// Why.
+        reason: String,
+        /// Who invoked escalation.
+        escalated_by: UserId,
+        /// Who the escalation routes to — gains authority to
+        /// approve/decline in the real owner's place.
+        escalated_to: UserId,
+        /// When.
+        escalated_at: Timestamp,
+    },
 }

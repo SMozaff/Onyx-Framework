@@ -652,6 +652,7 @@ pub async fn issue_token(
                 "staff_loan.DeclineStaffLoan".to_string(),
                 "staff_loan.ExtendStaffLoan".to_string(),
                 "staff_loan.EndStaffLoanEarly".to_string(),
+                "staff_loan.EscalateStaffLoan".to_string(),
                 "staff_loan.ExpireStaffLoan".to_string(),
             ],
             delegation_depth: 0,
