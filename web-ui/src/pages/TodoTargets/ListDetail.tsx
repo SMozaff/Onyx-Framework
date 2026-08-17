@@ -18,7 +18,9 @@ type ListItem = TodoListProjection | TargetListProjection;
  * the Team Leader class — see `require_team_leader_or_admin`, not
  * pre-validated client-side, same posture as every other server-gated
  * action here), and Verify/Reject/Escalate (Submitted or
- * TeamLeaderPreChecked, gated server-side by D.4's verifier-resolution).
+ * TeamLeaderPreChecked, plus an Escalated list when it was explicitly routed
+ * to the current user; all remain gated server-side by D.4's
+ * verifier-resolution).
  */
 export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
   const user = useAuthStore((state) => state.user);
@@ -32,10 +34,14 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
   const [preCheckNotes, setPreCheckNotes] = useState('');
 
   const isOwner = user?.id === list.owner;
+  const isEscalationTarget = user?.id === list.escalated_to;
   const canSubmit = list.status === 'Draft';
   const canAddItem = kind === 'todo_list' && list.status === 'Draft' && isOwner;
   const canRecordPreCheck = list.status === 'Submitted';
-  const canDecide = list.status === 'Submitted' || list.status === 'TeamLeaderPreChecked';
+  const canDecide =
+    list.status === 'Submitted' ||
+    list.status === 'TeamLeaderPreChecked' ||
+    (list.status === 'Escalated' && isEscalationTarget);
 
   function confirmDecision(payload: { outcome?: VerificationOutcome; comment?: string; reason?: string }) {
     if (!dialog) return;
@@ -77,6 +83,12 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
       </dl>
 
       <PreCheckSection list={list} />
+
+      {isEscalationTarget ? (
+        <p className="muted" style={{ margin: 0 }}>
+          This verification decision was escalated to you.
+        </p>
+      ) : null}
 
       {canRecordPreCheck ? (
         <div className="detail-section">

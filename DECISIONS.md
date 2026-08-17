@@ -1433,3 +1433,43 @@ and handoff since it was first noticed. It was a real environment gap
 in the specific sandboxes used earlier, not a fixed or permanent
 limitation of the workspace itself — confirmed by actually trying,
 not assumed either way.
+
+---
+
+## Remaining web-ui workflow gaps — closed 2026-08-17
+
+**Decision: ordinary authenticated users receive a reduced, active,
+same-organization picker directory; `/api/admin/users` remains
+admin-only.** A general user picker cannot call the administrative route
+without either failing for Staff/Managers or broadening an admin
+capability. The new `GET /api/users` route authenticates a normal bearer
+token, filters `UserStore::list()` to active records in that token's
+organization, and returns only `{ id, username }`. It never exposes
+admin state, user class, reporting-line data, or account activation
+metadata. A real HTTP test exercises the route as an ordinary user and
+confirms the reduced response, inactive exclusion, tenant exclusion, and
+401 behavior without a bearer token.
+
+**Assignment and StaffLoan creation now use one shared picker.**
+`web-ui/src/components/UserPicker.tsx` provides a small searchable
+select backed by the new endpoint. Todo/Target creation retains
+self-authored work and adds the explicit alternative to assign to a
+picked colleague, correctly sending `ManagerAssigned` with that person
+as `owner`. StaffLoan creation replaces all three raw UUID inputs with
+staff-member, real-owner, and borrowing-manager selectors while retaining
+the distinct-manager validation.
+
+**Escalations now have actionable, user-focused visibility.** Todo and
+Target lists include an **Escalated to you** view. Selecting a routed
+item opens the existing action-capable detail panel, which now treats an
+`Escalated` list as decidable only when the signed-in user is its
+`escalated_to` target. Staff Loans add the matching filter and present
+Approve/Decline to the current escalation target, replacing the real
+owner only when an escalation target exists — the same rule the API
+server enforces.
+
+`web-ui/tests/integration/ui_gap_workflows.test.tsx` covers picker
+search/selection, an escalated Todo decision reaching Verify/Reject/
+Escalate controls, and an escalated StaffLoan reaching Approve/Decline.
+These are production-page tests using the established MSW/query setup,
+not isolated filter-only helpers.
