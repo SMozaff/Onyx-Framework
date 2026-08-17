@@ -892,3 +892,54 @@ search/selection, Todo escalation filtering plus decision controls, and
 StaffLoan escalation filtering plus Approve/Decline controls using the
 real pages and production query hooks. Full API and web-ui validation is
 recorded in the final task report.
+
+
+### 11.10 — Native desktop notification inbox and acknowledgement — 2026-08-17
+
+This handoff was intentionally restricted to `desktop-shell` and its
+shared composition path: no `web-ui`, `admin-shell`, mobile, Docker suite,
+or unrelated hierarchy work was changed.
+
+**Shared domain boundary fixed first.** Notifications had an aggregate
+implementation only in `api-server::routes::command`, which made the
+native composition root unable to register an equivalent real handler
+without importing an HTTP route module as its domain model. The new
+`crates/domains/notification-domain` crate supplies the aggregate,
+command, event, and error types. `api-server` now re-exports those types,
+so the existing HTTP surface remains compatible, while
+`client-composition` depends on the shared domain crate directly.
+
+**Client-composition wiring is real, not a UI mock.** `AppState::new`
+creates a SQLite notification repository and registers
+`NotificationDecisionHandler` for `Acknowledge`, plus
+`GetNotification` and tenant- and recipient-scoped `ListNotifications`
+queries. The real SQLite integration test
+`app_state_wires_notification_inbox_acknowledgement_and_events` verifies
+recipient filtering, acknowledgement persistence, and the actual event
+bus path after a committed command.
+
+**The event mechanism was already present but had an outbox-registration
+gap.** `api-server::command_handler::handle_command` now calls
+`register_outbox()` for every committed event. That lets the existing
+`SyncAgent::run_outbox_pump` claim and publish notification events to the
+existing `EventBus`. `desktop-shell` starts `SyncAgent::run()` when
+building app state, and the existing `subscribe_events` Tauri command
+forwards the result as `onyx:event`; no new socket, polling, or push
+system was built.
+
+**Desktop delivery:** `/notifications` is a new page and main-navigation
+item. It uses the existing Tauri IPC hooks only:
+`useQuery("ListNotifications")` reads the local SQLite inbox;
+`useCommand("Acknowledge")` submits the real decision command; and an
+`onyx:event` listener refetches on notification events. There is no HTTP
+fetch/axios call in this UI. Its explicit Refresh button is manual user
+recovery, not background polling.
+
+**Verification:** `cargo fmt --all -- --check`; focused `cargo check` for
+`notification-domain`, `client-composition`, `desktop-shell`, and
+`api-server`; focused clippy with `-D warnings`; and the notification
+and client-composition test suites all passed. The real SQLite wiring test
+passed among 31 `client-composition` tests; `notification-domain` has 2
+passing unit tests. `npx tsc -b` reports zero errors, and `npx vite build`
+completed successfully (41 modules). `desktop-shell/ui` has no existing
+automated UI-test harness, so none was invented for this handoff.

@@ -362,6 +362,15 @@ pub fn run() {
                 };
 
                 let state = Arc::new(AppState::new(pool, config).await);
+                // `SyncAgent::run` owns the existing local outbox pump as
+                // well as periodic replica synchronization. Starting it here
+                // makes committed notification events available to
+                // `subscribe_events` and thus the webview's `onyx:event`
+                // listener without introducing a polling or second push path.
+                let sync_agent = Arc::clone(&state.sync_agent);
+                tauri::async_runtime::spawn(async move {
+                    sync_agent.run().await;
+                });
                 app_handle_for_state.manage(state);
                 app_handle_for_state.manage(storage);
             });

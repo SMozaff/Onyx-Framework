@@ -49,6 +49,7 @@ hex.workspace = true
 profile-domain.workspace = true
 policy-domain.workspace = true
 todo-domain.workspace = true
+notification-domain.workspace = true
 csv.workspace = true
 
 [dev-dependencies]

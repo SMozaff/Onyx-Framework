@@ -6,6 +6,7 @@ import Tasks from "@/pages/Tasks";
 import Approvals from "@/pages/Approvals";
 import Messaging from "@/pages/Messaging";
 import Files from "@/pages/Files";
+import Notifications from "@/pages/Notifications";
 
 /**
  * Root layout + route table for the ONYX desktop shell. Originally a
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/messaging" element={<Messaging />} />
         <Route path="/messaging/:conversationId" element={<Messaging />} />
         <Route path="/files" element={<Files />} />
+        <Route path="/notifications" element={<Notifications />} />
         <Route path="/files/:fileAssetId" element={<Files />} />
       </Routes>
     </MainLayout>

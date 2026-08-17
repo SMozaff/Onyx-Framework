@@ -1473,3 +1473,61 @@ search/selection, an escalated Todo decision reaching Verify/Reject/
 Escalate controls, and an escalated StaffLoan reaching Approve/Decline.
 These are production-page tests using the established MSW/query setup,
 not isolated filter-only helpers.
+
+
+---
+
+## Native desktop notifications — complete 2026-08-17
+
+**Decision: make notifications a shared domain capability, then compose the
+same aggregate into the native client rather than creating a desktop-only
+parallel model.** The notification aggregate, command, event, and error
+were previously defined only inside `api-server::routes::command`, even
+though `client-composition` is the desktop and mobile composition root.
+A new `notification-domain` crate now owns `NotificationAggregate`,
+`NotificationCommand`, `NotificationEvent`, and `NotificationError`.
+`api-server` re-exports those types for route compatibility, while
+`client-composition` depends on the same crate. This removes the
+cross-client type boundary without changing the already-working API
+command contract.
+
+**Inbox and acknowledgement are locally composed, tenant- and
+recipient-scoped.** `AppState` now registers a SQLite notification
+repository, a `NotificationDecisionHandler` for `Acknowledge`, and
+`ListNotificationsHandler` / `GetNotification` queries. The list handler
+filters the local projection by both organization and recipient, so the
+native client cannot use an unscoped aggregate scan as an inbox. A real
+SQLite integration test drives a notification through the actual command
+registry, confirms recipient filtering, persists acknowledgement, and
+observes delivery through the actual event bus.
+
+**Event delivery uses the existing outbox path, not new polling or push
+infrastructure.** `api-server::command_handler::handle_command` now
+registers each committed event with the local outbox before returning.
+That makes the existing `SyncAgent::run_outbox_pump` publish committed
+notification events to `EventBus`; the desktop shell starts
+`SyncAgent::run()` at application startup; and its established
+`subscribe_events` bridge forwards the event to the webview as
+`onyx:event`. This corrects the missing local-outbox registration that
+would otherwise have made event listeners inert despite successful command
+persistence.
+
+**Desktop UI scope:** `desktop-shell/ui/src/pages/Notifications.tsx` is a
+native inbox routed at `/notifications` and exposed in the main sidebar.
+It uses only the established Tauri `useQuery("ListNotifications")` and
+`useCommand("Acknowledge")` paths, and refreshes on the existing
+`onyx:event` stream. No browser HTTP request, axios/fetch client, polling
+loop, or desktop-specific push subsystem was introduced. A manual Refresh
+control remains a user action and recovery affordance, not background
+polling.
+
+**Verification:** `cargo fmt --all -- --check`; focused `cargo check` for
+`notification-domain`, `client-composition`, `desktop-shell`, and
+`api-server`; focused `cargo clippy --all-targets -- -D warnings`; and
+`cargo test --package notification-domain --package client-composition`
+all completed successfully. The latter ran 2 notification-domain tests
+and 31 client-composition tests, including
+`app_state_wires_notification_inbox_acknowledgement_and_events`. The
+native UI completed `npx tsc -b` with zero errors and `npx vite build`
+successfully (41 modules). No desktop-shell UI automated-test harness
+exists in this workspace; none was invented for this scoped feature.

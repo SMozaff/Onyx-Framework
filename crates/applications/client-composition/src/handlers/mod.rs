@@ -35,7 +35,8 @@ pub use creation_handler::{
 pub use decision_handler::{
     ConnectionRequestDecisionHandler, ConversationDecisionHandler, FileAssetDecisionHandler,
     LegalHoldDecisionHandler, MessageDecisionHandler, MissionDecisionHandler,
-    PolicyDecisionHandler, TaskDecisionHandler, UploadSessionDecisionHandler,
+    NotificationDecisionHandler, PolicyDecisionHandler, TaskDecisionHandler,
+    UploadSessionDecisionHandler,
 };
 
 use platform_contracts::{DecisionContext, IdGenerator};

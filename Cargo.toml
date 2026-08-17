@@ -11,6 +11,7 @@ members = [
     "crates/domains/policy-domain",
     "crates/domains/profile-domain",
     "crates/domains/todo-domain",
+    "crates/domains/notification-domain",
     "crates/applications/query-application",
     "crates/applications/worker-application",
     "crates/applications/client-composition",
@@ -92,6 +93,7 @@ file-domain = { path = "crates/domains/file-domain" }
 policy-domain = { path = "crates/domains/policy-domain" }
 profile-domain = { path = "crates/domains/profile-domain" }
 todo-domain = { path = "crates/domains/todo-domain" }
+notification-domain = { path = "crates/domains/notification-domain" }
 query-application = { path = "crates/applications/query-application" }
 worker-application = { path = "crates/applications/worker-application" }
 client-composition = { path = "crates/applications/client-composition" }

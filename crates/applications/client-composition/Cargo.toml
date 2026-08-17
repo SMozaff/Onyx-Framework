@@ -14,6 +14,7 @@ work-domain.workspace = true
 communication-domain.workspace = true
 file-domain.workspace = true
 policy-domain.workspace = true
+notification-domain.workspace = true
 synchronization-domain.workspace = true
 sync-transport.workspace = true
 api-server.workspace = true

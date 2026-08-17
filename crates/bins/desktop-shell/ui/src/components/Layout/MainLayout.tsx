@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: "/approvals", label: "Approvals", end: false },
   { to: "/messaging", label: "Messaging", end: false },
   { to: "/files", label: "Files", end: false },
+  { to: "/notifications", label: "Notifications", end: false },
 ];
 
 const linkClasses = (isActive: boolean) =>

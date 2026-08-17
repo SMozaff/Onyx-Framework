@@ -14,9 +14,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use platform_kernel::ObjectId;
+use platform_kernel::{AuthorityEpoch, LifecycleEpoch, ObjectId, ObjectVersion, OrganizationId};
 use query_application::{Loaded, Repository, RepositoryError};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 
 /// A JSON-serializable envelope for a query request. Not defined by any
 /// prior increment (Team Prompt 5 §3.2 references `QueryEnvelope` by name
@@ -68,6 +69,70 @@ impl LoadAggregateHandler {
 impl QueryHandler for LoadAggregateHandler {
     async fn handle_query(&self, target_id: ObjectId) -> Result<Option<Loaded>, RepositoryError> {
         api_server::load_aggregate(&target_id, Arc::clone(&self.repo)).await
+    }
+}
+
+/// Lists notification aggregate state from the local SQLite replica for one
+/// recipient. The registry's established wire contract returns a loaded-like
+/// object, so the inbox is exposed as `aggregate.notifications` rather than
+/// introducing a second Tauri query transport shape.
+pub struct ListNotificationsHandler {
+    pool: SqlitePool,
+    organization_id: OrganizationId,
+}
+
+impl ListNotificationsHandler {
+    pub fn new(pool: SqlitePool, organization_id: OrganizationId) -> Self {
+        Self {
+            pool,
+            organization_id,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl QueryHandler for ListNotificationsHandler {
+    async fn handle_query(
+        &self,
+        recipient_id: ObjectId,
+    ) -> Result<Option<Loaded>, RepositoryError> {
+        let states: Vec<String> = sqlx::query_scalar(
+            "SELECT state FROM aggregates \
+             WHERE aggregate_type = ? AND organization_id = ? \
+             ORDER BY updated_at DESC",
+        )
+        .bind("notification")
+        .bind(self.organization_id.0.to_vec())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| RepositoryError::Unknown(format!("listing notifications: {error}")))?;
+
+        let recipient_id = recipient_id.to_string();
+        let notifications = states
+            .into_iter()
+            .map(|state| {
+                serde_json::from_str::<serde_json::Value>(&state).map_err(|error| {
+                    RepositoryError::SerializationError(format!(
+                        "decoding notification state: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|notification| {
+                notification
+                    .get("recipient_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(recipient_id.as_str())
+            })
+            .collect::<Vec<_>>();
+
+        Ok(Some(Loaded {
+            aggregate: serde_json::json!({"notifications": notifications}),
+            version: ObjectVersion::INITIAL,
+            lifecycle_epoch: LifecycleEpoch::INITIAL,
+            authority_epoch: AuthorityEpoch::INITIAL,
+        }))
     }
 }
 
