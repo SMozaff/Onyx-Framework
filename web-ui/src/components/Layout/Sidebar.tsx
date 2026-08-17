@@ -4,6 +4,8 @@ const links = [
   ['/', 'Overview'],
   ['/missions', 'Missions'],
   ['/tasks', 'Tasks'],
+  ['/todos', 'Todos & Targets'],
+  ['/staff-loans', 'Staff Loans'],
   ['/notifications', 'Notifications'],
   ['/approvals', 'Approvals'],
   ['/reports', 'Reports'],

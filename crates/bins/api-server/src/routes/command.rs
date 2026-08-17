@@ -28,6 +28,10 @@ pub struct NotificationAggregate {
     pub message: String,
     pub priority: String,
     pub status: String,
+    /// The user this notification is addressed to. Legacy notifications
+    /// predate recipient targeting, so they deserialize as `None`.
+    #[serde(default)]
+    pub recipient_id: Option<String>,
     pub source_id: String,
     pub source_type: String,
     pub created_at: String,
@@ -207,6 +211,396 @@ impl AggregateRoot for ApprovalAggregate {
     }
 }
 
+/// Confirms the caller is a Team Leader (or Admin) — the class design
+/// doc §2.2 confirms carries "real, standing... authority to pre-check
+/// Todo/Target items" (see
+/// `security_application::ports::user_store::UserClass::TeamLeader`'s
+/// own doc comment). **Added 2026-08-16, closing a real gap**: this
+/// crate's own `todo_list.*`/`target_list.*` dispatch comment
+/// previously stated `RecordTeamLeaderPreCheck` is "not gated here" —
+/// true for verifier authority (D.4, correctly not required, since a
+/// pre-check never gates verification per design doc §2.2), but that
+/// reasoning had silently conflated "does this action gate
+/// verification" with "who may perform this action" — the *class*
+/// requirement (only a Team Leader may record one) had no check at
+/// all, meaning any authenticated user could record a pre-check on any
+/// list. This helper closes that gap without touching the non-gating
+/// behavior, which remains correct and unchanged.
+async fn require_team_leader_or_admin(
+    state: &ApiState,
+    actor: &ActorContext,
+) -> Result<(), crate::CommandError> {
+    let user_id = uuid::Uuid::from_bytes(actor.user_id.0).to_string();
+    let user = state
+        .user_store
+        .find_by_id(&user_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or_else(|| crate::CommandError::Domain("actor not found".to_string()))?;
+    let permitted =
+        user.is_admin || user.class == Some(security_application::UserClass::TeamLeader);
+    if permitted {
+        Ok(())
+    } else {
+        Err(crate::CommandError::Domain(
+            "only a Team Leader (or Admin) may record a pre-check".to_string(),
+        ))
+    }
+}
+
+/// Resolves and constructs a full `TodoListCommand::EscalateTodoList`
+/// for `/api/command`'s dispatch. `escalated_to` cannot come from the
+/// client -- it's server-resolved (design doc §4.1, confirmed
+/// 2026-08-16: one hop up from the *current* verifier, computed by
+/// `escalation_resolution::resolve_escalation_target`) -- so this
+/// function extracts only `reason` from the client's raw payload and
+/// builds the rest itself, rather than trusting client JSON to supply
+/// a field the client has no way to correctly compute.
+///
+/// # Determining "the current verifier" (first escalation vs.
+/// re-escalation)
+/// If the list is not yet `Escalated`, the current verifier is the
+/// tree parent (via `verifier_resolution`-equivalent lookup). If the
+/// list is already `Escalated` (a re-escalation -- E.1's "step-by-step"
+/// chaining), the current verifier is the list's own `escalated_to`
+/// from the prior escalation, not the original tree parent -- walking
+/// from the tree parent again would re-resolve the *same* target
+/// instead of advancing one more hop up the chain.
+///
+/// Returns a `Domain` error (mapped to a client-facing rejection, same
+/// as any other domain-rule violation) if there is nowhere to
+/// escalate to -- design doc E.1: "Chain terminates at Top-level
+/// Manager... there is no platform-owner rung above it to escalate
+/// into." This is a real, expected outcome, not a bug.
+async fn resolve_todo_list_escalation_command(
+    state: &ApiState,
+    target_id: ObjectId,
+    payload: &Value,
+) -> Result<todo_domain::TodoListCommand, crate::CommandError> {
+    let loaded = state
+        .todo_list_repo
+        .load(&target_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or(crate::CommandError::NotFound(target_id))?;
+    let current_verifier_id = current_verifier_for_escalation(state, &loaded.aggregate).await?;
+    let escalated_to = crate::escalation_resolution::resolve_escalation_target(
+        current_verifier_id,
+        &state.user_store,
+    )
+    .await
+    .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+    .ok_or_else(|| {
+        crate::CommandError::Domain(
+            "nothing to escalate to -- the current verifier has no manager above them".to_string(),
+        )
+    })?;
+    let reason = payload
+        .get("EscalateTodoList")
+        .and_then(|v| v.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(todo_domain::TodoListCommand::EscalateTodoList {
+        reason,
+        escalated_to,
+    })
+}
+
+/// See `resolve_todo_list_escalation_command`'s doc comment -- identical
+/// rationale, `TargetList` variant.
+async fn resolve_target_list_escalation_command(
+    state: &ApiState,
+    target_id: ObjectId,
+    payload: &Value,
+) -> Result<todo_domain::TargetListCommand, crate::CommandError> {
+    let loaded = state
+        .target_list_repo
+        .load(&target_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or(crate::CommandError::NotFound(target_id))?;
+    let current_verifier_id = current_verifier_for_escalation(state, &loaded.aggregate).await?;
+    let escalated_to = crate::escalation_resolution::resolve_escalation_target(
+        current_verifier_id,
+        &state.user_store,
+    )
+    .await
+    .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+    .ok_or_else(|| {
+        crate::CommandError::Domain(
+            "nothing to escalate to -- the current verifier has no manager above them".to_string(),
+        )
+    })?;
+    let reason = payload
+        .get("EscalateTargetList")
+        .and_then(|v| v.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(todo_domain::TargetListCommand::EscalateTargetList {
+        reason,
+        escalated_to,
+    })
+}
+
+/// Determines "the current verifier" for an escalation command, per
+/// `resolve_todo_list_escalation_command`'s doc comment: the list's
+/// existing `escalated_to` if it's already `Escalated` (re-escalation),
+/// otherwise the owner's tree parent (first escalation). Returns a
+/// `Domain` error if neither is available -- e.g. a first escalation
+/// attempted on an owner with no tree parent at all, which is a
+/// distinct, earlier failure than "the verifier has no parent"
+/// (handled by the caller via `resolve_escalation_target`'s `None`).
+async fn current_verifier_for_escalation(
+    state: &ApiState,
+    aggregate: &Value,
+) -> Result<ObjectId, crate::CommandError> {
+    if let Some(existing_target) = parse_escalated_to_field(aggregate) {
+        return Ok(existing_target);
+    }
+    let owner_id = parse_owner_field(aggregate)?;
+    let owner_uuid = uuid::Uuid::from_bytes(owner_id.0);
+    let owner_record = state
+        .user_store
+        .find_by_id(&owner_uuid.to_string())
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or_else(|| crate::CommandError::Domain("owner not found".to_string()))?;
+    let parent_id = owner_record.parent_user_id.ok_or_else(|| {
+        crate::CommandError::Domain(
+            "nothing to escalate to -- this list's owner has no manager at all".to_string(),
+        )
+    })?;
+    let parent_uuid = uuid::Uuid::parse_str(&parent_id).map_err(|_| {
+        crate::CommandError::Domain("owner's parent_user_id is malformed".to_string())
+    })?;
+    Ok(ObjectId(*parent_uuid.as_bytes()))
+}
+
+/// Parses an aggregate's `owner` field (a 16-byte array, per
+/// `todo_domain`'s `ObjectId` serialization) out of its raw JSON
+/// state. Factored out of `require_verifier_authority` (below) so the
+/// escalation-resolution helpers above don't duplicate the raw byte
+/// parsing.
+fn parse_owner_field(aggregate: &Value) -> Result<ObjectId, crate::CommandError> {
+    let owner_bytes = aggregate
+        .get("owner")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            crate::CommandError::Domain("aggregate state missing 'owner' field".to_string())
+        })?;
+    if owner_bytes.len() != 16 {
+        return Err(crate::CommandError::Domain(
+            "'owner' field is not a 16-byte object id".to_string(),
+        ));
+    }
+    let mut owner_id_bytes = [0u8; 16];
+    for (i, b) in owner_bytes.iter().enumerate() {
+        owner_id_bytes[i] = b
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| crate::CommandError::Domain("invalid 'owner' byte".to_string()))?;
+    }
+    Ok(ObjectId(owner_id_bytes))
+}
+
+/// Parses an aggregate's `escalated_to` field out of its raw JSON
+/// state. `escalated_to` is `Option<UserId>` on the domain side, so
+/// this returns `None` both when the key is absent/`null` (not
+/// escalated) and when the value doesn't parse as a valid 16-byte
+/// array (defensive — an aggregate with malformed escalation state
+/// should fall back to ordinary tree-parent resolution rather than
+/// error out of an otherwise-unrelated command).
+fn parse_escalated_to_field(aggregate: &Value) -> Option<ObjectId> {
+    let value = aggregate.get("escalated_to")?;
+    let array = value.as_array()?;
+    if array.len() != 16 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    for (i, b) in array.iter().enumerate() {
+        bytes[i] = u8::try_from(b.as_u64()?).ok()?;
+    }
+    Some(ObjectId(bytes))
+}
+
+/// Parses a `StaffLoan` aggregate's `real_owner_id` field out of its
+/// raw JSON state. Same shape/rationale as `parse_owner_field`, kept
+/// separate since `StaffLoan` has no `owner` field at all (it has
+/// `staff_user_id`/`real_owner_id`/`borrowing_manager_id` instead).
+fn parse_real_owner_id_field(aggregate: &Value) -> Result<ObjectId, crate::CommandError> {
+    let bytes = aggregate
+        .get("real_owner_id")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            crate::CommandError::Domain("aggregate state missing 'real_owner_id' field".to_string())
+        })?;
+    if bytes.len() != 16 {
+        return Err(crate::CommandError::Domain(
+            "'real_owner_id' field is not a 16-byte object id".to_string(),
+        ));
+    }
+    let mut id_bytes = [0u8; 16];
+    for (i, b) in bytes.iter().enumerate() {
+        id_bytes[i] = b
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| {
+                crate::CommandError::Domain("invalid 'real_owner_id' byte".to_string())
+            })?;
+    }
+    Ok(ObjectId(id_bytes))
+}
+
+/// Resolves and constructs a full `StaffLoanCommand::EscalateStaffLoan`
+/// for `/api/command`'s dispatch. Same rationale as
+/// `resolve_todo_list_escalation_command`: `escalated_to` is
+/// server-resolved, not client-supplied. "The current decision-maker"
+/// is the real owner on a first escalation, or the loan's existing
+/// `escalated_to` on a re-escalation — see design doc E.1's confirmed
+/// "step-by-step" chaining, applied here to staff-loan approval per
+/// E.2's confirmation that it is escalatable.
+async fn resolve_staff_loan_escalation_command(
+    state: &ApiState,
+    target_id: ObjectId,
+    payload: &Value,
+) -> Result<todo_domain::StaffLoanCommand, crate::CommandError> {
+    let loaded = state
+        .staff_loan_repo
+        .load(&target_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or(crate::CommandError::NotFound(target_id))?;
+    let current_decision_maker = match parse_escalated_to_field(&loaded.aggregate) {
+        Some(existing_target) => existing_target,
+        None => parse_real_owner_id_field(&loaded.aggregate)?,
+    };
+    let escalated_to = crate::escalation_resolution::resolve_escalation_target(
+        current_decision_maker,
+        &state.user_store,
+    )
+    .await
+    .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+    .ok_or_else(|| {
+        crate::CommandError::Domain(
+            "nothing to escalate to -- the current decision-maker has no manager above them"
+                .to_string(),
+        )
+    })?;
+    let reason = payload
+        .get("EscalateStaffLoan")
+        .and_then(|v| v.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(todo_domain::StaffLoanCommand::EscalateStaffLoan {
+        reason,
+        escalated_to,
+    })
+}
+
+/// Returns `Ok(())` if authorized; a `403`-mapped `CommandError`
+/// otherwise. `aggregate_type` selects which repository to load from
+/// (`"todo_list"` or `"target_list"`) — both aggregates carry an
+/// `owner: ObjectId` field in the same position, so one function
+/// serves both rather than two near-duplicates.
+async fn require_verifier_authority(
+    state: &ApiState,
+    actor: &ActorContext,
+    target_id: ObjectId,
+    aggregate_type: &str,
+) -> Result<(), crate::CommandError> {
+    let repo = match aggregate_type {
+        "todo_list" => &state.todo_list_repo,
+        "target_list" => &state.target_list_repo,
+        other => {
+            return Err(crate::CommandError::Domain(format!(
+                "require_verifier_authority called with unsupported aggregate_type {other}"
+            )))
+        }
+    };
+    let loaded = repo
+        .load(&target_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or(crate::CommandError::NotFound(target_id))?;
+    let owner_id = parse_owner_field(&loaded.aggregate)?;
+    let escalated_to = parse_escalated_to_field(&loaded.aggregate);
+    let organization_id_uuid = uuid::Uuid::from_bytes(actor.organization_id.0);
+
+    let authorized = crate::verifier_resolution::is_authorized_verifier(
+        actor.user_id,
+        owner_id,
+        organization_id_uuid,
+        &state.user_store,
+        &state.projection_pool,
+        escalated_to,
+    )
+    .await
+    .map_err(|e| crate::CommandError::Persistence(e.to_string()))?;
+
+    if authorized {
+        Ok(())
+    } else {
+        Err(crate::CommandError::Domain(
+            "actor is not an authorized verifier for this list's owner".to_string(),
+        ))
+    }
+}
+
+/// Enforces design doc §2.1's actor-specific StaffLoan decision rules
+/// at the HTTP composition boundary. The domain aggregate deliberately
+/// does not duplicate these identity checks because it has no user-store
+/// access; a valid generic command authority is therefore insufficient.
+///
+/// Approval, decline, and escalation belong to the current decision maker:
+/// the real owner unless an escalation target has replaced them. Extension
+/// belongs to the staff member, and early ending belongs to either manager.
+/// Expiry is worker-only and must never be accepted from `/api/command`.
+async fn require_staff_loan_authority(
+    state: &ApiState,
+    actor: &ActorContext,
+    target_id: ObjectId,
+    command_type: &str,
+) -> Result<(), crate::CommandError> {
+    let loaded = state
+        .staff_loan_repo
+        .load(&target_id)
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or(crate::CommandError::NotFound(target_id))?;
+    let loan: todo_domain::StaffLoan = serde_json::from_value(loaded.aggregate).map_err(|e| {
+        crate::CommandError::Persistence(format!("invalid stored staff-loan state: {e}"))
+    })?;
+
+    let authorized = match command_type {
+        "staff_loan.ApproveStaffLoan"
+        | "staff_loan.DeclineStaffLoan"
+        | "staff_loan.EscalateStaffLoan" => loan.grants_approval_authority_to(actor.user_id),
+        "staff_loan.ExtendStaffLoan" => actor.user_id == loan.staff_user_id(),
+        "staff_loan.EndStaffLoanEarly" => {
+            actor.user_id == loan.real_owner_id() || actor.user_id == loan.borrowing_manager_id()
+        }
+        // The worker executes expiry directly against PostgreSQL, and no
+        // end-user token is a valid authority for this scheduled action.
+        "staff_loan.ExpireStaffLoan" => false,
+        other => {
+            return Err(crate::CommandError::Domain(format!(
+                "require_staff_loan_authority called with unsupported command {other}"
+            )))
+        }
+    };
+
+    if authorized {
+        Ok(())
+    } else {
+        Err(crate::CommandError::Domain(format!(
+            "actor is not permitted to execute {command_type} for this staff loan"
+        )))
+    }
+}
+
 pub async fn command_route(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -278,6 +672,32 @@ pub async fn command_route(
         | "policy.RegisterViolation"
         | "policy.RetirePolicy" => "policy",
         "legal_hold.ReleaseLegalHold" => "legal_hold",
+        // TodoList/TargetList/StaffLoan (added 2026-08-16 — see
+        // DESIGN_User_Hierarchy_Chain_of_Authority.md §4, §2.1 and
+        // IMPLEMENTATION_PLAN_User_Hierarchy.md Phase C/D). Same
+        // rationale as Policy/LegalHold above: `todo-domain` has no
+        // `client-composition` wiring, so `/api/command` is these
+        // aggregates' entry point. `CreateTodoList`/`CreateTargetList`/
+        // `RequestStaffLoan` are `create()`-routed, not `decide()`-routed
+        // — see `routes::todo_admin` for their dedicated REST routes,
+        // mirroring `routes::policy_admin`'s precedent.
+        "todo_list.AddItem"
+        | "todo_list.SubmitTodoList"
+        | "todo_list.RecordTeamLeaderPreCheck"
+        | "todo_list.VerifyTodoList"
+        | "todo_list.RejectTodoList"
+        | "todo_list.EscalateTodoList" => "todo_list",
+        "target_list.SubmitTargetList"
+        | "target_list.RecordTeamLeaderPreCheck"
+        | "target_list.VerifyTargetList"
+        | "target_list.RejectTargetList"
+        | "target_list.EscalateTargetList" => "target_list",
+        "staff_loan.ApproveStaffLoan"
+        | "staff_loan.DeclineStaffLoan"
+        | "staff_loan.ExtendStaffLoan"
+        | "staff_loan.EndStaffLoanEarly"
+        | "staff_loan.EscalateStaffLoan"
+        | "staff_loan.ExpireStaffLoan" => "staff_loan",
         _ => {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
@@ -557,6 +977,146 @@ pub async fn command_route(
                     correlation_id,
                     "legal_hold",
                     Arc::clone(&state.legal_hold_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            // TodoList/TargetList/StaffLoan (added 2026-08-16). Unlike
+            // Policy/LegalHold above, these commands' payloads are
+            // deserialized in one shot rather than field-by-field: the
+            // command enums use plain externally-tagged serde (no
+            // `#[serde(tag = ...)]` override), so a payload shaped like
+            // `{"VerifyTodoList": {"outcome": "Flawless", "comment": null}}`
+            // deserializes directly into `todo_domain::TodoListCommand`
+            // — the same technique `client-composition`'s
+            // `DecisionHandler`s use (see
+            // `client_composition::handlers::decision_handler`), chosen
+            // here over manual field extraction because these commands
+            // carry richer typed fields (enums, `Option<String>`,
+            // timestamps) that would be error-prone to pluck by hand.
+            //
+            // Verifier authorization (D.4, added 2026-08-16): only
+            // `VerifyTodoList`/`RejectTodoList`/`EscalateTodoList`
+            // require the caller to be an authorized verifier per
+            // `verifier_resolution::is_authorized_verifier` — `AddItem`/
+            // `SubmitTodoList` are performed by the owner (design doc
+            // §4.0.1's bidirectional-creation rule), not a verifying
+            // Manager, and are not gated here. `RecordTeamLeaderPreCheck`
+            // has its own, separate class-based gate below
+            // (`require_team_leader_or_admin`, added 2026-08-16) — see
+            // that function's doc comment for why this was a real gap
+            // this dispatch comment previously described incorrectly.
+            // This check loads the current aggregate state first
+            // specifically to read `owner` — the same load
+            // `handle_command` performs internally moments later, so
+            // this is a real second read, accepted as the simplest
+            // correct implementation rather than threading owner-lookup
+            // through `handle_command`'s generic signature.
+            cmd if cmd.starts_with("todo_list.") => {
+                if matches!(
+                    envelope.command_type.as_str(),
+                    "todo_list.VerifyTodoList"
+                        | "todo_list.RejectTodoList"
+                        | "todo_list.EscalateTodoList"
+                ) {
+                    require_verifier_authority(&state, &actor, target_id, "todo_list").await?;
+                }
+                if envelope.command_type == "todo_list.RecordTeamLeaderPreCheck" {
+                    require_team_leader_or_admin(&state, &actor).await?;
+                }
+                let command: todo_domain::TodoListCommand = if envelope.command_type
+                    == "todo_list.EscalateTodoList"
+                {
+                    resolve_todo_list_escalation_command(&state, target_id, &envelope.payload)
+                        .await?
+                } else {
+                    serde_json::from_value(envelope.payload.clone())
+                        .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?
+                };
+                crate::handle_command::<todo_domain::TodoList, _, _, _>(
+                    command,
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "todo_list",
+                    Arc::clone(&state.todo_list_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            cmd if cmd.starts_with("target_list.") => {
+                if matches!(
+                    envelope.command_type.as_str(),
+                    "target_list.VerifyTargetList"
+                        | "target_list.RejectTargetList"
+                        | "target_list.EscalateTargetList"
+                ) {
+                    require_verifier_authority(&state, &actor, target_id, "target_list").await?;
+                }
+                if envelope.command_type == "target_list.RecordTeamLeaderPreCheck" {
+                    require_team_leader_or_admin(&state, &actor).await?;
+                }
+                let command: todo_domain::TargetListCommand = if envelope.command_type
+                    == "target_list.EscalateTargetList"
+                {
+                    resolve_target_list_escalation_command(&state, target_id, &envelope.payload)
+                        .await?
+                } else {
+                    serde_json::from_value(envelope.payload.clone())
+                        .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?
+                };
+                crate::handle_command::<todo_domain::TargetList, _, _, _>(
+                    command,
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "target_list",
+                    Arc::clone(&state.target_list_repo),
+                    Arc::clone(&state.unit_factory),
+                    Arc::clone(&state.idempotency_store),
+                )
+                .await
+            }
+            // StaffLoan decisions have identity-specific authority gates
+            // distinct from the domain's generic command authority. The
+            // server loads the current state before dispatch so escalation
+            // replacement applies to approval, decline, and re-escalation.
+            cmd if cmd.starts_with("staff_loan.") => {
+                require_staff_loan_authority(&state, &actor, target_id, &envelope.command_type)
+                    .await?;
+                let command: todo_domain::StaffLoanCommand = if envelope.command_type
+                    == "staff_loan.EscalateStaffLoan"
+                {
+                    resolve_staff_loan_escalation_command(&state, target_id, &envelope.payload)
+                        .await?
+                } else {
+                    serde_json::from_value(envelope.payload.clone())
+                        .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?
+                };
+                crate::handle_command::<todo_domain::StaffLoan, _, _, _>(
+                    command,
+                    target_id,
+                    operation_id,
+                    actor.clone(),
+                    ObjectVersion(envelope.expected_version),
+                    LifecycleEpoch(envelope.expected_lifecycle_epoch),
+                    AuthorityEpoch(envelope.expected_authority_epoch),
+                    vector_clock.clone(),
+                    correlation_id,
+                    "staff_loan",
+                    Arc::clone(&state.staff_loan_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
                 )

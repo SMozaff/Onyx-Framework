@@ -7,6 +7,8 @@ const LoginPage = lazy(() => import('./pages/Login'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const MissionsPage = lazy(() => import('./pages/Missions'));
 const TasksPage = lazy(() => import('./pages/Tasks'));
+const TodoTargetsPage = lazy(() => import('./pages/TodoTargets'));
+const StaffLoansPage = lazy(() => import('./pages/StaffLoans'));
 const NotificationsPage = lazy(() => import('./pages/Notifications'));
 const ApprovalsPage = lazy(() => import('./pages/Approvals'));
 const ReportsPage = lazy(() => import('./pages/Reports'));
@@ -25,6 +27,8 @@ export default function App() {
           <Route index element={<DashboardPage />} />
           <Route path="missions" element={<MissionsPage />} />
           <Route path="tasks" element={<TasksPage />} />
+          <Route path="todos" element={<TodoTargetsPage />} />
+          <Route path="staff-loans" element={<StaffLoansPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="reports" element={<ReportsPage />} />

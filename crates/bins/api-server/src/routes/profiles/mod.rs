@@ -31,7 +31,9 @@ use axum::{
 };
 use platform_contracts::{AggregateRoot, DecisionContext};
 use platform_kernel::{ActorContext, PolicyDecisionSet, Timestamp, VerifiedAuthority};
-use profile_domain::{BasicIdentity, OrganizationalInfo, ProfileCommand, StaffProfile, WorkStats};
+use profile_domain::{
+    BasicIdentity, OrganizationalInfo, ProfileCommand, StaffProfile, WorkStats,
+};
 use security_application::UserClass;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -174,8 +176,8 @@ async fn load_profile(
     let Some(loaded) = loaded else {
         return Ok(None);
     };
-    let profile: StaffProfile = serde_json::from_value(loaded.aggregate)
-        .map_err(|e| infrastructure_error(e.to_string()))?;
+    let profile: StaffProfile =
+        serde_json::from_value(loaded.aggregate).map_err(|e| infrastructure_error(e.to_string()))?;
     Ok(Some(profile))
 }
 
@@ -275,6 +277,24 @@ fn decision_context_for(actor: ActorContext) -> DecisionContext {
         policy_outcomes: PolicyDecisionSet,
         generated_id_generator: Box::new(RandomIdGenerator),
     }
+}
+
+/// Combines `actor_context_for` + `decision_context_for` for callers
+/// (e.g. `routes::policy_admin`) that just need a `DecisionContext` for
+/// a given admin user id and org, without the two intermediate steps.
+/// Returns a domain `ApiError` (400) rather than panicking/defaulting
+/// if `user_id` isn't a valid UUID — the equivalent inline code in this
+/// module's own routes silently falls back to `Uuid::default()` via
+/// `actor_context_for`'s `unwrap_or_default()`, which is fine there
+/// because those callers already validated the id earlier in the same
+/// function; this helper has no such guarantee about its callers, so it
+/// validates explicitly.
+pub(super) fn decision_context_for_actor(
+    user_id: &str,
+    organization_id: uuid::Uuid,
+) -> Result<DecisionContext, ApiError> {
+    uuid::Uuid::parse_str(user_id).map_err(|_| domain_error("invalid actor user id"))?;
+    Ok(decision_context_for(actor_context_for(user_id, organization_id)))
 }
 
 /// A random `IdGenerator`, local to this module — the equivalent
@@ -484,8 +504,8 @@ pub async fn upsert_profile_route(
     let admin = require_admin(&state, &headers).await?;
     let organization_id = uuid::Uuid::parse_str(&admin.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
-    let admin_uuid =
-        uuid::Uuid::parse_str(&admin.user_id).map_err(|_| domain_error("invalid admin user id"))?;
+    let admin_uuid = uuid::Uuid::parse_str(&admin.user_id)
+        .map_err(|_| domain_error("invalid admin user id"))?;
     let profile = upsert_profile(
         &state,
         &platform_kernel::ObjectId(*admin_uuid.as_bytes()),

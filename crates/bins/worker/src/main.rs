@@ -54,6 +54,13 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&job_queue),
         pool.clone(),
     ));
+    // StaffLoan advance-warning/expiry scan (2026-08-16) — see
+    // worker::staff_loan_scheduler's module doc comment and
+    // IMPLEMENTATION_PLAN_User_Hierarchy.md C.3.
+    let staff_loan_scheduler_task = tokio::spawn(worker::staff_loan_scheduler::run_staff_loan_scheduler(
+        Arc::clone(&job_queue),
+        pool.clone(),
+    ));
     let snapshot_task = tokio::spawn(worker::snapshot_loop::run_snapshotter(pool.clone()));
 
     let outbox_metrics = {
@@ -84,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
     outbox_task.abort();
     jobs_task.abort();
     scheduler_task.abort();
+    staff_loan_scheduler_task.abort();
     snapshot_task.abort();
     outbox_metrics.abort();
     observability_adapter::shutdown_observability();

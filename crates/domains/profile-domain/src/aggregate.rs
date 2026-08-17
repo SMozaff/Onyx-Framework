@@ -31,7 +31,9 @@ use crate::command::ProfileCommand;
 use crate::error::ProfileError;
 use crate::event::ProfileEvent;
 use crate::state_machine::ProfileStatus;
-use crate::value::{BasicIdentity, OrganizationalInfo, ProfileOwnerId, StaffProfileId, WorkStats};
+use crate::value::{
+    BasicIdentity, OrganizationalInfo, ProfileOwnerId, StaffProfileId, WorkStats,
+};
 use platform_contracts::{AggregateRoot, DecisionContext};
 use platform_kernel::{AuthorityEpoch, LifecycleEpoch, ObjectVersion};
 use serde::{Deserialize, Serialize};
@@ -292,7 +294,8 @@ mod tests {
         let mut profile = active_profile();
         let ctx = test_context();
         let new_identity =
-            BasicIdentity::new("New Name", None, Some("Engineer".to_string()), None, None).unwrap();
+            BasicIdentity::new("New Name", None, Some("Engineer".to_string()), None, None)
+                .unwrap();
 
         let events = profile
             .decide(
@@ -369,9 +372,7 @@ mod tests {
     fn archive_twice_is_rejected() {
         let mut profile = active_profile();
         let ctx = test_context();
-        let events = profile
-            .decide(ProfileCommand::ArchiveProfile, &ctx)
-            .unwrap();
+        let events = profile.decide(ProfileCommand::ArchiveProfile, &ctx).unwrap();
         apply_all(&mut profile, &events);
         let result = profile.decide(ProfileCommand::ArchiveProfile, &ctx);
         assert!(matches!(result, Err(ProfileError::InvalidTransition(_))));
@@ -381,9 +382,7 @@ mod tests {
     fn update_on_archived_profile_is_rejected() {
         let mut profile = active_profile();
         let ctx = test_context();
-        let archive_events = profile
-            .decide(ProfileCommand::ArchiveProfile, &ctx)
-            .unwrap();
+        let archive_events = profile.decide(ProfileCommand::ArchiveProfile, &ctx).unwrap();
         apply_all(&mut profile, &archive_events);
 
         let result = profile.decide(

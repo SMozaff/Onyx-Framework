@@ -41,4 +41,6 @@ pub use command::ProfileCommand;
 pub use error::ProfileError;
 pub use event::ProfileEvent;
 pub use state_machine::ProfileStatus;
-pub use value::{BasicIdentity, OrganizationalInfo, ProfileOwnerId, StaffProfileId, WorkStats};
+pub use value::{
+    BasicIdentity, OrganizationalInfo, ProfileOwnerId, StaffProfileId, WorkStats,
+};

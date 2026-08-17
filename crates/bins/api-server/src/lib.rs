@@ -28,9 +28,11 @@
 #![allow(clippy::result_large_err)]
 
 pub mod command_handler;
+pub mod escalation_resolution;
 pub mod middleware;
 pub mod query_handler;
 pub mod routes;
+pub mod verifier_resolution;
 
 pub use command_handler::{handle_command, CommandError, CommandResult};
 pub use query_handler::load_aggregate;

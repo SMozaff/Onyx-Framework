@@ -44,16 +44,25 @@ pub struct QueryExecution {
 }
 
 #[derive(Debug)]
-struct ProjectionRow {
-    aggregate_type: String,
-    state: Value,
-    version: i64,
-    updated_at_ms: i64,
+pub(crate) struct ProjectionRow {
+    pub(crate) aggregate_type: String,
+    pub(crate) state: Value,
+    pub(crate) version: i64,
+    pub(crate) updated_at_ms: i64,
 }
 
 /// Execute the frozen Team 6 read-model queries against the authoritative
 /// aggregate snapshot table. The web client remains projection-only: this
 /// function performs no domain mutation and contains no state-machine logic.
+/// # `viewer` (added 2026-08-16, D.5)
+/// The authenticated caller's user id, when known. Only used to redact
+/// `todo_list.*`/`target_list.*` results — see
+/// `redact_team_leader_pre_check_for_viewer`'s doc comment for the
+/// exact rule. `None` preserves this function's prior behavior exactly
+/// (no redaction applied) — every other query type (mission, task,
+/// policy, etc.) is unaffected regardless of `viewer`, since redaction
+/// only triggers for the two aggregate types that carry a Team Leader
+/// pre-check.
 pub async fn execute_query(
     pool: &ProjectionPool,
     query_type: &str,
@@ -61,6 +70,7 @@ pub async fn execute_query(
     filters: &HashMap<String, Value>,
     limit: Option<u32>,
     cursor: Option<&str>,
+    viewer: Option<ObjectId>,
 ) -> Result<QueryExecution, sqlx::Error> {
     let organization_id = uuid::Uuid::parse_str(organization_id)
         .map_err(|error| sqlx::Error::Protocol(format!("invalid organization UUID: {error}")))?;
@@ -84,6 +94,11 @@ pub async fn execute_query(
         // routes::command's matching comment.
         "policy.list" | "policy.detail" => "policy",
         "legal_hold.list" | "legal_hold.detail" => "legal_hold",
+        // TodoList/TargetList/StaffLoan (added 2026-08-16 — see
+        // DESIGN_User_Hierarchy_Chain_of_Authority.md §4, §2.1).
+        "todo_list.list" | "todo_list.detail" => "todo_list",
+        "target_list.list" | "target_list.detail" => "target_list",
+        "staff_loan.list" | "staff_loan.detail" => "staff_loan",
         _ => return Ok(empty_result()),
     };
 
@@ -97,6 +112,9 @@ pub async fn execute_query(
         latest_updated = latest_updated.max(row.updated_at_ms);
         let mut value = row.state;
         normalize_public_state(&mut value);
+        if aggregate_type == "todo_list" || aggregate_type == "target_list" {
+            redact_team_leader_pre_check_for_viewer(&mut value, viewer);
+        }
         if matches_filters(&value, filters) {
             values.push(value);
         }
@@ -104,7 +122,14 @@ pub async fn execute_query(
 
     let is_detail = matches!(
         query_type,
-        "mission.detail" | "task.detail" | "report.detail"
+        "mission.detail"
+            | "task.detail"
+            | "report.detail"
+            | "policy.detail"
+            | "legal_hold.detail"
+            | "todo_list.detail"
+            | "target_list.detail"
+            | "staff_loan.detail"
     );
     if is_detail {
         values.truncate(1);
@@ -127,7 +152,7 @@ pub async fn execute_query(
     })
 }
 
-async fn fetch_rows(
+pub(crate) async fn fetch_rows(
     pool: &ProjectionPool,
     organization_id: uuid::Uuid,
     aggregate_type: Option<&str>,
@@ -203,19 +228,171 @@ async fn fetch_rows(
     }
 }
 
+/// Normalizes an aggregate's raw `id` field for the wire.
+///
+/// # The gap this fixes (found 2026-08-14, confirmed pre-existing and
+/// affecting every aggregate type, not just Policy/LegalHold)
+/// Every domain aggregate's id type (`MissionId`, `PolicyId`, etc.) is a
+/// single-field tuple struct wrapping `platform_kernel::ObjectId([u8;
+/// 16])`. Serde's default behavior for a newtype is transparent
+/// serialization — confirmed empirically, not assumed — so `id` reaches
+/// this point as a flat JSON array of 16 numbers, not a string. Every
+/// `web-ui` page that keys off `.id` (`Missions`, `Tasks`, `Approvals`,
+/// `timeline.list` filtered by `subject_id: mission.id`, etc.) was
+/// therefore receiving a byte array where it expected a UUID string.
+/// The old `public_id`-remapping logic below never actually applied
+/// (`public_id` does not exist on any aggregate — confirmed by search),
+/// so this was silently broken for every aggregate type this route
+/// serves, not just newly-added ones.
+///
+/// Converts any 16-element array of small integers (0-255) found at
+/// `id` into the equivalent UUID string. Deliberately structural
+/// (shape-based), not aggregate-type-specific — this fixes Mission,
+/// Task, Notification, Approval, Report, Policy, and LegalHold in one
+/// place rather than requiring a per-type case here.
+/// Test-only public entry point for `normalize_public_state`, so
+/// `tests/query_id_normalization.rs` can exercise the id-shape
+/// conversion directly against a synthetic aggregate row shape, without
+/// needing a full Policy aggregate creation path (Policy creation is
+/// deliberately not exposed as a raw HTTP route yet — see
+/// `DECISIONS.md`'s "Admin Platform" section).
+#[doc(hidden)]
+pub fn normalize_public_state_for_test(value: &mut Value) {
+    normalize_public_state(value);
+}
+
+
+
+
 fn normalize_public_state(value: &mut Value) {
     let Some(object) = value.as_object_mut() else {
         return;
     };
+
+    // Retained for forward-compatibility, though `public_id` is not
+    // actually present on any aggregate today (confirmed by search) --
+    // removing this silently would be a second, separate change from
+    // the id-array fix below, so it stays as documented dead weight
+    // rather than being pulled out in this same pass.
     let public_id = object
         .get("public_id")
         .and_then(Value::as_str)
         .map(str::to_string);
     object.remove("public_id");
-    object.remove("id");
+
     if let Some(id) = public_id {
         object.insert("id".to_string(), Value::String(id));
+    } else if let Some(uuid_string) = object.get("id").and_then(object_id_array_to_uuid_string) {
+        object.insert("id".to_string(), Value::String(uuid_string));
     }
+
+    // Extended 2026-08-17: normalize every top-level field, not just
+    // `id`. A real, live bug was found in this session's own
+    // StaffLoansPage UI (`staff_user_id === user.id` comparing a raw
+    // byte array to a UUID string, silently never matching) -- the same
+    // root cause the doc comment above already describes for `id`
+    // ("this was silently broken for every aggregate type... not just
+    // newly-added ones"), just not yet fixed for every *field*.
+    // ObjectId is always a 16-byte array in this codebase (confirmed:
+    // `platform_kernel::ObjectId(pub [u8; 16])`), so any field shaped
+    // this way is always an id worth normalizing -- deliberately
+    // structural/shape-based, not a per-field-name allowlist, matching
+    // this function's existing `id`-handling philosophy. Top-level
+    // only (not recursive into nested objects/arrays like
+    // `team_leader_pre_check.checked_by` or `items[].item_id`) -- no
+    // known nested id field is compared against a UUID string
+    // client-side today, so recursing is deferred until a real need
+    // appears rather than built speculatively.
+    let keys: Vec<String> = object.keys().cloned().collect();
+    for key in keys {
+        if key == "id" {
+            continue; // already handled above
+        }
+        if let Some(uuid_string) = object.get(&key).and_then(object_id_array_to_uuid_string) {
+            object.insert(key, Value::String(uuid_string));
+        }
+    }
+}
+
+/// D.5 (added 2026-08-16): redacts a `TodoList`/`TargetList` result's
+/// Team Leader pre-check **substance** (`notes`) when `viewer` is the
+/// list's own `owner` — design doc §2.2's visibility rule, resolved
+/// 2026-08-15: "Staff must NEVER see the substance/content/quality-
+/// judgment of a Team Leader's pre-check — only existence
+/// (status/timestamp/who)."
+///
+/// # Why "viewer == owner" is the redaction rule
+/// This function has no access to the viewer's `UserClass` — only
+/// their id (see `execute_query`'s `viewer` parameter doc comment for
+/// why threading a full class lookup through this path was judged out
+/// of scope for this pass). But design doc §2.2's rule is specifically
+/// about **Staff** seeing their own pre-check, and a list's `owner` is
+/// by construction the Staff member the list is about (design doc
+/// §4.0.1's origin field — `ManagerAssigned` or `StaffAuthored` — never
+/// changes who `owner` is, only who authored the list). So "is the
+/// viewer the owner" is exactly the case design doc §2.2 requires
+/// redaction for, without needing a class lookup: nobody else viewing
+/// this list is the Staff member being pre-checked, whatever their own
+/// class happens to be.
+///
+/// # What is redacted vs. preserved
+/// Only `team_leader_pre_check.notes` is removed. `checked_by` and
+/// `checked_at` remain — existence must stay visible per the rule
+/// above. If `team_leader_pre_check` is absent (no pre-check recorded
+/// yet) or `viewer` is `None` (caller could not determine the
+/// requester, e.g. no authentication context), this function is a
+/// no-op.
+fn redact_team_leader_pre_check_for_viewer(value: &mut Value, viewer: Option<ObjectId>) {
+    let Some(viewer) = viewer else {
+        return;
+    };
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    let Some(owner_id) = object.get("owner").and_then(object_id_array_to_object_id) else {
+        return;
+    };
+    if owner_id != viewer {
+        return;
+    }
+    if let Some(pre_check) = object
+        .get_mut("team_leader_pre_check")
+        .and_then(Value::as_object_mut)
+    {
+        pre_check.remove("notes");
+    }
+}
+
+/// Same conversion as `object_id_array_to_uuid_string`, but returns the
+/// raw `ObjectId` for equality comparison against `viewer` rather than
+/// a display string — redaction needs to compare ids, not format them.
+fn object_id_array_to_object_id(value: &Value) -> Option<ObjectId> {
+    let array = value.as_array()?;
+    if array.len() != 16 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    for (i, entry) in array.iter().enumerate() {
+        bytes[i] = u8::try_from(entry.as_u64()?).ok()?;
+    }
+    Some(ObjectId(bytes))
+}
+
+/// Converts a JSON value shaped like `[u8; 16]` (16 numbers, each
+/// 0-255) into the equivalent UUID string. Returns `None` for anything
+/// else (already a string, wrong length, non-numeric, etc.) — this is
+/// deliberately conservative: a value that doesn't match the expected
+/// shape is left alone rather than guessed at.
+fn object_id_array_to_uuid_string(value: &Value) -> Option<String> {
+    let array = value.as_array()?;
+    if array.len() != 16 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    for (i, entry) in array.iter().enumerate() {
+        bytes[i] = u8::try_from(entry.as_u64()?).ok()?;
+    }
+    Some(uuid::Uuid::from_bytes(bytes).to_string())
 }
 
 fn matches_filters(value: &Value, filters: &HashMap<String, Value>) -> bool {

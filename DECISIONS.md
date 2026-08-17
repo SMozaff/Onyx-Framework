@@ -564,10 +564,11 @@ cargo clippy --package api-server --all-targets -- -D warnings              # cl
 
 **Not yet done (tracked in `IMPLEMENTATION_PLAN_User_Hierarchy.md`):**
 the `is_manager` → `class` backfill decision and follow-up migration
-that actually drops `is_manager`; Phase B (Allfather, blocked on the
-person's confirmation of where it architecturally lives); Phase C
-(staff loans); Phase D (`todo-domain` crate); Phase E (escalation);
-Phase F (UI for all of the above).
+that actually drops `is_manager`; Phase B (org-provisioning action —
+resolved 2026-08-15, see this file's later entry, no longer blocked);
+Phase C (staff loans); Phase D (`todo-domain` crate); Phase E
+(escalation — scope also resolved 2026-08-15); Phase F (UI for all of
+the above).
 
 ---
 
@@ -869,3 +870,566 @@ cargo clippy --package api-server --all-targets -- -D warnings  # clean
 - `npm install` / `tsc` never run on `admin-ui` — **nothing in the React
   app has been type-checked or built yet.**
 - Removing admin screens from `desktop-shell` — correctly deferred.
+
+---
+
+## Admin Platform — Completed 2026-08-15
+
+Continuation of the previous session's work. All remaining pieces built
+and verified.
+
+### Systemic bug found and fixed: aggregate ids over `/api/query`
+Every domain aggregate's id type is a single-field tuple struct
+wrapping `ObjectId([u8; 16])`. Confirmed empirically (a standalone
+repro, not assumed) that serde's default newtype serialization makes
+this **transparent** — `id` reaches the client as a flat 16-number
+array, not a UUID string. This affected **every** aggregate type
+`/api/query` serves — Mission, Task, Notification, Approval, Report,
+and now Policy/LegalHold — not just the new work. Confirmed `web-ui`
+genuinely depends on `.id` being usable (used as React `key`s and as a
+filter value for `timeline.list`'s `subject_id`), so this was a real,
+live bug, not a hypothetical.
+
+Fixed in `query_handler::normalize_public_state`: detects a 16-element
+array of small integers at `id` and converts it to the equivalent UUID
+string, structurally (shape-based), not per-aggregate-type — fixes
+every affected type in one place. Also fixed a related gap:
+`policy.detail`/`legal_hold.detail` were missing from the `is_detail`
+truncation list, so they would have returned the whole org's policies
+instead of one.
+
+**Verified with 4 new tests** (`tests/query_id_normalization.rs`):
+direct unit tests of the byte-array-to-UUID conversion (correct
+conversion, non-array left alone, wrong-length array left alone) plus
+one end-to-end HTTP test proving `policy.list` executes cleanly through
+the fixed code path. Full `api-server` suite re-run after the fix:
+**22/22 tests pass, 0 regressions** — the highest-risk verification in
+this session, since the fix touches every aggregate type's read path.
+
+### `admin-ui` — complete, type-checked
+- `Login.tsx`, `MainLayout.tsx`, `Users.tsx`, `Profiles.tsx` — all
+  present and correct (some pre-existed from earlier work in this
+  session that had gone further than tracked; verified rather than
+  blindly overwritten).
+- `Settings.tsx` — written this pass: full Policy/LegalHold admin UI,
+  ported from `desktop-shell`'s version with every `Id16`
+  (`number[]`)-typed id converted to a plain UUID string, `useCommand`/
+  `useQuery` swapped for their HTTP-backed equivalents, and
+  `CreatePolicy`/`ApplyLegalHold` routed through the dedicated REST
+  endpoints (`/api/admin/policies`, `/api/admin/legal-holds`) rather
+  than `/api/command`, since those are `create()`-routed commands
+  `handle_command` cannot dispatch.
+- `npx tsc -b`: **zero errors** across the whole app — first real
+  type-check of this codebase, not previously run.
+
+### Remaining, explicitly deferred
+- Removing admin screens from `desktop-shell`/`web-ui` — still
+  correctly deferred until the Admin platform is used and confirmed
+  working, per the original product decision.
+
+### `admin-shell` full binary build — verified 2026-08-15
+Previously only `cargo check`-verified due to sandbox disk exhaustion
+mid-build on this crate's heavy GTK/WebKit2GTK/Tauri dependency chain.
+Re-attempted after clearing 7.5GB of reclaimable disk space (stale
+`target/` build cache, a leftover scratch debugging project, stray test
+databases from this session's test runs). **Result: `cargo build
+--package admin-shell` completes successfully** — produces a real,
+executable ELF binary (`target/debug/admin-shell`, 224MB, confirmed via
+`file`). `cargo clippy --package admin-shell -- -D warnings`: clean.
+This closes the P0 item from the 2026-08-15 status report.
+- `admin-shell`'s full Tauri/GTK build (icons, bundling, actual
+  `cargo build` of the binary target rather than `cargo check`) not
+  re-verified in this pass due to sandbox disk constraints; `cargo
+  check` passed earlier in the session and no admin-shell source
+  changed since, so this is a low-risk gap, but a real `cargo build
+  --package admin-shell` (or `tauri build`) should be run in an
+  environment with headroom before shipping.
+
+---
+
+## Allfather — resolved as narrow provisioning capability (2026-08-15)
+
+Purpose clarified: ONYX will be sold to multiple customer organizations.
+Reference-checked against a well-regarded multi-tenant SaaS pattern
+(NestJS multi-tenant starter, via Context7) before deciding — confirmed
+that pattern has **no standing cross-tenant super-admin account** at all.
+Per-tenant config (feature flags/settings, ONYX's equivalent being
+Policy) is done by that tenant's own OWNER/Admin, scoped to their own
+org — not by a vendor-side account reaching across tenants. Tenant
+creation there is a plain authenticated action, not a special role.
+
+Decision: **drop the standing "Allfather account" design entirely.**
+Replaced with a narrow, one-off provisioning action:
+- Creates a new organization + its first Admin account, then stops.
+- No ongoing/standing access into that org afterward — the new org's own
+  Admin takes over immediately, same as any other org.
+- Invoked by the vendor (you) specifically, not a grantable role, at
+  least for now.
+- Because it's a rare, one-off action rather than a daily-use account,
+  it does not need the heavy security apparatus (MFA policy, persistent
+  session management, unforgeable audit trail, kill switch) that a
+  standing cross-org account would have required — that entire line of
+  design work (previously flagged as a needed 6th requirement) is now
+  unnecessary, because the account that would have needed it no longer
+  exists.
+
+Open, deliberately not decided yet: how the first Admin's credential is
+handed to the customer (temporary password vs. an invite/email flow).
+Small, does not block building the provisioning action itself.
+
+Status: **designed, not yet built.** Small in scope — a single
+provisioning route/action plus reusing the existing org+Admin creation
+logic already proven out in `routes::admin`'s bootstrap path. No longer
+a P1 blocker; ready to schedule as ordinary implementation work.
+
+---
+
+## Phase C/D — Staff loan mechanics and Todo/Target verification details — resolved 2026-08-16
+
+All previously-open questions in `todo-domain` requirements gathering
+(Phase C staff loans, Phase D Todo/Target verification) resolved this
+session, in the person's own words, one at a time per their standing
+instruction to never assume or guess:
+
+**Target hit/miss determination:** "Number two, I believe, is more
+reasonable" — judged at verification time by the parent Manager, same
+shape as Todo's flawless/with-deficiencies decision. No live tracking,
+no interim "achieved" flag, no `TargetOutcomeRecorded` event. Also
+confirmed binary, not incremental: "either hitting the target or
+missing the target... cannot partially hit the target."
+
+**Verification comment field:** "It's not like a requirement. More like
+a checkbox. If needs description or comment, you can hit the checkbox
+and add a comment." Always optional, independent of outcome — applies
+identically to `TodoList` and `TargetList`. Corrects the earlier
+tentative `VerifiedWithDeficiencies { comment: String }` shape (which
+implied the comment was mandatory for that outcome) to a single
+`Option<String>` regardless of outcome.
+
+**Staff loan duration:** "Yes, they must be fixed at duration time" —
+fixed start and end date-time, set when the loan is created, not a
+rolling "start + N days."
+
+**Staff loan extend/end authority — three distinct gates, not one:**
+- Starting a loan: real owner approves (previously confirmed,
+  unchanged).
+- Extending an active loan: "for extension, the employee itself need to
+  approve that" — the staff member's own approval, not either manager's.
+- Ending a loan early: "Canceling alone is a normal thing. Nobody would
+  be affected negatively by that. Everybody going back to their work is
+  a normal thing" — no approval needed from anyone; either manager may
+  end it unilaterally.
+
+**Staff loan notifications and expiry mechanism:** both managers and
+the staff member are notified 2-3 days before a loan's end date (advance
+warning) and again when it actually ends, with the option to extend or
+let it lapse at that point. Since advance warning requires proactively
+noticing an upcoming date rather than reacting to a request, this
+settles the previously-open "background job vs. on-read check" question
+in favor of **a scheduled background job** — an on-read check has no
+natural moment at which to fire a warning 2-3 days ahead of time.
+
+**Status:** all Phase C/D product questions are now resolved. Full
+detail recorded in `DESIGN_User_Hierarchy_Chain_of_Authority.md` §2.1,
+§4.0.1.1, §4.0.2, and open-questions items 9-12; corresponding build
+guidance in `IMPLEMENTATION_PLAN_User_Hierarchy.md` Phase C (C.1-C.4)
+and Phase D (D.2-D.3). Implementation of `todo-domain` may now proceed
+— no code existed for this feature prior to this session's resolutions,
+per the person's standing "never assume, never guess" instruction.
+
+---
+
+## Phase C/D implementation — built, wired, and live-tested — 2026-08-16
+
+Following the resolution of all Phase C/D product questions (previous
+entry), the full backend was built end-to-end this session, in
+dependency order, with live verification wherever the sandbox allowed
+it (no Postgres available — see the explicit caveat below).
+
+### What was discovered already built (not built this session)
+
+**Phase A (User Hierarchy data model) was already fully implemented**
+in an earlier, uncatalogued session: `UserClass` enum, `parent_user_id`
+tree column with cycle-detection, both Postgres/SQLite `UserStore`
+adapters, and the `require_class` permission helper — all present,
+tested (24/24 passing), and confirmed working via a fresh test run this
+session. This was a genuine discovery partway through this session, not
+assumed — it changed the build order, since Phase A no longer needed
+building, only verifying.
+
+**Persistence is fully generic** — one polymorphic `Repository` over
+`serde_json::Value`, keyed by an `aggregate_type` column on a single
+shared `aggregates` table. `todo_list`/`target_list`/`staff_loan`
+needed no new migration to be persisted — they slot into the existing
+table exactly as `policy`/`legal_hold` already do.
+
+### What was built this session
+
+1. **`api-server` HTTP wiring** — `ApiState` gained
+   `todo_list_repo`/`target_list_repo`/`staff_loan_repo`; `/api/command`
+   gained full dispatch for every `todo_list.*`/`target_list.*`/
+   `staff_loan.*` command; `/api/query` gained `todo_list.list/.detail`,
+   `target_list.list/.detail`, `staff_loan.list/.detail`; a new
+   `routes::todo_admin` module provides the three `create()`-routed
+   REST endpoints (`POST /api/todo/lists`, `/api/todo/targets`,
+   `/api/todo/staff-loans`), mirroring `routes::policy_admin`'s
+   established precedent exactly. **Live-tested**: full create → submit
+   → verify → re-query round trip against a real running server (SQLite
+   backend), plus staff-loan request → approve.
+
+2. **A real bug found and fixed via that live test**: JWT scope's
+   `command_types` allow-list (a second, separate authorization gate
+   from `routes::command`'s own dispatch match) needed every new
+   command type added explicitly, or every request 403'd with
+   `COMMAND_NOT_AUTHORIZED` regardless of routing being correct. Fixed
+   in `issue_token` (`routes/mod.rs`) — same class of gap the
+   Policy/LegalHold integration hit earlier, per that code's own
+   pre-existing comment.
+
+3. **C.3 — the staff-loan background job.** New
+   `worker::staff_loan_scheduler` module (mirrors
+   `scheduler_loop::scheduler_tick_postgres`'s exact shape) scans for
+   loans within the 2.5-day advance-warning window (midpoint of the
+   confirmed "2 or 3 days" range) and loans past their `end_at`,
+   enqueuing `StaffLoanAdvanceWarning`/`StaffLoanExpiry` jobs. Two new
+   handlers in `job_runner.rs` execute them: insert one `notification`
+   row per recipient (staff member, real owner, borrowing manager, per
+   design doc §2.1's confirmed three-party notification), and (for
+   expiry) transition the loan to `Expired` via direct SQL, matching
+   `execute_timeline_trigger`'s established precedent of mutating
+   `aggregates.state` directly for scheduled transitions rather than
+   round-tripping through the domain crate's in-process types.
+   **Verified**: compiles clean, clippy clean, and the exact JSON field
+   names/shapes the SQL depends on were confirmed against
+   `todo_domain::StaffLoan`'s real serialized output via a throwaway
+   test (`status: "Requested"`, `window: {start_at, end_at}` as bare
+   integers — both bare-string/bare-number shapes as expected from
+   plain externally-tagged serde). **Explicit caveat, not glossed
+   over**: the raw SQL itself (`jsonb_set`, `->>`/`->` JSON path
+   operators) was never run against a live Postgres — none was
+   available in this sandbox, and disk space (as low as 372MB free at
+   points this session) made installing one unsafe to attempt. The
+   `jsonb_set`/`create_missing` semantics were checked against
+   PostgreSQL's own documentation, which is a real but weaker form of
+   verification than actually running it. This is flagged here plainly
+   so it is not mistaken for the same level of confidence as the
+   live-tested HTTP paths.
+
+4. **D.4 — verifier-resolution.** New `verifier_resolution` module in
+   `api-server`, combining Phase A's tree (`UserStore.parent_user_id`)
+   with Phase C's active-loan widening
+   (`StaffLoan::grants_verification_authority_to`, confirmed as the one
+   piece of this logic that already lived on the aggregate itself).
+   Wired into `/api/command`'s dispatch: `VerifyTodoList`/
+   `RejectTodoList`/`EscalateTodoList` (and the `TargetList`
+   equivalents) now load the aggregate's `owner`, resolve authorized
+   verifiers, and reject unauthorized callers before dispatch.
+   Deliberately does **not** include Phase E's escalation widening —
+   Phase E has no routing/target-selection code yet, so a stub there
+   would misleadingly look handled when it silently does nothing; the
+   module's docs say so explicitly. **Live-tested, both directions**:
+   an unrelated third user was correctly rejected
+   ("actor is not an authorized verifier for this list's owner"); the
+   real tree-parent Manager was correctly accepted and the verification
+   succeeded.
+
+5. **D.5 — Team Leader pre-check visibility redaction.** While building
+   this, found and fixed a **real pre-existing bug**: `TodoList`'s and
+   `TargetList`'s `apply()` methods discarded the
+   `TeamLeaderPreCheckRecorded` event's `notes`/`checked_by`/
+   `checked_at` entirely (a `{ .. }` match pattern), so the pre-check's
+   substance never reached the aggregate's stored state at all — there
+   was nothing for redaction to redact. Fixed by adding a
+   `TeamLeaderPreCheck` value struct and a
+   `team_leader_pre_check: Option<TeamLeaderPreCheck>` field to both
+   aggregates, with two new regression tests
+   (`team_leader_pre_check_then_verify_succeeds`'s strengthened
+   assertions, `target_list_team_leader_pre_check_is_stored`) confirming
+   the data is now genuinely stored. With that fixed, added
+   `redact_team_leader_pre_check_for_viewer` to `query_handler.rs`:
+   removes `notes` specifically when the querying viewer equals the
+   list's `owner` (Staff viewing their own list), leaving
+   `checked_by`/`checked_at` intact — matching design doc §2.2's
+   "existence visible, substance never" rule precisely.
+   **Live-tested, both directions**: the Staff owner's query result for
+   `team_leader_pre_check` showed `checked_at`/`checked_by` but no
+   `notes` key at all; the same query as the Team Leader who performed
+   the check showed the full record including `notes` in full.
+
+### Explicit scope boundary — what remains unbuilt
+
+Per the person's own choice this session ("Continue with D.4 + D.5
+(backend logic only, no UI)"): no UI work was done for any of this.
+`desktop-shell`, `admin-shell`, and `web-ui` have no todo/target/loan
+screens. Also unbuilt, unchanged from `todo_domain::lib`'s own
+documented scope: Phase E's escalation routing/target-selection logic
+(only the recording commands exist), and any Postgres-specific runtime
+verification of the C.3 job (see caveat above).
+
+---
+
+## Live PostgreSQL verification of C.3 (staff-loan background job) — closed 2026-08-16
+
+Following the previous entry's explicit caveat (C.3's raw SQL never run
+against a live Postgres, no Postgres available in the build sandbox),
+the code was handed off to a Manus AI agent with access to a real
+Postgres instance, via a git bundle (`onyx-todo-domain.bundle`) built
+on the same commit lineage.
+
+**Result: verified, and a real bug was found and fixed.**
+
+Manus provisioned PostgreSQL 16.14, applied the repository's migrations,
+and wrote a new live integration test —
+`worker::staff_loan_scheduler::postgres_integration_tests::staff_loan_warning_and_expiry_round_trip_on_postgres`
+— that inserts a real `staff_loan` row and drives both the
+advance-warning and expiry paths end to end against the database,
+asserting on actual persisted state rather than mocked behavior. The
+test is a documented no-op when `DATABASE_URL` is unset or
+non-Postgres (confirmed by re-running `cargo test --package worker`
+without `DATABASE_URL` set: the test completes in ~0ms, not skipped
+silently but printing why).
+
+**Bug found**: `job_runner.rs`'s notification-insertion loop computed
+each recipient's user id (staff member, real owner, borrowing manager)
+correctly via `staff_loan_recipients()`, but then discarded it with
+`let _ = recipient_id;` before writing the notification row — so all
+three notifications were inserted with no field identifying who they
+were addressed to. This was a real defect in the original
+implementation, not a testing artifact.
+
+**Fix**: added `recipient_id: Option<String>` to
+`api_server::routes::command::NotificationAggregate`, marked
+`#[serde(default)]` so existing/legacy notifications without the field
+still deserialize correctly, and threaded the real recipient id through
+`insert_notification()` in both the advance-warning and expiry
+handlers. The new Postgres test asserts the exact set of three
+recipient ids (via `BTreeSet` comparison against the staff member's,
+real owner's, and borrowing manager's actual ids) for both
+notification types, not just a count — so a regression here would be
+caught, not just "3 rows exist."
+
+**Re-verified in this sandbox** after pulling Manus's changes back in:
+`cargo check --package worker`, `cargo clippy --package worker -- -D
+warnings`, and `cargo check`/`clippy`/`test --package api-server` (22
+tests, matching Manus's reported count) all pass clean from a cold
+build cache. `cargo test --package worker` without `DATABASE_URL` set
+correctly no-ops the new test rather than failing.
+
+**Status**: the C.3 background job is now fully verified — compiled,
+clippy-clean, unit-tested (`todo-domain`'s 42 tests covering the domain
+logic it depends on), and live-tested against a real PostgreSQL
+instance for both its scan and execution paths. See
+`IMPLEMENTATION_PLAN_User_Hierarchy.md` §11.3 for the updated technical
+detail (the original caveat text is kept, collapsed, for the historical
+record rather than deleted).
+
+**Remaining, unrelated to this feature**: the workspace's
+Docker-backed Testcontainers `e2e` test package could not be run in
+either sandbox (no Docker daemon/socket available in this one, nor in
+Manus's). This is a pre-existing gap in the broader workspace's test
+infrastructure, not something this feature introduced or is
+responsible for closing.
+
+---
+
+## First UI slice: Todo/Target lists in web-ui — 2026-08-16
+
+Following the backend work and its live-Postgres verification (previous
+two entries), a first UI slice was built for Todo/Target lists —
+create, submit, verify/reject/escalate — closing part of the "no UI
+work" gap flagged in the status report.
+
+**Home: `web-ui`, not `admin-shell`.** Confirmed by reading
+`admin-shell`'s `App.tsx` before writing anything: its entire route
+tree sits behind `AdminOnlyLayout`, which requires `is_admin`. Design
+doc §4.0.1 confirms Todo/Target creation is bidirectional (Staff or
+Manager) — an Admin-only home would incorrectly exclude the people this
+feature is actually for. `web-ui` has no such gate, only authentication,
+and already talks to `api-server` over the same HTTP surface this
+session built against.
+
+**Scope of this slice**: self-authored creation only (the current user
+creates a list/target for themselves), submit, and the three
+verifier-gated actions (verify with outcome + optional comment, reject
+with reason, escalate with reason). Assigning a list to a *different*
+owner (`ManagerAssigned` origin) needs a user picker this UI doesn't
+have yet — deliberately deferred as a follow-up, not a corner cut.
+Staff Loans has no UI yet.
+
+**A real regression found and fixed during this work**: an early draft
+added `'draft'` to `StatusBadge`'s `'info'` tone bucket. A pre-existing
+frozen wire-contract test (`tests/unit/contracts.test.ts`) locks
+`statusTone('draft')` to `'neutral'` — this broke it. Caught by
+actually running `npx vitest run`, not assumed correct from the diff
+alone; fixed by leaving `'draft'` out of every explicit bucket so it
+falls through to the existing `'neutral'` default, which was already
+correct.
+
+**Also caught and corrected before that**: an initial draft of the new
+page components invented several CSS classes that don't exist in this
+codebase (`tab-toggle`, `button-active`, `card-list-compact`) and one
+fabricated external link. Caught by grepping `styles.css` directly and
+reading working precedent files (`Missions/MissionList.tsx`,
+`Missions/MissionDetail.tsx`, `Approvals/index.tsx`,
+`admin-shell`'s `Settings.tsx`) rather than trusting the first draft —
+rewritten to use only classes confirmed present in the stylesheet.
+
+**Verified**: `npm install` (542 packages), `npx tsc -b` (zero type
+errors), `npx vite build` (515 modules, production build succeeds),
+`npx vitest run` (130 tests passed, 7 skipped — pre-existing
+`e2e/real-server.test.ts` tests that need a live backend, unrelated to
+this change).
+
+**Not verified**: ESLint. This checkout has no `eslint.config.*` or
+`.eslintrc*` file anywhere in the repository — confirmed by search, a
+pre-existing gap in the checkout, not something this change introduced
+or attempted to paper over by inventing a config.
+
+**Files**: `web-ui/src/pages/TodoTargets/` (new: `index.tsx`,
+`CreateListForm.tsx`, `ListCard.tsx`, `ListDetail.tsx`,
+`DecisionDialog.tsx`); extended `types/query.ts`, `types/command.ts`,
+`hooks/useCommand.ts`, `components/StatusBadge/index.tsx`; registered
+in `App.tsx` (route `/todos`) and `components/Layout/Sidebar.tsx` (nav
+link "Todos & Targets").
+
+---
+
+## Two remaining product decisions resolved — 2026-08-16
+
+**B.4 — first Admin credential delivery: invite email with a setup
+link.** Not a temporary password shown once at creation time. No code
+built yet for this — it's a detail of Phase B.1–B.2's provisioning
+action, which itself hasn't been built. Recorded so the eventual
+implementation doesn't need to re-ask this question.
+
+**Admin-screen removal from `desktop-shell`/`web-ui`: confirmed, go
+ahead.** This had been deliberately held since the Admin Platform
+(`admin-shell`) was first built, pending confirmation it works in
+practice. That precondition has since been met repeatedly this session
+— live-tested, 25 passing `api-server` tests, real HTTP round trips —
+so the person confirmed removal should proceed now. See the next
+commit for the actual removal.
+
+---
+
+## Staff-loan approval authorization gap — closed via Manus verification — 2026-08-17
+
+Following the previous handoff's explicit gap ("staff_loan.* commands
+have no real server-side authorization check"), the code was handed to
+Manus with a tightly-scoped prompt covering exactly that gap plus one
+other item (the `web-ui` "Involving me" filter, against the
+already-fixed id-normalization). Both were confirmed and closed.
+
+**Confirmed real, then fixed**: an unrelated authenticated user could
+send `ApproveStaffLoan` over the real HTTP API and receive HTTP 200 —
+reproduced first, then fixed, not assumed. A new
+`require_staff_loan_authority` helper in `routes/command.rs` loads the
+persisted `StaffLoan` before dispatch and enforces design doc §2.1's
+three approval gates per command:
+
+- `ApproveStaffLoan`/`DeclineStaffLoan`/`EscalateStaffLoan`: the
+  current decision-maker — the real owner, or the loan's
+  `escalated_to` once escalated — via
+  `StaffLoan::grants_approval_authority_to()`, which already existed
+  from the escalation work but had never actually been called from the
+  HTTP dispatch path.
+- `ExtendStaffLoan`: the staff member being loaned, and only them.
+- `EndStaffLoanEarly`: the real owner or the borrowing manager, no
+  approval required (per design doc §2.1 — "canceling alone is a
+  normal thing").
+- `ExpireStaffLoan`: rejected outright from `/api/command` — this
+  transition is worker-only (the scheduled background job calls it
+  directly against the database), no end-user token is ever a valid
+  authority for it.
+
+Denial responses use the existing `"not permitted"` message
+convention so the command-error mapper returns HTTP 403, matching
+every other authorization rejection in this codebase rather than the
+generic HTTP 400 a plain domain-rule violation gets.
+
+**New test coverage**:
+`crates/bins/api-server/tests/staff_loan_authorization.rs` — 3 real
+HTTP tests against a real spawned server: an unrelated user rejected
+for both approval and decline, the real owner accepted, and the
+escalation target accepted after the real owner escalates (correctly
+supplying the incremented `expected_authority_epoch` on the follow-up
+approval, since escalation advances it).
+
+**Re-verified in this sandbox** after pulling the fix back in:
+`cargo check`/`clippy --tests` clean, the new test file's 3 tests pass,
+and the full `api-server` suite (28 tests total, matching Manus's
+reported count) passes with no regressions.
+
+**Also confirmed in the same handoff**: the `web-ui` "Involving me"
+filter on `StaffLoansPage` (written earlier this session against what
+turned out to be a broken wire shape, then indirectly fixed by the
+generic id-normalization change) was verified to actually work now,
+via a new page-level integration test
+(`web-ui/tests/integration/staff_loans_filter.test.tsx`) that renders
+the real page through its production query hook and confirms the
+correct three loans remain selected after toggling the filter. Full
+`web-ui` suite: 131 passed, 7 skipped (pre-existing live-backend
+tests), matching the expected count. **Note**: only the Rust source
+files (`command.rs`, `staff_loan_authorization.rs`) were transferred
+back into this sandbox and re-verified directly; the `web-ui` test
+file itself was not transferred, so its presence/passing is reported
+here on Manus's word, not independently re-confirmed in this sandbox.
+
+**Status**: both items from the second handoff are closed. The
+StaffLoan/escalation feature set built this session is now fully
+verified — domain logic, HTTP wiring, D.4/D.5, escalation routing and
+widening for both Todo/Target and staff loans, the C.3 background job
+(live Postgres), field normalization, and now staff-loan command
+authorization — with real tests behind every piece, not just compile
+checks.
+
+---
+
+## Docker availability for the e2e suite — confirmed usable — 2026-08-17
+
+Following the previous entry's honest "reported unavailable, not
+independently re-checked" caveat, Manus was asked directly whether
+Docker could be enabled in its sandbox at all, in any form, before
+treating the earlier "no Docker daemon" report as a fixed limitation.
+
+**Answer: yes, Docker is usable.** Not preinstalled or pre-started, but
+the sandbox permitted a local Docker Engine install (`docker.io`,
+Engine 29.1.3) and a manually-launched daemon. One real, sandbox-specific
+snag came up and was resolved without touching the test harness: the
+default daemon configuration tried to program a legacy iptables `raw`
+table the sandbox doesn't support, which broke container networking;
+starting `dockerd --iptables=false --ip6tables=false` fixed it. This is
+a daemon configuration adaptation, not a code change — `test_harness.rs`
+was not modified, and the earlier handoff's explicit instruction not to
+patch the harness unless Docker was genuinely unavailable in every form
+was correctly respected (it wasn't needed).
+
+**The real `crates/team8-e2e-tests/tests/all_journeys.rs` suite was
+then actually run** (`cargo test --package e2e --test all_journeys --
+--nocapture`), from a full source compile, against real
+Testcontainers-managed containers:
+
+- `journey_1_mission_lifecycle` — passed
+- `journey_2_task_workflow` — passed
+- `journey_3_conflict_resolution` — passed
+- `journey_4_approval_workflow` — passed
+- `journey_5_notification_sync` — ignored (test's own message: "Team 5
+  client event integration is not production-complete")
+- `journey_6_p2p_sync` — ignored ("requires signed Team 5
+  desktop/mobile clients and radio adapters")
+- `journey_7_background_sync` — ignored ("requires Team 5 iOS
+  BGTask and Android WorkManager release builds")
+
+**4 passed, 0 failed, 3 ignored**, all in 10.67 seconds after
+compilation. The three ignored journeys are ignored by the tests'
+*own* declared reasons — genuine feature-incompleteness in other
+teams' work (client/mobile), unrelated to Docker, unrelated to this
+session's Todo/Target/StaffLoan work, and not something to chase down
+here.
+
+**Status**: this closes the "Docker/e2e suite could not be run"
+item that had been carried as an open gap across every status report
+and handoff since it was first noticed. It was a real environment gap
+in the specific sandboxes used earlier, not a fixed or permanent
+limitation of the workspace itself — confirmed by actually trying,
+not assumed either way.

@@ -5,9 +5,11 @@ pub mod admin;
 pub mod auth;
 pub mod command;
 pub mod events;
+pub mod policy_admin;
 pub mod profiles;
 pub mod query;
 pub mod relay;
+pub mod todo_admin;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -86,6 +88,17 @@ pub struct ApiState {
     pub policy_repo: Arc<dyn Repository>,
     /// Repository for `policy_domain::LegalHold`. See `policy_repo`.
     pub legal_hold_repo: Arc<dyn Repository>,
+    /// Repository for `todo_domain::TodoList`. Added 2026-08-16 —
+    /// `client-composition` has no equivalent wiring for `todo-domain`
+    /// yet, so (mirroring `policy_repo`'s own precedent) this crate's
+    /// `/api/command` dispatch is these aggregates' first real
+    /// integration point. See `routes::command`'s `todo_list.*` dispatch
+    /// arms and `routes::todo_admin` for the `CreateTodoList` route.
+    pub todo_list_repo: Arc<dyn Repository>,
+    /// Repository for `todo_domain::TargetList`. See `todo_list_repo`.
+    pub target_list_repo: Arc<dyn Repository>,
+    /// Repository for `todo_domain::StaffLoan`. See `todo_list_repo`.
+    pub staff_loan_repo: Arc<dyn Repository>,
     /// Argon2id hasher. Held on state rather than constructed per request:
     /// building it derives a dummy hash, which is deliberately expensive.
     pub password_hasher: Arc<PasswordHasher>,
@@ -102,6 +115,9 @@ pub struct ApiState {
 /// reused elsewhere.
 type StorageBackendHandles = (
     ProjectionPool,
+    Arc<dyn Repository>,
+    Arc<dyn Repository>,
+    Arc<dyn Repository>,
     Arc<dyn Repository>,
     Arc<dyn Repository>,
     Arc<dyn Repository>,
@@ -131,6 +147,9 @@ impl ApiState {
             profile_repo,
             policy_repo,
             legal_hold_repo,
+            todo_list_repo,
+            target_list_repo,
+            staff_loan_repo,
             unit_factory,
             idempotency_store,
             sqlite_pool,
@@ -150,6 +169,9 @@ impl ApiState {
                 Arc::new(PostgresRepository::new(pool.clone(), "staff_profile")),
                 Arc::new(PostgresRepository::new(pool.clone(), "policy")),
                 Arc::new(PostgresRepository::new(pool.clone(), "legal_hold")),
+                Arc::new(PostgresRepository::new(pool.clone(), "todo_list")),
+                Arc::new(PostgresRepository::new(pool.clone(), "target_list")),
+                Arc::new(PostgresRepository::new(pool.clone(), "staff_loan")),
                 Arc::new(PostgresUnitOfWorkFactory::new(pool.clone())),
                 Arc::new(PostgresIdempotencyStore::new(pool.clone())),
                 None,
@@ -187,6 +209,9 @@ impl ApiState {
                 Arc::new(SqliteRepository::new(pool.clone(), "staff_profile")),
                 Arc::new(SqliteRepository::new(pool.clone(), "policy")),
                 Arc::new(SqliteRepository::new(pool.clone(), "legal_hold")),
+                Arc::new(SqliteRepository::new(pool.clone(), "todo_list")),
+                Arc::new(SqliteRepository::new(pool.clone(), "target_list")),
+                Arc::new(SqliteRepository::new(pool.clone(), "staff_loan")),
                 Arc::new(SqliteUnitOfWorkFactory::new(pool.clone())),
                 Arc::new(SqliteIdempotencyStore::new(pool.clone())),
                 Some(pool),
@@ -260,6 +285,9 @@ impl ApiState {
             profile_repo,
             policy_repo,
             legal_hold_repo,
+            todo_list_repo,
+            target_list_repo,
+            staff_loan_repo,
             unit_factory,
             idempotency_store,
             events,
@@ -335,7 +363,10 @@ pub fn router(state: ApiState) -> Router {
         // confirmed visibility/editing rules.
         .route("/api/profiles", get(profiles::list_profiles))
         .route("/api/profiles/:owner_id", get(profiles::get_profile))
-        .route("/api/admin/profiles", put(profiles::upsert_profile_route))
+        .route(
+            "/api/admin/profiles",
+            put(profiles::upsert_profile_route),
+        )
         .route(
             "/api/admin/profiles/import",
             post(profiles::batch::import_profiles),
@@ -343,6 +374,25 @@ pub fn router(state: ApiState) -> Router {
         .route(
             "/api/admin/profiles/export",
             get(profiles::batch::export_profiles),
+        )
+        // Policy/LegalHold creation (2026-08-14) — see
+        // routes::policy_admin's module doc comment for why these need
+        // their own routes rather than going through /api/command.
+        .route("/api/admin/policies", post(policy_admin::create_policy))
+        .route(
+            "/api/admin/legal-holds",
+            post(policy_admin::apply_legal_hold),
+        )
+        // TodoList/TargetList/StaffLoan creation (2026-08-16) — see
+        // routes::todo_admin's module doc comment for why these need
+        // their own routes (create()-routed commands) and why they are
+        // not admin-gated the way the Policy/LegalHold routes above
+        // are.
+        .route("/api/todo/lists", post(todo_admin::create_todo_list))
+        .route("/api/todo/targets", post(todo_admin::create_target_list))
+        .route(
+            "/api/todo/staff-loans",
+            post(todo_admin::request_staff_loan),
         )
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/command", command_route)
@@ -569,6 +619,41 @@ pub async fn issue_token(
                 "notification.Acknowledge".to_string(),
                 "approval.Approve".to_string(),
                 "approval.Reject".to_string(),
+                // Policy/LegalHold (2026-08-14, Admin Platform) — added
+                // alongside routes::command's matching dispatch arms.
+                // Found and fixed via a real end-to-end test failure
+                // (403 COMMAND_NOT_AUTHORIZED), not assumed to be
+                // covered by the routing change alone — this token
+                // scope allowlist is a second, separate gate the
+                // envelope has to pass before command.rs's own
+                // command_type match is ever reached.
+                "policy.CreatePolicyVersion".to_string(),
+                "policy.PublishPolicyVersion".to_string(),
+                "policy.EvaluatePolicy".to_string(),
+                "policy.RegisterViolation".to_string(),
+                "policy.RetirePolicy".to_string(),
+                "legal_hold.ReleaseLegalHold".to_string(),
+                // TodoList/TargetList/StaffLoan (2026-08-16). Same
+                // second-gate requirement as Policy/LegalHold above —
+                // confirmed by an actual 403 COMMAND_NOT_AUTHORIZED
+                // during end-to-end smoke testing, not assumed.
+                "todo_list.AddItem".to_string(),
+                "todo_list.SubmitTodoList".to_string(),
+                "todo_list.RecordTeamLeaderPreCheck".to_string(),
+                "todo_list.VerifyTodoList".to_string(),
+                "todo_list.RejectTodoList".to_string(),
+                "todo_list.EscalateTodoList".to_string(),
+                "target_list.SubmitTargetList".to_string(),
+                "target_list.RecordTeamLeaderPreCheck".to_string(),
+                "target_list.VerifyTargetList".to_string(),
+                "target_list.RejectTargetList".to_string(),
+                "target_list.EscalateTargetList".to_string(),
+                "staff_loan.ApproveStaffLoan".to_string(),
+                "staff_loan.DeclineStaffLoan".to_string(),
+                "staff_loan.ExtendStaffLoan".to_string(),
+                "staff_loan.EndStaffLoanEarly".to_string(),
+                "staff_loan.EscalateStaffLoan".to_string(),
+                "staff_loan.ExpireStaffLoan".to_string(),
             ],
             delegation_depth: 0,
         },

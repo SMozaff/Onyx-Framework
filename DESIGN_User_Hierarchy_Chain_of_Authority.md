@@ -13,6 +13,12 @@ safety net." Allfather's correctability is not a license to under-specify;
 this document should continue to be built toward real precision on each
 tier, not approximations deferred to later correction.
 
+*(Note added 2026-08-15: §2.4's original "Allfather override tier" was
+later superseded by a much narrower design — see §2.4 below. The
+precision standard quoted above still holds regardless of that change;
+it's recorded here as a standing principle for this document, not
+something tied specifically to Allfather's now-superseded shape.)*
+
 ---
 
 ## 1. Scope of this requirement
@@ -55,7 +61,7 @@ confirmed when this is built — see §5).
 Team Leader (which one sits above the other operationally, if either)
 has not been asked yet.
 
-## 2.1 Staff borrowing / loan mechanism (clarified 2026-08-12)
+## 2.1 Staff borrowing / loan mechanism (clarified 2026-08-12; mechanics fully resolved 2026-08-16)
 
 The base hierarchy **is a strict tree** — every staff member has exactly
 one true **owning Manager** (the "real owner," their actual line
@@ -68,15 +74,18 @@ not a change to the tree itself:
 
 - A **different** Manager (the "borrowing manager") can temporarily gain
   working authority over a staff member who is owned by another Manager,
-  for a **designated period** (start + end, or start + duration — exact
-  representation not yet specified).
+  for a **designated period**.
+- **Duration representation (confirmed 2026-08-16): fixed start and end
+  date/time, decided at creation time.** Not a rolling "start + N days"
+  computed length — the Manager sets concrete start and end dates when
+  the loan is created.
 - Ownership itself does **not** transfer. The real owner remains the
   real owner throughout; the loan is an overlay, not a reassignment.
-- **Consent requirement (confirmed):** initiating a loan requires the
-  **real owner's approval** — a higher-authority manager cannot
-  unilaterally order a staff member borrowed away from their owner. This
-  is itself a small approval workflow (borrow request → owner
-  approves/declines), conceptually adjacent to the Todo/Target
+- **Consent requirement — starting a loan (confirmed):** initiating a
+  loan requires the **real owner's approval** — a higher-authority
+  manager cannot unilaterally order a staff member borrowed away from
+  their owner. This is itself a small approval workflow (borrow request
+  → owner approves/declines), conceptually adjacent to the Todo/Target
   verification workflow in §4, though not confirmed to share the same
   mechanism.
 - **Verification during an active loan (confirmed):** either the
@@ -84,20 +93,49 @@ not a change to the tree itself:
   Todo/Target lists while the loan is active — not exclusive to one
   side. This is a deliberate widening of §4's "parent Manager verifies"
   rule for the loan period specifically.
-- Presumed (not yet explicitly confirmed) to revert automatically to
-  the real owner's sole authority when the loan period ends — needs
-  confirmation, not assumed.
+- **Extension requires the Staff member's own approval (confirmed
+  2026-08-16).** This is a distinct approval gate from loan creation:
+  starting a loan is approved by the real owner; **extending** an
+  already-active loan is approved by the Staff member being loaned,
+  not by either manager. The Staff member is not a passive subject of
+  the loan mechanism once extension is on the table.
+- **Ending a loan early requires no approval from anyone (confirmed
+  2026-08-16).** Either the real owner or the borrowing manager may end
+  an active loan before its scheduled end date, unilaterally. Rationale
+  (person's own words): returning a staff member to their normal owner
+  is not something that harms anyone, so it carries none of the
+  friction that starting or extending a loan does.
+- **Notifications (confirmed 2026-08-16):** both the real owner, the
+  borrowing manager, **and the staff member** are notified twice per
+  loan lifecycle — an advance warning **2–3 days before** the loan's end
+  date, and a second notification **when the loan actually ends**. The
+  end-of-loan notification carries the option to extend (subject to the
+  staff member's approval, above) or let the loan end.
+- **Expiry mechanism (confirmed 2026-08-16, as a direct consequence of
+  the advance-warning requirement): a scheduled background job**, not an
+  on-read/live check. A live check (computing "is `now()` within the
+  loan window" only when something happens to ask) cannot produce a
+  proactive warning 2–3 days ahead of time, since nothing is "reading"
+  the loan at that moment — only a periodic background scan can notice
+  "this loan ends in 2 days" and fire a notification with no user
+  action having triggered it. This resolves what was previously an open
+  question in §2.1 and via Phase C.
 
 **Implications for the data model**, once this is built:
 - A `StaffLoan`-shaped aggregate/entity is needed: staff member, real
-  owner, borrowing manager, time window, and an approval state
-  (Requested → Approved/Declined by owner → Active → Expired/Ended).
+  owner, borrowing manager, fixed start/end date-time, and an approval
+  state (Requested → Approved/Declined by owner → Active →
+  Extended{approved by staff} / Ended{by either manager, no approval} /
+  Expired{by background job at end date}).
 - The "who verifies a given list" check becomes: real owner, **or** any
   manager currently holding an active, approved loan for that staff
   member — not a single fixed lookup.
-- Time-bounded: needs either a scheduled/background expiry check, or an
-  on-read check ("is `now()` within the loan's window") — not yet
-  decided which.
+- A background job (see Phase C in the implementation plan) is required
+  to scan for loans approaching their end date (2–3 day lookahead) and
+  loans that have just reached their end date, firing notifications and
+  transitioning state accordingly. This is a durable scheduled job, not
+  request-scoped work — see Blueprint §1.14.2's distinction between
+  request-scoped subtasks and durable background jobs.
 
 ## 2.2 Team Leader's concrete authority (clarified 2026-08-12)
 
@@ -139,7 +177,7 @@ purely informal/observational with no distinct system state — needs
 confirmation before this is modeled as a real workflow step versus just
 a permission to view/comment.
 
-## 2.3 Supervisor's concrete authority (clarified 2026-08-12)
+## 2.3 Supervisor's concrete authority (clarified 2026-08-12; visibility confirmed 2026-08-15)
 
 **Confirmed: Supervisors are not responsible for teams — Team Leader
 is.** This was the key distinguishing clarification: Supervisor is
@@ -153,7 +191,9 @@ parallel one.
   (unlike Team Leader's pre-check, §2.2, and unlike a Manager's actual
   verification, §4).
 - **No escalation authority** — cannot invoke escalation (§4.1)
-  themselves.
+  themselves, and (§4.1) cannot have escalation invoked against any
+  decision of theirs either, since Supervisor produces no binding
+  decisions to escalate.
 
 This settles the earlier hedge ("probably a complimentary title only")
 into something concrete: Supervisor is real but narrow — pure
@@ -162,70 +202,99 @@ ownership. It is not merely a title with zero system meaning (it does
 grant subgroup visibility), but it grants materially less than Team
 Leader.
 
-## 2.4 "Allfather" — global platform-owner class, above the org hierarchy (added 2026-08-12)
+**Confirmed 2026-08-15 — Supervisor's presence is fully visible, and
+that's all it needs to be.** Explicitly described as "a complementary
+position for the eldest/most experienced member of the team" —
+informal, not a systematic authority layer. Unlike the Team Leader
+pre-check (§2.2, §4.0.1.1 below), which needs an existence-only
+visibility rule because it carries binding-adjacent judgment content,
+Supervisor's observation carries **no recorded decision content at
+all** — it is an ambient fact ("Supervisor X is present/monitoring this
+team"), not an object with substance to gate. No special visibility
+rule is needed: full visibility of *presence* is correct and complete,
+because there is nothing beneath that presence to protect or hide.
+Implication for `todo-domain`'s data model: Supervisor observation is
+not a recorded field on Todo/Target items at all, and needs no
+per-field visibility rule the way the Team Leader pre-check does.
 
-**A new class, sitting above everything else in this document**,
-introduced when the person considered how ONYX should generalize its
-class/label system across different customer organizations (small
-businesses, midsize companies scaling up, military-style orgs wanting
-"Troops" instead of "Staff," etc.).
+## 2.4 Global platform-owner capability — resolved 2026-08-15 as a narrow provisioning action, not a standing "Allfather" account
 
-**Fundamentally different in kind from every other class above.**
-Admin through Staff (§2) are all **organizational** roles — they exist
-*within* one company's use of ONYX, scoped to that organization. Allfather
-is **not** an organizational role:
+**This section supersedes the original 2026-08-12 "Allfather" design
+below in full.** The original design (preserved further down for
+historical record — see the boxed note) proposed a single, standing,
+globally-scoped account sitting above the entire organizational
+hierarchy, with sweeping override power over every class's core
+abilities platform-wide. That design is **no longer the plan.**
 
-- **Confirmed global, not per-organization:** there is exactly **one**
-  Allfather across the entire platform, above every organization — not
-  one per company. Explicitly identified as the person themself, in the
-  role of platform/product owner, not a customer-facing position any
-  organization would have or assign on its own.
-- **Confirmed to have override power over the base hierarchy itself,**
-  not just additive configuration on top of it: Allfather can edit,
-  add, or remove **any class's core abilities** — including stripping
-  Admin's own defining power (user creation/removal/class changes,
-  §2's "sole authority" framing) if desired. The §2 hierarchy is
-  therefore the **default/floor design**, not an immutable contract —
-  Allfather can reshape it platform-wide.
-- Can customize per-organization display labels (the "Staff vs. Troops
-  vs. Members" question that prompted this class's creation in the
-  first place).
-- Can, per the person's own framing, "customize everything, edit
-  everything, add or remove every feature from every class."
-- **Confirmed 2026-08-12: entirely outside the operational
-  workflow.** Explicitly stated: "Allfather is not something inside the
-  workflow... it is not involved inside the projects and workflow."
-  Allfather never touches Missions, Tasks, Todos, Targets,
-  verifications, escalations, or any other in-project activity — its
-  authority is strictly over the **structure/configuration layer**
-  (classes, permissions, fields, labels — "the rule, the game theory and
-  plan," in the person's words), never over the operational content
-  running through that structure. This is an important boundary: it
-  means Allfather should not appear anywhere in the Todo/Target,
-  verification, or escalation design (§4) as a participant — it is a
-  meta-layer above all of it, not a top rung of the same ladder.
+**What changed:** the actual purpose was clarified 2026-08-15 — ONYX is
+intended to be sold to multiple customer organizations, and the
+underlying need is (a) per-customer configuration flexibility, and (b)
+a way to bring new customer organizations into existence. Both of these
+turned out not to require a standing cross-org account:
 
-**Implications, not yet resolved:**
-- Since Allfather can edit *any* organization's class permissions, this
-  is effectively a platform-administration capability, likely living
-  outside any single organization's data/tenancy boundary entirely —
-  needs to be modeled as such (e.g. not just another row in an
-  org-scoped `users` table with a very high permission level, but a
-  genuinely distinct, cross-tenant capability), though this hasn't been
-  confirmed as an implementation approach yet.
-- If Allfather can strip Admin's user-management power for a given
-  organization, that organization would then have **no one** able to
-  manage its own users unless Allfather also assigns that power
-  elsewhere — a real edge case to think through before building this
-  (does removing a class's core ability require designating a
-  replacement, or can an org genuinely end up with a gap?).
-- Whether there is ever more than one Allfather (e.g. a small ops team
-  on the product-owner side, not just one person) is unconfirmed —
-  current wording ("my title actually") suggests exactly one for now.
-- Security/audit implications of a single global super-role are
-  significant (a compromised Allfather account could reshape every
-  customer's permission model) — not yet discussed, worth raising
-  before implementation.
+- **(a) is already solved.** Per-organization configuration
+  (feature toggles, limits, retention — the "Lego" framing) is exactly
+  what `policy-domain`'s existing, per-org, versioned Policy mechanism
+  does, administered by that organization's own Admin through the
+  already-built Admin Platform. No cross-org account is needed for this
+  at all — each customer configures their own instance.
+- **(b) is solved by a single narrow action, not a role.** Reference-
+  checked against a well-regarded multi-tenant SaaS pattern before
+  deciding (a NestJS multi-tenant starter, checked via Context7):
+  confirmed that pattern has no standing cross-tenant super-admin
+  account either — tenant creation there is a plain, one-off
+  authenticated action, and per-tenant settings are managed by each
+  tenant's own owner/admin, never by a vendor-side account reaching
+  into live customer data.
+
+**Confirmed shape of the replacement, 2026-08-15:**
+- A **narrow, one-off provisioning action**: creates a new organization
+  and seeds its first Admin account, then stops. No ongoing or standing
+  access into that organization afterward — the new org's own Admin
+  takes over immediately, identically to every other organization.
+- Invoked by the platform owner (the person) specifically — not
+  currently a grantable role others could hold.
+- Because this is a rare, one-off action rather than a persistent
+  daily-use account, it does **not** need the heavy security apparatus
+  a standing account would have required (mandatory MFA policy,
+  session-length limits, an unforgeable audit trail, a kill switch
+  independent of its own credential) — those concerns applied
+  specifically to a standing account, and that account no longer
+  exists in this design.
+- **Not yet decided:** how the newly-created org's first Admin
+  credential is handed to the customer (a temporary password vs. an
+  invite/email flow). Small, does not block building the provisioning
+  action itself.
+
+**Status: designed, not yet built.** Small in scope — expected to reuse
+the org+Admin creation logic already proven out in the existing
+bootstrap path (`routes::admin`), exposed as a single provisioning
+route/action rather than a new standing role or auth system.
+
+> **Historical record — original 2026-08-12 "Allfather" design,
+> superseded above.** Preserved for context on how the design evolved;
+> do not implement as written below.
+>
+> A new class, sitting above everything else in this document,
+> introduced when the person considered how ONYX should generalize its
+> class/label system across different customer organizations (small
+> businesses, midsize companies scaling up, military-style orgs wanting
+> "Troops" instead of "Staff," etc.). Proposed as fundamentally
+> different in kind from every other class — not organizational, but
+> global, with override power over the base hierarchy itself (able to
+> edit, add, or remove any class's core abilities platform-wide,
+> including stripping Admin's own defining power), per-organization
+> label customization, and explicit confirmation it sits entirely
+> outside the operational workflow (never touching Missions, Tasks,
+> Todos, Targets, verifications, or escalations). Flagged but
+> unresolved at the time: where such an account would live outside
+> normal tenant boundaries, what happens if Admin's power is stripped
+> with no replacement designated, whether more than one such account
+> could exist, and — extensively discussed in a later session — the
+> security/audit burden of a single global super-role being
+> compromised. That security discussion is what ultimately surfaced the
+> mismatch between this design's scope and its actual purpose, leading
+> to the 2026-08-15 resolution above.
 
 ---
 
@@ -341,14 +410,25 @@ are not one by one their items."
 items within the list as deficient. "Deficiencies" exist only as prose
 in the one comment attached to the single list-level approval action.
 
-**Implication for the data model:** a Todo/Target list's verification
-state machine needs exactly one comment field on the
-approve/verify transition (optional or always-present — not yet
-specified), not a per-item annotation structure. This is simpler than
-an initial reading of "approved with deficiencies" might suggest — no
-item-level state is needed for this purpose.
+**Comment field — resolved 2026-08-16: always optional, and decoupled
+from outcome.** The comment is not gated by whether the verification is
+flawless or has deficiencies — it is an independent checkbox-triggered
+toggle available on **any** verification outcome. The verifier checks a
+box if they want to add a comment, and only then does a text field
+apply; nothing about the outcome itself requires a comment, including
+"approved with deficiencies" (though it is expected there in practice,
+it is not system-enforced). Person's own words: "It's not like a
+requirement. More like a checkbox. If needs description or comment, you
+can hit the checkbox and add a comment."
 
-## 4.0.2 Target lists — clarified scope (2026-08-12)
+**Implication for the data model:** a Todo/Target list's verification
+state machine needs one **always-optional** comment field on the
+approve/verify transition — `Option<String>`, independent of which
+outcome (flawless / with-deficiencies) was chosen — not a per-item
+annotation structure, and not a field whose presence is required by any
+particular outcome.
+
+## 4.0.2 Target lists — clarified scope (2026-08-12); hit/miss mechanism resolved 2026-08-16
 
 Distinct from Todo lists: **time-bound, measurable goals** (e.g.
 "achieve X during this week/month"), where the point is whether the
@@ -363,7 +443,36 @@ and said no. **ONYX's responsibility stops at tracking progress toward
 a defined target and whether it was met** — what an organization does
 with that outcome is outside this system's concern.
 
-## 4.1 Escalation (clarified 2026-08-12 — a general platform principle, not Todo/Target-specific)
+**Hit/miss is binary, not incremental (confirmed 2026-08-16):** "either
+hitting the target or missing the target... cannot partially hit the
+target." No running counts, percentage progress, or partial-credit
+thresholds — a Target resolves to exactly one of two outcomes.
+
+**Determination mechanism — resolved 2026-08-16: judged at verification
+time, not tracked live.** Two options were posed explicitly (live
+tracking with an interim "achieved" flag vs. a judgment call made when
+the window closes, parallel to Todo's flawless/deficiencies decision);
+the person chose the latter: *"Number two, I believe, is more
+reasonable."* Consequences:
+- **No interim tracking state is needed while a Target is open** — no
+  progress flags, no `TargetOutcomeRecorded` event, nothing written
+  during the window itself.
+- When the time window closes, the verifier (the parent Manager, same
+  authority as Todo verification, widened during an active loan per
+  §2.1) looks at the real-world outcome and declares hit or miss at
+  that point — structurally the same action as Todo's
+  flawless/with-deficiencies verification, just applied to a binary
+  hit/miss outcome instead.
+- **This means `TargetList` does not need a materially different state
+  machine from `TodoList`.** It can reuse the same
+  `Submitted → Verified{Hit|Miss} / Rejected / Escalated` shape (see
+  §4.0.1.1 and §4.1), with two differences: a `time_window` field
+  (start/end) instead of discrete checklist items, and no per-item
+  content at all — the "hit or miss" judgment stands in for the
+  flawless/deficiencies distinction. The optional comment field
+  (resolved above) applies identically.
+
+## 4.1 Escalation (clarified 2026-08-12 — a general platform principle, not Todo/Target-specific; scope fully resolved 2026-08-15)
 
 While discussing Todo/Target verification specifically, the person
 stated this as a **broad rule spanning almost every authority in the
@@ -390,9 +499,11 @@ others not yet identified).
   written cause — escalating is not gated behind justifying why.
 - **Step-by-step, not a direct jump.** Escalation always goes to the
   **immediate next level up** in the chain (e.g. parent Manager →
-  Senior Manager → Top-level Manager → Admin → Allfather), one level at
-  a time — confirmed explicitly, ruling out "jump straight to any
-  higher authority."
+  Senior Manager → Top-level Manager), one level at a time — confirmed
+  explicitly, ruling out "jump straight to any higher authority." Chain
+  stops at Top-level Manager/Admin — per §2.4 (resolved 2026-08-15),
+  the platform-owner capability sits entirely outside the operational
+  workflow and is never a rung in this chain.
 - **Full visibility on escalation, both directions (confirmed):** when
   something escalates, both the original party and the higher authority
   it escalates to must see full context/history automatically — this
@@ -401,14 +512,45 @@ others not yet identified).
   write one. Implies escalated items need their full history/thread
   visible to the receiving authority, not just a bare notification.
 
-**Not yet resolved:**
-- Whether escalation is available at *every* single authority/approval
-  point in the system, or "almost every" implies some specific,
-  not-yet-identified exceptions.
-- Whether escalating past a level requires that level's authority to be
-  literally unavailable/unresponsive, or can be invoked even when the
-  immediate parent is available but the escalating party simply wants a
-  higher decision.
+**Scope — fully resolved 2026-08-15:**
+- **Escalation applies to every decision, without exception** — no
+  enumerated allow-list of "escalatable decision types" is needed. The
+  mechanism is generic over decision content.
+- **But it is gated by *who made the decision*, not by what kind of
+  decision it is.** Only decisions made by **real Managers** (Senior
+  Manager, Top-level Manager) are escalatable. Team Leader (§2.2) and
+  Supervisor (§2.3) decisions are **never** escalatable — not because
+  those decisions don't matter operationally, but because neither role
+  holds real systemic/organizational authority in the first place
+  ("verbally maybe, but not systematically"). There is nothing to
+  escalate past, since neither role's output was ever a binding
+  decision in the system's eyes. This is the same principle already
+  present in §2.2 (Team Leader's pre-check explicitly "optional/
+  parallel, not a gate") and §2.3 (Supervisor "no escalation
+  authority"), now applied consistently to escalation as a whole rather
+  than decided per-role in isolation.
+- **This resolves both previously-open questions from §5 item 5 below**
+  (whether escalation is available at every point or only some) and
+  the "immediate parent unavailable vs. simply wants a higher decision"
+  question is answered by "no justification required" above — escalation
+  never requires proving unavailability, it can be invoked whenever the
+  escalating party judges it necessary.
+
+**Direct consequence for `todo-domain`'s data model (2026-08-15):**
+Because Team Leader pre-checks are never escalatable and Staff are not
+a party to that layer of decision-making, **Staff must never be shown
+the substance of a Team Leader's pre-check** — only its existence
+(status/timestamp/who performed it), never its content, notes, or any
+quality signal. Surfacing the substance would create a visible-but-
+unactionable disagreement for Staff to react to, which contradicts the
+"no recourse at that layer" design — the correct fix is to never expose
+the substance in the first place, not to expose it and separately block
+escalation on top of it. This needs to be a field-level visibility rule
+on whatever aggregate holds the pre-check (Staff sees existence-only;
+Manager/Team Leader see full content), not just role-gating on an
+entire endpoint. Supervisor observation needs no equivalent rule — see
+§2.3's 2026-08-15 update — because it carries no recorded decision
+content to protect in the first place.
 
 ## 4.2 Technical recommendation: Todo/Target vs. the existing Approval mechanism (2026-08-12)
 
@@ -483,21 +625,23 @@ transitions per §4.1), independent of `api-server`'s
 4. Should "employees/staff/troops/members" be a per-organization display
    label only, or do different organization types need different
    underlying class *sets* (e.g. a military-style org might want more
-   granularity than a small business)? **Effectively resolved
-   2026-08-12 via §2.4:** rather than a separate labels-config
-   mechanism, the new global **Allfather** class can edit/add/remove
-   any class's abilities and (implicitly) labels platform-wide, for any
-   organization. Whether Allfather is the *only* path to changing
-   labels, or a lighter per-organization label override also exists
-   underneath it for routine cases, is not yet specified — worth
-   clarifying before implementation, since routing every small labeling
-   preference through a single global role seems like a scaling
-   concern for the platform owner rather than a per-customer setting.
+   granularity than a small business)? **Revised 2026-08-15:** the
+   2026-08-12 answer (a global "Allfather" class editing labels
+   platform-wide) is superseded — see §2.4. Per-organization labels are
+   now expected to be handled the same way other per-org configuration
+   is: through that organization's own Policy, administered by its own
+   Admin — not through a global platform-owner role. Not yet fully
+   specified as a concrete Policy rule shape; worth a short follow-up
+   before `todo-domain`/labels work begins, but no longer blocked on a
+   platform-owner design.
 5. Does Todo/Target list verification block on a single parent Manager
    approval, or can it escalate (e.g. Senior Manager can also verify if
    the direct parent is unavailable)? **Confirmed 2026-08-12 as a
-   general platform principle, not just for Todo/Target — see new §4.1
-   ("Escalation").**
+   general platform principle, not just for Todo/Target — see §4.1
+   ("Escalation"). Scope fully resolved 2026-08-15** — see §4.1's
+   "Scope — fully resolved 2026-08-15" subsection: every decision is
+   escalatable, but only when made by a real Manager (not Team Leader or
+   Supervisor). No open questions remain on escalation.
 6. Relationship to the existing Approval-adjacent capability already in
    `api-server` (`notification.Acknowledge`, `approval.Approve/Reject`)
    — is Todo/Target verification meant to reuse that mechanism, or is
@@ -513,14 +657,57 @@ transitions per §4.1), independent of `api-server`'s
    same Manager both assigns and verifies; this is treated as
    legitimate, not circular. This also surfaced the list-level (not
    item-level) verification granularity — see §4.0.1.1.
+8. How does a new customer organization actually come into being —
+   is there a standing platform-owner account with reach into every
+   org, or something narrower? **Resolved 2026-08-15 — see §2.4
+   (fully rewritten).** No standing account: a one-off provisioning
+   action creates the org and its first Admin, then grants no further
+   ongoing access. Per-org configuration (the original motivating
+   question) is handled by each org's own Admin via existing Policy,
+   not by any cross-org role.
+9. When a Target's time window closes, is hit/miss determined live
+   (something is marked "done" as it happens) or judged afterward at
+   verification time? **Resolved 2026-08-16 — see §4.0.2.** Judged at
+   verification time, same shape as Todo's flawless/deficiencies
+   decision; no interim tracking state needed while a Target is open.
+10. Is the verification comment (Todo/Target approve step) required,
+    optional-only-on-deficiencies, or something else? **Resolved
+    2026-08-16 — see §4.0.1.1.** Always optional, checkbox-triggered,
+    independent of outcome.
+11. Loan duration representation — fixed start+end vs. start+length?
+    **Resolved 2026-08-16 — see §2.1.** Fixed start and end date/time,
+    set at loan creation.
+12. Who can extend or end an active staff loan? **Resolved 2026-08-16
+    — see §2.1.** Starting a loan: real owner approves. Extending an
+    active loan: the staff member being loaned approves (not either
+    manager). Ending a loan early: either manager may do so
+    unilaterally, no approval required from anyone. Expiry/advance
+    warning is handled by a scheduled background job, confirmed as a
+    direct consequence of the 2–3 day advance-notification
+    requirement.
 
 ---
 
-## 6. Explicit non-action taken
+## 6. Implementation status
 
-Per the person's instruction, **no code was written or modified for
-this feature.** No new migration, no new domain crate, no UI changes.
-This document exists solely so the requirement is recorded accurately
-ahead of a future implementation session, per the earlier standing
-instruction to document and register all such decisions in a markdown
-file.
+As of 2026-08-16, all product-level open questions above are resolved,
+and the `todo-domain` crate (`crates/domains/todo-domain/`) is **built
+and verified**: `TodoList`, `TargetList`, and `StaffLoan` are complete
+`AggregateRoot` implementations with 40/40 passing unit tests covering
+every state transition, clean `cargo clippy -- -D warnings`, and clean
+`cargo doc --no-deps`. See
+`IMPLEMENTATION_PLAN_User_Hierarchy.md` §10 ("Build progress") for the
+concrete summary and Phase C/D for the design-to-implementation
+mapping. Prior to 2026-08-16, per the person's standing instruction to
+never assume or guess on undecided items, no code for this feature had
+been written; every mechanic that code now depends on was confirmed
+directly with the person first (§2.1, §4.0.1.1, §4.0.2 above).
+
+**Not yet built:** the application-layer integration this domain crate
+does not own — verifier-resolution logic combining the org tree with
+active loans and escalation state (D.4), Team Leader pre-check
+visibility redaction at the read-model layer (D.5, §2.2), escalation
+routing (Phase E), the scheduled background job for loan
+expiry/advance notification (C.3), and any persistence or
+composition-root wiring. None of this blocks the domain crate itself,
+which has no dependency on it.

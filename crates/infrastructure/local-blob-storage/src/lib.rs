@@ -118,25 +118,23 @@ impl BlobStore for LocalBlobStore {
             .map_err(|e| BlobStoreError::Io(format!("syncing temp file: {e}")))?;
         drop(file);
 
-        tokio::fs::rename(&temp_path, &file_path)
-            .await
-            .map_err(|e| {
-                // Best-effort cleanup of the orphaned temp file — a failure
-                // here is secondary to the rename error itself, so it's
-                // logged, not propagated (propagating it would mask the
-                // actual rename failure the caller needs to see).
-                let cleanup_path = temp_path.clone();
-                tokio::spawn(async move {
-                    if let Err(cleanup_err) = tokio::fs::remove_file(&cleanup_path).await {
-                        tracing::warn!(
-                            path = %cleanup_path.display(),
-                            error = %cleanup_err,
-                            "failed to clean up orphaned blob temp file after a failed rename"
-                        );
-                    }
-                });
-                BlobStoreError::Io(format!("renaming temp file into place: {e}"))
-            })?;
+        tokio::fs::rename(&temp_path, &file_path).await.map_err(|e| {
+            // Best-effort cleanup of the orphaned temp file — a failure
+            // here is secondary to the rename error itself, so it's
+            // logged, not propagated (propagating it would mask the
+            // actual rename failure the caller needs to see).
+            let cleanup_path = temp_path.clone();
+            tokio::spawn(async move {
+                if let Err(cleanup_err) = tokio::fs::remove_file(&cleanup_path).await {
+                    tracing::warn!(
+                        path = %cleanup_path.display(),
+                        error = %cleanup_err,
+                        "failed to clean up orphaned blob temp file after a failed rename"
+                    );
+                }
+            });
+            BlobStoreError::Io(format!("renaming temp file into place: {e}"))
+        })?;
 
         Ok(())
     }
@@ -271,13 +269,7 @@ mod tests {
         store.put(&key("aaaa"), b"first").await.unwrap();
         store.put(&key("bbbb"), b"second").await.unwrap();
 
-        assert_eq!(
-            store.get(&key("aaaa")).await.unwrap(),
-            Some(b"first".to_vec())
-        );
-        assert_eq!(
-            store.get(&key("bbbb")).await.unwrap(),
-            Some(b"second".to_vec())
-        );
+        assert_eq!(store.get(&key("aaaa")).await.unwrap(), Some(b"first".to_vec()));
+        assert_eq!(store.get(&key("bbbb")).await.unwrap(), Some(b"second".to_vec()));
     }
 }

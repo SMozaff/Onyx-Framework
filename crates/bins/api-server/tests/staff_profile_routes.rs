@@ -369,3 +369,83 @@ async fn import_requires_admin() {
         .unwrap();
     assert_eq!(response.status(), 401);
 }
+
+#[tokio::test]
+async fn policy_and_legal_hold_creation_routes_work_end_to_end() {
+    let (addr, token) = start_server("policy-creation").await;
+    let http = reqwest::Client::new();
+    let base = format!("http://{addr}");
+
+    // Create a Policy via the new dedicated route.
+    let created: serde_json::Value = http
+        .post(format!("{base}/api/admin/policies"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({"name": "Org Governance"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let policy_id = created["policy_id"].as_str().unwrap().to_string();
+
+    // Draft a version through /api/command (the pre-existing dispatch
+    // path this session added).
+    let create_version = serde_json::json!({
+        "command_id": uuid::Uuid::new_v4(),
+        "operation_id": uuid::Uuid::new_v4(),
+        "command_type": "policy.CreatePolicyVersion",
+        "schema_version": "1.0",
+        "target": {"id": policy_id, "type": "policy", "organization_id": api_server::routes::ORGANIZATION_ID},
+        "expected_version": 0,
+        "expected_lifecycle_epoch": 0,
+        "expected_authority_epoch": 0,
+        "issued_at": chrono::Utc::now().to_rfc3339(),
+        "vector_clock": {"entries": {}},
+        "correlation_id": uuid::Uuid::new_v4(),
+        "causation_id": null,
+        "payload": {"rules": [{"rule_type": "FeatureToggle", "key": "messaging.enabled", "value": true}]}
+    });
+    let version_response = http
+        .post(format!("{base}/api/command"))
+        .bearer_auth(&token)
+        .json(&create_version)
+        .send()
+        .await
+        .unwrap();
+    let version_status = version_response.status();
+    let version_body: serde_json::Value = version_response.json().await.unwrap_or_default();
+    assert_eq!(version_status, 200, "unexpected response body: {version_body:?}");
+
+    // Apply a LegalHold via the new dedicated route.
+    let hold_created: serde_json::Value = http
+        .post(format!("{base}/api/admin/legal-holds"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "target_id": "00000000-0000-0000-0000-000000000001",
+            "target_type": "file_asset",
+            "reason": "pending litigation"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(hold_created["legal_hold_id"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn policy_creation_requires_admin() {
+    let (addr, _token) = start_server("policy-admin-required").await;
+    let http = reqwest::Client::new();
+    let base = format!("http://{addr}");
+
+    let response = http
+        .post(format!("{base}/api/admin/policies"))
+        .json(&serde_json::json!({"name": "No Auth"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401);
+}

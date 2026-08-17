@@ -53,6 +53,7 @@ pub async fn query_route(
             json!({}),
         ));
     }
+    let viewer = super::parse_object_id(&auth.user_id).ok();
     let result = crate::query_handler::execute_query(
         &state.projection_pool,
         &envelope.query_type,
@@ -60,6 +61,7 @@ pub async fn query_route(
         &envelope.filters,
         envelope.limit,
         envelope.cursor.as_deref(),
+        viewer,
     )
     .await
     .map_err(|e| {
