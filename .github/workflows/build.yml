@@ -88,12 +88,17 @@ jobs:
       # when APPLE_*/TAURI_SIGNING_* are unset, the same fallback
       # ci.yml's tag-triggered `release-desktop` job documents and relies
       # on when those secrets aren't configured.
+      # `projectPath` (desktop-shell) has no package.json of its own --
+      # the `tauri` CLI is a devDependency of its `ui/` frontend, so plain
+      # `npx tauri` can't resolve it from there ("could not determine
+      # executable to run"). `--prefix ui` points npx at ui/node_modules
+      # while still running from desktop-shell, where tauri.conf.json is.
       - name: Build and bundle the desktop app
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: crates/bins/desktop-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          tauriScript: npx tauri
+          tauriScript: npx --prefix ui tauri
       - name: Collect bundle output
         shell: bash
         run: |
