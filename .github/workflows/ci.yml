@@ -14,11 +14,25 @@ jobs:
     strategy:
       matrix:
         include:
-          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu}
-          - {os: macos-14, target: aarch64-apple-darwin}
-          - {os: windows-2022, target: x86_64-pc-windows-msvc}
+          # Built inside a real Debian container, not just on an Ubuntu
+          # runner -- the deployed target is Debian, and a plain
+          # ubuntu-24.04 build links against a newer glibc (2.39) than
+          # Debian 12 "bookworm" ships (2.36), which would refuse to run
+          # on it. Matches the base the runtime Dockerfiles already use
+          # (debian:bookworm-slim / rust:1.97-slim).
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, container: "debian:bookworm-slim"}
+          - {os: macos-14, target: aarch64-apple-darwin, container: ""}
+          - {os: windows-2022, target: x86_64-pc-windows-msvc, container: ""}
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     steps:
+      # Runs before checkout: a bare debian:bookworm-slim container has
+      # no `git`, which actions/checkout@v4 itself shells out to.
+      - name: Install build prerequisites (Debian container)
+        if: matrix.container != ''
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl xz-utils build-essential pkg-config git gnupg
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
@@ -62,26 +76,32 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage"}
-          - {os: macos-14, target: aarch64-apple-darwin, bundles: "dmg"}
-          - {os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis"}
+          # Same Debian-container rationale as release-binaries above --
+          # the .deb this produces must actually install and run on
+          # Debian, not just on the Ubuntu runner that built it.
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage", container: "debian:bookworm-slim"}
+          - {os: macos-14, target: aarch64-apple-darwin, bundles: "dmg", container: ""}
+          - {os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis", container: ""}
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     steps:
+      # Runs before checkout: a bare debian:bookworm-slim container has
+      # no `git`, which actions/checkout@v4 itself shells out to. Tauri
+      # v2 on Linux also links against WebKitGTK -- without these the
+      # build below fails with "gdk-3.0 not found" on a bare Debian image.
+      - name: Install desktop-shell native dependencies (Tauri/GTK)
+        if: matrix.container != ''
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl xz-utils build-essential pkg-config git gnupg \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev file
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
-      # Tauri v2 on Linux links against WebKitGTK; matches ci.yml's own
-      # `check` job install list exactly, since that job proved this is
-      # the working set on a bare ubuntu-24.04 runner image.
-      - name: Install desktop-shell native dependencies (Tauri/GTK)
-        if: matrix.os == 'ubuntu-24.04'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Resolve frozen dependency graph
         run: cargo generate-lockfile
       - name: Install frontend dependencies
@@ -123,6 +143,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The AppImage bundler normally mounts its linuxdeploy/appimagetool
+          # helpers via FUSE, which the Debian container above (no
+          # /dev/fuse) doesn't have. This forces extract-and-run instead,
+          # which needs no FUSE support at all.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           projectPath: crates/bins/desktop-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
