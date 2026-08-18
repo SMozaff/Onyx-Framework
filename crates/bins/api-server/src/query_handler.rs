@@ -261,9 +261,6 @@ pub fn normalize_public_state_for_test(value: &mut Value) {
     normalize_public_state(value);
 }
 
-
-
-
 fn normalize_public_state(value: &mut Value) {
     let Some(object) = value.as_object_mut() else {
         return;

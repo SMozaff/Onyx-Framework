@@ -52,7 +52,10 @@ async fn start_server(db_label: &str) -> (SocketAddr, String, String) {
         .expect("login body");
 
     let token = login["access_token"].as_str().unwrap().to_string();
-    let organization_id = login["user"]["organization_id"].as_str().unwrap().to_string();
+    let organization_id = login["user"]["organization_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     (addr, token, organization_id)
 }
