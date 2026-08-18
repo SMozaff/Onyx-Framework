@@ -34,6 +34,22 @@ jobs:
       - name: Resolve frozen dependency graph
         run: cargo generate-lockfile
       - run: cargo build --locked --release --target ${{ matrix.target }} -p api-server -p worker -p migration-tool -p sync-agent
+      - name: Collect binaries
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cd "target/${{ matrix.target }}/release"
+          for bin in api-server worker migration-tool sync-agent; do
+            cp "$bin"* ../../../artifacts/ 2>/dev/null || true
+          done
+          # cargo also emits *.d dep-info files alongside each binary on
+          # some targets -- drop those, only the executables are wanted.
+          rm -f ../../../artifacts/*.d
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.target }}
+          path: artifacts/*
+          if-no-files-found: error
 
   build-desktop:
     name: desktop (${{ matrix.target }})
@@ -41,9 +57,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu}
-          - {os: macos-14, target: aarch64-apple-darwin}
-          - {os: windows-2022, target: x86_64-pc-windows-msvc}
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage"}
+          - {os: macos-14, target: aarch64-apple-darwin, bundles: "dmg"}
+          - {os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis"}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -54,8 +70,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
       # Tauri v2 on Linux links against WebKitGTK -- without these the
-      # `cargo build` step below fails with "gdk-3.0 not found" on a bare
-      # ubuntu-24.04 runner image.
+      # build below fails with "gdk-3.0 not found" on a bare ubuntu-24.04
+      # runner image.
       - name: Install desktop-shell native dependencies (Tauri/GTK)
         if: matrix.os == 'ubuntu-24.04'
         run: |
@@ -64,14 +80,39 @@ jobs:
             libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Resolve frozen dependency graph
         run: cargo generate-lockfile
-      - name: Build desktop-shell frontend
+      - name: Install frontend dependencies
         working-directory: crates/bins/desktop-shell/ui
+        run: npm ci
+      # No signing secrets here (this workflow runs on every push/PR, not
+      # just tags) -- tauri-action ad-hoc-signs / leaves bundles unsigned
+      # when APPLE_*/TAURI_SIGNING_* are unset, the same fallback
+      # ci.yml's tag-triggered `release-desktop` job documents and relies
+      # on when those secrets aren't configured.
+      # `projectPath` (desktop-shell) has no package.json of its own --
+      # the `tauri` CLI is a devDependency of its `ui/` frontend, so plain
+      # `npx tauri` can't resolve it from there ("could not determine
+      # executable to run"). `--prefix ui` points npx at ui/node_modules
+      # while still running from desktop-shell, where tauri.conf.json is.
+      - name: Build and bundle the desktop app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: crates/bins/desktop-shell
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          tauriScript: npx --prefix ui tauri
+      - name: Collect bundle output
+        shell: bash
         run: |
-          npm ci
-          npm run build
-      # Tauri's build.rs embeds `frontendDist` into the binary, so the
-      # frontend must already be built (previous step) before this.
-      - run: cargo build --locked --release --target ${{ matrix.target }} -p desktop-shell
+          bundle_dir="target/${{ matrix.target }}/release/bundle"
+          mkdir -p artifacts
+          find "$bundle_dir" -maxdepth 2 -type f \
+            \( -iname "*.deb" -o -iname "*.AppImage" -o -iname "*.dmg" \
+               -o -iname "*.msi" -o -iname "*.exe" \) \
+            -exec cp {} artifacts/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: artifacts/*
+          if-no-files-found: error
 
   build-web:
     name: web
@@ -85,3 +126,8 @@ jobs:
         with: {node-version: "20", cache: "npm", cache-dependency-path: web-ui/package-lock.json}
       - run: npm ci
       - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-ui
+          path: web-ui/dist/*
+          if-no-files-found: error

@@ -126,7 +126,13 @@ jobs:
         with:
           projectPath: crates/bins/desktop-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          tauriScript: npx tauri
+          # `projectPath` has no package.json of its own -- the `tauri`
+          # CLI is a devDependency of its `ui/` frontend, so plain `npx
+          # tauri` can't resolve it from here ("could not determine
+          # executable to run"). `--prefix ui` points npx at
+          # ui/node_modules while still running from desktop-shell,
+          # where tauri.conf.json lives.
+          tauriScript: npx --prefix ui tauri
       - name: Locate bundle output
         shell: bash
         run: |
