@@ -1,21 +1,13 @@
-[![CI](https://github.com/So-Muzaff/Onyx-Framwork/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/So-Muzaff/Onyx-Framwork/actions/workflows/ci.yml)
-[![Tauri](https://img.shields.io/badge/tauri-2.x-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
-[![Flutter](https://img.shields.io/badge/flutter-3.x-02569B.svg?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Web](https://img.shields.io/badge/web-react-61DAFB.svg?logo=react&logoColor=white)](https://reactjs.org)
-[![Dependency Status](https://deps.rs/repo/github/So-Muzaff/Onyx-Framwork/status.svg)](https://deps.rs/repo/github/So-Muzaff/Onyx-Framwork)
+# ONYX — Mission Operations Platform
 
-[![Rust](https://img.shields.io/badge/rust-1.97.1+-orange.svg?logo=rust&logoColor=white)](https://rust-lang.org)
-[![Tauri](https://img.shields.io/badge/tauri-2.x-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-2021-purple?logo=rust)](https://www.rust-lang.org/)
+[![Tauri](https://img.shields.io/badge/Tauri-2.x-purple?logo=tauri)](https://tauri.app/)
+[![Web](https://img.shields.io/badge/web-react-61DAFB.svg?logo=react&logoColor=white)](https://reactjs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-5.x-3178C6.svg?logo=typescript&logoColor=white)](https://typescriptlang.org)
 [![React](https://img.shields.io/badge/react-19.x-61DAFB.svg?logo=react&logoColor=white)](https://reactjs.org)
 [![Flutter](https://img.shields.io/badge/flutter-3.x-02569B.svg?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Vite](https://img.shields.io/badge/vite-6.x-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev)
 [![Tailwind CSS](https://img.shields.io/badge/tailwindcss-4.x-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
-
-# ONYX — Mission Operations Platform
-
-[![Rust](https://img.shields.io/badge/Rust-2021-purple?logo=rust)](https://www.rust-lang.org/)
-[![Tauri](https://img.shields.io/badge/Tauri-2.x-purple?logo=tauri)](https://tauri.app/)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE.md)
 [![Platforms](https://img.shields.io/badge/Platforms-Android%20%7C%20Windows%20%7C%20Linux-brightgreen)]()
 [![Build Status](https://img.shields.io/badge/Build-passing-brightgreen)]()
