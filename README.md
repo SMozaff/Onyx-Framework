@@ -2,9 +2,9 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE.md)
-[![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20Windows%20%7C%20Linux-brightgreen)]()
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![Version](https://img.shields.io/badge/version-1.3.1-yellow)]()
+[![Platforms](https://img.shields.io/badge/Platforms-Android%20%7C%20Windows%20%7C%20Linux-brightgreen)]()
+[![Build Status](https://img.shields.io/badge/Build-passing-brightgreen)]()
+[![Version](https://img.shields.io/badge/Version-1.3.1-yellow)]()
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Rust Version](https://img.shields.io/badge/rust-1.75%2B-orange)](https://www.rust-lang.org/)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green?logo=android)](https://developer.android.com/)
