@@ -24,7 +24,8 @@ const BOOTSTRAP_TOKEN: &str = "team-leader-precheck-test-bootstrap";
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
     std::env::set_var("ONYX_BOOTSTRAP_TOKEN", BOOTSTRAP_TOKEN);
 
-    let db_path = std::env::temp_dir().join(format!("onyx-team-leader-precheck-test-{db_label}.db"));
+    let db_path =
+        std::env::temp_dir().join(format!("onyx-team-leader-precheck-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
     let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
@@ -101,14 +102,22 @@ async fn create_user_with_token(
         .json()
         .await
         .expect("login body");
-    let token = login["access_token"].as_str().expect("access_token").to_string();
+    let token = login["access_token"]
+        .as_str()
+        .expect("access_token")
+        .to_string();
 
     (id, token)
 }
 
 const ORG_ID: &str = "11111111-1111-1111-1111-111111111111";
 
-async fn create_and_submit_todo_list(http: &reqwest::Client, base: &str, admin_token: &str, owner_id: &str) -> String {
+async fn create_and_submit_todo_list(
+    http: &reqwest::Client,
+    base: &str,
+    admin_token: &str,
+    owner_id: &str,
+) -> String {
     let created: serde_json::Value = http
         .post(format!("{base}/api/todo/lists"))
         .bearer_auth(admin_token)
@@ -123,7 +132,10 @@ async fn create_and_submit_todo_list(http: &reqwest::Client, base: &str, admin_t
         .json()
         .await
         .expect("create todo list body");
-    let todo_list_id = created["todo_list_id"].as_str().expect("todo_list_id").to_string();
+    let todo_list_id = created["todo_list_id"]
+        .as_str()
+        .expect("todo_list_id")
+        .to_string();
 
     let submit_payload = serde_json::json!({
         "command_id": uuid_v4(),
@@ -145,7 +157,10 @@ async fn create_and_submit_todo_list(http: &reqwest::Client, base: &str, admin_t
         .send()
         .await
         .expect("submit request");
-    assert!(response.status().is_success(), "submit must succeed to set up this test");
+    assert!(
+        response.status().is_success(),
+        "submit must succeed to set up this test"
+    );
 
     todo_list_id
 }
@@ -176,8 +191,10 @@ async fn user_with_no_class_cannot_record_a_pre_check() {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    let (staff_id, _staff_token) = create_user_with_token(&http, &base, &admin_token, "staff-a", None).await;
-    let (_, rando_token) = create_user_with_token(&http, &base, &admin_token, "rando-a", None).await;
+    let (staff_id, _staff_token) =
+        create_user_with_token(&http, &base, &admin_token, "staff-a", None).await;
+    let (_, rando_token) =
+        create_user_with_token(&http, &base, &admin_token, "rando-a", None).await;
 
     let todo_list_id = create_and_submit_todo_list(&http, &base, &admin_token, &staff_id).await;
 
@@ -202,7 +219,8 @@ async fn team_leader_can_record_a_pre_check() {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    let (staff_id, _staff_token) = create_user_with_token(&http, &base, &admin_token, "staff-b", None).await;
+    let (staff_id, _staff_token) =
+        create_user_with_token(&http, &base, &admin_token, "staff-b", None).await;
     let (_, leader_token) =
         create_user_with_token(&http, &base, &admin_token, "leader-b", Some("team_leader")).await;
 
@@ -233,7 +251,8 @@ async fn admin_can_record_a_pre_check_without_a_team_leader_class() {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    let (staff_id, _staff_token) = create_user_with_token(&http, &base, &admin_token, "staff-c", None).await;
+    let (staff_id, _staff_token) =
+        create_user_with_token(&http, &base, &admin_token, "staff-c", None).await;
     let todo_list_id = create_and_submit_todo_list(&http, &base, &admin_token, &staff_id).await;
 
     let response = http
@@ -244,5 +263,8 @@ async fn admin_can_record_a_pre_check_without_a_team_leader_class() {
         .await
         .expect("precheck request");
 
-    assert!(response.status().is_success(), "Admin must be able to record a pre-check");
+    assert!(
+        response.status().is_success(),
+        "Admin must be able to record a pre-check"
+    );
 }

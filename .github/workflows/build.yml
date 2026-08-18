@@ -1,0 +1,87 @@
+name: Build
+
+# Verifies that the server backend, the native desktop app (PC platforms),
+# and the web client all actually compile on every push/PR -- unlike
+# ci.yml's "ONYX Signed Release" workflow, this has no signing/publishing
+# steps and no secrets, so it can run on ordinary commits, not just tags.
+on:
+  push:
+    branches: [main, "feature/**", "fix/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-server:
+    name: server (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu}
+          - {os: macos-14, target: aarch64-apple-darwin}
+          - {os: windows-2022, target: x86_64-pc-windows-msvc}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: "server-${{ matrix.target }}"}
+      - name: Resolve frozen dependency graph
+        run: cargo generate-lockfile
+      - run: cargo build --locked --release --target ${{ matrix.target }} -p api-server -p worker -p migration-tool -p sync-agent
+
+  build-desktop:
+    name: desktop (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu}
+          - {os: macos-14, target: aarch64-apple-darwin}
+          - {os: windows-2022, target: x86_64-pc-windows-msvc}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: "desktop-${{ matrix.target }}"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
+      # Tauri v2 on Linux links against WebKitGTK -- without these the
+      # `cargo build` step below fails with "gdk-3.0 not found" on a bare
+      # ubuntu-24.04 runner image.
+      - name: Install desktop-shell native dependencies (Tauri/GTK)
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Resolve frozen dependency graph
+        run: cargo generate-lockfile
+      - name: Build desktop-shell frontend
+        working-directory: crates/bins/desktop-shell/ui
+        run: |
+          npm ci
+          npm run build
+      # Tauri's build.rs embeds `frontendDist` into the binary, so the
+      # frontend must already be built (previous step) before this.
+      - run: cargo build --locked --release --target ${{ matrix.target }} -p desktop-shell
+
+  build-web:
+    name: web
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "20", cache: "npm", cache-dependency-path: web-ui/package-lock.json}
+      - run: npm ci
+      - run: npm run build
