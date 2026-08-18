@@ -1,10 +1,4 @@
-[![CI](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/blob/main/LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.97.1+-orange.svg?logo=rust&logoColor=white)](https://rust-lang.org)
-[![GitHub release](https://img.shields.io/github/v/release/YOUR_USERNAME/YOUR_REPO_NAME.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/releases)
-[![GitHub issues](https://img.shields.io/github/issues/YOUR_USERNAME/YOUR_REPO_NAME.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/issues)
-[![GitHub stars](https://img.shields.io/github/stars/YOUR_USERNAME/YOUR_REPO_NAME.svg?style=social&label=Star)](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME)
-[![Dependency Status](https://deps.rs/repo/github/YOUR_USERNAME/YOUR_REPO_NAME/status.svg)](https://deps.rs/repo/github/YOUR_USERNAME/YOUR_REPO_NAME)
+[![CI](https://github.com/So-Muzaff/Onyx-Framwork//badge.svg)]([https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions/workflows/ci.yml](https://github.com/So-Muzaff/Onyx-Framwork/))
 
 # ONYX — Mission Operations Platform
 
@@ -15,7 +9,7 @@
 [![Build Status](https://img.shields.io/badge/Build-passing-brightgreen)]()
 [![Version](https://img.shields.io/badge/Version-1.3.1-yellow)]()
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Rust Version](https://img.shields.io/badge/rust-1.75%2B-orange)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.97.1+-orange.svg?logo=rust&logoColor=white)](https://rust-lang.org)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green?logo=android)](https://developer.android.com/)
 
 
