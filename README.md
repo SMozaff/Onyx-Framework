@@ -1,4 +1,4 @@
-[![CI](https://github.com/So-Muzaff/Onyx-Framwork//badge.svg)]([https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions/workflows/ci.yml](https://github.com/So-Muzaff/Onyx-Framwork/))
+[![CI](https://github.com/So-Muzaff/Onyx-Framwork/blob/main/.github/workflows/ci.yml/badge.svg)]([[https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions/workflows/ci.yml](https://github.com/So-Muzaff/Onyx-Framwork/](https://github.com/So-Muzaff/Onyx-Framwork/blob/main/.github/workflows/ci.yml)))
 
 # ONYX — Mission Operations Platform
 
