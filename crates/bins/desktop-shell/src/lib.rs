@@ -311,16 +311,27 @@ struct SessionInfo {
     username: String,
     is_admin: bool,
     server_address: String,
+    user_id: String,
     organization_id: String,
+    device_id: String,
 }
 
-impl From<&StoredSession> for SessionInfo {
-    fn from(s: &StoredSession) -> Self {
-        SessionInfo {
-            username: s.username.clone(),
-            is_admin: s.is_admin,
-            server_address: s.server_address.clone(),
-            organization_id: s.organization_id.to_string(),
+impl SessionInfo {
+    /// Builds the browser-safe session shape from the persisted identity and
+    /// the native app's local replica. `user_id` is a non-secret identity
+    /// needed to construct the existing local command envelopes; tokens stay
+    /// inside `StoredSession`/`SecureStorage`. `device_id` deliberately
+    /// derives from the same stable-for-this-process `ReplicaId` used by the
+    /// local `AppState` and relay socket, so the frontend no longer invents a
+    /// second, unrelated actor device id.
+    fn from_session(session: &StoredSession, local_replica: ReplicaId) -> Self {
+        Self {
+            username: session.username.clone(),
+            is_admin: session.is_admin,
+            server_address: session.server_address.clone(),
+            user_id: session.user_id.to_string(),
+            organization_id: session.organization_id.to_string(),
+            device_id: uuid::Uuid::from_bytes(local_replica.0).to_string(),
         }
     }
 }
@@ -332,9 +343,12 @@ impl From<&StoredSession> for SessionInfo {
 #[tauri::command]
 async fn get_current_session(
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
+    local_replica: tauri::State<'_, ReplicaId>,
 ) -> Result<Option<SessionInfo>, ShellError> {
     let session = session::load(&storage).await?;
-    Ok(session.as_ref().map(SessionInfo::from))
+    Ok(session
+        .as_ref()
+        .map(|stored| SessionInfo::from_session(stored, *local_replica.inner())))
 }
 
 /// Authenticates against `server_address`, and on success:
@@ -355,6 +369,7 @@ async fn login(
     app: AppHandle,
     state: tauri::State<'_, SharedAppState>,
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
+    local_replica: tauri::State<'_, ReplicaId>,
     server_address: String,
     username: String,
     password: String,
@@ -368,7 +383,10 @@ async fn login(
 
     *state.write().await = new_state;
 
-    Ok(SessionInfo::from(&authenticated))
+    Ok(SessionInfo::from_session(
+        &authenticated,
+        *local_replica.inner(),
+    ))
 }
 
 /// Clears the persisted session and rebuilds `AppState` under a fresh
@@ -413,20 +431,21 @@ async fn build_app_state(
         .map_err(|e| ShellError::Storage(format!("failed to resolve app data directory: {e}")))?;
     let blob_store_root = data_dir.join("blobs");
 
-    let lan_discovery: Option<Arc<dyn sync_transport::Discovery>> = match lan_discovery::LanDiscovery::start(
-        local_replica,
-        organization_id,
-        3000,
-        hostname_or_none(),
-    )
-    .await
-    {
-        Ok(d) => Some(Arc::new(d)),
-        Err(e) => {
-            tracing::warn!(error = %e, "LAN discovery unavailable; relay only");
-            None
-        }
-    };
+    let lan_discovery: Option<Arc<dyn sync_transport::Discovery>> =
+        match lan_discovery::LanDiscovery::start(
+            local_replica,
+            organization_id,
+            3000,
+            hostname_or_none(),
+        )
+        .await
+        {
+            Ok(d) => Some(Arc::new(d)),
+            Err(e) => {
+                tracing::warn!(error = %e, "LAN discovery unavailable; relay only");
+                None
+            }
+        };
 
     // Derive the ws(s):// relay endpoint from the logged-in server's
     // http(s):// address, so there is exactly one address the person
@@ -634,7 +653,33 @@ fn hostname_or_none() -> Option<String> {
 
 #[cfg(test)]
 mod lib_tests {
-    use super::relay_ws_endpoint_from_http;
+    use super::{relay_ws_endpoint_from_http, SessionInfo, StoredSession};
+    use platform_kernel::{ObjectId, ReplicaId};
+
+    #[test]
+    fn session_info_exposes_non_secret_actor_and_device_ids() {
+        let stored = StoredSession {
+            server_address: "https://onyx.example.com".to_string(),
+            access_token: "access-token-must-not-cross-ipc".to_string(),
+            refresh_token: "refresh-token-must-not-cross-ipc".to_string(),
+            user_id: ObjectId([1; 16]),
+            organization_id: ObjectId([2; 16]),
+            username: "staff".to_string(),
+            is_admin: false,
+        };
+        let info = SessionInfo::from_session(&stored, ReplicaId([3; 16]));
+        let json = serde_json::to_value(info).expect("SessionInfo must serialize");
+
+        assert_eq!(json["username"], "staff");
+        assert_eq!(json["userId"], ObjectId([1; 16]).to_string());
+        assert_eq!(json["organizationId"], ObjectId([2; 16]).to_string());
+        assert_eq!(
+            json["deviceId"],
+            uuid::Uuid::from_bytes([3; 16]).to_string()
+        );
+        assert!(json.get("accessToken").is_none());
+        assert!(json.get("refreshToken").is_none());
+    }
 
     #[test]
     fn http_becomes_ws() {
