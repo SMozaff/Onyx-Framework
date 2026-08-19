@@ -146,7 +146,10 @@ jobs:
         with:
           projectPath: crates/bins/desktop-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          tauriScript: npx tauri
+          # Keep npm as the runner and resolve the CLI from the UI prefix.
+          # This avoids a POSIX-only .bin path and lets npm select its
+          # Windows .cmd wrapper when the matrix runner is Windows.
+          tauriScript: npm --prefix ${{ github.workspace }}/crates/bins/desktop-shell/ui exec tauri
       - name: Locate bundle output
         shell: bash
         run: |
@@ -245,7 +248,10 @@ jobs:
         with:
           projectPath: crates/bins/admin-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          tauriScript: npx tauri
+          # Keep npm as the runner and resolve the CLI from the UI prefix.
+          # This avoids a POSIX-only .bin path and lets npm select its
+          # Windows .cmd wrapper when the matrix runner is Windows.
+          tauriScript: npm --prefix ${{ github.workspace }}/crates/bins/admin-shell/ui exec tauri
       - name: Locate Admin bundle output
         shell: bash
         run: |
