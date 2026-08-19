@@ -1,23 +1,5 @@
 # ONYX — Mission Operations Platform
 
-[![Rust](https://img.shields.io/badge/Rust-2021-purple?logo=rust)](https://www.rust-lang.org/)
-[![Tauri](https://img.shields.io/badge/Tauri-2.x-purple?logo=tauri)](https://tauri.app/)
-[![Web](https://img.shields.io/badge/web-react-61DAFB.svg?logo=react&logoColor=white)](https://reactjs.org)
-[![TypeScript](https://img.shields.io/badge/typescript-5.x-3178C6.svg?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![React](https://img.shields.io/badge/react-19.x-61DAFB.svg?logo=react&logoColor=white)](https://reactjs.org)
-[![Flutter](https://img.shields.io/badge/flutter-3.x-02569B.svg?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Vite](https://img.shields.io/badge/vite-6.x-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev)
-[![Tailwind CSS](https://img.shields.io/badge/tailwindcss-4.x-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE.md)
-[![Platforms](https://img.shields.io/badge/Platforms-Android%20%7C%20Windows%20%7C%20Linux-brightgreen)]()
-[![Build Status](https://img.shields.io/badge/Build-passing-brightgreen)]()
-[![Version](https://img.shields.io/badge/Version-1.3.1-yellow)]()
-[![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Rust](https://img.shields.io/badge/rust-1.97.1+-orange.svg?logo=rust&logoColor=white)](https://rust-lang.org)
-[![Android](https://img.shields.io/badge/Android-8.0%2B-green?logo=android)](https://developer.android.com/)
-[![CI](https://github.com/So-Muzaff/Onyx-Framwork/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/So-Muzaff/Onyx-Framwork/actions/workflows/ci.yml)
-
-
 A local‑first, authority‑aware mission operations system.
 
 ## Development environment

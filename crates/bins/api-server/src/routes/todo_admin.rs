@@ -140,9 +140,7 @@ pub struct TimeWindowDto {
 impl From<TimeWindowDto> for TimeWindow {
     fn from(dto: TimeWindowDto) -> Self {
         TimeWindow {
-            start_at: platform_kernel::Timestamp::from_nanos(
-                dto.start_at_ms.saturating_mul(1_000_000),
-            ),
+            start_at: platform_kernel::Timestamp::from_nanos(dto.start_at_ms.saturating_mul(1_000_000)),
             end_at: platform_kernel::Timestamp::from_nanos(dto.end_at_ms.saturating_mul(1_000_000)),
         }
     }
@@ -254,12 +252,8 @@ pub async fn request_staff_loan(
             real_owner_id: platform_kernel::ObjectId(*real_owner_id.as_bytes()),
             borrowing_manager_id: platform_kernel::ObjectId(*borrowing_manager_id.as_bytes()),
             window: LoanWindow {
-                start_at: platform_kernel::Timestamp::from_nanos(
-                    req.start_at_ms.saturating_mul(1_000_000),
-                ),
-                end_at: platform_kernel::Timestamp::from_nanos(
-                    req.end_at_ms.saturating_mul(1_000_000),
-                ),
+                start_at: platform_kernel::Timestamp::from_nanos(req.start_at_ms.saturating_mul(1_000_000)),
+                end_at: platform_kernel::Timestamp::from_nanos(req.end_at_ms.saturating_mul(1_000_000)),
             },
         },
         &ctx,

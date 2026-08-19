@@ -1,269 +1,254 @@
-name: ONYX Signed Release
+name: CI
+
 on:
   push:
-    tags: ["v*"]
+    branches: [ main, 'feature/**', 'fix/**' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: true
+
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
-  artifact-metadata: write
-  actions: read
+  contents: read
+  packages: read
+
 jobs:
-  release-binaries:
-    strategy:
-      matrix:
-        include:
-          # Built inside a real Debian container, not just on an Ubuntu
-          # runner -- the deployed target is Debian, and a plain
-          # ubuntu-24.04 build links against a newer glibc (2.39) than
-          # Debian 12 "bookworm" ships (2.36), which would refuse to run
-          # on it. Matches the base the runtime Dockerfiles already use
-          # (debian:bookworm-slim / rust:1.97-slim).
-          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, container: "debian:bookworm-slim"}
-          - {os: macos-14, target: aarch64-apple-darwin, container: ""}
-          - {os: windows-2022, target: x86_64-pc-windows-msvc, container: ""}
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: onyx
+          POSTGRES_PASSWORD: onyx
+          POSTGRES_DB: onyx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U onyx -d onyx"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://onyx:onyx@127.0.0.1:5432/onyx
+      ONYX_DATABASE_KIND: postgres
+      ONYX_ENV: test
     steps:
-      # Runs before checkout: a bare debian:bookworm-slim container has
-      # no `git`, which actions/checkout@v4 itself shells out to.
-      - name: Install build prerequisites (Debian container)
-        if: matrix.container != ''
-        run: |
-          apt-get update -qq
-          apt-get install -y --no-install-recommends ca-certificates curl xz-utils build-essential pkg-config git gnupg
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@v2
-      - name: Resolve frozen dependency graph
-        run: cargo generate-lockfile
-      - run: cargo build --locked --release --target ${{ matrix.target }} -p api-server -p worker -p migration-tool -p sync-agent
-      - name: Package binaries
-        shell: bash
+        with:
+          toolchain: "1.97.1"
+          components: clippy, rustfmt
+      # desktop-shell (Tauri) links against GTK/WebKit. Without this the
+      # `cargo build --workspace` step below fails on a bare runner image
+      # with "gdk-3.0 not found" — reproduced directly during the audit.
+      - name: Install desktop-shell native dependencies (Tauri/GTK)
         run: |
-          mkdir -p artifacts
-          cp target/${{ matrix.target }}/release/api-server* artifacts/ || true
-          cp target/${{ matrix.target }}/release/worker* artifacts/ || true
-          cp target/${{ matrix.target }}/release/migration-tool* artifacts/ || true
-          cp target/${{ matrix.target }}/release/sync-agent* artifacts/ || true
-          tar -czf "onyx-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" -C artifacts .
-      - name: Import GPG signing key
-        uses: crazy-max/ghaction-import-gpg@v7
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-      - name: GPG-sign binary package
-        shell: bash
-        run: gpg --batch --yes --armor --detach-sign "onyx-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries-${{ matrix.target }}
-          path: |
-            onyx-*.tar.gz
-            onyx-*.tar.gz.asc
+          sudo apt-get update -qq
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Ensure rustfmt is installed
+        run: rustup component add rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --workspace --release
+      # Several integration test suites (e.g.
+      # persistence-postgres/tests/concurrency_test.rs) connect straight
+      # to the `postgres` service and operate on `aggregates` et al.,
+      # assuming the schema already exists — they don't run migrations
+      # themselves, the same way an app process wouldn't. The only place
+      # migrations were previously applied was the later "Migration
+      # idempotency and rollback" step, which runs after Test, so the
+      # service container started every prior run with no schema at all.
+      - name: Run database migrations
+        run: cargo run --package migration-tool -- up
+      # desktop-shell's secure_storage tests exercise the real `keyring`
+      # crate against a live Secret Service, deliberately not mocked (see
+      # keyring_adapter.rs's own test doc comments). A bare ubuntu-latest
+      # runner has no D-Bus session bus or Secret Service daemon at all,
+      # so those tests fail with "No default store has been set" — not a
+      # code defect, a missing environment dependency. gnome-keyring is
+      # the standard fix CI pipelines use for the `keyring` crate itself.
+      - name: Start a D-Bus session and unlocked gnome-keyring (for secure_storage tests)
+        run: |
+          sudo apt-get install -y gnome-keyring dbus-x11
+          rm -f "$HOME/.local/share/keyrings/login.keyring"
+          mkdir -p "$HOME/.local/share/keyrings"
+          echo -n "" | gnome-keyring-daemon --unlock --login >/dev/null 2>&1 || true
+          eval "$(dbus-launch --sh-syntax)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_PID=$DBUS_SESSION_BUS_PID" >> "$GITHUB_ENV"
+          eval "$(printf '\n' | gnome-keyring-daemon --unlock --components=secrets --daemonize)"
+          echo "GNOME_KEYRING_CONTROL=$GNOME_KEYRING_CONTROL" >> "$GITHUB_ENV"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+      - name: Test
+        run: cargo test --workspace --release -- --test-threads=1
+      - name: Docs
+        run: cargo doc --workspace --no-deps
+      - name: Migration idempotency and rollback
+        run: |
+          cargo run --package migration-tool -- up
+          cargo run --package migration-tool -- up
+          cargo run --package migration-tool -- status
+          cargo run --package migration-tool -- down --target 0
+          cargo run --package migration-tool -- up
+      - name: Contract verification
+        run: bash scripts/verify/verify_team7.sh && bash scripts/verify/verify_team8.sh
 
-  # Builds and GPG-signs the native desktop apps (Tauri) for all three
-  # target platforms. Added because `release-binaries` above only ever
-  # covered the server-side binaries (api-server/worker/migration-tool/
-  # sync-agent) -- desktop-shell was compiled by ci.yml's `check` job
-  # for Linux only, as a plain `cargo build` correctness check, never
-  # bundled into an installable app on any platform. `tauri.conf.json`'s
-  # own "targets": "all" already specifies every platform's native
-  # bundle format; this job is what actually invokes the bundler.
-  #
-  # Covers both desktop-shell (the main ONYX app) and admin-shell (the
-  # separate admin-only Tauri app -- see
-  # crates/bins/admin-shell/Cargo.toml's description), each on all three
-  # platforms. Spelled out as a flat list rather than a separate `app:`
-  # axis crossed with `include:` -- an include entry that shares no key
-  # with another matrix axis gets merged into *every* combination of
-  # that axis instead of cross-producing with it, which would silently
-  # collapse this to 2 jobs instead of 6.
-  release-desktop:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Same Debian-container rationale as release-binaries above --
-          # the .deb this produces must actually install and run on
-          # Debian, not just on the Ubuntu runner that built it.
-          - {app: desktop-shell, os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage", container: "debian:bookworm-slim"}
-          - {app: desktop-shell, os: macos-14, target: aarch64-apple-darwin, bundles: "dmg", container: ""}
-          - {app: desktop-shell, os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis", container: ""}
-          - {app: admin-shell, os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage", container: "debian:bookworm-slim"}
-          - {app: admin-shell, os: macos-14, target: aarch64-apple-darwin, bundles: "dmg", container: ""}
-          - {app: admin-shell, os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis", container: ""}
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
+  deploy-check:
+    runs-on: ubuntu-latest
     steps:
-      # Runs before checkout: a bare debian:bookworm-slim container has
-      # no `git`, which actions/checkout@v4 itself shells out to. Tauri
-      # v2 on Linux also links against WebKitGTK -- without these the
-      # build below fails with "gdk-3.0 not found" on a bare Debian image.
-      - name: Install Tauri native dependencies (GTK/WebKit)
-        if: matrix.container != ''
-        run: |
-          apt-get update -qq
-          apt-get install -y --no-install-recommends ca-certificates curl xz-utils build-essential pkg-config git gnupg \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev file
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: "${{ matrix.app }}-${{ matrix.target }}"}
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.3
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.3
+      - name: Helm lint
+        run: |
+          helm lint deploy/helm/onyx-api
+          helm lint deploy/helm/onyx-worker
+          helm lint deploy/helm/onyx-sync-agent
+      - name: Terraform validate
+        run: |
+          terraform -chdir=deploy/terraform init -backend=false
+          terraform -chdir=deploy/terraform validate
+      - name: Docker build
+        run: |
+          docker build -f deploy/docker/api-server.Dockerfile .
+          docker build -f deploy/docker/worker.Dockerfile .
+          docker build -f deploy/docker/sync-agent.Dockerfile .
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-ui
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: "20", cache: "npm", cache-dependency-path: "crates/bins/${{ matrix.app }}/ui/package-lock.json"}
-      - name: Resolve frozen dependency graph
-        run: cargo generate-lockfile
-      - name: Install frontend dependencies
-        working-directory: crates/bins/${{ matrix.app }}/ui
-        run: npm ci
-      - name: Import Apple signing certificate
-        if: matrix.os == 'macos-14'
-        uses: apple-actions/import-codesign-certs@v3
         with:
-          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
-          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        # Ad-hoc-signs and skips notarization if these secrets are unset,
-        # matching Tauri's own documented fallback (see this job's header
-        # comment) -- a signed build is not yet configured for this repo
-        # and should not silently block every other platform's release.
-        continue-on-error: true
-      - name: Build and bundle the desktop app
-        # Deliberately omits tagName/releaseName/releaseId: per
-        # tauri-action's own documented behavior, providing none of
-        # those three makes it build only, with no GitHub release
-        # interaction -- this repo already has its own `publish` job
-        # assembling every platform's artifacts into one release via
-        # softprops/action-gh-release, and letting tauri-action also
-        # try to create/upload to a release would conflict with it.
-        #
-        # This is a Cargo workspace, so `cargo`/`tauri build`'s output
-        # lands in the *workspace root's* `target/`, not a per-crate
-        # one -- confirmed by checking how every other job in this file
-        # (`release-binaries`) already references
-        # `target/${{ matrix.target }}/release/...` from the repo root.
-        # The "Locate bundle output" step below relies on that same
-        # workspace-root path.
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # The AppImage bundler normally mounts its linuxdeploy/appimagetool
-          # helpers via FUSE, which the Debian container above (no
-          # /dev/fuse) doesn't have. This forces extract-and-run instead,
-          # which needs no FUSE support at all.
-          APPIMAGE_EXTRACT_AND_RUN: "1"
-        with:
-          projectPath: crates/bins/${{ matrix.app }}
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          # `projectPath` has no package.json of its own -- the `tauri`
-          # CLI is a devDependency of its `ui/` frontend, so plain `npx
-          # tauri` can't resolve it from here ("could not determine
-          # executable to run"). `--prefix ui` points npx at
-          # ui/node_modules while still running from the app's crate
-          # dir, where tauri.conf.json lives.
-          tauriScript: npx --prefix ui tauri
-      - name: Locate bundle output
-        shell: bash
-        run: |
-          bundle_dir="target/${{ matrix.target }}/release/bundle"
-          echo "Bundle contents:"
-          find "$bundle_dir" -maxdepth 2 -type f
-          mkdir -p artifacts
-          find "$bundle_dir" -maxdepth 2 -type f \
-            \( -iname "*.deb" -o -iname "*.AppImage" -o -iname "*.dmg" \
-               -o -iname "*.msi" -o -iname "*.exe" \) \
-            -exec cp {} artifacts/ \;
-      - name: Import GPG signing key
-        uses: crazy-max/ghaction-import-gpg@v7
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-      - name: GPG-sign desktop bundles
-        shell: bash
-        run: |
-          cd artifacts
-          shopt -s nullglob
-          for f in *; do
-            gpg --batch --yes --armor --detach-sign "$f"
-          done
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.app }}-${{ matrix.target }}
-          path: artifacts/*
+          node-version: 22
+      - name: Install dependencies
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npm run type-check
+      - run: npm test
+      - run: npm run test:a11y
+      - run: npm run feature-audit
+      - run: npm run build
+      - run: npm run bundle-check
 
-  release-images:
-    runs-on: ubuntu-24.04
-    strategy:
-      matrix: {service: [api-server, worker, sync-agent, migration-tool]}
+  load-smoke:
+    runs-on: ubuntu-latest
+    needs: check
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: onyx
+          POSTGRES_PASSWORD: onyx
+          POSTGRES_DB: onyx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U onyx -d onyx"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: sigstore/cosign-installer@v4
-      - name: Build and push immutable image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/docker/${{ matrix.service }}.Dockerfile
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}:${{ github.ref_name }}
-          provenance: true
-          sbom: true
-      - name: Attest image provenance
-        uses: actions/attest@v4
-        with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
-      - name: Cosign image digest
+          toolchain: "1.97.1"
+      - uses: grafana/setup-k6-action@v1
+      - name: Start API
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
-      - name: Download Syft
-        id: syft
-        uses: anchore/sbom-action/download-syft@v0
-      - name: Generate SPDX 2.3 JSON SBOM
-        env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}@${{ steps.build.outputs.digest }}
+          ONYX_ENV: test
+          ONYX_TEST_MODE: "1"
+          ONYX_COMMAND_RATE_LIMIT: "1000000"
+          ONYX_BIND: 127.0.0.1:3000
+          DATABASE_URL: sqlite://load-test.db?mode=rwc
+          ONYX_GOVERNANCE_DATABASE_URL: postgres://onyx:onyx@127.0.0.1:5432/onyx
         run: |
-          "${{ steps.syft.outputs.cmd }}" "$IMAGE" -o "spdx-json@2.3=onyx-${{ matrix.service }}.spdx.json"
-          test "$(jq -r .spdxVersion onyx-${{ matrix.service }}.spdx.json)" = "SPDX-2.3"
-      - name: Attest image SBOM
-        uses: actions/attest@v4
-        with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          sbom-path: onyx-${{ matrix.service }}.spdx.json
-          push-to-registry: true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom-${{ matrix.service }}
-          path: onyx-${{ matrix.service }}.spdx.json
+          cargo run --package api-server >api.log 2>&1 &
+          echo $! > api.pid
+          for i in {1..60}; do curl -fsS http://127.0.0.1:3000/health && break; sleep 1; done
+      - run: k6 run tests/load/smoke-test.js --vus 100 --duration 60s
+      - if: always()
+        run: kill "$(cat api.pid)" || true
 
-  publish:
-    runs-on: ubuntu-24.04
-    needs: [release-binaries, release-desktop, release-images]
+  mobile-dart:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: {path: release-assets, merge-multiple: true}
-      - uses: actions/attest@v4
-        with: {subject-path: "release-assets/**"}
-      - uses: softprops/action-gh-release@v2
+      - uses: subosito/flutter-action@v2
         with:
-          generate_release_notes: true
-          files: release-assets/**
+          channel: stable
+          cache: true
+      - name: Complete Flutter-owned platform scaffold
+        run: bash tool/ensure_platform_scaffold.sh
+      - run: flutter pub get
+      - run: flutter pub upgrade
+      - name: Apply automatic fixes (dart fix)
+        run: dart fix --apply || true
+      - name: Analyze (allow warnings for now)
+        run: flutter analyze --no-fatal-warnings
+      - run: flutter test
+      - name: Mobile structural contract
+        working-directory: .
+        run: bash scripts/verify/verify_mobile.sh
+
+  mobile-android:
+    runs-on: ubuntu-latest
+    needs: mobile-dart
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: bash mobile/tool/ensure_platform_scaffold.sh
+      - run: bash mobile/tool/build_rust_android.sh
+      - working-directory: mobile
+        run: flutter pub get
+      - working-directory: mobile
+        run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onyx-mobile-android-debug
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+
+  mobile-ios:
+    runs-on: macos-latest
+    needs: mobile-dart
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: bash mobile/tool/ensure_platform_scaffold.sh
+      - run: bash mobile/tool/build_rust_ios.sh
+      - working-directory: mobile
+        run: flutter pub get
+      - working-directory: mobile/ios
+        run: pod install
+      - working-directory: mobile
+        run: flutter build ios --simulator

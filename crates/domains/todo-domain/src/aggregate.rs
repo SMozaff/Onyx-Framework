@@ -258,25 +258,25 @@ impl AggregateRoot for TodoList {
             },
 
             TodoListCommand::VerifyTodoList { outcome, comment } => match self.status {
-                ListStatus::Submitted
-                | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => Ok(vec![TodoListEvent::TodoListVerified {
-                    outcome,
-                    comment,
-                    verified_by: context.actor.user_id,
-                    verified_at: context.trusted_now,
-                }]),
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
+                    Ok(vec![TodoListEvent::TodoListVerified {
+                        outcome,
+                        comment,
+                        verified_by: context.actor.user_id,
+                        verified_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("VerifyTodoList")),
             },
 
             TodoListCommand::RejectTodoList { reason } => match self.status {
-                ListStatus::Submitted
-                | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => Ok(vec![TodoListEvent::TodoListRejected {
-                    reason,
-                    rejected_by: context.actor.user_id,
-                    rejected_at: context.trusted_now,
-                }]),
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
+                    Ok(vec![TodoListEvent::TodoListRejected {
+                        reason,
+                        rejected_by: context.actor.user_id,
+                        rejected_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("RejectTodoList")),
             },
 
@@ -284,14 +284,14 @@ impl AggregateRoot for TodoList {
                 reason,
                 escalated_to,
             } => match self.status {
-                ListStatus::Submitted
-                | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => Ok(vec![TodoListEvent::TodoListEscalated {
-                    reason,
-                    escalated_by: context.actor.user_id,
-                    escalated_to,
-                    escalated_at: context.trusted_now,
-                }]),
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
+                    Ok(vec![TodoListEvent::TodoListEscalated {
+                        reason,
+                        escalated_by: context.actor.user_id,
+                        escalated_to,
+                        escalated_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("EscalateTodoList")),
             },
         }
@@ -546,9 +546,7 @@ impl AggregateRoot for TargetList {
             },
 
             TargetListCommand::VerifyTargetList { outcome, comment } => match self.status {
-                ListStatus::Submitted
-                | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => {
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
                     // Design doc §4.0.2, resolved 2026-08-16: hit/miss
                     // is judged only once the window has closed.
                     if context.trusted_now < self.time_window.end_at {
@@ -565,13 +563,13 @@ impl AggregateRoot for TargetList {
             },
 
             TargetListCommand::RejectTargetList { reason } => match self.status {
-                ListStatus::Submitted
-                | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => Ok(vec![TargetListEvent::TargetListRejected {
-                    reason,
-                    rejected_by: context.actor.user_id,
-                    rejected_at: context.trusted_now,
-                }]),
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
+                    Ok(vec![TargetListEvent::TargetListRejected {
+                        reason,
+                        rejected_by: context.actor.user_id,
+                        rejected_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("RejectTargetList")),
             },
 
@@ -579,14 +577,14 @@ impl AggregateRoot for TargetList {
                 reason,
                 escalated_to,
             } => match self.status {
-                ListStatus::Submitted
-                | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => Ok(vec![TargetListEvent::TargetListEscalated {
-                    reason,
-                    escalated_by: context.actor.user_id,
-                    escalated_to,
-                    escalated_at: context.trusted_now,
-                }]),
+                ListStatus::Submitted | ListStatus::TeamLeaderPreChecked | ListStatus::Escalated => {
+                    Ok(vec![TargetListEvent::TargetListEscalated {
+                        reason,
+                        escalated_by: context.actor.user_id,
+                        escalated_to,
+                        escalated_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("EscalateTargetList")),
             },
         }
@@ -768,10 +766,8 @@ impl StaffLoan {
     /// D.4 calls this a natural chokepoint other phases should share
     /// rather than re-derive.
     pub fn grants_verification_authority_to(&self, manager_id: UserId) -> bool {
-        matches!(
-            self.status,
-            StaffLoanStatus::Active | StaffLoanStatus::Extended
-        ) && (manager_id == self.real_owner_id || manager_id == self.borrowing_manager_id)
+        matches!(self.status, StaffLoanStatus::Active | StaffLoanStatus::Extended)
+            && (manager_id == self.real_owner_id || manager_id == self.borrowing_manager_id)
     }
 
     /// Who this loan's approval decision has been escalated to, if any.
@@ -1286,6 +1282,7 @@ mod tests {
         assert_eq!(recorded.notes, "Target looks achievable");
         assert_eq!(recorded.checked_by, ctx.actor.user_id);
     }
+
 
     #[test]
     fn escalated_todo_list_can_be_verified() {

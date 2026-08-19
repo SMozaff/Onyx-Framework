@@ -1,0 +1,36 @@
+name: Format Fix
+
+# One-off, manually-triggered utility: runs `cargo fmt --all` on a GitHub
+# runner and commits the result straight back to the triggering branch.
+# Exists so formatting drift can be corrected entirely on GitHub
+# infrastructure, without requiring a local Rust toolchain.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt
+      - name: Format
+        run: cargo fmt --all
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "style: cargo fmt --all"
+            git push
+          else
+            echo "Nothing to format."
+          fi

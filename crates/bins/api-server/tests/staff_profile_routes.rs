@@ -415,10 +415,7 @@ async fn policy_and_legal_hold_creation_routes_work_end_to_end() {
         .unwrap();
     let version_status = version_response.status();
     let version_body: serde_json::Value = version_response.json().await.unwrap_or_default();
-    assert_eq!(
-        version_status, 200,
-        "unexpected response body: {version_body:?}"
-    );
+    assert_eq!(version_status, 200, "unexpected response body: {version_body:?}");
 
     // Apply a LegalHold via the new dedicated route.
     let hold_created: serde_json::Value = http
