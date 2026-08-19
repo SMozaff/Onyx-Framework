@@ -12,6 +12,18 @@ use mobile_core::{
 };
 use platform_kernel::OrganizationId;
 use std::ffi::{CStr, CString};
+use std::sync::{Mutex, MutexGuard};
+
+// `mobile_core_new` registers a single process-global handle for iOS/Android
+// background schedulers. Rust tests otherwise run in parallel and can replace
+// that registration while another test is checking its lifecycle contract.
+static MOBILE_APP_LIFECYCLE_LOCK: Mutex<()> = Mutex::new(());
+
+fn mobile_app_lifecycle_lock() -> MutexGuard<'static, ()> {
+    MOBILE_APP_LIFECYCLE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn test_db_path() -> String {
     // A literal "/tmp/..." only resolves for a native Windows binary if
@@ -37,6 +49,7 @@ fn config_json(organization_id: OrganizationId) -> String {
 
 #[test]
 fn mobile_core_new_and_free_round_trip() {
+    let _lock = mobile_app_lifecycle_lock();
     let organization_id = OrganizationId::new_random();
     let db_path = CString::new(test_db_path()).unwrap();
     let config = CString::new(config_json(organization_id)).unwrap();
@@ -52,6 +65,7 @@ fn mobile_core_new_and_free_round_trip() {
 
 #[test]
 fn mobile_core_new_returns_null_for_invalid_config_json() {
+    let _lock = mobile_app_lifecycle_lock();
     let db_path = CString::new(test_db_path()).unwrap();
     let bad_config = CString::new("not valid json").unwrap();
 
@@ -64,6 +78,7 @@ fn mobile_core_new_returns_null_for_invalid_config_json() {
 
 #[test]
 fn mobile_core_new_returns_null_for_null_pointers() {
+    let _lock = mobile_app_lifecycle_lock();
     let handle = unsafe { mobile_core_new(std::ptr::null(), std::ptr::null()) };
     assert!(
         handle.is_null(),
@@ -73,6 +88,7 @@ fn mobile_core_new_returns_null_for_null_pointers() {
 
 #[test]
 fn execute_command_creates_a_mission_through_the_real_command_registry() {
+    let _lock = mobile_app_lifecycle_lock();
     let organization_id = OrganizationId::new_random();
     let db_path = CString::new(test_db_path()).unwrap();
     let config = CString::new(config_json(organization_id)).unwrap();
@@ -148,6 +164,7 @@ fn execute_command_creates_a_mission_through_the_real_command_registry() {
 
 #[test]
 fn execute_command_returns_null_for_unknown_command_type() {
+    let _lock = mobile_app_lifecycle_lock();
     let organization_id = OrganizationId::new_random();
     let db_path = CString::new(test_db_path()).unwrap();
     let config = CString::new(config_json(organization_id)).unwrap();
@@ -167,6 +184,7 @@ fn execute_command_returns_null_for_unknown_command_type() {
 
 #[test]
 fn execute_query_for_nonexistent_mission_returns_null_json_value() {
+    let _lock = mobile_app_lifecycle_lock();
     let organization_id = OrganizationId::new_random();
     let db_path = CString::new(test_db_path()).unwrap();
     let config = CString::new(config_json(organization_id)).unwrap();
@@ -195,6 +213,7 @@ fn execute_query_for_nonexistent_mission_returns_null_json_value() {
 
 #[test]
 fn trigger_sync_with_no_peers_available_returns_success_not_error() {
+    let _lock = mobile_app_lifecycle_lock();
     let organization_id = OrganizationId::new_random();
     let db_path = CString::new(test_db_path()).unwrap();
     let config = CString::new(config_json(organization_id)).unwrap();
@@ -216,6 +235,7 @@ fn trigger_sync_with_no_peers_available_returns_success_not_error() {
 
 #[test]
 fn list_aggregates_and_sync_status_are_available_to_flutter() {
+    let _lock = mobile_app_lifecycle_lock();
     use mobile_core::{mobile_core_get_sync_status, mobile_core_list_aggregates};
 
     let organization_id = OrganizationId::new_random();
@@ -244,6 +264,7 @@ fn list_aggregates_and_sync_status_are_available_to_flutter() {
 
 #[test]
 fn registered_background_sync_uses_the_active_mobile_instance() {
+    let _lock = mobile_app_lifecycle_lock();
     use mobile_core::mobile_core_background_sync_registered;
 
     let organization_id = OrganizationId::new_random();

@@ -216,9 +216,13 @@ pub unsafe extern "C" fn mobile_core_new(
                 sync_transport::placeholder_types::StaticAuthorityProvider(String::new()),
             ),
             cloud_relay_socket_factory: Arc::new(NotYetImplementedSocketFactory),
+            // Keep mobile file assets beside the caller-supplied SQLite database,
+            // rather than relying on a current working directory that differs
+            // between iOS, Android, and test hosts.
+            blob_store_root: std::path::PathBuf::from(format!("{db_path}.blobs")),
         };
 
-        Some(Arc::new(AppState::new(pool, app_config)))
+        Some(Arc::new(AppState::new(pool, app_config).await))
     });
 
     let Some(state) = state else {
