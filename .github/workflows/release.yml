@@ -2,6 +2,17 @@ name: ONYX Signed Release
 on:
   push:
     tags: ["v*"]
+  # Manual runs are for grabbing debug build artifacts on demand --
+  # not a release. release-images (GHCR push + SBOM/provenance
+  # attestation + cosign signing) and publish (creates a real GitHub
+  # Release) are both gated to the tag trigger only, further down.
+  # workflow_dispatch has no ref_name of its own; github.ref_name on a
+  # manual run resolves to the branch name ("master"), which would
+  # otherwise silently produce artifacts/images misleadingly named
+  # after the branch instead of a version -- moot here since those two
+  # jobs never run on a manual trigger, but noted for anyone tempted
+  # to widen this later.
+  workflow_dispatch: {}
 permissions:
   contents: write
   packages: write
@@ -23,8 +34,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
       - uses: Swatinem/rust-cache@v2
-      - name: Resolve frozen dependency graph
-        run: cargo generate-lockfile
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --no-deps
       - run: cargo build --locked --release --target ${{ matrix.target }} -p api-server -p worker -p migration-tool -p sync-agent
       - name: Package binaries
         shell: bash
@@ -35,11 +46,19 @@ jobs:
           cp target/${{ matrix.target }}/release/migration-tool* artifacts/ || true
           cp target/${{ matrix.target }}/release/sync-agent* artifacts/ || true
           tar -czf "onyx-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" -C artifacts .
+      # Signing (and its matching .asc upload) is gated to real tag
+      # releases only. workflow_dispatch runs are for grabbing debug
+      # artifacts on demand; github.ref_name on a manual run is the
+      # branch name ("master"), not a version, and there's no reason
+      # to spend a real GPG signature on a debug build nobody is
+      # meant to redistribute as a release asset.
       - name: Import GPG signing key
+        if: github.event_name == 'push'
         uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
       - name: GPG-sign binary package
+        if: github.event_name == 'push'
         shell: bash
         run: gpg --batch --yes --armor --detach-sign "onyx-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
       - uses: actions/upload-artifact@v4
@@ -48,6 +67,7 @@ jobs:
           path: |
             onyx-*.tar.gz
             onyx-*.tar.gz.asc
+          if-no-files-found: ignore
 
   # Builds and GPG-signs the native desktop app (Tauri) for all three
   # target platforms. Added because `release-binaries` above only ever
@@ -82,8 +102,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-      - name: Resolve frozen dependency graph
-        run: cargo generate-lockfile
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --no-deps
       - name: Install frontend dependencies
         working-directory: crates/bins/desktop-shell/ui
         run: npm ci
@@ -138,11 +158,21 @@ jobs:
             \( -iname "*.deb" -o -iname "*.AppImage" -o -iname "*.dmg" \
                -o -iname "*.msi" -o -iname "*.exe" \) \
             -exec cp {} artifacts/ \;
+          shopt -s nullglob
+          bundles=(artifacts/*)
+          if (( ${#bundles[@]} == 0 )); then
+            echo "No supported desktop bundle was produced for ${{ matrix.target }}" >&2
+            exit 1
+          fi
+          printf 'Collected %s desktop bundle(s) for %s\n' "${#bundles[@]}" "${{ matrix.target }}"
+      # Same manual-run signing exemption as release-binaries above.
       - name: Import GPG signing key
+        if: github.event_name == 'push'
         uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
       - name: GPG-sign desktop bundles
+        if: github.event_name == 'push'
         shell: bash
         run: |
           cd artifacts
@@ -184,8 +214,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-      - name: Resolve frozen dependency graph
-        run: cargo generate-lockfile
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --no-deps
       - name: Install frontend dependencies
         working-directory: crates/bins/admin-shell/ui
         run: npm ci
@@ -227,11 +257,21 @@ jobs:
             \( -iname "*.deb" -o -iname "*.AppImage" -o -iname "*.dmg" \
                -o -iname "*.msi" -o -iname "*.exe" \) \
             -exec cp {} artifacts/ \;
+          shopt -s nullglob
+          bundles=(artifacts/*)
+          if (( ${#bundles[@]} == 0 )); then
+            echo "No supported Admin desktop bundle was produced for ${{ matrix.target }}" >&2
+            exit 1
+          fi
+          printf 'Collected %s Admin desktop bundle(s) for %s\n' "${#bundles[@]}" "${{ matrix.target }}"
+      # Same manual-run signing exemption as the other two jobs above.
       - name: Import GPG signing key
+        if: github.event_name == 'push'
         uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
       - name: GPG-sign Admin desktop bundles
+        if: github.event_name == 'push'
         shell: bash
         run: |
           cd artifacts
@@ -244,7 +284,12 @@ jobs:
           name: admin-desktop-${{ matrix.target }}
           path: artifacts/*
 
+  # Real container publish: pushes signed, attested images to GHCR.
+  # Gated to tag pushes only -- a manual run has no version tag to
+  # name an image after, and this project's manual-trigger use case is
+  # "give me debug build artifacts," not "publish a release."
   release-images:
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     strategy:
       matrix: {service: [api-server, worker, sync-agent, migration-tool]}
@@ -299,7 +344,13 @@ jobs:
           name: sbom-${{ matrix.service }}
           path: onyx-${{ matrix.service }}.spdx.json
 
+  # Real GitHub Release creation. Gated the same way as release-images
+  # and for the same reason: manual runs are for grabbing build
+  # artifacts, not for publishing a release. A skipped (not failed)
+  # dependency still satisfies `needs` by default, so this needs its
+  # own explicit `if` rather than relying on release-images' gate alone.
   publish:
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     needs: [release-binaries, release-desktop, release-admin-desktop, release-images]
     steps:
