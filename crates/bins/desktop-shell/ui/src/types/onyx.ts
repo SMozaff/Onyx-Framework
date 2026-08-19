@@ -120,7 +120,7 @@ export interface QueryEnvelope {
  * the error type every Tauri command in this app returns on failure,
  * which Tauri's `invoke()` rejects the returned Promise with. */
 export interface ShellError {
-  kind: "command" | "query" | "storage" | "invalidArgument";
+  kind: "command" | "query" | "storage" | "invalidArgument" | "auth";
   message: string;
 }
 

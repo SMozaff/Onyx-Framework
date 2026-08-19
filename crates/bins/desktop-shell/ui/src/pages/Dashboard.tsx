@@ -15,7 +15,7 @@ import { useSession } from "@/hooks/useSession";
  * for anything that needs a specific aggregate.
  */
 export default function Dashboard() {
-  const { organizationId } = useSession();
+  const { organizationIdText, serverAddress } = useSession();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -85,10 +85,7 @@ export default function Dashboard() {
       </div>
 
       <p className="mt-8 text-xs text-onyx-text-dim">
-        Session organization: {organizationId.slice(0, 4).join(",")}… (placeholder — no
-        authentication flow exists yet; see the codebase's own
-        <code className="mx-1 rounded bg-onyx-surface px-1 py-0.5">TODO(auth/org resolution)</code>
-        notes).
+        Connected to {serverAddress} for organization {organizationIdText}.
       </p>
     </div>
   );

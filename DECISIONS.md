@@ -1588,3 +1588,206 @@ non-obvious `tauri-action` input and Tauri's own CI documentation, and
 catching the two real mistakes above during that review — not by an
 actual CI run. The workflow only triggers on `push: tags: ["v*"]`
 (unchanged), so it has not run automatically either.
+
+## admin-shell: runtime-configurable server address (2026-08-19)
+
+**Problem, found during live deployment, not in review**: `admin-shell`
+(`crates/bins/admin-shell/ui/src/api/client.ts`) had the backend server
+address hardcoded at build time — `VITE_API_BASE` env var, defaulting
+to `http://127.0.0.1:3000` — with no way to change it after the app was
+built. This meant every install of the Admin app, on every PC, could
+only ever talk to a server running on that same machine. On a second
+PC, trying to log in silently tried to reach `127.0.0.1:3000` on that
+PC itself (nothing there), got a network error, and — because `Login.tsx`
+previously caught every failure identically — displayed "Invalid
+username or password," which is misleading: the request never reached
+the real server at all. This surfaced directly during setup on real
+hardware, not from a review pass.
+
+**Fix**: the server address is now a runtime, user-editable setting,
+persisted in `localStorage` (not `sessionStorage` — unlike the auth
+session in `utils/auth.ts`, this must survive app restarts, which is
+the entire point of making it configurable). New file
+`utils/serverAddress.ts` holds the get/set/validate logic;
+`api/client.ts`'s request interceptor now resolves the base URL fresh
+on every request instead of once at module load, so a saved change
+takes effect immediately with no app restart required.
+
+**Two places to edit it, not one, and this was deliberate**: the full
+version lives on the Settings page (`pages/Settings.tsx`,
+`ServerConnectionSettings`), but Settings sits behind
+`ProtectedLayout`'s login gate — someone whose app is still pointed at
+the wrong address can't log in yet, so they'd never be able to reach
+it to fix it. A second, collapsed "Server address / connection
+settings" section was added directly to the Login page itself
+(`pages/Login.tsx`, `ServerAddressField`), reachable pre-login, so the
+address can be corrected without ever needing a successful login
+first.
+
+**"Test & Save" is one action, not two**: both copies of the field
+call `GET /health` against the entered address before saving anything.
+An unreachable address is never silently persisted — the person sees
+"could not reach a server at this address" immediately, rather than
+saving a bad value and only discovering it's wrong at the next failed
+login. `Login.tsx`'s submit handler also now distinguishes a network
+failure (`isNetworkError`, no `error.response` present — axios only
+sets that when a response was actually received) from a real
+401/credentials rejection, and only shows the server-unreachable
+messaging (auto-expanding the address field) for the former.
+
+**Verified**: `npx tsc -b` clean, `npx vite build` clean (95 modules,
+no errors). No existing test files cover `admin-shell/ui` — nothing to
+regress, none written for this change either since the app has no test
+harness in place yet to add to consistently.
+
+**Not done, explicit gap**: `staff_manual`/desktop-shell and mobile
+clients were not touched — this fix was scoped to `admin-shell` only,
+since that's the app that was actually failing on real hardware in
+this session. A quick grep afterward found `desktop-shell/src/lib.rs`
+has a similarly-shaped hardcoded fallback
+(`ws://127.0.0.1:3000`, line ~353) — but it's Rust, not the TypeScript
+`localStorage`/interceptor pattern used here, so it needs its own
+investigation and fix, not an assumption that this change covers it.
+`web-ui` showed no equivalent hardcoded address at all in the same
+grep — unconfirmed why (possibly same-origin deployment), not
+verified further. Neither is fixed by this change.
+
+## desktop-shell: real per-user login, replacing random-org-per-launch (2026-08-19)
+
+**The gap, found by reading the code, not assumed fixed**: `desktop-shell`
+(the Staff native app) previously had NO login screen and NO real
+session at all. Every launch called `OrganizationId::new_random()` —
+flagged by its own `TODO(auth/org resolution)` comment as "no
+login/auth flow exists yet." Worse, the frontend's `useSession.ts`
+independently generated its own placeholder ids, which could disagree
+with the Rust side's random id — meaning a command could target a
+different `organization_id` than the one `AppState`'s aggregates were
+actually scoped under. This was confirmed directly with the person
+before any code was written, since it's a materially bigger gap than a
+hardcoded address (see the conversation this session): the person
+explicitly chose full per-user login (matching `admin-shell`) over a
+lighter-weight device-pairing alternative that was offered.
+
+**Design**: `desktop-shell` embeds a full local `AppState` (its own
+SQLite, command/query registries, sync agent) rather than talking to
+`api-server` per-request like `admin-shell` does — so login here does
+two things, not one: (1) authenticate against `api-server`'s real
+`POST /api/auth/login` (same endpoint `admin-shell` uses) to learn the
+real `organization_id`; (2) persist that identity via the existing
+`SecureStorage` port (`secure_storage/mod.rs` — its own doc comment
+already named `"auth.refresh_token"` as an intended key, so this was
+scaffolded for, never connected) so the *next* launch resumes the same
+org instead of a fresh random one.
+
+New file `session.rs`: `authenticate()` (calls `/api/auth/login`,
+maps the response into a `StoredSession` that travels with its
+`server_address` — reusing tokens against a different server would be
+a real correctness bug, not just unlikely), `save`/`load`/`clear`
+(one JSON blob under one storage key, atomic — no risk of a token
+saved with a missing/mismatched org id after a partial write).
+
+`lib.rs` changes: managed state is now `Arc<RwLock<Arc<AppState>>>`
+(was a bare `Arc<AppState>`) so `login`/`logout` can build a *new*
+`AppState` under the real org id and atomically swap it in without
+restarting the Tauri process — verified against Tauri 2's own state
+management docs as the supported pattern before choosing it over a
+process-restart approach. Three new commands: `login`, `logout`,
+`get_current_session` (lets the frontend decide on launch whether to
+show the login screen or go straight in). `SessionInfo` (what the
+frontend actually receives) deliberately omits the raw tokens — all
+authenticated calls happen server-side in Rust, so there's no reason
+for a webview-reachable value to hold them. The sync relay address is
+now *derived* from the login server address
+(`relay_ws_endpoint_from_http`), not a separately-configured
+`ONYX_RELAY_ENDPOINT` — one address to ever enter, not two that could
+silently drift apart. The device's local SQLite/`ReplicaId` are
+deliberately NOT reset on login/logout — they belong to the physical
+device/install, not to who happens to be logged in.
+
+**New in `platform-kernel`**: `ObjectId`/`OrganizationId`/etc. had
+`new_random()` and `Display` but no way to parse a UUID string back
+into the type — genuinely missing, not overlooked elsewhere (grepped
+first). Added `from_uuid_str` plus a real `FromStr` impl (so
+`str.parse::<ObjectId>()` works idiomatically too), implemented once
+and shared by both, so there is exactly one parsing rule. This is what
+turns `/api/auth/login`'s JSON `organization_id` string back into a
+real id client-side.
+
+**Verified for real, not assumed**:
+- `cargo check -p platform-kernel` clean; `cargo test -p platform-kernel`
+  31/31 passing (28 pre-existing + 3 new: round-trip, `FromStr`
+  parity, garbage-input rejection).
+- `cargo check -p desktop-shell` clean — confirmed via a real, timed
+  compile in this sandbox (~6 minutes, genuine Tauri/GTK dependency
+  tree, not skipped).
+- New unit tests written for `session.rs` (save/load/clear round-trip
+  via an in-memory `SecureStorage` fake — the real `KeyringSecureStorage`
+  needs an actual OS credential store and can't run in this sandbox;
+  corrupt-stored-data handling) and `lib.rs`
+  (`relay_ws_endpoint_from_http` http→ws, https→wss, already-ws
+  passthrough).
+
+**Explicit, NOT verified — this is the important gap**: those new unit
+tests (`cargo test -p desktop-shell --lib`) were written but never
+confirmed passing. This sandbox's disk repeatedly ran out of space
+mid-build while linking the full Tauri/GTK dependency tree (a `target/`
+directory this size — several GB — is inherently disk-heavy, and this
+environment's available space did not reliably survive a full test
+build even after being cleared multiple times). `cargo check` (type
+and borrow-checker correctness) passed cleanly and repeatedly; `cargo
+test` (does the new logic actually behave correctly at runtime) did
+not get a confirmed clean run. Anyone continuing this work should run
+`cargo test -p desktop-shell --lib` on a machine with normal disk
+headroom before trusting these tests pass — do not assume they do
+because the code compiles.
+
+**Not done, explicit gap**: no frontend login screen exists yet for
+`desktop-shell` (React side) — the Rust commands (`login`/`logout`/
+`get_current_session`) are ready to be called, but nothing in
+`crates/bins/desktop-shell/ui/src` calls them yet, and `App.tsx`'s
+route table still goes straight to `Dashboard` with no auth gate.
+`admin-shell`'s server-settings screen (`ServerConnectionSettings`,
+`ServerAddressField`) has not yet been reconciled with this new
+`desktop-shell` session model — they are two separate, currently
+unrelated pieces of work. Neither Windows nor Linux automation scripts
+for full server setup exist yet. CI (`release.yml`) still only builds
+`desktop-shell`, not `admin-shell`, and has not been updated for any
+of this session's changes.
+
+---
+
+## Desktop authentication UI, server setup automation, and Admin release builds — 2026-08-19
+
+### Inherited native-session tests — now verified
+
+The handoff correctly marked the new `desktop-shell` session tests as unverified: the earlier environment had run out of disk space while linking the full Tauri/GTK test target. This was not treated as a compile-only guarantee. The continuation environment was provisioned with the repository-pinned Rust 1.97.1 toolchain, a C/C++ linker, GTK/WebKit dependencies, and a live Linux Secret Service session; then it ran `cargo test -p platform-kernel` followed by `cargo test -p desktop-shell --lib`.
+
+`platform-kernel` completed successfully, allowing the chained desktop test to begin. The final desktop run completed with **11 passing tests and 1 explicitly ignored test**. The new session persistence tests (`save_then_load_round_trips_every_field`, clear/no-session behavior, and corrupt-data error handling) all passed, as did the relay-endpoint conversion tests. The ignored test remains the existing live keyring write round-trip: it requires an interactive keyring-unlock prompt that a headless test environment cannot satisfy. The two non-mutating keyring tests were run against a **real system-installed `gnome-keyring-daemon` Secret Service provider** in a newly created `dbus-run-session`; no mock or stub was used. The session did **not** have a pre-unlocked interactive login keyring, so this evidence establishes the adapter's `None`/`NotFound` handling for an unknown key against a reachable real OS service—not successful writable-keyring access. The latter remains explicitly unverified in headless CI, and the write round-trip remains ignored for that reason. The prior initial failure was therefore diagnosed as a missing credential-store provider in the bare environment, not papered over by weakening the tests.
+
+### `desktop-shell` React login, authenticated session, and connection settings — complete
+
+**The frontend no longer creates placeholder identity.** `App.tsx` now calls the real native `get_current_session` command before rendering any operational page. A missing session is normal and renders the new Login screen; an IPC/storage failure is rendered as an explicit retryable startup error, not silently treated as an unauthenticated state. Once authenticated, every page is rendered below a `SessionProvider`; `useSession()` has no random-ID fallback and throws if it is used outside that authenticated tree. This removes the old frontend/backend organization mismatch rather than merely hiding it.
+
+**The native session IPC shape was extended deliberately, without exposing tokens.** Existing desktop command envelopes require `organizationId`, `userId`, and `deviceId`; the prior `SessionInfo` exposed only the organization. The native result now includes the real non-secret user id and the managed local replica identity as UUID text, in addition to username, admin flag, server address, and organization. Access and refresh tokens remain exclusively in `StoredSession` and `SecureStorage`. The provider converts UUID text back into the transparent 16-byte array shape used by the existing Tauri command IPC, so the existing Dashboard, Missions, Tasks, Approvals, Messaging, Files, and Notifications command paths consume the real identity without a separate frontend-only convention. A new Rust unit test proves the serialized result contains the real actor/device fields and omits both token fields.
+
+**Server configuration follows the session model rather than copying Admin’s localStorage model.** The Login page uses the same collapsed Server address / connection settings visual pattern as `admin-shell`, with username, password, and server address available before a successful login. A health check can validate the address, but an address is persisted only by a successful native login, because it belongs with the server-specific token bundle. The authenticated Settings page displays and tests the current address; choosing a changed address first proves it reachable, then clears the current session and returns to Login for a new authentication. Reusing tokens from one server against another would be a correctness and security error, so a silent hot-swap was deliberately rejected. Logout is available in the persistent application chrome and continues to leave the local SQLite data and managed replica state untouched, as decided in the preceding native-login entry.
+
+**Verification:** `cargo fmt --all` followed by the desktop library tests above; `npx tsc -b`, `npx vite build`, and `npx oxlint` in `desktop-shell/ui`, all clean. There is no desktop frontend test harness in this workspace, so no fictitious browser test suite was added. A live login screen run also requires an actual configured API server and native WebView session, which was not available inside the build sandbox.
+
+### Windows and Debian full server setup scripts — complete
+
+Two new scripts install a **provided, trusted prebuilt** `api-server` binary rather than downloading or compiling an executable. Both protect existing SQLite data by default, create the first Admin only on a fresh database through the real one-time bootstrap endpoint, remove the bootstrap token before their final state, poll `/health`, and issue a real `/api/auth/login` request with the created or supplied Admin credentials. This is intentionally stronger than merely starting a process and assuming it works.
+
+On **Windows**, `scripts/setup-onyx-windows.ps1` requires elevation, uses only a **Process-scoped** PowerShell execution-policy bypass, installs under `C:\ProgramData\ONYX`, writes a named and verified `New-NetFirewallRule` for the chosen API port and binary, and defaults that rule to Domain/Private profiles plus `LocalSubnet`. Public-network exposure requires an explicit `-AllowPublicNetwork`. The service choice is opt-in: `-InstallService` requires a separately obtained, trusted NSSM executable and never downloads one. When selected, it configures the API to run as `NT AUTHORITY\LocalService`, grants write access only to ONYX’s data/log locations, starts automatically, and is verified as running. A regular background process is the default and the script states plainly that it will not automatically survive reboot or recover from failure. This script was statically reviewed but cannot be executed from the Linux sandbox; Windows Firewall, NSSM, and the Windows service manager remain real-machine verification requirements.
+
+On **Debian 13**, `scripts/setup-onyx-debian.sh` installs its minimal setup/verification prerequisites (`ca-certificates`, `curl`, `jq`, and `openssl`), creates an unprivileged `onyx` account, and installs the binary in `/opt/onyx` with data and logs in `/var/lib/onyx` and `/var/log/onyx`. The runtime dependency conclusion was checked against `deploy/docker/api-server.Dockerfile`: ONYX itself uses `rustls` and does not require a runtime OpenSSL package; `curl`, `jq`, and `openssl` are script utilities for health/login checking and safe token generation. UFW is changed only if it is installed and active; its default rules allow the selected TCP port only from private IPv4 ranges, while `--allow-public-network` is a deliberate broadening. `--install-service` creates a hardened systemd unit that runs as `onyx`, restarts on failure, starts at boot, reads a root-owned environment file, and has only the database/log paths writable. The default remains a documented regular background process, not an implied production supervisor.
+
+**Verification:** `bash -n` passed, then the Debian script was run end-to-end against a freshly built real `api-server`, an isolated SQLite database, and an isolated loopback port. It installed the binary, initialized/migrated the database, passed health, created the first Admin, restarted without the bootstrap token, and passed a real login verification. The test server and temporary data were then removed. The separate runbook `docs/runbooks/automated-api-server-setup.md` documents invocation, service implications, firewall scope, and recovery behavior.
+
+### Release workflow now builds both desktop shells — complete locally, pending real GitHub runner evidence
+
+`release.yml` now contains a separate `release-admin-desktop` job that mirrors the already-reviewed `release-desktop` matrix for Linux, macOS, and Windows. A separate job was chosen instead of a parameterized two-app matrix because the apps have distinct frontend lockfile cache paths, application metadata (`ONYX` / `com.onyx.platform` versus `ONYX Admin` / `com.onyx.admin`), and likely future signing/release requirements; the explicit job keeps those differences auditable without making path logic conditional and opaque.
+
+The job uses the same established workspace-root bundle location, Linux GTK/WebKit dependency set, `tauri-apps/tauri-action` build-only mode, and bundle-file search policy as the Staff job. It builds `deb`/`AppImage` on Linux, **DMG only** on macOS (not the `.app` directory), and MSI/NSIS on Windows; it uploads distinct `admin-desktop-*` artifacts. The final `publish` job now waits for the Admin job as well. The existing signing caveat deliberately remains true for both applications: no real Apple Developer/notarization or Windows code-signing credentials are present, so macOS ad-hoc fallback remains non-blocking and user-facing Gatekeeper/SmartScreen warnings remain an explicit release gap.
+
+**Verification:** the workflow parses as YAML and a local structural check confirms the three-platform Admin matrix, Tauri build action, and `publish` dependency. `admin-shell/ui` completed `npm ci`, `npx tsc -b`, `npx vite build`, and `npx oxlint` with zero warnings or errors. This still does not replace real cross-platform GitHub Actions execution; the next commit is intended to be pushed with a dedicated `v*` validation tag so the actual runners can surface any platform-specific bundling issue.

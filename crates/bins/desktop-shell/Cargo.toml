@@ -37,6 +37,12 @@ async-trait.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
 uuid.workspace = true
+# Added for the real login flow: desktop-shell must call api-server's
+# POST /api/auth/login over plain HTTP (see session.rs), rather than
+# only ever going through the sync-relay WebSocket path. Uses the same
+# rustls-tls feature set as api-server's own reqwest dependency
+# (workspace-pinned) — no OpenSSL introduced.
+reqwest.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true

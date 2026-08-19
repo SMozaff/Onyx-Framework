@@ -4,6 +4,7 @@ import { apiClient } from "@/api/client";
 import { useCommand } from "@/hooks/useCommand";
 import { useQuery } from "@/hooks/useQuery";
 import { useAuthStore } from "@/stores/authStore";
+import { getServerAddress, setServerAddress, isPlausibleServerAddress } from "@/utils/serverAddress";
 
 /**
  * Policy administration — ported from `desktop-shell`'s `Settings.tsx`
@@ -42,6 +43,8 @@ export default function Settings() {
         Organization policy: feature availability, limits, retention, and legal holds.
       </p>
 
+      <ServerConnectionSettings />
+
       <IdLookup onLookup={(id) => navigate(`/settings/${id}`)} />
       <CreatePolicyForm onCreated={(id) => navigate(`/settings/${id}`)} />
 
@@ -59,6 +62,98 @@ export default function Settings() {
       )}
 
       <LegalHoldPanel />
+    </div>
+  );
+}
+
+/**
+ * Lets an admin point this app at a different backend server without
+ * rebuilding — added because `admin-shell` previously had the server
+ * address hardcoded at build time (`VITE_API_BASE` env var / defaulted
+ * to `127.0.0.1:3000`), which meant every install on every PC could
+ * only ever talk to a server running on that same machine. See
+ * `utils/serverAddress.ts` for the storage layer and
+ * `api/client.ts`'s request interceptor for how this takes effect
+ * immediately, with no restart required.
+ */
+function ServerConnectionSettings() {
+  const [value, setValue] = useState(() => getServerAddress());
+  const [status, setStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function testConnection(address: string): Promise<boolean> {
+    try {
+      const response = await fetch(`${address.replace(/\/+$/, "")}/health`, {
+        signal: AbortSignal.timeout(5_000),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleSave() {
+    if (!isPlausibleServerAddress(value)) {
+      setStatus("error");
+      setMessage("Enter a full address including http:// or https://, e.g. http://192.168.0.250:3000");
+      return;
+    }
+    setStatus("testing");
+    setMessage(null);
+    const reachable = await testConnection(value);
+    if (!reachable) {
+      setStatus("error");
+      setMessage(
+        "Could not reach a server at this address. The address was NOT saved — " +
+          "double-check the IP/port, that the server is running, and that this PC " +
+          "can reach it on the network before saving.",
+      );
+      return;
+    }
+    setServerAddress(value);
+    setStatus("ok");
+    setMessage("Saved. This app will now use this address for all requests.");
+  }
+
+  return (
+    <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
+      <h2 className="text-sm font-semibold text-onyx-text">Server connection</h2>
+      <p className="mt-1 text-xs text-onyx-text-dim">
+        The address of the ONYX backend this app talks to. Change this if you're running
+        the Admin app on a different computer than the server — e.g. a LAN address like{" "}
+        <code className="rounded bg-onyx-bg px-1 py-0.5">http://192.168.0.250:3000</code>{" "}
+        instead of <code className="rounded bg-onyx-bg px-1 py-0.5">http://127.0.0.1:3000</code>.
+      </p>
+
+      <div className="mt-3 flex gap-2">
+        <input
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setStatus("idle");
+          }}
+          placeholder="http://192.168.0.250:3000"
+          className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={status === "testing"}
+          className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {status === "testing" ? "Testing…" : "Test & Save"}
+        </button>
+      </div>
+
+      {message && (
+        <p
+          className={`mt-2 text-xs ${
+            status === "error" ? "text-onyx-status-blocked" : "text-onyx-text-dim"
+          }`}
+        >
+          {message}
+        </p>
+      )}
     </div>
   );
 }

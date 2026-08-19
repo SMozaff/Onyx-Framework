@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { SyncStatus } from "@/types/onyx";
+import { useSession } from "@/hooks/useSession";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", end: true },
@@ -12,6 +13,7 @@ const NAV_ITEMS = [
   { to: "/messaging", label: "Messaging", end: false },
   { to: "/files", label: "Files", end: false },
   { to: "/notifications", label: "Notifications", end: false },
+  { to: "/settings", label: "Settings", end: false },
 ];
 
 const linkClasses = (isActive: boolean) =>
@@ -22,15 +24,23 @@ const linkClasses = (isActive: boolean) =>
   }`;
 
 /**
- * Header + sidebar shell wrapping every route. Polls
- * `get_sync_status` (the real Tauri command, wrapping
- * `client-composition`'s `SyncAgent::status`) on an interval and shows
- * it in the header, since sync state is relevant regardless of which
- * page the user is on — matching Team Prompt 5 §7's "Sync Status
- * Display" acceptance criterion.
+ * Header + sidebar shell wrapping every authenticated route. It polls the
+ * existing local sync-status command and displays the real native session with
+ * a logout action; App owns the actual session clearing so a successful logout
+ * immediately returns to the pre-login route gate.
  */
-export default function MainLayout({ children }: { children: ReactNode }) {
+export default function MainLayout({
+  children,
+  onLogout,
+}: {
+  children: ReactNode;
+  onLogout: () => Promise<void>;
+}) {
+  const session = useSession();
+  const navigate = useNavigate();
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,11 +50,8 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         const status = await invoke<SyncStatus>("get_sync_status");
         if (!cancelled) setSyncStatus(status);
       } catch {
-        // get_sync_status has no documented failure mode in normal
-        // operation (it only serializes an in-memory struct); a
-        // transient IPC error here just means the header shows the
-        // previous status until the next successful poll rather than
-        // surfacing an error banner for a non-critical status readout.
+        // A transient IPC error only leaves the previous sync indicator in
+        // place; it is non-critical compared with the page's own actions.
       }
     }
 
@@ -56,12 +63,22 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  async function logout() {
+    setLogoutError(null);
+    setLoggingOut(true);
+    try {
+      await onLogout();
+      navigate("/", { replace: true });
+    } catch (error) {
+      setLogoutError(String(error));
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <div className="flex h-screen">
-      <aside className="w-56 shrink-0 border-r border-onyx-border bg-onyx-surface p-4">
-        <div className="mb-6 px-2 text-lg font-semibold tracking-tight text-onyx-text">
-          ONYX
-        </div>
+      <aside className="flex w-56 shrink-0 flex-col border-r border-onyx-border bg-onyx-surface p-4">
+        <div className="mb-6 px-2 text-lg font-semibold tracking-tight text-onyx-text">ONYX</div>
         <nav className="space-y-1">
           {NAV_ITEMS.map((item) => (
             <NavLink
@@ -74,6 +91,23 @@ export default function MainLayout({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
+        <div className="mt-auto border-t border-onyx-border pt-4">
+          <p className="truncate px-2 text-xs font-medium text-onyx-text" title={session.username}>
+            {session.username}
+          </p>
+          <p className="mt-1 truncate px-2 text-[11px] text-onyx-text-dim" title={session.serverAddress}>
+            {session.serverAddress}
+          </p>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            disabled={loggingOut}
+            className="mt-3 w-full rounded-md px-3 py-1.5 text-left text-sm font-medium text-onyx-text-dim hover:bg-onyx-surface-hover hover:text-onyx-text disabled:opacity-50"
+          >
+            {loggingOut ? "Signing out…" : "Sign out"}
+          </button>
+          {logoutError && <p className="mt-2 px-2 text-[11px] text-onyx-status-blocked">{logoutError}</p>}
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
