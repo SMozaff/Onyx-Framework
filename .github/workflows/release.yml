@@ -146,10 +146,10 @@ jobs:
         with:
           projectPath: crates/bins/desktop-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          # Keep npm as the runner and resolve the CLI from the UI prefix.
-          # This avoids a POSIX-only .bin path and lets npm select its
-          # Windows .cmd wrapper when the matrix runner is Windows.
-          tauriScript: npm --prefix ${{ github.workspace }}/crates/bins/desktop-shell/ui exec tauri
+          # tauri-action@v0 prepends `npm run` to npm-based scripts. Execute
+          # the UI-local CLI entry point through Node instead so the same
+          # command works on Windows, macOS, and Linux without shell shims.
+          tauriScript: node ${{ github.workspace }}/crates/bins/desktop-shell/ui/node_modules/@tauri-apps/cli/tauri.js
       - name: Locate bundle output
         shell: bash
         run: |
@@ -248,10 +248,10 @@ jobs:
         with:
           projectPath: crates/bins/admin-shell
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          # Keep npm as the runner and resolve the CLI from the UI prefix.
-          # This avoids a POSIX-only .bin path and lets npm select its
-          # Windows .cmd wrapper when the matrix runner is Windows.
-          tauriScript: npm --prefix ${{ github.workspace }}/crates/bins/admin-shell/ui exec tauri
+          # tauri-action@v0 prepends `npm run` to npm-based scripts. Execute
+          # the UI-local CLI entry point through Node instead so the same
+          # command works on Windows, macOS, and Linux without shell shims.
+          tauriScript: node ${{ github.workspace }}/crates/bins/admin-shell/ui/node_modules/@tauri-apps/cli/tauri.js
       - name: Locate Admin bundle output
         shell: bash
         run: |
