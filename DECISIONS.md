@@ -1651,3 +1651,105 @@ investigation and fix, not an assumption that this change covers it.
 `web-ui` showed no equivalent hardcoded address at all in the same
 grep — unconfirmed why (possibly same-origin deployment), not
 verified further. Neither is fixed by this change.
+
+## desktop-shell: real per-user login, replacing random-org-per-launch (2026-08-19)
+
+**The gap, found by reading the code, not assumed fixed**: `desktop-shell`
+(the Staff native app) previously had NO login screen and NO real
+session at all. Every launch called `OrganizationId::new_random()` —
+flagged by its own `TODO(auth/org resolution)` comment as "no
+login/auth flow exists yet." Worse, the frontend's `useSession.ts`
+independently generated its own placeholder ids, which could disagree
+with the Rust side's random id — meaning a command could target a
+different `organization_id` than the one `AppState`'s aggregates were
+actually scoped under. This was confirmed directly with the person
+before any code was written, since it's a materially bigger gap than a
+hardcoded address (see the conversation this session): the person
+explicitly chose full per-user login (matching `admin-shell`) over a
+lighter-weight device-pairing alternative that was offered.
+
+**Design**: `desktop-shell` embeds a full local `AppState` (its own
+SQLite, command/query registries, sync agent) rather than talking to
+`api-server` per-request like `admin-shell` does — so login here does
+two things, not one: (1) authenticate against `api-server`'s real
+`POST /api/auth/login` (same endpoint `admin-shell` uses) to learn the
+real `organization_id`; (2) persist that identity via the existing
+`SecureStorage` port (`secure_storage/mod.rs` — its own doc comment
+already named `"auth.refresh_token"` as an intended key, so this was
+scaffolded for, never connected) so the *next* launch resumes the same
+org instead of a fresh random one.
+
+New file `session.rs`: `authenticate()` (calls `/api/auth/login`,
+maps the response into a `StoredSession` that travels with its
+`server_address` — reusing tokens against a different server would be
+a real correctness bug, not just unlikely), `save`/`load`/`clear`
+(one JSON blob under one storage key, atomic — no risk of a token
+saved with a missing/mismatched org id after a partial write).
+
+`lib.rs` changes: managed state is now `Arc<RwLock<Arc<AppState>>>`
+(was a bare `Arc<AppState>`) so `login`/`logout` can build a *new*
+`AppState` under the real org id and atomically swap it in without
+restarting the Tauri process — verified against Tauri 2's own state
+management docs as the supported pattern before choosing it over a
+process-restart approach. Three new commands: `login`, `logout`,
+`get_current_session` (lets the frontend decide on launch whether to
+show the login screen or go straight in). `SessionInfo` (what the
+frontend actually receives) deliberately omits the raw tokens — all
+authenticated calls happen server-side in Rust, so there's no reason
+for a webview-reachable value to hold them. The sync relay address is
+now *derived* from the login server address
+(`relay_ws_endpoint_from_http`), not a separately-configured
+`ONYX_RELAY_ENDPOINT` — one address to ever enter, not two that could
+silently drift apart. The device's local SQLite/`ReplicaId` are
+deliberately NOT reset on login/logout — they belong to the physical
+device/install, not to who happens to be logged in.
+
+**New in `platform-kernel`**: `ObjectId`/`OrganizationId`/etc. had
+`new_random()` and `Display` but no way to parse a UUID string back
+into the type — genuinely missing, not overlooked elsewhere (grepped
+first). Added `from_uuid_str` plus a real `FromStr` impl (so
+`str.parse::<ObjectId>()` works idiomatically too), implemented once
+and shared by both, so there is exactly one parsing rule. This is what
+turns `/api/auth/login`'s JSON `organization_id` string back into a
+real id client-side.
+
+**Verified for real, not assumed**:
+- `cargo check -p platform-kernel` clean; `cargo test -p platform-kernel`
+  31/31 passing (28 pre-existing + 3 new: round-trip, `FromStr`
+  parity, garbage-input rejection).
+- `cargo check -p desktop-shell` clean — confirmed via a real, timed
+  compile in this sandbox (~6 minutes, genuine Tauri/GTK dependency
+  tree, not skipped).
+- New unit tests written for `session.rs` (save/load/clear round-trip
+  via an in-memory `SecureStorage` fake — the real `KeyringSecureStorage`
+  needs an actual OS credential store and can't run in this sandbox;
+  corrupt-stored-data handling) and `lib.rs`
+  (`relay_ws_endpoint_from_http` http→ws, https→wss, already-ws
+  passthrough).
+
+**Explicit, NOT verified — this is the important gap**: those new unit
+tests (`cargo test -p desktop-shell --lib`) were written but never
+confirmed passing. This sandbox's disk repeatedly ran out of space
+mid-build while linking the full Tauri/GTK dependency tree (a `target/`
+directory this size — several GB — is inherently disk-heavy, and this
+environment's available space did not reliably survive a full test
+build even after being cleared multiple times). `cargo check` (type
+and borrow-checker correctness) passed cleanly and repeatedly; `cargo
+test` (does the new logic actually behave correctly at runtime) did
+not get a confirmed clean run. Anyone continuing this work should run
+`cargo test -p desktop-shell --lib` on a machine with normal disk
+headroom before trusting these tests pass — do not assume they do
+because the code compiles.
+
+**Not done, explicit gap**: no frontend login screen exists yet for
+`desktop-shell` (React side) — the Rust commands (`login`/`logout`/
+`get_current_session`) are ready to be called, but nothing in
+`crates/bins/desktop-shell/ui/src` calls them yet, and `App.tsx`'s
+route table still goes straight to `Dashboard` with no auth gate.
+`admin-shell`'s server-settings screen (`ServerConnectionSettings`,
+`ServerAddressField`) has not yet been reconciled with this new
+`desktop-shell` session model — they are two separate, currently
+unrelated pieces of work. Neither Windows nor Linux automation scripts
+for full server setup exist yet. CI (`release.yml`) still only builds
+`desktop-shell`, not `admin-shell`, and has not been updated for any
+of this session's changes.

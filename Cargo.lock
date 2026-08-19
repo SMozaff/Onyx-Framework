@@ -1449,6 +1449,7 @@ dependencies = [
  "platform-contracts",
  "platform-kernel",
  "query-application",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "sqlx",
