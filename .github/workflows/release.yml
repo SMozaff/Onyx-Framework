@@ -7,7 +7,7 @@ on:
   # attestation + cosign signing) and publish (creates a real GitHub
   # Release) are both gated to the tag trigger only, further down.
   # workflow_dispatch has no ref_name of its own; github.ref_name on a
-  # manual run resolves to the branch name ("master"), which would
+  # manual run resolves to the branch name ("main"), which would
   # otherwise silently produce artifacts/images misleadingly named
   # after the branch instead of a version -- moot here since those two
   # jobs never run on a manual trigger, but noted for anyone tempted
@@ -49,7 +49,7 @@ jobs:
       # Signing (and its matching .asc upload) is gated to real tag
       # releases only. workflow_dispatch runs are for grabbing debug
       # artifacts on demand; github.ref_name on a manual run is the
-      # branch name ("master"), not a version, and there's no reason
+      # branch name ("main"), not a version, and there's no reason
       # to spend a real GPG signature on a debug build nobody is
       # meant to redistribute as a release asset.
       - name: Import GPG signing key
