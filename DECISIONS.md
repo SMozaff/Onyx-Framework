@@ -1791,3 +1791,95 @@ On **Debian 13**, `scripts/setup-onyx-debian.sh` installs its minimal setup/veri
 The job uses the same established workspace-root bundle location, Linux GTK/WebKit dependency set, `tauri-apps/tauri-action` build-only mode, and bundle-file search policy as the Staff job. It builds `deb`/`AppImage` on Linux, **DMG only** on macOS (not the `.app` directory), and MSI/NSIS on Windows; it uploads distinct `admin-desktop-*` artifacts. The final `publish` job now waits for the Admin job as well. The existing signing caveat deliberately remains true for both applications: no real Apple Developer/notarization or Windows code-signing credentials are present, so macOS ad-hoc fallback remains non-blocking and user-facing Gatekeeper/SmartScreen warnings remain an explicit release gap.
 
 **Verification:** the workflow parses as YAML and a local structural check confirms the three-platform Admin matrix, Tauri build action, and `publish` dependency. `admin-shell/ui` completed `npm ci`, `npx tsc -b`, `npx vite build`, and `npx oxlint` with zero warnings or errors. This still does not replace real cross-platform GitHub Actions execution; the next commit is intended to be pushed with a dedicated `v*` validation tag so the actual runners can surface any platform-specific bundling issue.
+
+
+---
+
+## Cross-platform Tauri CLI invocation in `release.yml` — verified 2026-08-20
+
+**The original defect was a dependency-resolution failure, not a Rust or
+Tauri compilation failure.** The Staff and Admin frontend dependencies are
+installed independently under their respective `ui` directories, while the
+release action runs from the repository workspace. The original
+`tauriScript: npx tauri` therefore did not reliably discover either
+UI-local `@tauri-apps/cli` package. A manual, non-release
+`workflow_dispatch` run on the branch-renamed baseline failed all six
+desktop matrix entries before Rust compilation or bundle creation with
+`npm error could not determine executable to run`; the three server-binary
+matrix entries were unaffected. This was observed on GitHub-hosted runners,
+not inferred from the workflow text. [1]
+
+**The first correction was locally valid but incompatible with the pinned
+action version.** It replaced the bare `npx` command with
+`npm --prefix <ui-directory> exec tauri`, which resolves the CLI correctly
+when executed directly. Both UI installations passed `npm ci`, and both
+exact direct command shapes produced Tauri 2.11.4 `build --help` output
+locally. However, the workflow uses `tauri-apps/tauri-action@v0`, not the
+current development implementation initially reviewed. The exact v0 runner
+treats an `npm` executable specially and inserts `run` unless its first
+argument is already `run`. As a result, the action transformed the supplied
+command into `npm run --prefix <ui-directory> exec tauri build -- ...`, an
+invalid npm invocation. The subsequent manual retry consistently failed the
+completed Staff and Admin desktop jobs on Linux, macOS, and Windows for
+that reason, while the server-binary jobs passed. [2] [4]
+
+**Decision: invoke the installed CLI module through Node directly.** Both
+desktop jobs now set `tauriScript` to the platform-neutral command below,
+with the shell-specific UI directory substituted in the workflow:
+
+```yaml
+tauriScript: node ${{ github.workspace }}/crates/bins/<shell>/ui/node_modules/@tauri-apps/cli/tauri.js
+```
+
+This deliberately bypasses the action's npm-specific command rewriting and
+also avoids relying on the platform-specific executable shim in
+`node_modules/.bin` (`.cmd` on Windows versus a POSIX shim elsewhere). The
+v0 runner receives `node` as its executable, passes the package's real
+`tauri.js` entry point as the first argument, and appends the requested
+`build`, target, and bundle arguments normally. The two workflow edits are
+limited to the Staff and Admin `tauriScript` values plus explanatory
+comments. [4] [5]
+
+**Verification was repeated on real GitHub-hosted runners without a release
+tag.** `actionlint` and `git diff --check` passed before the workflow commit
+`c2eb740b9e902044909ad50befffcb13104085a8`; direct local invocations of
+both installed CLI entry points also returned `build --help`. The full
+manual debug-build matrix for that commit was run as GitHub Actions run
+`32311213443`, so no `v*` tag was created, no GitHub Release was published,
+and the image/publish jobs correctly remained skipped. [3]
+
+| Target class | Linux | macOS | Windows | Result relevant to this decision |
+|---|---|---|---|---|
+| Server binaries | Passed | Passed | Passed | Unchanged control matrix; all three platform jobs succeeded. |
+| Staff desktop | Passed | Reached Tauri compile and DMG bundling | Passed | The direct Node command invoked Tauri successfully on every platform. |
+| Admin desktop | Passed | Reached Tauri compile and DMG bundling | Passed | The direct Node command invoked Tauri successfully on every platform. |
+
+The Linux and Windows desktop artifacts completed successfully for **both**
+applications. On macOS, both applications compiled successfully through the
+direct Node CLI and reached Tauri's DMG bundling phase. They then failed at a
+separate asset-processing step: `Failed to create app icon: Format error
+decoding Ico: The PNG is not in RGBA format!` This establishes that the
+cross-platform CLI invocation no longer blocks macOS; the remaining macOS
+DMG failure is an icon-format defect, not a command-resolution or signing
+failure. It was deliberately **flagged but not changed** in this scoped
+workflow repair: correcting or replacing application artwork is a separate
+product/asset change and was not silently folded into the CI fix. The
+workflow run is consequently overall red only because of those two macOS
+icon failures, not because `tauriScript` failed to resolve or execute. [3]
+
+**Remaining explicit gap:** a future scoped change must supply an RGBA-valid
+PNG/ICO input for both macOS application bundles and then rerun the macOS
+matrix to obtain final DMGs. Apple notarization and Windows code-signing
+credentials also remain separate, pre-existing release concerns; neither
+was invented or altered here. The direct-Node workflow fix itself is now
+verified with complete server coverage and successful Linux/Windows desktop
+artifacts for both shells, plus macOS compilation/bundling reachability on
+real hosted runners.
+
+### References
+
+[1]: https://github.com/So-Muzaff/Onyx-Framwork/actions/runs/32299530139 "Initial manual release debug-build run"
+[2]: https://github.com/So-Muzaff/Onyx-Framwork/actions/runs/32301698085 "npm-prefix retry run"
+[3]: https://github.com/So-Muzaff/Onyx-Framwork/actions/runs/32311213443 "Direct-Node verification run"
+[4]: https://raw.githubusercontent.com/tauri-apps/tauri-action/v0/src/runner.ts "tauri-action v0 runner implementation"
+[5]: https://github.com/So-Muzaff/Onyx-Framwork/blob/c2eb740b9e902044909ad50befffcb13104085a8/.github/workflows/release.yml "Verified direct-Node release workflow change"
