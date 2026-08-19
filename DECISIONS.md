@@ -1588,3 +1588,66 @@ non-obvious `tauri-action` input and Tauri's own CI documentation, and
 catching the two real mistakes above during that review — not by an
 actual CI run. The workflow only triggers on `push: tags: ["v*"]`
 (unchanged), so it has not run automatically either.
+
+## admin-shell: runtime-configurable server address (2026-08-19)
+
+**Problem, found during live deployment, not in review**: `admin-shell`
+(`crates/bins/admin-shell/ui/src/api/client.ts`) had the backend server
+address hardcoded at build time — `VITE_API_BASE` env var, defaulting
+to `http://127.0.0.1:3000` — with no way to change it after the app was
+built. This meant every install of the Admin app, on every PC, could
+only ever talk to a server running on that same machine. On a second
+PC, trying to log in silently tried to reach `127.0.0.1:3000` on that
+PC itself (nothing there), got a network error, and — because `Login.tsx`
+previously caught every failure identically — displayed "Invalid
+username or password," which is misleading: the request never reached
+the real server at all. This surfaced directly during setup on real
+hardware, not from a review pass.
+
+**Fix**: the server address is now a runtime, user-editable setting,
+persisted in `localStorage` (not `sessionStorage` — unlike the auth
+session in `utils/auth.ts`, this must survive app restarts, which is
+the entire point of making it configurable). New file
+`utils/serverAddress.ts` holds the get/set/validate logic;
+`api/client.ts`'s request interceptor now resolves the base URL fresh
+on every request instead of once at module load, so a saved change
+takes effect immediately with no app restart required.
+
+**Two places to edit it, not one, and this was deliberate**: the full
+version lives on the Settings page (`pages/Settings.tsx`,
+`ServerConnectionSettings`), but Settings sits behind
+`ProtectedLayout`'s login gate — someone whose app is still pointed at
+the wrong address can't log in yet, so they'd never be able to reach
+it to fix it. A second, collapsed "Server address / connection
+settings" section was added directly to the Login page itself
+(`pages/Login.tsx`, `ServerAddressField`), reachable pre-login, so the
+address can be corrected without ever needing a successful login
+first.
+
+**"Test & Save" is one action, not two**: both copies of the field
+call `GET /health` against the entered address before saving anything.
+An unreachable address is never silently persisted — the person sees
+"could not reach a server at this address" immediately, rather than
+saving a bad value and only discovering it's wrong at the next failed
+login. `Login.tsx`'s submit handler also now distinguishes a network
+failure (`isNetworkError`, no `error.response` present — axios only
+sets that when a response was actually received) from a real
+401/credentials rejection, and only shows the server-unreachable
+messaging (auto-expanding the address field) for the former.
+
+**Verified**: `npx tsc -b` clean, `npx vite build` clean (95 modules,
+no errors). No existing test files cover `admin-shell/ui` — nothing to
+regress, none written for this change either since the app has no test
+harness in place yet to add to consistently.
+
+**Not done, explicit gap**: `staff_manual`/desktop-shell and mobile
+clients were not touched — this fix was scoped to `admin-shell` only,
+since that's the app that was actually failing on real hardware in
+this session. A quick grep afterward found `desktop-shell/src/lib.rs`
+has a similarly-shaped hardcoded fallback
+(`ws://127.0.0.1:3000`, line ~353) — but it's Rust, not the TypeScript
+`localStorage`/interceptor pattern used here, so it needs its own
+investigation and fix, not an assumption that this change covers it.
+`web-ui` showed no equivalent hardcoded address at all in the same
+grep — unconfirmed why (possibly same-origin deployment), not
+verified further. Neither is fixed by this change.

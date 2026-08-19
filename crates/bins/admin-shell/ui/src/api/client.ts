@@ -1,15 +1,21 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
+import { getServerAddress } from '../utils/serverAddress';
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000';
-
+/**
+ * No longer a fixed value read once at module load. The server
+ * address is user-configurable at runtime (see Settings page +
+ * `utils/serverAddress.ts`), so `baseURL` must be resolved fresh on
+ * every request via the interceptor below — otherwise a saved change
+ * wouldn't take effect until the app was restarted.
+ */
 export const apiClient = axios.create({
-  baseURL: API_BASE,
   timeout: 30_000,
   headers: { 'Content-Type': 'application/json' },
 });
 
 apiClient.interceptors.request.use((config) => {
+  config.baseURL = getServerAddress();
   const token = useAuthStore.getState().accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
