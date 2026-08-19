@@ -26,8 +26,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    domain_error, fetch_staff_profile_rows, find_by_owner, infrastructure_error,
-    to_public_dto, upsert_profile, PublicProfileDto, UpsertProfileRequest,
+    domain_error, fetch_staff_profile_rows, find_by_owner, infrastructure_error, to_public_dto,
+    upsert_profile, PublicProfileDto, UpsertProfileRequest,
 };
 use crate::routes::admin::require_admin;
 use crate::routes::{ApiError, ApiState};
@@ -117,9 +117,16 @@ impl ImportExportRow {
 #[derive(Debug, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum RowResult {
-    Created { user_id: String },
-    Updated { user_id: String },
-    Failed { user_id: Option<String>, reason: String },
+    Created {
+        user_id: String,
+    },
+    Updated {
+        user_id: String,
+    },
+    Failed {
+        user_id: Option<String>,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -235,8 +242,8 @@ pub async fn import_profiles(
     let admin = require_admin(&state, &headers).await?;
     let organization_id = uuid::Uuid::parse_str(&admin.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
-    let admin_uuid = uuid::Uuid::parse_str(&admin.user_id)
-        .map_err(|_| domain_error("invalid admin user id"))?;
+    let admin_uuid =
+        uuid::Uuid::parse_str(&admin.user_id).map_err(|_| domain_error("invalid admin user id"))?;
     let actor = platform_kernel::ObjectId(*admin_uuid.as_bytes());
 
     let mut file_bytes: Option<Vec<u8>> = None;
@@ -369,12 +376,7 @@ pub async fn export_profiles(
     if format == "json" {
         let body = serde_json::to_vec_pretty(&profiles)
             .map_err(|e| infrastructure_error(e.to_string()))?;
-        Ok((
-            StatusCode::OK,
-            [("content-type", "application/json")],
-            body,
-        )
-            .into_response())
+        Ok((StatusCode::OK, [("content-type", "application/json")], body).into_response())
     } else {
         let mut writer = csv::Writer::from_writer(Vec::new());
         for profile in &profiles {
@@ -386,11 +388,6 @@ pub async fn export_profiles(
         let body = writer
             .into_inner()
             .map_err(|e| infrastructure_error(e.to_string()))?;
-        Ok((
-            StatusCode::OK,
-            [("content-type", "text/csv")],
-            body,
-        )
-            .into_response())
+        Ok((StatusCode::OK, [("content-type", "text/csv")], body).into_response())
     }
 }
