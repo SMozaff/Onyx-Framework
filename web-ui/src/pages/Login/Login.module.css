@@ -2,6 +2,6 @@
 .panel { display: flex; align-items: center; justify-content: center; padding: 48px; }
 .card { width: min(440px, 100%); background: #fff; border: 1px solid #dbe4ef; border-radius: 20px; padding: 36px; box-shadow: 0 22px 60px rgba(15,42,82,.12); }
 .hero { padding: 64px; color: #fff; background: radial-gradient(circle at 20% 20%, rgba(90,154,216,.38), transparent 30%), linear-gradient(145deg, #0a1e3d, #0f2a52 60%, #1a3f6a); display: flex; flex-direction: column; justify-content: space-between; }
-.hero h1 { font-size: clamp(42px, 6vw, 76px); line-height: .95; max-width: 700px; margin: 0; }
+.hero h1 { color: #fff; font-size: clamp(42px, 6vw, 76px); line-height: .95; max-width: 700px; margin: 0; }
 .hero p { max-width: 580px; color: #d8e8f6; font-size: 18px; }
 @media (max-width: 820px) { .page { grid-template-columns: 1fr; } .hero { display: none; } .panel { padding: 24px; } }

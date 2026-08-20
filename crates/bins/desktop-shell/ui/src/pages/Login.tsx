@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate } from "react-router-dom";
 import { isShellError, type ShellError } from "@/types/onyx";
+import { userFacingMessage } from "@/utils/userFacingError";
 import type { SessionWire } from "@/hooks/useSession";
 
 const DEFAULT_SERVER_ADDRESS = "http://127.0.0.1:3000";
@@ -67,7 +68,7 @@ export default function Login({
       } else if (shellError?.kind === "auth") {
         setError("Invalid username or password.");
       } else {
-        setError(`Sign-in failed: ${String(caught)}`);
+        setError(userFacingMessage(caught));
       }
     } finally {
       setLoading(false);

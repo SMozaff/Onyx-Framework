@@ -6,6 +6,8 @@ export interface AuthUser {
   id: string;
   username: string;
   organization_id: string;
+  /** Optional while older API servers are rolling out the additive login field. */
+  organization_display_name?: string;
 }
 
 export function storeSession(accessToken: string, refreshToken: string, user: AuthUser): void {

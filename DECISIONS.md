@@ -1883,3 +1883,125 @@ real hosted runners.
 [3]: https://github.com/So-Muzaff/Onyx-Framwork/actions/runs/32311213443 "Direct-Node verification run"
 [4]: https://raw.githubusercontent.com/tauri-apps/tauri-action/v0/src/runner.ts "tauri-action v0 runner implementation"
 [5]: https://github.com/So-Muzaff/Onyx-Framwork/blob/c2eb740b9e902044909ad50befffcb13104085a8/.github/workflows/release.yml "Verified direct-Node release workflow change"
+
+
+---
+
+## UI/UX remediation — Milestones 1 and 2 — Complete
+
+This increment implements the approved first two remediation milestones from
+the UI/UX audit: restore operator trust and accessible interaction first, then
+align the Browser Remote Operator, Staff desktop shell, and Admin desktop shell
+around stable state, error, navigation, and decision patterns. The work was
+kept intentionally within the audited defects. It does **not** change domain
+state machines, authorization decisions, release publication behavior, token
+storage architecture, or any unrelated product workflow.
+
+**Current documentation was consulted before focus-sensitive implementation.**
+The configured Context7 React documentation source was queried for controlled
+dialog and focus/effect lifecycle guidance. Its current `useEffect` examples
+use an effect to synchronize controlled modal state and require cleanup for
+imperative dialog effects. The Staff `AccessibleDialog` and browser navigation
+implementation follow that pattern: they record current focus when opening,
+move focus to the controlled surface, register keyboard listeners only while
+open, remove listeners on cleanup, and restore focus to the initiating control
+when the surface closes. This was used as implementation guidance, not treated
+as a substitute for project-specific validation. [1]
+
+**Browser trust and state fixes.** The dark login hero now explicitly applies
+white foreground colour to its heading, preventing the global navy `h1` rule
+from creating the previously measured 1.16:1 dark-on-dark contrast failure.
+A shared `ProjectionState` primitive now gives browser operational pages a
+single `loading` / `unavailable` / `stale` / `empty` / `ready` contract. The
+Dashboard, Missions, Tasks, Notifications, and Approvals pages use it so a
+failed first load is rendered as an unavailable projection with recovery
+rather than a false `0 total`, empty portfolio, or actionless blank region.
+Stale responses retain usable data with explicit freshness messaging.
+
+**Organization context decision and implementation.** The current login API
+returns an `organization_id` but not an authoritative organization display
+name. The hard-coded `ONYX Test Operations` label was therefore removed. The
+browser session model now accepts an additive optional
+`organization_display_name` for forward compatibility; when absent, the UI
+shows a neutral context derived from the authenticated organization ID prefix
+and says “Verify organization before acting.” This is deliberately truthful:
+no tenant name is inferred from a user record or fabricated from test copy.
+A future additive backend organization-display field remains required to
+replace the neutral fallback universally.
+
+**Accessible navigation and decision surfaces.** The browser mobile sidebar
+now has breakpoint-aware `inert` and focus behavior: closed drawer links are
+not keyboard-reachable, the trigger reports its expanded state, opening moves
+focus to the first navigation link, Escape closes, closing returns focus to
+the trigger, and selecting a route moves focus to main content. The Staff
+shell gained equivalent narrow-window navigation rather than compressing all
+work behind its permanent rail. Staff approvals now use a reusable named
+modal primitive with modal semantics, description linkage, initial focus,
+Tab/Shift+Tab containment, non-busy Escape behavior, and focus restoration.
+The browser approval dialog gained the same focus lifecycle protections.
+
+**Approval evidence policy resolved.** The earlier clients disagreed: Browser
+required an explanation only for rejection while Staff required one for both
+decisions. This implementation adopts the remediation plan's recommended
+policy: **rejection requires a reason; approval accepts an optional decision
+note**. The matching Browser and Staff controls now use that rule, labels, and
+disabled-submit behavior. This is a client interaction-policy alignment; the
+current server/domain validation contract was intentionally not altered in
+this UI-only increment.
+
+**Raw user-facing errors replaced at shared boundaries.** Browser and Admin
+HTTP helpers now map network, session, permission, conflict, validation,
+not-found, service, and unexpected failures to stable user-safe copy and a
+recovery action. The Staff shell gained the same `UserFacingError` shape for
+startup, shared query, shared command, login fallback, and logout errors.
+Existing pages that render shared query/command `error.message` now consume
+that mapped copy without per-page raw exception handling. This resolves the
+live Staff startup failure that previously rendered a raw `TypeError` inside
+a scrolling `<pre>`. Specialized local input/parsing messages are not silently
+suppressed; they remain a follow-up review item, but no longer define the
+central server/IPC failure surfaces audited as high risk.
+
+**Admin first-run connection flow refined.** The pre-login connection setting
+was extracted into an explicit component. Operators choose either “This
+computer” (loopback) or “Another computer” (LAN address), test the address,
+and save it only after a successful five-second `/health` request. The entered
+address is retained but not saved on failure, and the resulting recovery state
+is announced in-page. This preserves the existing correct persistence
+semantics while making first-run intent and result feedback more scannable.
+
+**Verification:**
+```
+web-ui: npm run type-check                         # clean
+web-ui: npx vitest run tests/unit/projection-state.test.tsx
+                                                    # 5 tests, 0 failures
+web-ui: npm test                                   # 138 passed, 7 skipped;
+                                                    # 1 pre-existing real-server suite skipped
+web-ui: npm run build                              # clean; existing bundle check passed
+crates/bins/desktop-shell/ui: npm run build        # clean (tsc -b + Vite)
+crates/bins/admin-shell/ui: npm run build          # clean (tsc -b + Vite)
+git diff --check                                   # clean
+```
+The full browser suite continues to emit the pre-existing jsdom/axe canvas
+warning while still passing its accessibility assertions. That limitation is
+explicitly retained for Milestone 3's real-browser accessibility/visual test
+work; it is not represented as evidence that browser-rendered contrast has
+been automatically proven. Live local browser inspection independently
+confirmed the white login hero, neutral organization-ID context, and an
+unavailable Mission projection without false-zero copy. Only synthetic local
+session storage was used; no real user, organization data, or production
+server was accessed.
+
+A complete file-by-file change inventory, implementation rationale, Context7
+provenance, validation record, and deferred dependencies is stored in
+`docs/ui-remediation/MILESTONES_1_2_IMPLEMENTATION.md`.
+
+**Explicit remaining scope:** Milestones 3 and 4 remain unimplemented:
+tracked ESLint restoration, real-browser/Playwright and visual regression
+coverage, native runtime smoke evidence, CI enforcement, and release evidence
+retention. The authoritative backend organization display-name field is also
+outside this increment. These are flagged rather than silently represented as
+complete.
+
+### References
+
+[1]: https://react.dev/reference/react/useEffect "React useEffect reference (consulted through Context7)"

@@ -1,3 +1,4 @@
+import { forwardRef, type Ref } from 'react';
 import { NavLink } from 'react-router-dom';
 
 const links = [
@@ -11,16 +12,38 @@ const links = [
   ['/reports', 'Reports'],
 ] as const;
 
-export default function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
+interface SidebarProps {
+  open: boolean;
+  mobile: boolean;
+  firstLinkRef: Ref<HTMLAnchorElement>;
+  onNavigate: () => void;
+}
+
+const Sidebar = forwardRef<HTMLElement, SidebarProps>(function Sidebar({ open, mobile, firstLinkRef, onNavigate }, ref) {
+  const closedMobileDrawer = mobile && !open;
   return (
-    <aside className={`sidebar ${open ? 'sidebar-open' : ''}`} aria-label="Primary navigation">
+    <aside
+      ref={ref}
+      id="primary-navigation"
+      className={`sidebar ${open ? 'sidebar-open' : ''}`}
+      aria-label="Primary navigation"
+      aria-hidden={closedMobileDrawer || undefined}
+    >
       <div className="brand-block" aria-label="ONYX Remote Operator">
         <span className="brand-mark" aria-hidden="true">O</span>
         <div><strong>ONYX</strong><small>Remote Operator</small></div>
       </div>
       <nav>
-        {links.map(([to, label]) => (
-          <NavLink key={to} to={to} end={to === '/'} onClick={onNavigate} className={({ isActive }) => isActive ? 'nav-link nav-link-active' : 'nav-link'}>
+        {links.map(([to, label], index) => (
+          <NavLink
+            key={to}
+            ref={index === 0 ? firstLinkRef : undefined}
+            to={to}
+            end={to === '/'}
+            tabIndex={closedMobileDrawer ? -1 : undefined}
+            onClick={onNavigate}
+            className={({ isActive }) => isActive ? 'nav-link nav-link-active' : 'nav-link'}
+          >
             <span className="nav-indicator" aria-hidden="true" />{label}
           </NavLink>
         ))}
@@ -28,4 +51,6 @@ export default function Sidebar({ open, onNavigate }: { open: boolean; onNavigat
       <div className="sidebar-note"><strong>Thin client</strong><span>No offline commands or local domain state.</span></div>
     </aside>
   );
-}
+});
+
+export default Sidebar;

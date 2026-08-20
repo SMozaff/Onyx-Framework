@@ -12,6 +12,7 @@ import Notifications from "@/pages/Notifications";
 import Login from "@/pages/Login";
 import Settings from "@/pages/Settings";
 import { SessionProvider, type SessionWire } from "@/hooks/useSession";
+import { toUserFacingError, type UserFacingError } from "@/utils/userFacingError";
 
 /**
  * Loads the native persisted session before exposing any operational route.
@@ -22,7 +23,7 @@ import { SessionProvider, type SessionWire } from "@/hooks/useSession";
  */
 export default function App() {
   const [session, setSession] = useState<SessionWire | null | undefined>(undefined);
-  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupError, setStartupError] = useState<UserFacingError | null>(null);
   const [retryToken, setRetryToken] = useState(0);
   const [loginServerAddress, setLoginServerAddress] = useState("http://127.0.0.1:3000");
 
@@ -41,7 +42,7 @@ export default function App() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setStartupError(String(error));
+          setStartupError(toUserFacingError(error));
           setSession(null);
         }
       });
@@ -60,29 +61,13 @@ export default function App() {
     [loginServerAddress, session],
   );
 
-  if (session === undefined) {
-    return <LoadingSession />;
-  }
-
-  if (startupError !== null) {
-    return (
-      <StartupError
-        message={startupError}
-        onRetry={() => setRetryToken((attempt) => attempt + 1)}
-      />
-    );
-  }
-
+  if (session === undefined) return <LoadingSession />;
+  if (startupError !== null) return <StartupError error={startupError} onRetry={() => setRetryToken((attempt) => attempt + 1)} />;
   if (session === null) {
-    return (
-      <Login
-        initialServerAddress={loginServerAddress}
-        onAuthenticated={(authenticated) => {
-          setLoginServerAddress(authenticated.serverAddress);
-          setSession(authenticated);
-        }}
-      />
-    );
+    return <Login initialServerAddress={loginServerAddress} onAuthenticated={(authenticated) => {
+      setLoginServerAddress(authenticated.serverAddress);
+      setSession(authenticated);
+    }} />;
   }
 
   return (
@@ -99,10 +84,7 @@ export default function App() {
           <Route path="/messaging/:conversationId" element={<Messaging />} />
           <Route path="/files" element={<Files />} />
           <Route path="/files/:fileAssetId" element={<Files />} />
-          <Route
-            path="/settings"
-            element={<Settings onRequireReauthentication={logout} />}
-          />
+          <Route path="/settings" element={<Settings onRequireReauthentication={logout} />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -112,32 +94,16 @@ export default function App() {
 }
 
 function LoadingSession() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4 text-sm text-onyx-text-dim">
-      Loading secure session…
-    </div>
-  );
+  return <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4 text-sm text-onyx-text-dim">Loading secure session…</div>;
 }
 
-function StartupError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function StartupError({ error, onRetry }: { error: UserFacingError; onRetry: () => void }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4">
-      <section className="w-full max-w-md rounded-lg border border-onyx-border bg-onyx-surface p-6">
-        <h1 className="text-lg font-semibold text-onyx-text">ONYX could not load its session</h1>
-        <p className="mt-2 text-sm text-onyx-text-dim">
-          The secure session store did not respond. Retry after confirming the desktop credential
-          store is available on this device.
-        </p>
-        <pre className="mt-3 overflow-auto rounded-md bg-onyx-bg p-3 text-xs text-onyx-status-blocked">
-          {message}
-        </pre>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-4 rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white"
-        >
-          Retry
-        </button>
+      <section className="w-full max-w-md rounded-lg border border-onyx-border bg-onyx-surface p-6" role="alert">
+        <h1 className="text-lg font-semibold text-onyx-text">{error.title}</h1>
+        <p className="mt-2 text-sm text-onyx-text-dim">{error.message}</p>
+        <button type="button" onClick={onRetry} className="mt-4 rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white">Retry</button>
       </section>
     </div>
   );
