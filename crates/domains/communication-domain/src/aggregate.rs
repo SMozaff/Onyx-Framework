@@ -620,7 +620,10 @@ impl AggregateRoot for ConnectionRequest {
         command: Self::Command,
         context: &DecisionContext,
     ) -> Result<Vec<Self::Event>, Self::Error> {
-        if !context.authority.is_authorized("communication.connection_request.command") {
+        if !context
+            .authority
+            .is_authorized("communication.connection_request.command")
+        {
             return Err(ConnectionRequestError::Unauthorized(
                 "actor lacks required authority".to_string(),
             ));

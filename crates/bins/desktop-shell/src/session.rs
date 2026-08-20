@@ -130,9 +130,7 @@ pub async fn authenticate(
     }
     if !response.status().is_success() {
         let status = response.status();
-        return Err(SessionError::UnexpectedResponse(format!(
-            "HTTP {status}"
-        )));
+        return Err(SessionError::UnexpectedResponse(format!("HTTP {status}")));
     }
 
     let body: LoginResponseWire = response
@@ -157,7 +155,10 @@ pub async fn authenticate(
 }
 
 /// Persists a session as one JSON blob via `SecureStorage`.
-pub async fn save(storage: &Arc<dyn SecureStorage>, session: &StoredSession) -> Result<(), SessionError> {
+pub async fn save(
+    storage: &Arc<dyn SecureStorage>,
+    session: &StoredSession,
+) -> Result<(), SessionError> {
     let json = serde_json::to_vec(session)
         .map_err(|e| SessionError::Storage(format!("serializing session: {e}")))?;
     storage
