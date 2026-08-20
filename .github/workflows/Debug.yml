@@ -1,0 +1,145 @@
+name: Windows Debug Build (Milestone 1)
+
+# Purpose: produce unsigned, untagged Windows debug artifacts for the
+# internal office test drive — api-server (backend) plus the two Tauri
+# desktop apps (admin-shell, desktop-shell). Deliberately narrower than
+# release.yml: Windows only, no macOS/Linux, no mobile, no signing, no
+# GHCR image publish, no GitHub Release. Manual trigger only; nothing
+# here runs on every push.
+#
+# This does not replace release.yml. It exists because release.yml's
+# manual (workflow_dispatch) path already builds all three platforms —
+# more than this milestone needs — and this workflow is faster and
+# cheaper to run for a Windows-only test drive.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --no-deps
+      # SQLX_OFFLINE builds against the committed .sqlx/ query cache —
+      # no live database needed at compile time, matching
+      # docs/RUN_LOCALLY.md and start-backend.ps1's own build path.
+      - name: Build api-server (debug)
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo build -p api-server
+      - name: Package backend debug binary
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp target/debug/api-server.exe artifacts/
+          cp start-backend.ps1 artifacts/ || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onyx-backend-windows-debug
+          path: artifacts/*
+          if-no-files-found: error
+
+  desktop-shell:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --no-deps
+      - name: Install frontend dependencies
+        working-directory: crates/bins/desktop-shell/ui
+        run: npm ci
+      - name: Build Staff desktop app (debug, unsigned)
+        # No tagName/releaseName/releaseId — build only, no GitHub
+        # release interaction. No Apple/GPG/Tauri signing env vars —
+        # this is an internal debug build, not a release.
+        # tauriScript matches release.yml's confirmed-working fix for
+        # tauri-action's npx resolution problem on Windows.
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/bins/desktop-shell
+          args: --target x86_64-pc-windows-msvc --bundles msi,nsis --debug
+          tauriScript: node ${{ github.workspace }}/crates/bins/desktop-shell/ui/node_modules/@tauri-apps/cli/tauri.js
+      - name: Locate Staff desktop bundle output
+        shell: bash
+        run: |
+          bundle_dir="target/x86_64-pc-windows-msvc/debug/bundle"
+          echo "Bundle contents:"
+          find "$bundle_dir" -maxdepth 2 -type f
+          mkdir -p artifacts
+          find "$bundle_dir" -maxdepth 2 -type f \
+            \( -iname "*.msi" -o -iname "*.exe" \) \
+            -exec cp {} artifacts/ \;
+          shopt -s nullglob
+          bundles=(artifacts/*)
+          if (( ${#bundles[@]} == 0 )); then
+            echo "No Staff desktop bundle was produced" >&2
+            exit 1
+          fi
+          printf 'Collected %s Staff desktop bundle(s)\n' "${#bundles[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onyx-desktop-shell-windows-debug
+          path: artifacts/*
+          if-no-files-found: error
+
+  admin-shell:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/admin-shell/ui/package-lock.json}
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --no-deps
+      - name: Install frontend dependencies
+        working-directory: crates/bins/admin-shell/ui
+        run: npm ci
+      - name: Build Admin desktop app (debug, unsigned)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/bins/admin-shell
+          args: --target x86_64-pc-windows-msvc --bundles msi,nsis --debug
+          tauriScript: node ${{ github.workspace }}/crates/bins/admin-shell/ui/node_modules/@tauri-apps/cli/tauri.js
+      - name: Locate Admin desktop bundle output
+        shell: bash
+        run: |
+          bundle_dir="target/x86_64-pc-windows-msvc/debug/bundle"
+          echo "Bundle contents:"
+          find "$bundle_dir" -maxdepth 2 -type f
+          mkdir -p artifacts
+          find "$bundle_dir" -maxdepth 2 -type f \
+            \( -iname "*.msi" -o -iname "*.exe" \) \
+            -exec cp {} artifacts/ \;
+          shopt -s nullglob
+          bundles=(artifacts/*)
+          if (( ${#bundles[@]} == 0 )); then
+            echo "No Admin desktop bundle was produced" >&2
+            exit 1
+          fi
+          printf 'Collected %s Admin desktop bundle(s)\n' "${#bundles[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onyx-admin-shell-windows-debug
+          path: artifacts/*
+          if-no-files-found: error
