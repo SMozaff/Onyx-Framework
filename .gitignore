@@ -2,3 +2,7 @@
 **/node_modules
 *.db
 *.db-*
+
+# Browser-regression artifacts
+web-ui/playwright-report/
+web-ui/test-results/

@@ -137,14 +137,77 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: web-ui/package-lock.json
       - name: Install dependencies
-        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
-      - run: npm run type-check
-      - run: npm test
-      - run: npm run test:a11y
-      - run: npm run feature-audit
-      - run: npm run build
-      - run: npm run bundle-check
+        run: npm ci
+      - name: Lint (zero warnings)
+        run: npm run lint
+      - name: Type check
+        run: npm run type-check
+      - name: Unit and integration tests
+        run: npm test
+      - name: Accessibility component tests
+        run: npm run test:a11y
+      - name: Feature contract audit
+        run: npm run feature-audit
+      - name: Install Chromium for browser regressions
+        run: npx playwright install --with-deps chromium
+      - name: Browser accessibility, keyboard, state, and visual regressions
+        run: npm run test:browser
+      - name: Production build and bundle budget
+        run: npm run build
+      - name: Upload web quality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onyx-web-quality-${{ github.sha }}
+          path: |
+            web-ui/test-reports/
+            web-ui/playwright-report/
+            web-ui/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-ui-evidence:
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            crates/bins/desktop-shell/ui/package-lock.json
+            crates/bins/admin-shell/ui/package-lock.json
+      - name: Install Staff UI dependencies
+        working-directory: crates/bins/desktop-shell/ui
+        run: npm ci
+      - name: Build Staff UI frontend smoke target
+        working-directory: crates/bins/desktop-shell/ui
+        run: npm run build
+      - name: Install Admin UI dependencies
+        working-directory: crates/bins/admin-shell/ui
+        run: npm ci
+      - name: Build Admin UI frontend smoke target
+        working-directory: crates/bins/admin-shell/ui
+        run: npm run build
+      - name: Write native UI evidence manifest
+        env:
+          UI_EVIDENCE_STATUS: passed
+          UI_EVIDENCE_COMMANDS: |
+            npm ci && npm run build (crates/bins/desktop-shell/ui)
+            npm ci && npm run build (crates/bins/admin-shell/ui)
+        run: node scripts/collect-ui-evidence.mjs artifacts/ui-evidence/native-ui-frontend-smoke.json native-ui-frontend-smoke
+      - name: Upload native UI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onyx-native-ui-evidence-${{ github.sha }}
+          path: artifacts/ui-evidence/
+          if-no-files-found: warn
+          retention-days: 30
 
   load-smoke:
     runs-on: ubuntu-latest

@@ -29,7 +29,6 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
   const addItem = useAddTodoItem();
   const recordPreCheck = useRecordPreCheck(kind);
   const [dialog, setDialog] = useState<'verify' | 'reject' | 'escalate' | null>(null);
-  const [newItemText, setNewItemText] = useState('');
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [preCheckNotes, setPreCheckNotes] = useState('');
 

@@ -4,7 +4,7 @@ import { deriveProjectionState, ProjectionStatePanel } from '../../src/component
 import { normalizeError } from '../../src/utils/errorHandler';
 import type { QueryResponse } from '../../src/types/query';
 
-function queryFixture<T>(overrides: Record<string, unknown>) {
+function queryFixture(overrides: Record<string, unknown>) {
   return {
     data: undefined,
     isPending: false,

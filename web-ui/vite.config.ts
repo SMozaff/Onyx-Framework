@@ -29,6 +29,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: './tests/setup.ts',
+    exclude: ['tests/browser/**', 'node_modules/**', 'dist/**'],
     css: true,
     // `provider` became required by vitest 1.6's coverage types after this
     // config was written against an earlier 1.x. Surfaced by the audit
