@@ -78,3 +78,19 @@ The package-manager audit output reported existing transitive dependency advisor
 - Native evidence generator: `scripts/collect-ui-evidence.mjs`
 - Native smoke procedure: `docs/ui-remediation/NATIVE_UI_SMOKE_EVIDENCE.md`
 - CI quality and evidence jobs: `.github/workflows/ci.yml`
+
+
+## GitHub-hosted validation evidence
+
+The quality implementation was pushed first as `4e062c1`. Its GitHub Actions CI run `32332728269` reached the new web job and uploaded artifact `onyx-web-quality-4e062c1d21c3b227e659e02a85a87187dc44065e` (artifact ID `9393590353`). The new lint, type, existing test, browser keyboard/state/accessibility checks, build, and report upload all completed. The only new-web failure was the original full-text screenshot baseline: GitHub’s rendered heading wrapped differently from the sandbox image, yielding a 10% pixel difference while the foreground contrast and axe assertion passed. The checked-in test was corrected to snapshot the hero background/layout while preserving live text colour and axe assertions separately.
+
+The stable-baseline correction was pushed as `bee8798`. GitHub Actions CI run `32333049774` then completed the new **web** job successfully and completed **native-ui-evidence** successfully. The web quality artifact is `onyx-web-quality-bee8798cfc73718788e3d239935588f39dc81edb` (artifact ID `9393694749`). The native evidence artifact is `onyx-native-ui-evidence-bee8798cfc73718788e3d239935588f39dc81edb` (artifact ID `9393702754`). The downloaded manifest reports schema `1.0`, commit `bee8798cfc73718788e3d239935588f39dc81edb`, Linux x64 runner, GitHub run ID `32333049774`, and both exact Staff/Admin `npm ci && npm run build` commands with `status: passed`.
+
+The overall GitHub run remains red because the pre-existing Rust **check** job fails `cargo fmt --check` on Rust files not changed by either Milestone 3/4 commit, including `crates/bins/api-server/tests/team_leader_precheck_authorization.rs`. The evidence is a rustfmt diff only; no UI, CI quality-gate, or native evidence command fails. This unrelated baseline formatting repair is explicitly flagged rather than being silently folded into this scoped UI quality work.
+
+### Hosted-evidence references
+
+- Quality implementation run: <https://github.com/SMozaff/Onyx-Framwork/actions/runs/32332728269>
+- Stable-baseline validation run: <https://github.com/SMozaff/Onyx-Framwork/actions/runs/32333049774>
+- Hosted web quality artifact: <https://github.com/SMozaff/Onyx-Framwork/actions/runs/32333049774/artifacts/9393694749>
+- Hosted native UI evidence artifact: <https://github.com/SMozaff/Onyx-Framwork/actions/runs/32333049774/artifacts/9393702754>

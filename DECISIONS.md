@@ -2005,3 +2005,124 @@ complete.
 ### References
 
 [1]: https://react.dev/reference/react/useEffect "React useEffect reference (consulted through Context7)"
+
+
+---
+
+## UI/UX remediation — Milestones 3 and 4 — Complete
+
+This increment makes the earlier UI/UX remediation enforceable rather than
+merely documented. It restores the Web UI's declared lint command as a tracked,
+deterministic zero-warning gate; adds real Chromium browser coverage for the
+highest-risk audit repairs; records native frontend smoke evidence as a
+machine-readable artifact; and integrates those checks into ordinary CI. It
+does **not** change tag-triggered publication or silently absorb the separate
+macOS icon asset defect.
+
+**Lint became a real quality gate.** `web-ui/package.json` already declared
+`npm run lint`, but the repository had no tracked ESLint configuration, so the
+command was not reproducible after a fresh checkout. This increment adds
+`web-ui/.eslintrc.cjs` with TypeScript and React Hooks recommended rules,
+explicit generated-artifact exclusions, and `--max-warnings=0`. The first
+real run found two genuine dead declarations: draft item state in
+`TodoTargets/ListDetail.tsx` and an unused generic parameter in the
+projection-state test helper; both were removed without changing behavior.
+The installed TypeScript compiler was 5.9.3 while the old
+`@typescript-eslint` v6 parser printed an unsupported-version warning. The
+parser and plugin were upgraded to v8 in the committed manifest/lockfile, and
+the lint gate now passes without that warning.
+
+**The browser gate covers UI behavior jsdom cannot prove.** Playwright and
+`@axe-core/playwright` are now locked development dependencies. Its two
+projects exercise desktop Chromium and an iPhone-sized Chromium viewport. The
+explicit Chromium override matters: an iPhone device descriptor defaults to
+WebKit, which the first local test run exposed; the configured gate is
+intentionally Chromium-only to match its installed CI runtime. The test
+server uses an isolated port (4179) and refuses to reuse a pre-existing dev
+server, preventing a test from accidentally checking a different checkout.
+
+The test fixture uses only a synthetic session and only intercepts the exact
+`/api/query` pathname. This exact-path requirement was itself caught by
+real-browser diagnosis: the broad pattern initially chosen also matched Vite's
+`src/api/query.ts` module and served JSON as a JavaScript module, producing a
+blank protected route. The corrected fixture preserves Vite module loading and
+makes test data strictly local. The committed browser assertions now cover the
+white browser-login hero heading plus axe scan, mobile drawer focus movement
+and Escape/trigger restoration, failed Mission projection recovery rather
+than a false empty portfolio, and named/keyboard-accessible approval dialog
+behavior with the aligned decision-note policy.
+
+**Visual regression evidence is intentionally cross-environment stable.** The
+initial full-hero screenshot passed locally but failed on GitHub-hosted Linux
+because font metrics wrapped the same heading differently (10% of pixels) even
+though the live CSS foreground assertion and axe check both passed. Instead of
+loosening image-diff tolerance until a real change could slip through, the
+visual baseline now snapshots only the background/layout after semantic text
+colour and real-browser axe checks run on the actual visible text. This is a
+deliberate separation: text accessibility stays semantically enforced, while
+the pixel baseline catches deterministic background/layout changes without
+being a font-rendering proxy. The first run and correction are both recorded
+in the Milestone implementation record, not hidden.
+
+**Native UI smoke evidence has an explicit runtime boundary.** The new
+`scripts/collect-ui-evidence.mjs` records schema version, commit, runner,
+commands, result, and GitHub IDs; critically, its `runtime_claim` states that
+a frontend smoke build does not assert native window launch. The new
+`native-ui-evidence` job runs locked dependency installation and production
+builds for both Staff and Admin frontends after Web quality succeeds, writes
+that manifest, and retains it as a 30-day CI artifact. The complementary
+`docs/ui-remediation/NATIVE_UI_SMOKE_EVIDENCE.md` defines frontend,
+Tauri-matrix, and human target-native evidence levels so artifact consumers do
+not overstate what was observed. It also preserves the no-tag release boundary
+and records the known macOS RGBA icon defect as a separate asset limitation.
+
+**CI integration is limited and deliberate.** The existing Web job now runs
+locked install, lint, type check, existing Vitest/axe/feature suites, Chromium
+installation, browser regression, production build/bundle budget, and a
+14-day report artifact. A separate native evidence job is dependent on that
+Web quality result. `release.yml`, its manual-debug behavior, and all `v*`
+tag publication semantics remain untouched: ordinary CI has no release side
+effect.
+
+**Verification:**
+```
+web-ui: npm run lint                    # clean, zero warnings
+web-ui: npm run type-check              # clean
+web-ui: npm test                        # 138 passed, 7 skipped; 1 existing suite skipped
+web-ui: npm run test:browser            # 4 passed, 4 project-inapplicable skips
+web-ui: npm run build                   # clean; existing bundle check passed
+Staff UI: npm ci && npm run build       # clean
+Admin UI: npm ci && npm run build       # clean
+node scripts/collect-ui-evidence.mjs …  # schema 1.0 manifest verified
+actionlint .github/workflows/ci.yml     # clean
+git diff --check                        # clean
+```
+
+**Hosted validation was read back from GitHub, not inferred.** Initial commit
+`4e062c1` triggered CI run `32332728269`; the new Web job completed every
+quality stage except the font-sensitive full-hero visual baseline and uploaded
+its report artifact (`9393590353`). The documented stable-baseline correction
+`bee8798` then triggered run `32333049774`: the Web job passed and uploaded
+artifact `9393694749`; the dependent native UI evidence job passed and uploaded
+artifact `9393702754`. Downloading that artifact confirmed `status: passed`,
+commit `bee8798cfc73718788e3d239935588f39dc81edb`, Linux x64, GitHub run ID
+`32333049774`, and the two exact Staff/Admin smoke commands. [1] [2]
+
+**Explicit unrelated limitation:** the overall hosted CI run remains red
+because the pre-existing Rust `check` job fails `cargo fmt --check` on Rust
+files not modified by these two commits, including
+`crates/bins/api-server/tests/team_leader_precheck_authorization.rs`. This is a
+rustfmt-only diff; Web quality and native evidence both passed. It is flagged,
+not silently fixed, because repairing unrelated Rust formatting exceeds the
+approved UI quality scope. Package-manager audit output also surfaced existing
+transitive advisories (Web: 7; Staff: 1; Admin: 0); automatic audit fixes are
+similarly deferred to a compatibility-tested security dependency update.
+
+The complete artifact contract, local validation record, hosted evidence
+links, and file-level implementation detail are stored in
+`docs/ui-remediation/MILESTONES_3_4_IMPLEMENTATION.md`.
+
+### References
+
+[1]: https://github.com/SMozaff/Onyx-Framwork/actions/runs/32332728269 "Initial Milestone 3/4 hosted validation"
+[2]: https://github.com/SMozaff/Onyx-Framwork/actions/runs/32333049774 "Stable visual baseline and native evidence validation"
