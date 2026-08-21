@@ -7,62 +7,67 @@ const NAV_ITEMS = [
   { to: "/profiles", label: "Staff Profiles", end: false },
 ];
 
-const linkClasses = (isActive: boolean) =>
-  `block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-    isActive
-      ? "bg-onyx-surface-hover text-onyx-text"
-      : "text-onyx-text-dim hover:bg-onyx-surface-hover hover:text-onyx-text"
-  }`;
-
 /**
- * Header + sidebar shell for the Admin platform. Uses react-router's
- * `<Outlet />` (nested-route children), not a `{children}` prop like
- * `desktop-shell`'s `MainLayout` — this app's `App.tsx` nests routes
- * under this layout via `<Route element={<AdminOnlyLayout />}>` rather
- * than passing children explicitly, since `AdminOnlyLayout` itself
- * needs to conditionally render this layout vs. an access-denied
- * screen (see `App.tsx`'s own doc comment).
- *
- * No sync-status indicator (unlike `desktop-shell`'s `MainLayout`) —
- * this is a thin HTTP client with no local sync engine to report on;
- * shows the logged-in admin's identity and a logout action instead,
- * which is what actually matters for this app.
+ * Header + sidebar shell for the Admin platform. The visual structure matches
+ * the Staff desktop's operational workspace while retaining this app's thin
+ * HTTP-client boundary: it intentionally presents stored identity/context,
+ * not an invented sync or connection status.
  */
 export default function MainLayout() {
   const user = useAuthStore((state) => state.user);
+  const organizationLabel = user ? `Organization ${user.organization_id.slice(0, 8)}…` : "Organization context";
 
   return (
-    <div className="flex h-screen">
-      <aside className="w-56 shrink-0 border-r border-onyx-border bg-onyx-surface p-4">
-        <div className="mb-6 px-2 text-lg font-semibold tracking-tight text-onyx-text">
-          ONYX Admin
+    <div className="flex h-screen overflow-hidden bg-onyx-bg">
+      <aside className="onyx-sidebar flex w-60 shrink-0 flex-col p-3" aria-label="Admin primary navigation">
+        <div className="mb-8 flex items-center gap-2.5 px-2 pt-1">
+          <span className="onyx-brand-mark" aria-hidden="true">O</span>
+          <div>
+            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">ONYX</p>
+            <p className="mt-0.5 text-[0.62rem] text-sky-100/70">Administration</p>
+          </div>
         </div>
-        <nav className="space-y-1">
+
+        <nav className="space-y-1" aria-label="Administrative workspace">
           {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) => linkClasses(isActive)}
-            >
+            <NavLink key={item.to} to={item.to} end={item.end} className="onyx-nav-link">
               {item.label}
             </NavLink>
           ))}
         </nav>
+
+        <div className="mt-auto space-y-3 px-1 pb-1">
+          <div className="onyx-sidebar-note">
+            <p className="text-xs font-semibold text-white">Admin platform</p>
+            <p className="mt-1 text-[0.68rem] leading-4">Policy, identity, and staff-profile controls are organization-scoped.</p>
+          </div>
+          <p className="px-2 text-[0.64rem] text-sky-100/65">Connection settings are verified before they are saved.</p>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-end gap-3 border-b border-onyx-border px-6">
-          <span className="text-sm text-onyx-text-dim">{user?.username}</span>
-          <button
-            type="button"
-            onClick={() => useAuthStore.getState().logout()}
-            className="rounded-md bg-onyx-surface px-3 py-1.5 text-xs text-onyx-text hover:bg-onyx-surface-hover"
-          >
-            Log out
-          </button>
+        <header className="onyx-workspace-header flex min-h-16 shrink-0 items-center justify-between gap-4 border-b border-onyx-border px-5 sm:px-7">
+          <div className="min-w-0">
+            <p className="text-[0.63rem] font-bold uppercase tracking-[0.14em] text-onyx-text-dim">Organization</p>
+            <p className="truncate text-sm font-semibold text-onyx-text" title={user?.organization_id}>{organizationLabel}</p>
+            <p className="mt-0.5 text-[0.65rem] text-onyx-text-dim">Administrative control plane</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="onyx-state-chip bg-sky-50 text-onyx-accent">Admin session</span>
+            <div className="hidden border-l border-onyx-border pl-3 text-right sm:block">
+              <p className="text-xs font-semibold text-onyx-text">{user?.username}</p>
+              <p className="text-[0.64rem] text-onyx-text-dim">Administrator</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => useAuthStore.getState().logout()}
+              className="rounded-md border border-onyx-border bg-white px-3 py-1.5 text-xs font-bold text-onyx-text transition-colors hover:bg-onyx-surface-hover"
+            >
+              Sign out
+            </button>
+          </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-auto p-6">
+        <main className="min-h-0 flex-1 overflow-auto p-5 sm:p-7 lg:p-8">
           <Outlet />
         </main>
       </div>

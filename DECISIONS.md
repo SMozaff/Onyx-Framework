@@ -2126,3 +2126,103 @@ links, and file-level implementation detail are stored in
 
 [1]: https://github.com/SMozaff/Onyx-Framwork/actions/runs/32332728269 "Initial Milestone 3/4 hosted validation"
 [2]: https://github.com/SMozaff/Onyx-Framwork/actions/runs/32333049774 "Stable visual baseline and native evidence validation"
+
+
+---
+
+## Native desktop visual redesign — Staff and Admin shells — Complete
+
+The Staff desktop shell (`crates/bins/desktop-shell/ui`) and the distinct Admin
+desktop shell (`crates/bins/admin-shell/ui`) have been redesigned from the
+current minimal dark-console presentation into a shared ONYX operational
+workspace. The user supplied two ONYX reference compositions: a deep-navy,
+left-navigation operations view with a white/blue-grey workspace, and a
+split, navy-and-white sign-in view. The implementation adopts that visual
+language rather than copying browser-only product claims into native clients.
+
+**Shared design system:** Both native `index.css` files now define the same
+light operational tokens: blue-white work canvas, white cards, navy primary
+text, blue primary actions, readable semantic status colours, visible
+focus-ring treatment, a deep-navy branded side plane, high-contrast active
+navigation state, connection/session chips, and split authentication layout
+primitives. Existing semantic Tailwind class names (`onyx-text`,
+`onyx-surface`, `onyx-status-blocked`, and so on) were preserved and remapped
+rather than globally replacing page markup. This deliberately restyles the
+many existing card, form, table, dialog, safe-error, and status surfaces while
+keeping their behavior and their semantic state mapping intact.
+
+**Staff desktop:** `MainLayout` now presents the authenticated native workspace
+as an ONYX staff-operations shell: branded sidebar, contextual organization
+header sourced from the authenticated session, session identity, visible
+connection chip, and an offline-only alert banner. The alert says that commands
+are not queued only when the actual Tauri sync-status value reports offline;
+it does not manufacture a connectivity state. All prior responsive drawer
+behavior is retained: the button reports expanded state, the closed nav becomes
+inert, first-link focus is restored on open, Escape closes the drawer, and
+focus returns to the trigger. Existing sync polling, conflict/pending counts,
+logout handling, and safe mapped logout error remain unchanged.
+
+The Staff login now uses the split visual composition while retaining every
+pre-existing authentication and recovery behavior: `login` still uses the
+native command, server-address validation still requires an HTTP(S) URL,
+network failures expose the connection controls, the health test still avoids
+persisting an unreachable address, and user-facing errors remain safely mapped.
+The authentication form now has stronger labelled controls, an explicit native
+session-security explanation, a visible primary action, and an accessible
+expanded connection-settings state.
+
+**Admin desktop:** The Admin shell receives the same workspace framing, but
+truthfully remains a thin HTTP client: its header presents the authenticated
+user and organization identifier held in its session, not a fictitious sync or
+connection indication. The existing HTTP logout behavior and nested router
+`Outlet` remain intact. Its login uses the matching split composition while
+continuing to delegate server setup to `ConnectionSettings`, whose test-before-
+save behavior is unchanged. The Users page, as the primary dense administrative
+surface, was additionally refined with an identity-management heading,
+labelled username/password/class controls, a clear administrator-access
+checkbox, a stronger primary action, and a bounded white data table. No API
+request shape, user-management behavior, or safe error path changed.
+
+**Explicit design choices:**
+- The native labels are deliberately `Staff operations` and `Administration`,
+  not the reference browser client's `Remote Operator`, because the apps have
+  different client contracts.
+- Organization labels use authenticated identifier values shortened only for
+  display, with the complete UUID in the title attribute; no hard-coded
+  organization name was introduced.
+- The Admin header's `Admin session` chip signals an authenticated UI session,
+  not reachability. Server reachability remains the responsibility of the
+  existing explicit test-before-save interaction.
+- The user references informed colour, hierarchy, shell geometry, and
+  authentication composition only. No reference image asset was copied,
+  altered, or embedded in the application.
+
+**Verification:**
+```
+Staff UI: npm ci && npm run build          # clean (TypeScript + Vite)
+Admin UI: npm ci && npm run build          # clean (TypeScript + Vite)
+Staff UI: npm run lint                     # 0 warnings, 0 errors
+Admin UI: npm run lint                     # 0 warnings, 0 errors
+git diff --check                           # clean
+```
+
+**Live visual evidence:** The Admin `/login` and authenticated `/users` shell
+were rendered in a local Vite preview with synthetic browser-only session data;
+the preview confirmed the navy branded access plane, white form/work surface,
+active navigation contrast, organization/identity header, clear labelled
+user-creation card, and safe API-failure message when no backend was present.
+The Staff browser preview intentionally stopped at its existing safe native
+startup-error view: unlike Admin, Staff correctly invokes Tauri's
+`get_current_session` before it exposes login or operational content, and a
+plain browser has no native command provider. This is a verification boundary,
+not a fallback to fake desktop session data. The production Staff build passed;
+Tauri-window visual launch remains a separate native-runtime evidence level.
+The full preview record is in
+`docs/ui-remediation/DESKTOP_REDIRECT_PREVIEW_NOTES.md`.
+
+**Scope boundary:** This work intentionally does not change desktop Rust,
+Tauri packaging, release workflows, server contracts, connection semantics,
+or the separate production deployment blockers. The Staff UI's package audit
+continues to report one existing high-severity dependency advisory after locked
+installation; dependency remediation remains a separate compatibility-tested
+security task.

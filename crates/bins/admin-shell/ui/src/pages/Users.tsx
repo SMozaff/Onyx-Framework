@@ -49,8 +49,10 @@ export default function Users() {
   }, []);
 
   return (
-    <div className="max-w-5xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Users</h1>
+    <div className="max-w-6xl">
+      <p className="text-[0.66rem] font-extrabold tracking-[0.15em] text-onyx-accent">IDENTITY MANAGEMENT</p>
+      <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-onyx-text">Users</h1>
+      <p className="mt-1 text-sm text-onyx-text-dim">Create, classify, and maintain organization access with explicit account state.</p>
 
       <CreateUserForm onCreated={() => void refresh()} />
 
@@ -58,9 +60,9 @@ export default function Users() {
       {users === null && !error && <p className="mt-4 text-sm text-onyx-text-dim">Loading…</p>}
 
       {users && (
-        <div className="mt-6 overflow-x-auto rounded-lg border border-onyx-border">
+        <div className="mt-6 overflow-x-auto rounded-xl border border-onyx-border bg-white shadow-sm">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-onyx-border bg-onyx-surface text-onyx-text-dim">
+            <thead className="border-b border-onyx-border bg-slate-50 text-onyx-text-dim">
               <tr>
                 <th className="px-3 py-2 font-medium">Username</th>
                 <th className="px-3 py-2 font-medium">Admin</th>
@@ -116,49 +118,64 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <div className="mt-4 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Create user</h2>
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="Username"
-          className="rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
-        />
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          type="password"
-          placeholder="Password"
-          className="rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
-        />
-        <select
-          value={userClass}
-          onChange={(e) => setUserClass(e.target.value)}
-          className="rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
-        >
-          <option value="">No class</option>
-          {USER_CLASSES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        <label className="flex items-center gap-2 text-sm text-onyx-text-dim">
+    <section className="mt-6 rounded-xl border border-onyx-border bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold text-onyx-text">Create user</h2>
+          <p className="mt-1 text-xs text-onyx-text-dim">New accounts receive only the classification and administrator access selected here.</p>
+        </div>
+        <span className="onyx-state-chip bg-sky-50 text-onyx-accent">New account</span>
+      </div>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <label className="block text-xs font-bold text-onyx-text">
+          Username
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none"
+          />
+        </label>
+        <label className="block text-xs font-bold text-onyx-text">
+          Initial password
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            placeholder="Password"
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none"
+          />
+        </label>
+        <label className="block text-xs font-bold text-onyx-text">
+          Operational class
+          <select
+            value={userClass}
+            onChange={(e) => setUserClass(e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
+          >
+            <option value="">No class</option>
+            {USER_CLASSES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="mt-6 flex items-center gap-2 rounded-lg border border-onyx-border bg-slate-50 px-3 py-2.5 text-sm font-semibold text-onyx-text">
           <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
-          Admin
+          Grant administrator access
         </label>
       </div>
-      {error && <p className="mt-2 text-xs text-onyx-status-blocked">{error}</p>}
+      {error && <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-onyx-status-blocked" role="alert">{error}</p>}
       <button
         type="button"
         onClick={() => void create()}
         disabled={loading || !username || !password}
-        className="mt-3 rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+        className="mt-5 rounded-lg bg-onyx-accent px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#174d7b] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Creating…" : "Create user"}
       </button>
-    </div>
+    </section>
   );
 }
 

@@ -1,35 +1,219 @@
 @import "tailwindcss";
 
-/* ONYX design tokens — deliberately minimal (a functional operations
-   console, not a marketing site). Tailwind v4 is CSS-first: this
-   @theme block is the entire "theme config" (no tailwind.config.js —
-   see DECISIONS.md for why: Tailwind v4 removed the JS config file in
-   favor of this, verified against the real, current Tailwind docs
-   before setting the project up this way). */
+/*
+ * ONYX desktop operational design system.
+ *
+ * The native applications intentionally use the same visual language as the
+ * supplied ONYX references: a stable deep-navy navigation plane, a quiet
+ * blue-white work surface, concise hierarchy, and clear connection/decision
+ * states. The tokens keep existing semantic utility classes intact so safe
+ * error messages, focus states, dialogs, and status badges retain their
+ * behavior while receiving the new presentation.
+ */
 @theme {
-  --color-onyx-bg: #0b0d12;
-  --color-onyx-surface: #14171f;
-  --color-onyx-surface-hover: #1b1f2a;
-  --color-onyx-border: #262b38;
-  --color-onyx-text: #e4e6eb;
-  --color-onyx-text-dim: #8b93a7;
-  --color-onyx-accent: #4f8cff;
+  --color-onyx-bg: #f3f7fb;
+  --color-onyx-surface: #ffffff;
+  --color-onyx-surface-hover: #e8f0f8;
+  --color-onyx-border: #d8e2ec;
+  --color-onyx-text: #102b4d;
+  --color-onyx-text-dim: #5d7088;
+  --color-onyx-accent: #1f6098;
 
-  --color-onyx-status-draft: #8b93a7;
-  --color-onyx-status-active: #4f8cff;
-  --color-onyx-status-review: #d9a441;
-  --color-onyx-status-approved: #3fb27f;
-  --color-onyx-status-blocked: #e5484d;
-  --color-onyx-status-closed: #5c6270;
+  --color-onyx-status-draft: #667991;
+  --color-onyx-status-active: #226aa5;
+  --color-onyx-status-review: #a47718;
+  --color-onyx-status-approved: #247b59;
+  --color-onyx-status-blocked: #b4232c;
+  --color-onyx-status-closed: #64748b;
+}
+
+:root {
+  color: var(--color-onyx-text);
+  background: var(--color-onyx-bg);
+  font-synthesis: none;
 }
 
 body {
   margin: 0;
-  background-color: var(--color-onyx-bg);
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(206, 225, 241, 0.55), transparent 28rem),
+    var(--color-onyx-bg);
   color: var(--color-onyx-text);
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(31, 96, 152, 0.34);
+  outline-offset: 2px;
 }
 
 #root {
   min-height: 100vh;
+}
+
+.onyx-brand-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 0.62rem;
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.onyx-sidebar {
+  background:
+    radial-gradient(circle at 24% 8%, rgba(47, 115, 176, 0.32), transparent 15rem),
+    linear-gradient(180deg, #092a52 0%, #062044 100%);
+  box-shadow: 8px 0 24px rgba(15, 42, 77, 0.08);
+}
+
+.onyx-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  padding: 0.64rem 0.72rem;
+  color: rgba(230, 241, 251, 0.8);
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.onyx-nav-link::before {
+  width: 0.25rem;
+  height: 0.25rem;
+  flex: none;
+  border-radius: 999px;
+  background: rgba(200, 222, 240, 0.7);
+  content: "";
+}
+
+.onyx-nav-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.onyx-nav-link[aria-current="page"] {
+  border-color: rgba(255, 255, 255, 0.7);
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(2, 23, 54, 0.17);
+  color: #102b4d;
+}
+
+.onyx-nav-link[aria-current="page"]::before {
+  background: #1f6098;
+}
+
+.onyx-sidebar-note {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.75rem;
+  color: rgba(230, 241, 251, 0.76);
+}
+
+.onyx-workspace-header {
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 1px 0 rgba(16, 43, 77, 0.07);
+}
+
+.onyx-connection-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.15rem;
+  background: #8e1b20;
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.onyx-state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  border-radius: 999px;
+  padding: 0.33rem 0.64rem;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.onyx-state-chip--online {
+  background: #e5f5ed;
+  color: #196446;
+}
+
+.onyx-state-chip--offline {
+  background: #fce9eb;
+  color: #9f2028;
+}
+
+.onyx-auth-shell {
+  min-height: 100vh;
+  background: #f5f8fc;
+}
+
+.onyx-auth-aside {
+  position: relative;
+  display: flex;
+  min-height: 20rem;
+  flex: 1 1 47%;
+  flex-direction: column;
+  overflow: hidden;
+  padding: clamp(2rem, 6vw, 4.5rem);
+  background:
+    radial-gradient(circle at 22% 17%, rgba(73, 142, 201, 0.52), transparent 15rem),
+    radial-gradient(circle at 76% 88%, rgba(18, 75, 126, 0.4), transparent 22rem),
+    linear-gradient(145deg, #092a52, #062044 72%);
+  color: white;
+}
+
+.onyx-auth-aside::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(3, 26, 57, 0.22));
+  content: "";
+  pointer-events: none;
+}
+
+.onyx-auth-copy {
+  position: relative;
+  z-index: 1;
+  margin: auto 0;
+  max-width: 29rem;
+}
+
+.onyx-auth-card {
+  width: min(100%, 25rem);
+  border: 1px solid #e0e8f0;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 24px 55px rgba(28, 55, 87, 0.16);
+}
+
+@media (max-width: 760px) {
+  .onyx-auth-aside {
+    min-height: 18rem;
+  }
 }
