@@ -2247,7 +2247,7 @@ account automatically on first startup, exactly once, guarded by
 bootstrap used, just automatic instead of requiring a token + HTTP call.
 
 - Username: `All-Father` (as given)
-- Password: `passvord000` — **not** the literal `passvord` given. The
+- Password: `passvord0000` — **not** the literal `passvord` given. The
   shared `PasswordHasher::hash()` (security-adapter/src/password.rs) enforces
   a hard 12-character `MIN_PASSWORD_LENGTH` before hashing anything, and
   `passvord` is 8 characters. Calling it as given would return `Err`, and

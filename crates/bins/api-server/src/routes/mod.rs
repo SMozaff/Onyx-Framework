@@ -309,13 +309,13 @@ impl ApiState {
         // too — a riskier, broader change than a single seeded login).
         //
         // Resolution taken: the stored/actual login password is
-        // "passvord000" (the literal 8 characters requested, with a fixed,
-        // visible "000" appended solely to clear the 12-char floor). This
+        // "passvord0000" (the literal 8 characters requested, with a fixed,
+        // visible "0000" appended solely to clear the 12-char floor). This
         // is a deviation from the literal 8-character string given, made
         // to avoid a startup crash, and is called out here explicitly
         // rather than silently substituted.
         const SEEDED_ADMIN_USERNAME: &str = "All-Father";
-        const SEEDED_ADMIN_PASSWORD: &str = "passvord000";
+        const SEEDED_ADMIN_PASSWORD: &str = "passvord0000";
         //
         // SECURITY NOTE, stated plainly and not glossed over: this seed
         // also removes the fail-closed, token-gated, one-time bootstrap
