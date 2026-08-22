@@ -1,5 +1,6 @@
 # ONYX — Mission Operations Platform
 https://onyxcase-bxl5ndbk.manus.space
+https://ox-workflow.github.io/
 
 A local‑first, authority‑aware mission operations system.
 
