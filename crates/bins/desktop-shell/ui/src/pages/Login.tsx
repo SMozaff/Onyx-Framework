@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { isShellError, type ShellError } from "@/types/onyx";
 import { userFacingMessage } from "@/utils/userFacingError";
 import type { SessionWire } from "@/hooks/useSession";
+import onyxLogo from "@/assets/onyx-logo.png";
 
 const DEFAULT_SERVER_ADDRESS = "http://127.0.0.1:3000";
 
@@ -103,8 +104,8 @@ export default function Login({
   return (
     <div className="onyx-auth-shell flex flex-col lg:flex-row">
       <section className="onyx-auth-aside" aria-labelledby="staff-signin-context">
-        <div className="relative z-10 flex items-center gap-2.5">
-          <span className="onyx-brand-mark" aria-hidden="true">O</span>
+        <div className="relative z-10 flex items-center gap-3">
+          <img src={onyxLogo} alt="ONYX" className="h-11 w-11 shrink-0 object-contain" />
           <div>
             <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">ONYX</p>
             <p className="mt-0.5 text-[0.62rem] text-sky-100/70">Staff operations</p>

@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SyncStatus } from "@/types/onyx";
 import { useSession } from "@/hooks/useSession";
 import { userFacingMessage } from "@/utils/userFacingError";
+import onyxLogoHorizontal from "@/assets/onyx-logo-horizontal.png";
 
 const NAV_ITEMS = [
   { to: "/", label: "Overview", end: true },
@@ -174,7 +175,7 @@ export default function MainLayout({ children, onLogout }: { children: ReactNode
           </div>
         )}
         <header className="onyx-workspace-header flex min-h-16 shrink-0 items-center justify-between gap-4 border-b border-onyx-border px-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-4">
             {narrow && (
               <button
                 ref={menuButtonRef}
@@ -188,7 +189,8 @@ export default function MainLayout({ children, onLogout }: { children: ReactNode
                 Menu
               </button>
             )}
-            <div className="min-w-0">
+            <img src={onyxLogoHorizontal} alt="ONYX" className="hidden h-6 w-auto shrink-0 sm:block" />
+            <div className="min-w-0 sm:border-l sm:border-onyx-border sm:pl-4">
               <p className="text-[0.63rem] font-bold uppercase tracking-[0.14em] text-onyx-text-dim">Organization</p>
               <p className="truncate text-sm font-semibold text-onyx-text" title={session.organizationIdText}>{organizationLabel}</p>
               <p className="mt-0.5 text-[0.65rem] text-onyx-text-dim">Native operational workspace</p>
