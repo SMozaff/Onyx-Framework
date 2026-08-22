@@ -2226,3 +2226,71 @@ or the separate production deployment blockers. The Staff UI's package audit
 continues to report one existing high-severity dependency advisory after locked
 installation; dependency remediation remains a separate compatibility-tested
 security task.
+
+## Fixed seeded admin account replaces token-gated bootstrap — Complete, security tradeoff explicit
+
+**Context.** The only way to create the first admin account was previously
+`POST /api/admin/bootstrap` (routes/admin.rs): disabled unless
+`ONYX_BOOTSTRAP_TOKEN` is set on the server, constant-time token check,
+refuses forever once any user exists. This blocked a Windows Codex agent
+session trying to establish admin-shell credentials — its own tool hit a
+Windows Credential Manager "secret longer than platform limit" error
+(2,560-char native secret-storage cap) while attempting to store/generate a
+token for this flow. Rather than debug that tool-side error, the person
+explicitly instructed: define a fixed username/password for the admin
+platform and remove the token-bootstrap requirement, and to not worry about
+the security implications of doing so.
+
+**What changed.** `ApiState::new` (routes/mod.rs) now seeds a fixed admin
+account automatically on first startup, exactly once, guarded by
+`user_store.count().await? == 0` — the same one-time semantics the token
+bootstrap used, just automatic instead of requiring a token + HTTP call.
+
+- Username: `All-Father` (as given)
+- Password: `passvord000` — **not** the literal `passvord` given. The
+  shared `PasswordHasher::hash()` (security-adapter/src/password.rs) enforces
+  a hard 12-character `MIN_PASSWORD_LENGTH` before hashing anything, and
+  `passvord` is 8 characters. Calling it as given would return `Err`, and
+  because this runs during server startup before `ApiState::new` returns,
+  that error would abort the entire api-server boot, not just fail the seed
+  step. There is no lower-level bypass of that policy exposed from
+  `routes/mod.rs` without editing `PasswordHasher` itself — a shared
+  primitive used by every other account's password, judged a broader and
+  riskier change than a single seeded login. Resolution: the literal
+  8 characters requested, with a fixed, visible `000` appended solely to
+  clear the 12-character floor. Disclosed here rather than silently
+  substituted.
+- Stored via the same Argon2id `PasswordHasher` path every other account
+  uses — only the plaintext choice is fixed, not the hashing/storage
+  mechanism.
+- `is_admin: true`, `is_manager: false`, `class: None`, `parent_user_id: None`.
+
+**Security tradeoff — stated plainly, not glossed over.** This removes the
+fail-closed, token-gated, one-time protection the bootstrap endpoint
+provided for the *first* admin account. That account now exists with a
+fixed, publicly-known (to anyone with this source or binary) password the
+moment the server starts against an empty database — no token, no HTTP call,
+no secret required. This is acceptable *only* for the internal, non-public
+office test-drive this milestone targets. It was implemented as explicitly
+instructed despite this tradeoff being raised beforehand.
+
+**What was NOT touched.** `/api/admin/bootstrap` itself (routes/admin.rs) is
+untouched and still works exactly as it did before, for any *additional*
+account beyond the seeded one. It will correctly refuse to create a second
+"first" admin once the seeded account exists (`BOOTSTRAP_ALREADY_COMPLETED`),
+same as it always has once any user exists — this is pre-existing behavior,
+not new. No frontend (`admin-shell` or `desktop-shell`) code was touched;
+this is a backend (`api-server`) seeding change only. `seed_if_empty`'s
+existing mission/task/notification/approval/report fixture seeding is
+unchanged and unrelated — this is a separate seed added after `user_store`
+and `password_hasher` both exist (`seed_if_empty` only has a raw SQLite pool
+and runs earlier, before either exists, so the new logic could not be added
+there).
+
+**Not yet verified — real build/run still needed.** This has been written
+and read back for compile-plausibility (types, trait signatures, and
+`?`-conversion paths for `UserStoreError`/`PasswordError` were checked
+against source, not assumed) but has **not** been compiled, run, or logged
+into on a real machine. Per standing project rule, verification happens via
+Manus AI's sandbox or the `Debug.yml` GitHub Actions workflow, not in this
+environment.

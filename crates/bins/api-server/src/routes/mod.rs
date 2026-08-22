@@ -278,6 +278,80 @@ impl ApiState {
                 )
             };
 
+        let password_hasher = Arc::new(PasswordHasher::new());
+
+        // --- Fixed seeded admin account (replaces token-gated bootstrap) ---
+        //
+        // Per explicit instruction this session: the one-time
+        // `POST /api/admin/bootstrap` flow (token-gated, see
+        // routes/admin.rs) was blocking a Windows Codex agent run with a
+        // Windows Credential Manager "secret longer than platform limit"
+        // error while it tried to establish admin-shell credentials. Rather
+        // than debug that further, a fixed admin account is now seeded
+        // automatically on first startup (when the `users` table is empty),
+        // exactly once, the same way `seed_if_empty` above seeds mission/
+        // task/notification fixtures.
+        //
+        // Username: "All-Father"
+        // Password, as literally requested: "passvord"
+        //
+        // BLOCKING ISSUE FOUND WHILE IMPLEMENTING, disclosed rather than
+        // silently worked around: the shared `PasswordHasher::hash()` used
+        // everywhere else in this codebase enforces a hard 12-character
+        // minimum (`MIN_PASSWORD_LENGTH`, security-adapter/src/password.rs)
+        // before it will hash anything. "passvord" is 8 characters, so
+        // calling it as-is returns `Err` and — because this runs during
+        // server startup, before `Ok(Self { .. })` — that error would abort
+        // the ENTIRE api-server boot via `?`, not just this seed step.
+        // There is no lower-level "hash without policy check" method
+        // exposed to bypass this from here without editing the shared
+        // PasswordHasher itself (used by every other account's password
+        // too — a riskier, broader change than a single seeded login).
+        //
+        // Resolution taken: the stored/actual login password is
+        // "passvord000" (the literal 8 characters requested, with a fixed,
+        // visible "000" appended solely to clear the 12-char floor). This
+        // is a deviation from the literal 8-character string given, made
+        // to avoid a startup crash, and is called out here explicitly
+        // rather than silently substituted.
+        const SEEDED_ADMIN_USERNAME: &str = "All-Father";
+        const SEEDED_ADMIN_PASSWORD: &str = "passvord000";
+        //
+        // SECURITY NOTE, stated plainly and not glossed over: this seed
+        // also removes the fail-closed, token-gated, one-time bootstrap
+        // protection for the *first* admin account specifically — that
+        // account now exists with a fixed, known password the moment the
+        // server starts against an empty database, no token or HTTP call
+        // required. Anyone with a copy of this source or binary knows the
+        // login. Acceptable only for the internal, non-public office
+        // test-drive this milestone targets — explicitly requested despite
+        // this tradeoff being raised. `/api/admin/bootstrap` itself
+        // (routes/admin.rs) is untouched and still works exactly as before
+        // for any *additional* accounts; it will just correctly refuse to
+        // create a second "first" admin once this seeded one exists
+        // (BOOTSTRAP_ALREADY_COMPLETED), same as it always has once any
+        // user exists.
+        if user_store.count().await? == 0 {
+            let password_hash = password_hasher
+                .hash(SEEDED_ADMIN_PASSWORD)
+                .map_err(|e| anyhow::anyhow!("failed to hash seeded admin password: {e}"))?;
+            user_store
+                .create(security_application::NewUser {
+                    user_id: uuid::Uuid::new_v4().to_string(),
+                    username: SEEDED_ADMIN_USERNAME.to_string(),
+                    organization_id: ORGANIZATION_ID.to_string(),
+                    password_hash,
+                    is_admin: true,
+                    is_manager: false,
+                    class: None,
+                    parent_user_id: None,
+                })
+                .await?;
+            tracing::warn!(
+                "seeded fixed admin account 'All-Father' (see routes/mod.rs comment for context/tradeoff)"
+            );
+        }
+
         Ok(Self {
             projection_pool,
             notification_repo,
@@ -297,7 +371,7 @@ impl ApiState {
             audit_writer,
             metrics: Metrics::new("onyx_api_server")?,
             user_store,
-            password_hasher: Arc::new(PasswordHasher::new()),
+            password_hasher,
             relay_registry: relay::RelayRegistry::new(),
         })
     }
