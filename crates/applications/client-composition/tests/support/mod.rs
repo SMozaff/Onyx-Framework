@@ -84,6 +84,29 @@ impl Default for InMemoryIdempotencyStore {
     }
 }
 
+/// Test double for `api_server::OwnerAuthority`, unconditionally
+/// authorizing every actor/owner pair. None of these end-to-end tests
+/// exercise the owner-gated commands (`ApproveTask`/`RejectTask`/
+/// `RejectApproval`/`ActivateMission`) — they only need *some* concrete
+/// `Arc<dyn OwnerAuthority>` to satisfy `TaskDecisionHandler::new`/
+/// `MissionDecisionHandler::new`'s now-required parameter, added
+/// alongside the real authorization fix (see `DECISIONS.md`). Allow-all
+/// rather than deny-all specifically so a future test that *does* add
+/// coverage for those commands isn't silently blocked by this test
+/// double if it forgets to swap it out.
+pub struct AllowAllOwnerAuthority;
+
+#[async_trait::async_trait]
+impl api_server::OwnerAuthority for AllowAllOwnerAuthority {
+    async fn is_authorized(
+        &self,
+        _actor: platform_kernel::UserId,
+        _owner: platform_kernel::UserId,
+    ) -> bool {
+        true
+    }
+}
+
 #[async_trait::async_trait]
 impl query_application::IdempotencyStore for InMemoryIdempotencyStore {
     async fn get(

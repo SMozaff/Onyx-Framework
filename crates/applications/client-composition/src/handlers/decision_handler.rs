@@ -12,10 +12,28 @@ use crate::command_registry::{CommandResult, DecisionHandler};
 
 /// Wraps `api_server::handle_command` for `Mission`, for every
 /// `MissionCommand` variant other than `CreateMission`.
+///
+/// `owner_authority` closes a real, confirmed gap (see `hierarchy.rs`'s
+/// module doc in `desktop-shell` for the full history): `RejectApproval`
+/// and `ActivateMission` previously had no check on *who* could issue
+/// them. `RequestApproval` is deliberately NOT gated by this — it is
+/// the mission owner asking for approval on their own work, not a
+/// decision about someone else's, so `owner_authority` (which answers
+/// "is actor this owner's manager?") is the wrong question for it; a
+/// self-only check would be the right one, but that is out of scope for
+/// this fix (confirmed with the person — only RejectApproval and
+/// ActivateMission were asked for). `ActivateMission` is gated
+/// regardless of source status (`Planning`/`AwaitingApproval`/`Review`
+/// are all currently accepted identically — see this crate's own
+/// `mission_domain::aggregate` comment: the "Approval received" guard on
+/// that transition is a documented Increment-1 stub that always passes,
+/// meaning `ActivateMission` could otherwise bypass `RequestApproval`/
+/// `RejectApproval` entirely by calling it directly from `Planning`).
 pub struct MissionDecisionHandler {
     repo: Arc<dyn Repository>,
     unit_factory: Arc<dyn UnitOfWorkFactory>,
     idempotency_store: Arc<dyn IdempotencyStore>,
+    owner_authority: Arc<dyn api_server::OwnerAuthority>,
 }
 
 impl MissionDecisionHandler {
@@ -23,11 +41,13 @@ impl MissionDecisionHandler {
         repo: Arc<dyn Repository>,
         unit_factory: Arc<dyn UnitOfWorkFactory>,
         idempotency_store: Arc<dyn IdempotencyStore>,
+        owner_authority: Arc<dyn api_server::OwnerAuthority>,
     ) -> Self {
         Self {
             repo,
             unit_factory,
             idempotency_store,
+            owner_authority,
         }
     }
 }
@@ -49,6 +69,24 @@ impl DecisionHandler for MissionDecisionHandler {
         let command: mission_domain::MissionCommand =
             serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
 
+        // Only these two variants are owner-gated decisions — see the
+        // struct's own doc comment for why RequestApproval is excluded.
+        // Checked by variant here, not inside `handle_command` itself,
+        // since that function receives `command: C` fully generically
+        // and has no way to inspect which specific variant this is.
+        let owner_check: api_server::OwnerCheck<mission_domain::Mission> = if matches!(
+            command,
+            mission_domain::MissionCommand::RejectApproval { .. }
+                | mission_domain::MissionCommand::ActivateMission { .. }
+        ) {
+            Some((
+                Box::new(|m: &mission_domain::Mission| m.owner_id()),
+                Arc::clone(&self.owner_authority),
+            ))
+        } else {
+            None
+        };
+
         api_server::handle_command::<mission_domain::Mission, _, _, _>(
             command,
             target_id,
@@ -63,6 +101,7 @@ impl DecisionHandler for MissionDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            owner_check,
         )
         .await
     }
@@ -70,10 +109,18 @@ impl DecisionHandler for MissionDecisionHandler {
 
 /// Wraps `api_server::handle_command` for `Task`, for every `TaskCommand`
 /// variant other than `CreateTask`.
+///
+/// `owner_authority` closes the real, confirmed gap this session found:
+/// `ApproveTask`/`RejectTask` previously had no check at all on *who*
+/// was issuing them (only on the task's own status). See
+/// `desktop-shell::hierarchy`'s module doc for the full history and
+/// `MissionDecisionHandler`'s doc comment for the equivalent Mission-side
+/// fix and why its scope differs slightly.
 pub struct TaskDecisionHandler {
     repo: Arc<dyn Repository>,
     unit_factory: Arc<dyn UnitOfWorkFactory>,
     idempotency_store: Arc<dyn IdempotencyStore>,
+    owner_authority: Arc<dyn api_server::OwnerAuthority>,
 }
 
 impl TaskDecisionHandler {
@@ -81,11 +128,13 @@ impl TaskDecisionHandler {
         repo: Arc<dyn Repository>,
         unit_factory: Arc<dyn UnitOfWorkFactory>,
         idempotency_store: Arc<dyn IdempotencyStore>,
+        owner_authority: Arc<dyn api_server::OwnerAuthority>,
     ) -> Self {
         Self {
             repo,
             unit_factory,
             idempotency_store,
+            owner_authority,
         }
     }
 }
@@ -107,6 +156,24 @@ impl DecisionHandler for TaskDecisionHandler {
         let command: work_domain::TaskCommand =
             serde_json::from_value(payload).map_err(api_server::CommandError::Serialization)?;
 
+        // Only these two variants are owner-gated decisions — every
+        // other TaskCommand (StartTask, PauseTask, AssignOwner, ...) is
+        // unaffected. SubmitCompletion is deliberately excluded, same
+        // reasoning as Mission's RequestApproval: it is the task owner
+        // acting on their own work, not a decision about someone else's.
+        let owner_check: api_server::OwnerCheck<work_domain::Task> = if matches!(
+            command,
+            work_domain::TaskCommand::ApproveTask { .. }
+                | work_domain::TaskCommand::RejectTask { .. }
+        ) {
+            Some((
+                Box::new(|t: &work_domain::Task| t.owner_id()),
+                Arc::clone(&self.owner_authority),
+            ))
+        } else {
+            None
+        };
+
         api_server::handle_command::<work_domain::Task, _, _, _>(
             command,
             target_id,
@@ -121,6 +188,7 @@ impl DecisionHandler for TaskDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            owner_check,
         )
         .await
     }
@@ -179,6 +247,7 @@ impl DecisionHandler for ConversationDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }
@@ -237,6 +306,7 @@ impl DecisionHandler for FileAssetDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }
@@ -295,6 +365,7 @@ impl DecisionHandler for UploadSessionDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }
@@ -353,6 +424,7 @@ impl DecisionHandler for MessageDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }
@@ -411,6 +483,7 @@ impl DecisionHandler for PolicyDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }
@@ -470,6 +543,7 @@ impl DecisionHandler for LegalHoldDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }
@@ -529,6 +603,7 @@ impl DecisionHandler for ConnectionRequestDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }
@@ -589,6 +664,7 @@ impl DecisionHandler for NotificationDecisionHandler {
             Arc::clone(&self.repo),
             Arc::clone(&self.unit_factory),
             Arc::clone(&self.idempotency_store),
+            None, // owner_check: not an owner-gated decision command
         )
         .await
     }

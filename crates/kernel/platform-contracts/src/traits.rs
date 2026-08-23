@@ -90,3 +90,34 @@ pub trait AggregateRoot: Send + Sync {
     /// Must be pure: no validation, no I/O.
     fn apply(&mut self, event: &Self::Event);
 }
+
+/// Optional companion to [`AggregateRoot`] for aggregates that have a
+/// single, well-defined "owning user" whose manager (or an Admin) may
+/// be required to approve certain commands against them.
+///
+/// Added to close a real, confirmed authorization gap: `Task` and
+/// `Mission` approval/rejection commands (`ApproveTask`, `RejectTask`,
+/// `ApproveMission`, `RejectMission`) previously had no check at all on
+/// *who* was issuing them — only on the aggregate's own status (must be
+/// `Submitted`). Any authenticated organization member could approve or
+/// reject any task or mission. Deliberately a separate, optional trait
+/// rather than a new required method on [`AggregateRoot`] itself —
+/// most aggregates (`Notification`, `TodoList` — which has its own,
+/// separate, already-correct authority resolution in
+/// `api_server::verifier_resolution` — `ApprovalAggregate`, etc.) have
+/// no single-owner concept at all, and forcing them to implement one
+/// would be meaningless for them.
+///
+/// See `command_handler::handle_command`'s `owner_authority` parameter
+/// for where this is actually checked, and its own doc comment for why
+/// that check is generic over an injected closure rather than hardcoded
+/// to one specific authority-resolution strategy (the HTTP API path on
+/// `api-server` and `desktop-shell`'s offline-first local command path
+/// need genuinely different implementations — a live database lookup
+/// versus a locally cached hierarchy snapshot — and neither belongs
+/// hardcoded into this shared kernel crate).
+pub trait HasOwner: AggregateRoot {
+    /// The user this aggregate is "owned by" for approval-authority
+    /// purposes — e.g. a `Task`'s or `Mission`'s `owner_id`.
+    fn owner_id(&self) -> platform_kernel::UserId;
+}

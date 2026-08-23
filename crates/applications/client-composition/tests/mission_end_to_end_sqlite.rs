@@ -95,6 +95,7 @@ async fn create_mission_then_pause_it_through_the_real_command_registry_and_sqli
                 Arc::clone(&repo),
                 Arc::clone(&unit_factory),
                 Arc::clone(&idempotency_store),
+                Arc::new(support::AllowAllOwnerAuthority),
             ),
         );
 
@@ -199,6 +200,7 @@ async fn decision_handler_does_not_deadlock_a_single_connection_pool() {
                 Arc::clone(&repo),
                 Arc::clone(&unit_factory),
                 Arc::clone(&idempotency_store),
+                Arc::new(support::AllowAllOwnerAuthority),
             ),
         );
 

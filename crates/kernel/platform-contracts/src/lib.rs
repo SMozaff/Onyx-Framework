@@ -15,4 +15,4 @@ pub mod traits;
 pub use command::CommandEnvelope;
 pub use error::{DomainError, DomainErrorResponse, RepositoryError};
 pub use event::{AuditMetadata, DataClassification, DomainEventEnvelope};
-pub use traits::{AggregateRoot, DecisionContext, IdGenerator};
+pub use traits::{AggregateRoot, DecisionContext, HasOwner, IdGenerator};

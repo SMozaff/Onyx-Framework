@@ -714,6 +714,7 @@ pub async fn command_route(
                     Arc::clone(&state.notification_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -737,6 +738,7 @@ pub async fn command_route(
                     Arc::clone(&state.approval_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -761,6 +763,7 @@ pub async fn command_route(
                     Arc::clone(&state.approval_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -784,6 +787,7 @@ pub async fn command_route(
                     Arc::clone(&state.policy_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -802,6 +806,7 @@ pub async fn command_route(
                     Arc::clone(&state.policy_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -826,6 +831,7 @@ pub async fn command_route(
                     Arc::clone(&state.policy_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -856,6 +862,7 @@ pub async fn command_route(
                     Arc::clone(&state.policy_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -874,6 +881,7 @@ pub async fn command_route(
                     Arc::clone(&state.policy_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -898,6 +906,7 @@ pub async fn command_route(
                     Arc::clone(&state.legal_hold_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -967,6 +976,7 @@ pub async fn command_route(
                     Arc::clone(&state.todo_list_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -1005,6 +1015,7 @@ pub async fn command_route(
                     Arc::clone(&state.target_list_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -1038,6 +1049,7 @@ pub async fn command_route(
                     Arc::clone(&state.staff_loan_repo),
                     Arc::clone(&state.unit_factory),
                     Arc::clone(&state.idempotency_store),
+                    None, // owner_check: not an owner-gated decision command
                 )
                 .await
             }
@@ -1126,6 +1138,7 @@ fn command_error_class(error: &crate::CommandError) -> &'static str {
         crate::CommandError::Persistence(_) => "persistence_failure",
         crate::CommandError::Serialization(_) => "serialization_failure",
         crate::CommandError::Idempotency(_) => "idempotency_failure",
+        crate::CommandError::OwnerAuthorityDenied { .. } => "owner_authority_denied",
     }
 }
 
@@ -1345,6 +1358,14 @@ fn map_command_error(error: crate::CommandError, correlation_id: &str) -> ApiErr
             "NON_RETRYABLE",
             correlation_id,
             json!({"message": message}),
+        ),
+        crate::CommandError::OwnerAuthorityDenied { actor, owner } => ApiError::new(
+            StatusCode::FORBIDDEN,
+            "OWNER_AUTHORITY_DENIED",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            correlation_id,
+            json!({"actor": actor.0, "owner": owner.0}),
         ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,

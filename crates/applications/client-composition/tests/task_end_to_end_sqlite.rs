@@ -101,6 +101,7 @@ async fn create_task_then_mark_it_ready_through_the_real_command_registry_and_sq
                 Arc::clone(&repo),
                 Arc::clone(&unit_factory),
                 Arc::clone(&idempotency_store),
+                Arc::new(support::AllowAllOwnerAuthority),
             ),
         );
 
@@ -210,6 +211,7 @@ async fn version_advances_correctly_across_three_successive_decision_commands() 
                 Arc::clone(&repo),
                 Arc::clone(&unit_factory),
                 Arc::clone(&idempotency_store),
+                Arc::new(support::AllowAllOwnerAuthority),
             ),
         )
         .register_decision(
@@ -218,6 +220,7 @@ async fn version_advances_correctly_across_three_successive_decision_commands() 
                 Arc::clone(&repo),
                 Arc::clone(&unit_factory),
                 Arc::clone(&idempotency_store),
+                Arc::new(support::AllowAllOwnerAuthority),
             ),
         );
 

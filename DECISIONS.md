@@ -2399,3 +2399,207 @@ distinction.
   `routes/mod.rs` source), and by a clean typecheck/build — not by an
   actual browser-observed failure. Stated explicitly rather than
   implied as tested.
+
+## Task/Mission approval authorization gap closed — direct-manager-only, verified 2026-08-23
+
+**The gap.** `TaskDecisionHandler`/`MissionDecisionHandler`'s underlying
+`decide()` calls checked only the aggregate's own status (must be
+`Submitted`/`AwaitingApproval`/etc.) before applying `ApproveTask`,
+`RejectTask`, `RejectApproval`, or `ActivateMission` — never *who* was
+issuing the command. Confirmed directly in
+`VerifiedAuthority::is_authorized` (`platform-kernel/src/authority.rs`):
+a documented Increment-1 stub that unconditionally returns `true`,
+deferred to "Increment 7" per a frozen-spec ruling. Practically, this
+meant any authenticated organization member — with no real relationship
+to a given task or mission — could approve or reject it. Todo/Target-
+list verification and Staff Loans already have real, working authority
+resolution (`api_server::verifier_resolution`); Task/Mission approval
+never had an equivalent, and that module's own doc comment ("as built
+2026-08-16") never claimed to cover it.
+
+**Scope, confirmed decision-by-decision with the project owner, not
+assumed.** Direct-manager-only authority — an Admin, or the specific
+user who is the task/mission owner's direct manager per the org tree —
+deliberately *not* the same loan/escalation widening
+`verifier_resolution` also does for lists. If Task/Mission approval
+later needs that widening, it should be asked for explicitly rather than
+added speculatively.
+
+**What's gated and what isn't, and why:**
+- Task: `ApproveTask`/`RejectTask` are gated. `SubmitCompletion` is
+  deliberately *not* gated — it's the task owner acting on their own
+  work, not a decision about someone else's.
+- Mission has no `ApproveMission` command at all (a naming assumption
+  that would have been wrong to build against). The real commands are
+  `RequestApproval` (`Planning → AwaitingApproval`, the owner's own
+  action — not gated, same reasoning as `SubmitCompletion`) and
+  `RejectApproval` (`AwaitingApproval → Planning`, a decision about
+  someone else's work — gated). `ActivateMission` was found, while
+  reading `mission_domain::aggregate` to build this, to bypass the
+  whole workflow: it accepts `Planning`, `AwaitingApproval`, and
+  `Review` as valid source states identically, with its own code
+  comment stating the "Approval received" guard is a stub that always
+  passes — meaning `ActivateMission` could activate a mission straight
+  from `Planning`, skipping `RequestApproval`/`RejectApproval`
+  entirely. Confirmed explicitly with the project owner that closing
+  this bypass was in scope, not just the narrower `RejectApproval`
+  case — `ActivateMission` is now also gated.
+
+**Design.** A new optional `HasOwner` trait in `platform-contracts`
+(`traits.rs`), implemented only by `Task`/`Mission` — not forced onto
+every aggregate (`Notification`, `TodoList`, etc. have no single-owner
+concept). A new `OwnerAuthority` trait plus an `owner_check` parameter
+on `api_server::handle_command` (a caller-supplied `(extractor closure,
+authority strategy)` pair, `None` for every one of the ~20 other call
+sites that don't need it — every one of those was updated to pass
+`None` explicitly, not left broken; factored into a `type OwnerCheck<A>`
+alias after `cargo clippy -D warnings` flagged the inline tuple type as
+`type_complexity`). `desktop-shell`'s new `HierarchyCache`
+(`hierarchy.rs`) implements `OwnerAuthority` by fetching and locally
+caching the org's reporting-line tree at login (`GET
+/api/users/hierarchy`, new route in `routes/admin.rs`) rather than
+requiring a live server round-trip at the moment of every approval —
+`desktop-shell` has no local `UserStore` (its embedded `AppState` never
+composed one) and this app's offline-first design, confirmed directly
+with the person rather than assumed, is why a cached-at-login approach
+was chosen over a live check. A new `DenyAllOwnerAuthority` fallback in
+`client-composition` (`app_state.rs`) is used whenever no real strategy
+is configured (`AppStateConfig::owner_authority: None` — the pre-login
+placeholder `AppState`, and `mobile-core`, which has no approval UI at
+all yet) — deliberately fails closed, not open: "no checker configured"
+must never silently mean "allow everything."
+
+**Delivery and integration, not a from-scratch build in this session.**
+This fix's 14 changed files (13 modified + `hierarchy.rs` new) arrived
+as a complete file-content snapshot from a prior session that had zero
+compilation performed against a real toolchain (disk-constrained
+sandbox, per that session's own explicit instruction). This session's
+job was to apply, compile for real, and fix whatever a real compiler
+found — treated as expected, not a sign the design was wrong, matching
+this project's established pattern (e.g. the `mobile-core`
+`blob_store_root`/`.await` fix earlier this same session). Real gaps a
+compiler caught that the source-reading-only prior session could not:
+- The delivered files had CRLF line endings throughout (a Windows
+  editor round-trip) — normalized to LF before any real diff was
+  possible; the true diff was ~450 lines across 13 files, not the
+  ~13,000-line diff CRLF-vs-LF made `git diff --stat` initially show.
+- `map_command_error` (`routes/command.rs`) had no explicit match arm
+  for the new `CommandError::OwnerAuthorityDenied` variant — it fell
+  through to the generic `other =>` catch-all, which would have
+  returned HTTP 500/`INFRASTRUCTURE`/`TRANSIENT` for what is actually a
+  403/`AUTHORITY`/`NON_RETRYABLE` rejection. Added an explicit arm
+  (and to `command_error_class`'s metrics-label match, which was
+  genuinely non-exhaustive and would not have compiled otherwise).
+- Three `api_server::handle_command` call sites in
+  `client-composition/src/file_upload.rs` (`UploadSession`/`FileAsset`
+  commands) were missed by the scripted `None,` insertion the prior
+  session used for the ~20 other call sites — a real `E0061` (wrong
+  argument count), not a style issue. Added `None,` to each.
+- `AppStateConfig` gained a required field but three test/production
+  call sites elsewhere in the workspace were never touched by this
+  delivery: `mobile-core/src/lib.rs`'s `mobile_core_new` (from this
+  same session's earlier, unrelated fix — added `owner_authority: None`,
+  same fail-closed reasoning as the placeholder `AppState`, disclosed
+  in that function's own comment that mobile-core has no approval UI
+  yet so this isn't a regression in practice), and
+  `client-composition/tests/app_state_wiring.rs`'s `test_config()`
+  (added `owner_authority: None`).
+- `TaskDecisionHandler::new`/`MissionDecisionHandler::new` gained a
+  required constructor parameter, but the existing
+  `task_end_to_end_sqlite.rs`/`mission_end_to_end_sqlite.rs` integration
+  tests (5 call sites total) were never updated — added a small
+  `AllowAllOwnerAuthority` test double to `tests/support/mod.rs` (none
+  of those tests exercise the owner-gated commands, so its behavior is
+  inert for them; allow-all rather than deny-all specifically so a
+  future test that *does* add coverage for those commands isn't
+  silently blocked if it forgets to swap the double out).
+- `cargo clippy --workspace -- -D warnings` (this repo's actual CI
+  gate, confirmed by reading `.github/workflows/ci.yml`) flagged the
+  inline `Option<(Box<dyn Fn...>, Arc<dyn OwnerAuthority>)>` tuple type
+  as `type_complexity` in `handle_command`'s signature — factored into
+  the `OwnerCheck<A>` type alias mentioned above and re-exported from
+  `api_server`, used consistently at both call sites in
+  `decision_handler.rs` too.
+
+**`desktop-shell` could not be compiled or tested in this environment.**
+It (and `admin-shell`) pull in `gdk-sys` via Tauri, which requires the
+system GTK3 `gdk-3.0` pkg-config file; this sandbox has no GTK dev
+libraries and `apt-get install libgtk-3-dev ...` failed here (package
+mirror 404s) — an environment limitation, disclosed rather than
+silently worked around. To still get real compiler verification of the
+new `hierarchy.rs` (rather than only reading it), its exact content was
+built as a standalone scratch crate against the real `platform-kernel`/
+`api-server`/`async-trait`/`tokio`/`reqwest`/`serde`/`thiserror`
+dependencies (no Tauri/GTK involved) — this caught one real issue (an
+unused `Serialize` import; `HierarchyUserWire` only derives
+`Deserialize`) and confirmed the file's 7 unit tests
+(direct-manager-authorized, unrelated-user-denied, admin-always-
+authorized, owner-not-self-authorized, unknown-actor-denied,
+unknown-owner-denied, refresh-replaces-not-merges) all pass against the
+real compiler. `desktop-shell/src/lib.rs`'s own diff (wiring
+`HierarchyCache` into `login`/`logout`/`build_app_state`/`setup`) was
+reviewed by hand against the actual, current file content and existing
+patterns in that file (the same `tauri::State<T>` idiom already used for
+`session`/`storage`/`local_replica`) — not compiled. This is a real,
+disclosed verification gap: `desktop-shell` should be built and its
+approval flow exercised against a running `api-server` on a machine
+with the Tauri/GTK toolchain before this is considered fully proven end
+to end, even though every piece that *could* be compiled here was.
+
+**Verification actually run:**
+- `cargo check --workspace --exclude desktop-shell --exclude
+  admin-shell` — clean (the two excluded crates are the only ones
+  requiring GTK; every other crate in the workspace, including every
+  crate this fix touches, is covered).
+- `cargo clippy --workspace --exclude desktop-shell --exclude
+  admin-shell --all-targets --no-deps -- -D warnings` — clean, matching
+  this repo's actual CI gate (`ci.yml`) exactly except for the two
+  GTK-blocked crates.
+- `cargo test -p platform-contracts -p work-domain -p mission-domain -p
+  client-composition -p mobile-core` — all pass, including the full
+  pre-existing `work-domain`/`mission-domain` unit suites (65 and 61
+  tests respectively — no regression in any existing Task/Mission
+  transition test), `app_state_wiring` (9), `task_end_to_end_sqlite`
+  (2), `mission_end_to_end_sqlite` (2), and `mobile-core`'s
+  `ffi_integration` suite (9, exercising the exact `AppState::new` call
+  this session's earlier `mobile-core` fix touches).
+- New end-to-end test added and passing:
+  `client-composition/tests/task_owner_authority_gate.rs` — a real
+  dispatch through `CommandRegistry`/`handle_command` against a live
+  SQLite database (not a unit test of `HierarchyCache`'s logic in
+  isolation): creates a task, has the owner mark it ready/start it/
+  submit completion (confirms this last step still succeeds ungated),
+  then confirms an unrelated stranger's `ApproveTask` is rejected with
+  `CommandError::OwnerAuthorityDenied` specifically (not some other
+  failure), and that the task's real, authority-resolved direct manager
+  can approve it, advancing the persisted status to `Approved`.
+- `cargo test -p api-server` has 6 pre-existing failing integration
+  test binaries (`query_id_normalization`,
+  `staff_loan_authorization`, `staff_profile_routes`,
+  `team_leader_precheck_authorization`, `user_hierarchy_admin_routes`,
+  `relay_switchboard` — all HTTP-integration tests that spin up a real
+  server and log in) — confirmed, by stashing every change in this
+  entry and re-running the identical `cargo test` commands against
+  unmodified `main`, that every one of these fails identically on `main`
+  with no changes from this session at all. This is a pre-existing
+  environment issue in this sandbox (most failures are `access_token in
+  login response` panics, suggesting the login round-trip — likely
+  Argon2 password hashing — is too slow or otherwise failing under this
+  sandbox's resource constraints), not something this fix caused or
+  should be scoped to fix. `api-server`'s own unit tests (0, this crate
+  has none) and the one `query_id_normalization` sub-test unrelated to
+  login (`object_id_byte_array_converts_to_matching_uuid_string`, etc.)
+  pass; the login-dependent ones do not, on `main` or with this fix
+  applied.
+
+**Remaining gap surfaced by this session's own verification, not
+silently left implicit:** `desktop-shell` itself — the actual consumer
+of `HierarchyCache`, `login`/`logout` wiring, and the Tauri commands a
+real user would exercise — was never compiled, run, or clicked through
+in this environment. Everything gating logic-level (`command_handler.rs`,
+`decision_handler.rs`, the domain aggregates, `hierarchy.rs` itself) is
+real-compiler-verified; the last mile connecting it into the actual
+desktop app is reviewed-by-hand only. Build and manually exercise
+`desktop-shell` (approve as a real logged-in manager; attempt to approve
+as an unrelated user) on a machine with the Tauri/GTK toolchain before
+treating this as fully proven.

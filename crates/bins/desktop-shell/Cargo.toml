@@ -17,6 +17,13 @@ tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
 client-composition.workspace = true
+# Added so HierarchyCache (hierarchy.rs) can implement
+# api_server::OwnerAuthority directly — required by Rust's orphan rule
+# (a trait defined elsewhere can only be implemented for a local type if
+# this crate actually depends on the crate that defines the trait).
+# client-composition already depends on api-server for handle_command
+# itself; this is the same dependency, just also declared here.
+api-server.workspace = true
 platform-kernel.workspace = true
 platform-contracts.workspace = true
 query-application.workspace = true

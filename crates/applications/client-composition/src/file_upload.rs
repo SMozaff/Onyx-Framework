@@ -138,6 +138,7 @@ impl FileUploadCoordinator {
                 Arc::clone(&self.upload_session_repo),
                 Arc::clone(&self.unit_factory),
                 self.noop_idempotency_store(),
+                None,
             )
             .await?;
             session_version = extract_new_version(&result)?;
@@ -162,6 +163,7 @@ impl FileUploadCoordinator {
             Arc::clone(&self.upload_session_repo),
             Arc::clone(&self.unit_factory),
             self.noop_idempotency_store(),
+            None,
         )
         .await?;
 
@@ -197,6 +199,7 @@ impl FileUploadCoordinator {
             Arc::clone(&self.file_asset_repo),
             Arc::clone(&self.unit_factory),
             self.noop_idempotency_store(),
+            None,
         )
         .await?;
 

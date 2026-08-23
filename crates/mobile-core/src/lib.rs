@@ -228,6 +228,16 @@ pub unsafe extern "C" fn mobile_core_new(
             ),
             cloud_relay_socket_factory: Arc::new(NotYetImplementedSocketFactory),
             blob_store_root,
+            // mobile-core has no local user-hierarchy directory (same
+            // reasoning as desktop-shell's pre-login placeholder
+            // AppState — see client_composition::app_state's
+            // DenyAllOwnerAuthority doc comment): `None` here correctly
+            // falls back to denying every owner-gated Task/Mission
+            // approval decision rather than allowing one with no way to
+            // check it. mobile-core does not yet expose approval UI at
+            // all, so this is not a regression in practice, just the
+            // safe default until it does.
+            owner_authority: None,
         };
 
         Some(Arc::new(AppState::new(pool, app_config).await))

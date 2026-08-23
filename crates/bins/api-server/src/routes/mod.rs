@@ -411,6 +411,10 @@ pub fn router(state: ApiState) -> Router {
         // assignment and staff-loan pickers. Unlike `/api/admin/users`,
         // this route intentionally returns no privilege or hierarchy data.
         .route("/api/users", get(admin::list_picker_users))
+        // {id, parent_user_id, is_admin} only — for desktop-shell's local
+        // Task/Mission approval-authority cache (no local UserStore
+        // exists there). See admin::list_hierarchy_users's doc comment.
+        .route("/api/users/hierarchy", get(admin::list_hierarchy_users))
         // Bootstrap is intentionally unauthenticated; it self-closes once any
         // user exists and requires ONYX_BOOTSTRAP_TOKEN. See routes::admin.
         .route("/api/admin/bootstrap", post(admin::bootstrap))

@@ -1440,6 +1440,7 @@ name = "desktop-shell"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "api-server",
  "async-trait",
  "client-composition",
  "futures-util",

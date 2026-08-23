@@ -90,6 +90,12 @@ fn test_config() -> AppStateConfig {
                 .map(|b| format!("{b:02x}"))
                 .collect::<String>(),
         ),
+        // This test doesn't exercise owner-gated Task/Mission decision
+        // commands (`ApproveTask`/`RejectTask`/`RejectApproval`/
+        // `ActivateMission`) — `None` (the safe deny-all default, see
+        // `DenyAllOwnerAuthority`'s doc comment in `app_state.rs`) is
+        // correct here, not a stand-in that happens to be unused.
+        owner_authority: None,
     }
 }
 

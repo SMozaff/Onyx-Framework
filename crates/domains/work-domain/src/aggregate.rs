@@ -10,7 +10,7 @@ use crate::error::TaskError;
 use crate::event::TaskEvent;
 use crate::state_machine::TaskStatus;
 use crate::value::{Dependency, TaskId, TaskMissionRef, TaskPriority};
-use platform_contracts::{AggregateRoot, DecisionContext};
+use platform_contracts::{AggregateRoot, DecisionContext, HasOwner};
 use platform_kernel::{AuthorityEpoch, LifecycleEpoch, ObjectVersion, UserId};
 use serde::{Deserialize, Serialize};
 
@@ -159,6 +159,12 @@ impl Task {
             self.status,
             TaskStatus::Draft | TaskStatus::Ready | TaskStatus::Active | TaskStatus::Reopened
         )
+    }
+}
+
+impl HasOwner for Task {
+    fn owner_id(&self) -> UserId {
+        self.owner_id
     }
 }
 

@@ -27,6 +27,7 @@
 //! verified against v2.tauri.app before choosing this over a
 //! process-restart approach.
 
+mod hierarchy;
 mod relay_socket;
 mod secure_storage;
 mod session;
@@ -370,6 +371,7 @@ async fn login(
     state: tauri::State<'_, SharedAppState>,
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
     local_replica: tauri::State<'_, ReplicaId>,
+    hierarchy_cache: tauri::State<'_, hierarchy::HierarchyCache>,
     server_address: String,
     username: String,
     password: String,
@@ -382,6 +384,20 @@ async fn login(
         build_app_state(&app, authenticated.organization_id, Some(&authenticated)).await?;
 
     *state.write().await = new_state;
+
+    // Best-effort, same reasoning as the startup-resume case in
+    // setup(): a person who can reach the server well enough to
+    // authenticate but hits a transient failure on this second call
+    // should not be locked out of logging in entirely — they simply
+    // can't approve anything until the cache is populated (by a later
+    // successful refresh, or the next login). Logged, not propagated
+    // as a login failure.
+    if let Err(e) = hierarchy_cache
+        .refresh(&server_address, &authenticated.access_token)
+        .await
+    {
+        tracing::warn!(error = %e, "failed to refresh approval-authority cache after login");
+    }
 
     Ok(SessionInfo::from_session(
         &authenticated,
@@ -399,10 +415,18 @@ async fn logout(
     app: AppHandle,
     state: tauri::State<'_, SharedAppState>,
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
+    hierarchy_cache: tauri::State<'_, hierarchy::HierarchyCache>,
 ) -> Result<(), ShellError> {
     session::clear(&storage).await?;
     let new_state = build_app_state(&app, OrganizationId::new_random(), None).await?;
     *state.write().await = new_state;
+    // Defensive: a different person logging in next on this same
+    // device must not inherit the previous person's cached hierarchy
+    // even transiently. `login` always overwrites this cache anyway,
+    // but clearing here removes the window where it wouldn't (an
+    // approval attempted between logout and the next login's own
+    // refresh completing).
+    hierarchy_cache.clear().await;
     Ok(())
 }
 
@@ -485,6 +509,16 @@ async fn build_app_state(
             local_replica,
         )),
         blob_store_root,
+        // Real HierarchyCache only for an actual logged-in session
+        // (mirrors the `cloud_relay_auth_provider` conditional above) —
+        // the pre-login/logged-out placeholder AppState has no session
+        // to have populated a cache from, so it correctly falls back to
+        // client-composition's DenyAllOwnerAuthority (config value
+        // `None`) rather than pointing at a cache that's empty anyway.
+        owner_authority: session.map(|_| {
+            Arc::new(app.state::<hierarchy::HierarchyCache>().inner().clone())
+                as Arc<dyn api_server::OwnerAuthority>
+        }),
     };
 
     let state = Arc::new(AppState::new(pool, config).await);
@@ -586,6 +620,12 @@ pub fn run() {
                 app_handle_for_state.manage(pool.clone());
                 app_handle_for_state.manage(local_replica);
                 app_handle_for_state.manage(storage.clone());
+                // Task/Mission approval-authority cache — see
+                // hierarchy.rs's module doc for the full gap this
+                // closes. Registered empty here; populated by `login`
+                // (and re-populated on resuming a saved session, below)
+                // via a real fetch, never assumed non-empty before that.
+                app_handle_for_state.manage(hierarchy::HierarchyCache::new());
 
                 // Real login/org resolution (2026-08-19): check for a
                 // previously-saved session first. If one exists, resume
@@ -614,6 +654,25 @@ pub fn run() {
                 )
                 .await
                 .expect("failed to build initial AppState");
+
+                // Populate the hierarchy cache for a resumed session too
+                // — not just fresh logins (below) — since approvals must
+                // work correctly on a normal app restart, not only
+                // immediately after typing a password. Best-effort: a
+                // stale/offline cache degrades to "cannot approve until
+                // reachable," not a crash or a silent bypass — logged,
+                // not surfaced as a fatal setup error, since being unable
+                // to refresh this on startup must not block the rest of
+                // the app from opening.
+                if let Some(existing) = existing_session.as_ref() {
+                    let cache = app_handle_for_state.state::<hierarchy::HierarchyCache>();
+                    if let Err(e) = cache
+                        .refresh(&existing.server_address, &existing.access_token)
+                        .await
+                    {
+                        tracing::warn!(error = %e, "failed to refresh approval-authority cache on startup");
+                    }
+                }
 
                 app_handle_for_state.manage::<SharedAppState>(Arc::new(RwLock::new(state)));
             });

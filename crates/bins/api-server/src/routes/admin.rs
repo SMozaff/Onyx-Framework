@@ -566,6 +566,59 @@ pub async fn list_picker_users(
     Ok(Json(visible))
 }
 
+/// Identity shape for `desktop-shell`'s local Task/Mission approval-
+/// authority cache — see `list_hierarchy_users` below. Includes exactly
+/// the fields `verifier_resolution`-style tree-parent authority needs
+/// (`id`, `parent_user_id`) plus `is_admin` (an Admin may always
+/// approve, mirroring `require_admin`'s own "admin bypasses the
+/// narrower check" pattern used throughout `routes::admin`). Everything
+/// more sensitive than this (password hash — never serialized anywhere;
+/// `class`; account activation state) is intentionally omitted, same
+/// restraint as `PickerUserDto` above, since this is not an admin-only
+/// route.
+#[derive(Debug, Serialize)]
+pub struct HierarchyUserDto {
+    pub id: String,
+    pub parent_user_id: Option<String>,
+    pub is_admin: bool,
+}
+
+/// `GET /api/users/hierarchy` — authenticated, same-organization,
+/// `{id, parent_user_id, is_admin}` only.
+///
+/// Built specifically so `desktop-shell` (which has no local
+/// `UserStore` — its embedded `AppState` composes only the domain
+/// aggregates it needs offline, and the org's account/reporting-line
+/// directory is deliberately not one of them, see
+/// `client-composition::AppState`'s own doc comment) can fetch and
+/// cache the organization's reporting-line tree once at login, then
+/// resolve "is the current user this task's owner's manager?" purely
+/// from that local cache when approving/rejecting a `Task`/`Mission` —
+/// see `TaskDecisionHandler`'s doc comment for the full authority-gap
+/// history this closes. Deliberately not admin-gated (`require_admin`
+/// would be wrong here: an ordinary Manager approving their own
+/// report's work is not an administrative action), but deliberately
+/// minimal in fields returned for the same reason `PickerUserDto` is —
+/// this is a directory lookup any authenticated org member can make,
+/// not a privilege-escalation surface.
+pub async fn list_hierarchy_users(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<HierarchyUserDto>>, ApiError> {
+    let authenticated = authenticate_headers(&state, &headers).await?;
+    let users = state.user_store.list().await.map_err(store_error)?;
+    let visible = users
+        .into_iter()
+        .filter(|user| user.organization_id == authenticated.organization_id && user.is_active)
+        .map(|user| HierarchyUserDto {
+            id: user.user_id,
+            parent_user_id: user.parent_user_id,
+            is_admin: user.is_admin,
+        })
+        .collect();
+    Ok(Json(visible))
+}
+
 /// `GET /api/admin/users` — admin-only listing.
 pub async fn list_users(
     State(state): State<ApiState>,

@@ -185,6 +185,19 @@ pub struct AppStateConfig {
     /// (Phase 1 addition). The composing client (desktop-shell) supplies
     /// a real, writable directory; tests use a `tempfile::TempDir`.
     pub blob_store_root: std::path::PathBuf,
+    /// Answers "may this actor decide on behalf of this owner?" for
+    /// `Task`/`Mission` approval-type commands — see
+    /// `api_server::OwnerAuthority`'s doc comment for the full gap this
+    /// closes and why this is a caller-supplied strategy rather than a
+    /// single hardcoded implementation. `None` is a real, valid
+    /// configuration (not a bug) for compositions that never execute
+    /// owner-gated commands — e.g. the pre-login placeholder `AppState`
+    /// in `desktop-shell::build_app_state` — in which case
+    /// `MissionDecisionHandler`/`TaskDecisionHandler` fall back to
+    /// denying every owner-gated decision rather than silently allowing
+    /// one with no way to check it (see this field's use in this file,
+    /// below).
+    pub owner_authority: Option<Arc<dyn api_server::OwnerAuthority>>,
 }
 
 /// The composition root. Held for the client process's lifetime,
@@ -206,6 +219,23 @@ pub struct AppState {
     /// otherwise used by the composition logic itself, which always goes
     /// through `command_registry`/`query_registry`.
     pub pool: SqlitePool,
+}
+
+/// Fallback `OwnerAuthority` used when `AppStateConfig::owner_authority`
+/// is `None`. Denies every owner-gated check unconditionally — safe by
+/// construction: a composition that hasn't supplied a real strategy
+/// (e.g. `desktop-shell`'s pre-login placeholder `AppState`, which has
+/// no session and therefore no real hierarchy to check against) must
+/// not silently allow every `ApproveTask`/`RejectTask`/`RejectApproval`/
+/// `ActivateMission` through just because no checker was configured —
+/// that would defeat the entire point of adding this gate.
+struct DenyAllOwnerAuthority;
+
+#[async_trait::async_trait]
+impl api_server::OwnerAuthority for DenyAllOwnerAuthority {
+    async fn is_authorized(&self, _actor: platform_kernel::UserId, _owner: platform_kernel::UserId) -> bool {
+        false
+    }
 }
 
 impl AppState {
@@ -286,6 +316,16 @@ impl AppState {
         ));
 
         let mut command_registry = CommandRegistry::new();
+        // Resolved once, shared by both handlers below — real strategy
+        // if the composing client supplied one (desktop-shell's
+        // post-login AppState), the safe deny-all fallback otherwise
+        // (the pre-login placeholder). See DenyAllOwnerAuthority's own
+        // doc comment for why "no checker configured" must not mean
+        // "allow everything."
+        let owner_authority: Arc<dyn api_server::OwnerAuthority> = config
+            .owner_authority
+            .clone()
+            .unwrap_or_else(|| Arc::new(DenyAllOwnerAuthority));
         command_registry.register_creation(
             "CreateMission",
             MissionCreationHandler::new(Arc::clone(&mission_repo), Arc::clone(&unit_factory)),
@@ -297,6 +337,7 @@ impl AppState {
                     Arc::clone(&mission_repo),
                     Arc::clone(&unit_factory),
                     Arc::clone(&idempotency_store),
+                    Arc::clone(&owner_authority),
                 ),
             );
         }
@@ -311,6 +352,7 @@ impl AppState {
                     Arc::clone(&task_repo),
                     Arc::clone(&unit_factory),
                     Arc::clone(&idempotency_store),
+                    Arc::clone(&owner_authority),
                 ),
             );
         }

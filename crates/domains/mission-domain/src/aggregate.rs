@@ -9,7 +9,7 @@ use crate::error::MissionError;
 use crate::event::MissionEvent;
 use crate::state_machine::MissionStatus;
 use crate::value::{MissionId, MissionSettings, MissionTimelineRef};
-use platform_contracts::{AggregateRoot, DecisionContext};
+use platform_contracts::{AggregateRoot, DecisionContext, HasOwner};
 use platform_kernel::{AuthorityEpoch, LifecycleEpoch, ObjectId, ObjectVersion, UserId};
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +152,12 @@ impl Mission {
 
     fn invalid(&self, command: &str) -> MissionError {
         MissionError::InvalidTransition(format!("{} from {:?}", command, self.status))
+    }
+}
+
+impl HasOwner for Mission {
+    fn owner_id(&self) -> UserId {
+        self.owner_id
     }
 }
 

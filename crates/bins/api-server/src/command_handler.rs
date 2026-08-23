@@ -11,10 +11,29 @@ use platform_contracts::{
 use platform_kernel::{
     ActorContext, AuthorityEpoch, CorrelationId, DomainObjectRef, EventId, LifecycleEpoch,
     ObjectId, ObjectVersion, OperationId, OrganizationId, PolicyDecisionSet, ReplicaId,
-    SchemaVersion, Timestamp, VectorClock, VerifiedAuthority,
+    SchemaVersion, Timestamp, UserId, VectorClock, VerifiedAuthority,
 };
 use query_application::{IdempotencyStore, OutboxMessage, Repository, UnitOfWorkFactory};
 use serde::{de::DeserializeOwned, Serialize};
+
+/// A pluggable strategy for answering "may `actor` decide on behalf of
+/// `owner`?" — see `handle_command`'s `owner_check` parameter doc
+/// comment for the full rationale (why this is a trait rather than a
+/// single hardcoded implementation, and why it lives here rather than
+/// in a lower-level kernel crate: it needs `async` and needs to be
+/// object-safe/`Arc`-shareable across request handlers, neither of
+/// which the dependency-light `platform-contracts`/`platform-kernel`
+/// crates take on for anything else).
+#[async_trait::async_trait]
+pub trait OwnerAuthority: Send + Sync {
+    async fn is_authorized(&self, actor: UserId, owner: UserId) -> bool;
+}
+
+/// `handle_command`'s `owner_check` parameter type, factored out purely
+/// to satisfy `clippy::type_complexity` — see that parameter's own doc
+/// comment on `handle_command` for what it means and why it's shaped
+/// this way.
+pub type OwnerCheck<A> = Option<(Box<dyn Fn(&A) -> UserId + Send + Sync>, Arc<dyn OwnerAuthority>)>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
@@ -43,6 +62,15 @@ pub enum CommandError {
     Serialization(#[from] serde_json::Error),
     #[error("idempotency error: {0}")]
     Idempotency(String),
+    /// Added alongside `OwnerAuthority` (see that trait's doc comment):
+    /// `actor` is not authorized to decide on behalf of `owner`. Kept
+    /// distinct from `Domain` so callers (`command_route`'s HTTP
+    /// mapping, `ShellError`'s Tauri mapping) can render a specific,
+    /// diagnosable message rather than a generic domain-rejection one —
+    /// same reasoning as this session's earlier fix for `admin-shell`'s
+    /// collapsed error messages.
+    #[error("actor {actor:?} is not authorized to decide on behalf of owner {owner:?}")]
+    OwnerAuthorityDenied { actor: UserId, owner: UserId },
 }
 
 struct DefaultIdGenerator;
@@ -78,6 +106,15 @@ pub async fn handle_command<A, C, E, Err>(
     repo: Arc<dyn Repository>,
     unit_factory: Arc<dyn UnitOfWorkFactory>,
     idempotency_store: Arc<dyn IdempotencyStore>,
+    // `None` for every command that isn't an owner-gated decision (the
+    // overwhelming majority of calls) — see the "Step 3b" comment below
+    // for the full rationale. `Some((extractor, authority))` pairs a
+    // closure that reads the owner id off the already-loaded `A` with
+    // the strategy to check that owner against. Boxed rather than a bare
+    // generic type parameter so callers that don't need this (i.e.
+    // almost all of them) aren't forced to name a concrete no-op type at
+    // every call site — `None` alone is enough.
+    owner_check: OwnerCheck<A>,
 ) -> Result<CommandResult, CommandError>
 where
     A: AggregateRoot<Command = C, Event = E, Error = Err>,
@@ -140,6 +177,50 @@ where
             expected: expected_authority_epoch,
             actual: aggregate.authority_epoch(),
         });
+    }
+
+    // Step 3b: owner-authority check, for commands that need one.
+    //
+    // Added to close a real, confirmed gap: `ApproveTask`/`RejectTask`/
+    // `ApproveMission`/`RejectMission` previously had no check at all on
+    // *who* was issuing them (`decide()`'s own
+    // `context.authority.is_authorized(...)` is a documented Increment-1
+    // stub that always returns `true` — see `VerifiedAuthority::is_authorized`
+    // and the frozen-spec ruling deferring real policy evaluation to
+    // Increment 7). Any authenticated org member could approve or reject
+    // any task or mission.
+    //
+    // `owner_check` is `None` for the overwhelming majority of calls
+    // (every command that isn't an owner-gated decision) — a no-op in
+    // that case. When present, it pairs an extractor closure — over the
+    // already-loaded, already-deserialized `aggregate: A` above — with an
+    // authority strategy to check the extracted owner against. The
+    // extractor is only ever constructed by callers that know `A:
+    // HasOwner` concretely (`TaskDecisionHandler`, `MissionDecisionHandler`
+    // in `client-composition`, and `command_route`'s HTTP dispatch for the
+    // same two commands) — this deliberately avoids adding `A: HasOwner`
+    // as a blanket bound on `handle_command` itself, which would force
+    // every other aggregate type (`Notification`, `TodoList`,
+    // `ApprovalAggregate`, ...) to implement an owner concept that makes
+    // no sense for them.
+    //
+    // The authority strategy itself is caller-supplied, not a single
+    // global implementation: `api-server`'s HTTP path has direct database
+    // access and can check a live `UserStore`; `desktop-shell`'s
+    // offline-first local command path has no local `UserStore` at all
+    // and instead checks a locally cached hierarchy snapshot
+    // (`desktop_shell::hierarchy::HierarchyCache`). Neither strategy
+    // belongs hardcoded into this shared, dependency-light kernel-adjacent
+    // crate — each caller supplies its own via the `OwnerAuthority` trait.
+    if let Some((get_owner_id, authority)) = owner_check.as_ref() {
+        let owner_id = get_owner_id(&aggregate);
+        let authorized = authority.is_authorized(actor.user_id, owner_id).await;
+        if !authorized {
+            return Err(CommandError::OwnerAuthorityDenied {
+                actor: actor.user_id,
+                owner: owner_id,
+            });
+        }
     }
 
     // Step 4 (ruling H2): open the UnitOfWork transaction now that a
