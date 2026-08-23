@@ -52,7 +52,7 @@ export interface CommandEnvelope<T = unknown> {
 
 export interface CommandError {
   code: string;
-  category: 'DOMAIN' | 'AUTHORITY' | 'CONCURRENCY' | 'INFRASTRUCTURE';
+  category: 'DOMAIN' | 'AUTHORITY' | 'CONCURRENCY' | 'INFRASTRUCTURE' | 'VALIDATION';
   retryability: 'RETRYABLE' | 'NON_RETRYABLE' | 'TRANSIENT';
   safe_details: Record<string, string | number | boolean>;
   correlation_id: string;

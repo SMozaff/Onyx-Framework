@@ -45,3 +45,14 @@ export function normalizeError(error: unknown): UserFacingError {
   const safeMessage = commandError?.safe_details?.message;
   return { ...base, message: typeof safeMessage === "string" ? safeMessage : base.message, commandError };
 }
+
+/**
+ * For pages that keep error state as a plain string (not a full
+ * `UserFacingError`): the server's own error `code` prefixed onto its
+ * message, e.g. `"USERNAME_TAKEN: That username already exists"`, so the
+ * displayed text is diagnosable rather than generic prose.
+ */
+export function describeError(error: unknown): string {
+  const { commandError, message } = normalizeError(error);
+  return commandError ? `${commandError.code}: ${message}` : message;
+}

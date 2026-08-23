@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/api/client";
+import { describeError } from "@/utils/errorHandler";
 
 /**
  * Staff profile administration: list, single edit (upsert), and batch
@@ -34,8 +35,8 @@ export default function Profiles() {
       const response = await apiClient.get<ProfileRow[]>("/api/profiles");
       setProfiles(response.data);
       setError(null);
-    } catch {
-      setError("Failed to load profiles.");
+    } catch (e) {
+      setError(describeError(e));
     }
   }
 
@@ -191,10 +192,7 @@ function EditProfileDialog({
       });
       onSaved();
     } catch (e) {
-      const message =
-        (e as { response?: { data?: { message?: string } } }).response?.data?.message ??
-        "Failed to save profile.";
-      setError(message);
+      setError(describeError(e));
     } finally {
       setLoading(false);
     }
@@ -321,8 +319,8 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
       );
       setSummary(response.data);
       onImported();
-    } catch {
-      setError("Import failed — check the file format and try again.");
+    } catch (e) {
+      setError(describeError(e));
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

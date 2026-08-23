@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { useCommand } from "@/hooks/useCommand";
 import { useQuery } from "@/hooks/useQuery";
+import { describeError } from "@/utils/errorHandler";
 import { useAuthStore } from "@/stores/authStore";
 import { getServerAddress, setServerAddress, isPlausibleServerAddress } from "@/utils/serverAddress";
 
@@ -199,8 +200,8 @@ function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
       });
       setName("");
       onCreated(response.data.policy_id);
-    } catch {
-      setError("Failed to create policy.");
+    } catch (e) {
+      setError(describeError(e));
     } finally {
       setLoading(false);
     }
@@ -528,8 +529,8 @@ function LegalHoldPanel() {
       setHoldIdRaw(response.data.legal_hold_id);
       setTargetIdInput("");
       setReasonInput("");
-    } catch {
-      setApplyError("Failed to apply legal hold.");
+    } catch (e) {
+      setApplyError(describeError(e));
     } finally {
       setApplying(false);
     }

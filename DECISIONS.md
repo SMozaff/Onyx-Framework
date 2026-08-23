@@ -2294,3 +2294,108 @@ against source, not assumed) but has **not** been compiled, run, or logged
 into on a real machine. Per standing project rule, verification happens via
 Manus AI's sandbox or the `Debug.yml` GitHub Actions workflow, not in this
 environment.
+
+## Two pending fixes: `mobile-core` workspace build break, and admin-shell's generic error messages — verified 2026-08-23
+
+Two bugs were reported as already diagnosed but not yet landed. Checked
+`git log`/`git show` against `origin/main` first, per standing project
+rule — neither fix was present. Both are applied here, and both were
+actually compiled/built in this environment, not just read for
+plausibility.
+
+**Bug 1 — `mobile-core` broke `cargo check --workspace`.** When
+`client-composition::AppState::new` became `async` and
+`AppStateConfig` gained a required `blob_store_root: std::path::PathBuf`
+field (Phase 1, file-upload support for desktop-shell — see that
+change's own doc comment on `AppState::new`), the doc comment claimed
+every *existing* call site was updated. `crates/mobile-core/src/lib.rs`'s
+`mobile_core_new` was not yet a call site at the time and was missed. As
+a Cargo workspace member, `mobile-core`'s compile errors
+(E0063/E0609/E0308 — missing field, `.sync_agent` accessed on an
+un-awaited future, and `Arc<impl Future<...>>` where `Arc<AppState>` was
+expected) abort `cargo check --workspace` entirely, not just a
+mobile-specific check — this is why it showed up in the shared `check`
+CI job rather than an isolated mobile job.
+
+Fix, inside `mobile_core_new`'s existing `runtime.block_on(async { ... })`
+block (already an async context — confirmed, not assumed):
+- `AppState::new(pool, app_config)` is now `.await`ed.
+- `AppStateConfig` now gets a `blob_store_root` field, derived from
+  `db_path` (`mobile_core_new`'s first FFI parameter — the Dart/Flutter
+  side's chosen SQLite file location) as `db_path`'s parent directory
+  joined with `"blobs"`. This intentionally mirrors
+  `crates/bins/desktop-shell/src/lib.rs`'s own
+  `data_dir.join("blobs")` line exactly, rather than inventing a new
+  convention for the same concept. Falls back to the relative path
+  `"onyx-blobs"` only if `db_path` has no parent component (e.g. a bare
+  filename with no directory), which should not happen given how the
+  Flutter side is expected to supply this path, but is handled rather
+  than left to panic.
+
+**Bug 2 — admin-shell showed a generic "failed to X" message instead of
+the server's real, specific error.** `api-server`'s `ApiError::into_response`
+(`crates/bins/api-server/src/routes/mod.rs`) returns
+`{ error: { code, category, safe_details: { message }, correlation_id } }`.
+`crates/bins/admin-shell/ui/src/utils/errorHandler.ts`'s `normalizeError`
+already read this shape correctly, and `useCommand.ts`/`useQuery.ts`
+already used it. But `Users.tsx` (5 call sites: refresh, create, set
+class, set parent, activate/deactivate), `Profiles.tsx` (3: refresh,
+save, batch import), and `Settings.tsx` (2: create policy, apply legal
+hold) either had a bare `catch {}` hardcoding a generic string, or read
+`e.response.data.message` — a path that does not exist anywhere in the
+real response shape, so it was always `undefined` and fell through to
+the same generic fallback regardless of which specific error
+(`USERNAME_TAKEN`, `INVALID_CLASS`, `WEAK_PASSWORD`,
+`PARENT_USER_NOT_FOUND`, `PARENT_CYCLE`, `CANNOT_DEACTIVATE_SELF`,
+`CLASS_REQUIRED`, etc.) the backend actually sent.
+
+Added `describeError(error: unknown): string` to `errorHandler.ts` —
+calls the existing `normalizeError`, then formats
+`` `${commandError.code}: ${message}` `` when a `commandError` is
+present (else just the message), matching the diagnosable format asked
+for (e.g. `"USERNAME_TAKEN: That username already exists"`). All 10
+call sites listed above now use it. `types/command.ts`'s
+`CommandError['category']` union was missing `'VALIDATION'`, which
+`api-server`'s admin routes (`routes/admin.rs`) send constantly for
+exactly these errors — added.
+
+**Deliberately not touched.** `Settings.tsx`'s and the connection-setup
+component's raw-`fetch`-based `testConnection` helpers, which collapse
+any failure to a boolean `/health` reachability check — not part of this
+bug, and changing them to surface a server message would be wrong (a
+`/health` probe failing has no `CommandError` to report). `Login.tsx`'s
+login-submit catch was also left alone: it deliberately shows a generic
+"Invalid username or password" on non-network failures rather than the
+server's specific reason, which is correct security practice for an
+auth endpoint (don't reveal whether the username or the password was
+wrong) — not an instance of this bug, so not "fixed" into leaking that
+distinction.
+
+**Verification actually run, not assumed:**
+- `cargo check -p mobile-core` — clean.
+- `cargo check --workspace --exclude desktop-shell --exclude admin-shell`
+  — clean. The full unrestricted `cargo check --workspace` could not be
+  run in this environment: `desktop-shell` and `admin-shell` (Tauri)
+  pull in `gdk-sys`, which needs the system GTK3 `gdk-3.0` pkg-config
+  file; this sandbox has no GTK dev libraries installed and package
+  installation via `apt-get` failed here (mirror 404s), which is an
+  environment limitation unrelated to this change — not a claim that
+  the excluded crates were checked. Every crate that was previously
+  breaking (`mobile-core` and everything it's a dependency of) is
+  included in the exclusion-scoped check and is clean.
+- `cargo build -p mobile-core` was not run separately — `cargo check`
+  already exercises the same trait/type resolution that was failing;
+  a full `build` was not additionally run due to time, and this is
+  disclosed rather than implied.
+- Android/iOS mobile CI jobs specifically were not run — no mobile
+  toolchain in this environment. Flagged, not silently skipped.
+- `crates/bins/admin-shell/ui`: `npx tsc -b` and `npx vite build` both
+  ran clean after `npm install`.
+- No live `api-server` instance was available in this environment to
+  actually trigger a real `USERNAME_TAKEN` (or similar) rejection and
+  confirm the rendered UI text end-to-end. The fix was verified by
+  reading `normalizeError`/`describeError` against the exact response
+  shape `ApiError::into_response` sends (confirmed against
+  `routes/mod.rs` source), and by a clean typecheck/build — not by an
+  actual browser-observed failure. Stated explicitly rather than
+  implied as tested.

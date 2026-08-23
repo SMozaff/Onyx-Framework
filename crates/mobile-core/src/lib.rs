@@ -197,6 +197,17 @@ pub unsafe extern "C" fn mobile_core_new(
                 }
             };
 
+        // Mirrors desktop-shell's `data_dir.join("blobs")` (lib.rs): a
+        // sibling "blobs" directory next to the SQLite file. There is no
+        // Tauri-style app-data-directory API in this FFI layer, but
+        // `db_path` (the Dart/Flutter side's chosen database location) is
+        // already available and serves the same role. Falls back to a
+        // relative path only if `db_path` has no parent component.
+        let blob_store_root = std::path::Path::new(&db_path)
+            .parent()
+            .map(|p| p.join("blobs"))
+            .unwrap_or_else(|| std::path::PathBuf::from("onyx-blobs"));
+
         let app_config = AppStateConfig {
             local_replica,
             organization_id: config.organization_id,
@@ -216,9 +227,10 @@ pub unsafe extern "C" fn mobile_core_new(
                 sync_transport::placeholder_types::StaticAuthorityProvider(String::new()),
             ),
             cloud_relay_socket_factory: Arc::new(NotYetImplementedSocketFactory),
+            blob_store_root,
         };
 
-        Some(Arc::new(AppState::new(pool, app_config)))
+        Some(Arc::new(AppState::new(pool, app_config).await))
     });
 
     let Some(state) = state else {

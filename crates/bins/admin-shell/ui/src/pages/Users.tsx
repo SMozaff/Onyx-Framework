@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiClient } from "@/api/client";
+import { describeError } from "@/utils/errorHandler";
 
 /**
  * User management: list, create, deactivate/reactivate, class + parent
@@ -39,8 +40,8 @@ export default function Users() {
       const response = await apiClient.get<UserRow[]>("/api/admin/users");
       setUsers(response.data);
       setError(null);
-    } catch {
-      setError("Failed to load users.");
+    } catch (e) {
+      setError(describeError(e));
     }
   }
 
@@ -108,10 +109,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       setUserClass("");
       onCreated();
     } catch (e) {
-      const message =
-        (e as { response?: { data?: { message?: string } } }).response?.data?.message ??
-        "Failed to create user.";
-      setError(message);
+      setError(describeError(e));
     } finally {
       setLoading(false);
     }
@@ -197,8 +195,8 @@ function UserRowView({
     try {
       await apiClient.post(`/api/admin/users/${user.id}/class`, { class: newClass || null });
       onChanged();
-    } catch {
-      setError("Failed to set class.");
+    } catch (e) {
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -212,8 +210,8 @@ function UserRowView({
         parent_user_id: parentId || null,
       });
       onChanged();
-    } catch {
-      setError("Failed to set parent — check for a cycle or invalid reference.");
+    } catch (e) {
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -226,8 +224,8 @@ function UserRowView({
       const path = user.is_active ? "deactivate" : "activate";
       await apiClient.post(`/api/admin/users/${user.id}/${path}`);
       onChanged();
-    } catch {
-      setError("Failed to update status.");
+    } catch (e) {
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
