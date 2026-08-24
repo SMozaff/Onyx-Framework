@@ -21,12 +21,20 @@ permissions:
   artifact-metadata: write
   actions: read
 jobs:
+  # Windows-only: the real production server is a Windows 10 machine in
+  # the office (see DECISIONS.md) -- there is no current deployment
+  # target for Linux/macOS server binaries. Previously built all three
+  # OSes; narrowed here since the other two platforms' outputs were
+  # never actually deployed anywhere. release-images below is a
+  # separate, Linux-container artifact (GHCR/Docker) for a different
+  # deployment path and is deliberately untouched by this narrowing --
+  # it was never OS-matrixed in the first place (one ubuntu-24.04
+  # runner builds every service's Linux container image, regardless of
+  # native server-binary platform support).
   release-binaries:
     strategy:
       matrix:
         include:
-          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu}
-          - {os: macos-14, target: aarch64-apple-darwin}
           - {os: windows-2022, target: x86_64-pc-windows-msvc}
     runs-on: ${{ matrix.os }}
     steps:
