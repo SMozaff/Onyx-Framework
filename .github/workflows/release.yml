@@ -145,7 +145,16 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # `${{ secrets.X }}` evaluates to an empty string, not unset,
+          # when the secret doesn't exist -- confirmed via a real
+          # release.yml run: this explicit-but-empty value made Tauri's
+          # macOS bundler codesign with identity "" ("The specified item
+          # could not be found in the keychain"), not the ad-hoc "-"
+          # fallback this job's own header comment already documents as
+          # the intended no-real-cert behavior. `|| '-'` restores that
+          # documented fallback only when the secret is genuinely unset;
+          # a real configured identity still wins.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -247,7 +256,16 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # `${{ secrets.X }}` evaluates to an empty string, not unset,
+          # when the secret doesn't exist -- confirmed via a real
+          # release.yml run: this explicit-but-empty value made Tauri's
+          # macOS bundler codesign with identity "" ("The specified item
+          # could not be found in the keychain"), not the ad-hoc "-"
+          # fallback this job's own header comment already documents as
+          # the intended no-real-cert behavior. `|| '-'` restores that
+          # documented fallback only when the secret is genuinely unset;
+          # a real configured identity still wins.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
