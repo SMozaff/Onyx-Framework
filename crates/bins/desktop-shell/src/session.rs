@@ -76,6 +76,12 @@ pub enum SessionError {
 struct LoginRequest<'a> {
     username: &'a str,
     password: &'a str,
+    /// New, additive field on the server's `LoginRequest` — see that
+    /// struct's doc comment. `desktop-shell` is never subject to the
+    /// mobile-class-access gate (only `client_type: "mobile"` is
+    /// checked server-side), but sends its own real value for
+    /// consistency across every first-party client.
+    client_type: &'a str,
 }
 
 /// Mirrors `api-server::routes::auth::LoginResponse` /
@@ -120,7 +126,7 @@ pub async fn authenticate(
 
     let response = client
         .post(&url)
-        .json(&LoginRequest { username, password })
+        .json(&LoginRequest { username, password, client_type: "desktop" })
         .send()
         .await
         .map_err(|e| SessionError::Network(e.to_string()))?;

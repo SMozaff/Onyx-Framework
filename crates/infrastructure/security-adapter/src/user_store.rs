@@ -336,6 +336,47 @@ impl UserStore for PostgresUserStore {
             .map_err(infrastructure)?;
         Ok(count.max(0) as u64)
     }
+
+    async fn list_mobile_access(&self, organization_id: &str) -> Result<Vec<String>, UserStoreError> {
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT user_class FROM mobile_class_access WHERE organization_id = $1",
+        )
+        .bind(parse_uuid(organization_id, "organization_id")?)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(infrastructure)?;
+        Ok(rows)
+    }
+
+    async fn set_mobile_access(
+        &self,
+        organization_id: &str,
+        classes: &[String],
+    ) -> Result<(), UserStoreError> {
+        let org = parse_uuid(organization_id, "organization_id")?;
+        // Replace-the-whole-set semantics in one transaction, per this
+        // method's own doc comment on the port trait: a reader must never
+        // observe a partially-applied grant list.
+        let mut tx = self.pool.begin().await.map_err(infrastructure)?;
+        sqlx::query("DELETE FROM mobile_class_access WHERE organization_id = $1")
+            .bind(org)
+            .execute(&mut *tx)
+            .await
+            .map_err(infrastructure)?;
+        for class in classes {
+            sqlx::query(
+                "INSERT INTO mobile_class_access (id, organization_id, user_class) VALUES ($1, $2, $3)",
+            )
+            .bind(uuid::Uuid::new_v4())
+            .bind(org)
+            .bind(class)
+            .execute(&mut *tx)
+            .await
+            .map_err(infrastructure)?;
+        }
+        tx.commit().await.map_err(infrastructure)?;
+        Ok(())
+    }
 }
 
 // ------------------------------------------------------------------ SQLite --
@@ -592,6 +633,43 @@ impl UserStore for SqliteUserStore {
             .map_err(infrastructure)?;
         Ok(count.max(0) as u64)
     }
+
+    async fn list_mobile_access(&self, organization_id: &str) -> Result<Vec<String>, UserStoreError> {
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT user_class FROM mobile_class_access WHERE organization_id = ?1",
+        )
+        .bind(organization_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(infrastructure)?;
+        Ok(rows)
+    }
+
+    async fn set_mobile_access(
+        &self,
+        organization_id: &str,
+        classes: &[String],
+    ) -> Result<(), UserStoreError> {
+        let mut tx = self.pool.begin().await.map_err(infrastructure)?;
+        sqlx::query("DELETE FROM mobile_class_access WHERE organization_id = ?1")
+            .bind(organization_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(infrastructure)?;
+        for class in classes {
+            sqlx::query(
+                "INSERT INTO mobile_class_access (id, organization_id, user_class) VALUES (?1, ?2, ?3)",
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(organization_id)
+            .bind(class)
+            .execute(&mut *tx)
+            .await
+            .map_err(infrastructure)?;
+        }
+        tx.commit().await.map_err(infrastructure)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -656,6 +734,17 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query(
+            "CREATE TABLE mobile_class_access (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                user_class TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (organization_id, user_class))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         SqliteUserStore::new(pool)
     }
 
@@ -826,6 +915,40 @@ mod tests {
                 .unwrap_err(),
             UserStoreError::NotFound
         );
+    }
+
+    #[tokio::test]
+    async fn mobile_access_defaults_to_empty_and_replaces_wholesale() {
+        let store = store().await;
+        let org_a = uuid::Uuid::new_v4().to_string();
+        let org_b = uuid::Uuid::new_v4().to_string();
+
+        // Restrictive default: an org with no grants at all returns an
+        // empty list, not every class or an error.
+        assert_eq!(store.list_mobile_access(&org_a).await.unwrap(), Vec::<String>::new());
+
+        store
+            .set_mobile_access(&org_a, &["staff".to_string(), "supervisor".to_string()])
+            .await
+            .unwrap();
+        let mut granted = store.list_mobile_access(&org_a).await.unwrap();
+        granted.sort();
+        assert_eq!(granted, vec!["staff".to_string(), "supervisor".to_string()]);
+
+        // A second org's grants are independent.
+        assert_eq!(store.list_mobile_access(&org_b).await.unwrap(), Vec::<String>::new());
+
+        // Replacing wholesale drops anything not in the new set, rather
+        // than merging with the old one.
+        store
+            .set_mobile_access(&org_a, &["staff".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(store.list_mobile_access(&org_a).await.unwrap(), vec!["staff".to_string()]);
+
+        // An empty replacement is valid and means "deny every class".
+        store.set_mobile_access(&org_a, &[]).await.unwrap();
+        assert_eq!(store.list_mobile_access(&org_a).await.unwrap(), Vec::<String>::new());
     }
 
     #[tokio::test]

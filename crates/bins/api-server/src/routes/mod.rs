@@ -440,6 +440,13 @@ pub fn router(state: ApiState) -> Router {
         // and admin::set_parent's doc comments.
         .route("/api/admin/users/:id/class", post(admin::set_class))
         .route("/api/admin/users/:id/parent", post(admin::set_parent))
+        // Class-based mobile access control: admin-only read/replace of
+        // the caller's organization's mobile-access grant list. See
+        // `admin::get_mobile_access`/`set_mobile_access` doc comments.
+        .route(
+            "/api/admin/mobile-access",
+            get(admin::get_mobile_access).put(admin::set_mobile_access),
+        )
         // Staff profiles (2026-08-13): public view/list, admin-only
         // upsert and batch import/export. See routes::profiles for the
         // confirmed visibility/editing rules.

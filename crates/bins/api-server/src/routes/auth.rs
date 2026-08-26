@@ -30,6 +30,15 @@ fn invalid_credentials() -> ApiError {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// Which kind of client is logging in: `"mobile"`, `"desktop"`,
+    /// `"admin"`, or `"web"`. Optional and additive — existing callers
+    /// that don't send it are treated as `None`, which is never gated
+    /// (only `Some("mobile")` triggers the `mobile_class_access` check
+    /// below); this keeps any caller this project doesn't yet know
+    /// about from being silently locked out by a field it has never
+    /// heard of. Every first-party client (`mobile`, `desktop-shell`,
+    /// `admin-shell`) has been updated to send its own real value.
+    pub client_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +128,49 @@ pub async fn login(
             return Err(invalid_credentials());
         }
     };
+
+    if payload.client_type.as_deref() == Some("mobile") && !user.is_admin {
+        // Restrictive-by-default class-based mobile access control, per
+        // explicit product decision: an org with no configured
+        // `mobile_class_access` row for this user's class denies mobile
+        // login, rather than allowing it until explicitly restricted.
+        // Admin bypasses this check entirely (see the migration's own
+        // doc comment, mirroring `require_class`'s existing Admin-
+        // bypass precedent elsewhere in this codebase). An unclassified
+        // user (`class: None`) can never match a grant row and is
+        // denied here.
+        let allowed = match &user.class {
+            Some(class) => {
+                let granted = state
+                    .user_store
+                    .list_mobile_access(&user.organization_id)
+                    .await
+                    .map_err(|error| {
+                        tracing::error!(error = %error, "mobile access lookup failed during login");
+                        ApiError::new(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "USER_STORE_UNAVAILABLE",
+                            "INFRASTRUCTURE",
+                            "TRANSIENT",
+                            uuid::Uuid::new_v4().to_string(),
+                            json!({}),
+                        )
+                    })?;
+                granted.iter().any(|c| c == class.as_str())
+            }
+            None => false,
+        };
+        if !allowed {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "MOBILE_ACCESS_RESTRICTED",
+                "AUTHORITY",
+                "NON_RETRYABLE",
+                uuid::Uuid::new_v4().to_string(),
+                json!({"message":"Mobile access is not enabled for your user class in this organization"}),
+            ));
+        }
+    }
 
     let access_token = issue_token(&state, &user, "access", 3600)
         .await

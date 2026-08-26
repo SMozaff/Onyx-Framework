@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../net/auth.dart' show MobileAccessRestrictedException;
 import '../net/onyx_http_api.dart';
 import 'app.dart';
 
@@ -208,6 +209,10 @@ class _HttpLoginScreenState extends State<HttpLoginScreen> {
 /// falls back to the raw error rather than guessing at an unsupported
 /// cause.
 String _friendlyLoginError(Object error) {
+  if (error is MobileAccessRestrictedException) {
+    return 'Mobile access is not enabled for your user class in this '
+        'organization. Ask an admin to enable it in Settings.';
+  }
   final text = error.toString().toLowerCase();
   if (text.contains('connection') || text.contains('socketexception') || text.contains('timeout')) {
     return 'Could not reach the server. Check that api-server is running '

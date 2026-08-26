@@ -512,6 +512,60 @@ pub async fn set_class(
     Ok(Json(json!({"success": true})))
 }
 
+#[derive(serde::Serialize)]
+pub struct MobileAccessResponse {
+    pub allowed_classes: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct SetMobileAccessRequest {
+    pub allowed_classes: Vec<String>,
+}
+
+/// `GET /api/admin/mobile-access` — admin-only. Returns the caller's own
+/// organization's current mobile-access grants (which `UserClass`
+/// values, as wire strings, may currently log in with
+/// `client_type: "mobile"`). Scoped to the admin's own organization —
+/// there is no cross-org admin concept anywhere else in this file
+/// either, so this follows that same precedent rather than accepting an
+/// organization_id from the caller.
+pub async fn get_mobile_access(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Json<MobileAccessResponse>, ApiError> {
+    let admin = require_admin(&state, &headers).await?;
+    let allowed_classes = state
+        .user_store
+        .list_mobile_access(&admin.organization_id)
+        .await
+        .map_err(store_error)?;
+    Ok(Json(MobileAccessResponse { allowed_classes }))
+}
+
+/// `PUT /api/admin/mobile-access` — admin-only. Replaces the caller's
+/// organization's full mobile-access grant list with exactly the
+/// `allowed_classes` given (validated against `UserClass::parse` so an
+/// unrecognized class string is rejected as `INVALID_CLASS` rather than
+/// silently stored). An empty list is valid and means "no class may log
+/// in from mobile" — the restrictive default this table exists to
+/// implement, not an error.
+pub async fn set_mobile_access(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(payload): Json<SetMobileAccessRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin(&state, &headers).await?;
+    for class in &payload.allowed_classes {
+        parse_class_field(Some(class.as_str()))?;
+    }
+    state
+        .user_store
+        .set_mobile_access(&admin.organization_id, &payload.allowed_classes)
+        .await
+        .map_err(store_error)?;
+    Ok(Json(json!({"success": true})))
+}
+
 /// `POST /api/admin/users/:id/parent` — admin-only reporting-line
 /// assignment. Admin-only for the same reason as `set_class` above —
 /// the reporting line determines who verifies whose Todo/Target lists

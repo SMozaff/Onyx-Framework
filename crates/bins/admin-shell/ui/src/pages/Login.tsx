@@ -24,7 +24,7 @@ export default function Login() {
     setError(null);
     setLoading(true);
     try {
-      const response = await apiClient.post("/api/auth/login", { username, password });
+      const response = await apiClient.post("/api/auth/login", { username, password, client_type: "admin" });
       useAuthStore.getState().login(response.data);
       navigate("/", { replace: true });
     } catch (err) {

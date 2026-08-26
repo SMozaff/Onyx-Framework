@@ -268,4 +268,26 @@ pub trait UserStore: Send + Sync {
     /// Number of stored users. Used solely by the first-run bootstrap check,
     /// which must be able to distinguish an empty store from a populated one.
     async fn count(&self) -> Result<u64, UserStoreError>;
+
+    /// The set of `UserClass` values, as their wire strings
+    /// (`UserClass::as_str()`), currently granted mobile access within
+    /// `organization_id`. Backed by the `mobile_class_access` table
+    /// (per-org, per-class allow-list rows — see that migration's own
+    /// doc comment). An empty result means mobile login is denied for
+    /// every class in this organization until an admin adds a grant —
+    /// per the explicit, restrictive-by-default product decision this
+    /// table implements, absence of a row is never treated as "allow".
+    async fn list_mobile_access(&self, organization_id: &str) -> Result<Vec<String>, UserStoreError>;
+
+    /// Replaces the full set of mobile-access grants for
+    /// `organization_id` with exactly `classes` (each a
+    /// `UserClass::as_str()` value) in one atomic operation, so a caller
+    /// setting "Staff and Supervisor only" cannot race with a concurrent
+    /// read into a state where some other class is transiently also
+    /// granted. Admin-only at the route layer, mirroring `set_class`.
+    async fn set_mobile_access(
+        &self,
+        organization_id: &str,
+        classes: &[String],
+    ) -> Result<(), UserStoreError>;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { useCommand } from "@/hooks/useCommand";
@@ -63,6 +63,100 @@ export default function Settings() {
       )}
 
       <LegalHoldPanel />
+      <MobileAccessPanel />
+    </div>
+  );
+}
+
+const USER_CLASSES: { value: string; label: string }[] = [
+  { value: "top_level_manager", label: "Top-level Manager" },
+  { value: "senior_manager", label: "Senior Manager" },
+  { value: "team_leader", label: "Team Leader" },
+  { value: "supervisor", label: "Supervisor" },
+  { value: "staff", label: "Staff" },
+];
+
+/**
+ * Class-based mobile access control. Per an explicit product decision,
+ * mobile login is restrictive by default: a class with no grant here
+ * cannot log in from the mobile app at all (Admin is unaffected either
+ * way — it always bypasses this check server-side, same as every other
+ * class-based gate in this codebase). Reads/writes
+ * `GET`/`PUT /api/admin/mobile-access` directly, like `ServerConnectionSettings`
+ * and `Profiles.tsx`'s own plain-table settings do, rather than going
+ * through `useCommand`/`useQuery` — this isn't an event-sourced
+ * aggregate.
+ */
+function MobileAccessPanel() {
+  const [allowed, setAllowed] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await apiClient.get("/api/admin/mobile-access");
+        setAllowed(new Set(response.data.allowed_classes as string[]));
+      } catch (err) {
+        setError(describeError(err));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function save(next: Set<string>) {
+    setAllowed(next);
+    setSaving(true);
+    setError(null);
+    try {
+      await apiClient.put("/api/admin/mobile-access", { allowed_classes: Array.from(next) });
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggle(value: string) {
+    const next = new Set(allowed);
+    if (next.has(value)) {
+      next.delete(value);
+    } else {
+      next.add(value);
+    }
+    void save(next);
+  }
+
+  return (
+    <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
+      <h2 className="text-sm font-semibold text-onyx-text">Mobile access</h2>
+      <p className="mt-1 text-sm text-onyx-text-dim">
+        Only the user classes checked below may sign in from the mobile app. A class with no
+        checkmark is denied mobile login entirely, until enabled here — Administrators always
+        retain mobile access regardless of this list.
+      </p>
+      {loading && <p className="mt-3 text-sm text-onyx-text-dim">Loading…</p>}
+      {error && <p className="mt-3 text-sm text-onyx-status-blocked">{error}</p>}
+      {!loading && (
+        <div className="mt-3 flex flex-col gap-2">
+          {USER_CLASSES.map((c) => (
+            <label key={c.value} className="flex items-center gap-2 text-sm text-onyx-text">
+              <input
+                type="checkbox"
+                checked={allowed.has(c.value)}
+                disabled={saving}
+                onChange={() => toggle(c.value)}
+              />
+              {c.label}
+            </label>
+          ))}
+        </div>
+      )}
+      {savedAt && !saving && <p className="mt-2 text-xs text-onyx-text-dim">Saved.</p>}
     </div>
   );
 }

@@ -2891,3 +2891,124 @@ investigate further — flagged as a possible future task, not acted on.
   be run through `dart analyze`/`flutter analyze` on a real toolchain
   before being considered fully verified, the same standard this
   project has applied to every other Dart change.
+
+## Class-based mobile access control — restrictive by default, per explicit project-owner decision
+
+**The gap.** Mobile login had no per-class access control at all: any
+active user with correct credentials could log in from the mobile app,
+regardless of their `UserClass`. This piece adds an admin-managed
+allow-list, `mobile_class_access` (per-organization, per-class grant
+rows), gating `client_type: "mobile"` logins specifically.
+
+**The one question this piece required asking before writing any code**
+(per the plan's own explicit instruction — "don't default to the plan's
+tentative recommendation without an explicit go-ahead"): for an
+organization with **no** `mobile_class_access` rows configured at all,
+should mobile login be allowed (permissive) or denied (restrictive)?
+This was asked directly via `AskUserQuestion`, not inferred or defaulted.
+**Answer received: restrictive.** An org with zero grant rows denies
+mobile login for every class until an admin explicitly adds one. This is
+the opposite of the plan document's own tentative "permissive" lean —
+implemented exactly as answered, not as the plan first suggested.
+
+**What was built:**
+
+- `migrations/{postgres,sqlite}/20260108000000_add_mobile_class_access.{up,down}.sql`
+  — one row per `(organization_id, user_class)` grant, `UNIQUE`
+  constraint preventing duplicates, mirroring the existing
+  `20260107000000_add_user_class_hierarchy` migration's own
+  documentation conventions (each file explains its own provenance and
+  the Postgres/SQLite validation-strength gap, same as that precedent).
+- `UserStore` port (`security-application`): two new methods,
+  `list_mobile_access`/`set_mobile_access` (the latter replaces the
+  full grant set atomically inside one transaction — a partial
+  read mid-write must never be observable), implemented for both
+  `PostgresUserStore` and `SqliteUserStore`.
+- `LoginRequest` (`api-server::routes::auth`) gains an additive,
+  optional `client_type: Option<String>` field. Only
+  `client_type == Some("mobile")` triggers the gate — anything else
+  (including `None`, for any caller this project doesn't yet know
+  about) is never gated, so this cannot silently lock out a caller
+  that predates the field. **Admin bypasses the gate unconditionally**
+  regardless of `client_type`, mirroring the existing `require_class`
+  precedent elsewhere in `admin.rs` where Admin bypasses every
+  class-based check in this codebase — this was not asked about
+  separately since it is consistent with that established pattern, not
+  a new judgment call. An unclassified user (`class: None`) can never
+  match a grant row (`user_class` is `NOT NULL`), so is denied by
+  construction, consistent with the restrictive-default answer above.
+  Denial returns a new, specific `403 MOBILE_ACCESS_RESTRICTED` — kept
+  distinct from `invalid_credentials()`'s deliberately-generic
+  `401 INVALID_CREDENTIALS` (audit finding H-01's enumeration-resistance
+  requirement), since a mobile-access denial is disclosed only *after*
+  a real credential match and is not a credential-guessing surface.
+- New admin-only routes, `GET`/`PUT /api/admin/mobile-access`, scoped to
+  the calling admin's own organization (no cross-org admin concept
+  exists anywhere else in `admin.rs` either, so this follows that same
+  precedent rather than accepting an arbitrary `organization_id`).
+- `admin-shell`'s Settings page gained a `MobileAccessPanel` — a
+  checkbox per `UserClass`, reading/writing the new endpoints directly
+  via `apiClient` (this is a plain table, not an event-sourced
+  aggregate, so it does not go through `useCommand`/`useQuery` — same
+  reasoning `ServerConnectionSettings`/`Profiles.tsx` already use for
+  their own plain-table settings).
+- Every first-party login call site was updated to send its own real
+  `client_type` for consistency, even where the value doesn't trigger
+  the gate: `desktop-shell` sends `"desktop"`, `admin-shell` sends
+  `"admin"`, `mobile`'s `net/auth.dart` sends `"mobile"`.
+- `mobile/lib/net/auth.dart` gains `MobileAccessRestrictedException`,
+  thrown specifically when the server's login rejection carries
+  `MOBILE_ACCESS_RESTRICTED` — distinguished from every other login
+  failure, which still surfaces as the deliberately-generic
+  `INVALID_CREDENTIALS` per that file's own existing doc comment (audit
+  finding H-01). `http_login_screen.dart`'s `_friendlyLoginError` shows
+  a specific "ask your admin to enable mobile access" message for this
+  one case rather than the generic "sign-in failed" text.
+
+**Verification actually run:**
+- `cargo check --workspace --exclude desktop-shell --exclude admin-shell`
+  and `cargo clippy` (same exclusions, `-D warnings`) — clean.
+  `desktop-shell` itself was independently confirmed to still hit the
+  same pre-existing, unrelated `gdk-3.0` pkg-config/GTK limitation this
+  sandbox has hit throughout this session (not a new failure from this
+  change — confirmed by reading the actual error text again).
+- `cargo test -p security-adapter` — 25/25 pass, including a new test,
+  `mobile_access_defaults_to_empty_and_replaces_wholesale`, proving the
+  restrictive default (`list_mobile_access` on an unconfigured org
+  returns empty, not "everyone"), per-org isolation, and that
+  `set_mobile_access` truly replaces rather than merges.
+- `cargo test -p api-server --test mobile_access_gate` — a new, real,
+  full-HTTP end-to-end test: an Admin can log in with
+  `client_type: "mobile"` before any grant exists (bypass confirmed); a
+  Staff user with the same client_type is denied
+  `403 MOBILE_ACCESS_RESTRICTED` before any grant exists (restrictive
+  default confirmed over real HTTP, not just at the store layer); the
+  same Staff user succeeds with `client_type: "desktop"` (gate is
+  `client_type`-scoped, confirmed); `GET /api/admin/mobile-access`
+  starts empty; `PUT` grants `"staff"`; the Staff user's mobile login
+  then succeeds; and a non-admin's own `GET` on the admin route is
+  confirmed `403`. All assertions pass.
+- Ran the **full** `api-server` test suite alongside this change and
+  found four pre-existing failures unrelated to this work — confirmed
+  by re-running each on unmodified `main` (via `git stash`) and getting
+  the identical failure count and messages there too:
+  `query_id_normalization` (the seeded fixed `"All-Father"` admin
+  account, added in a prior session, means the token-gated
+  `/api/admin/bootstrap` flow that test relies on is always
+  `BOOTSTRAP_ALREADY_COMPLETED` against a fresh database — the new
+  `mobile_access_gate` test deliberately logs in as the seeded admin
+  instead, precisely to avoid this trap), `relay_switchboard` (3
+  failures, appear to be a WebSocket/port-binding limitation in this
+  sandbox), and `staff_loan_authorization` /
+  `user_hierarchy_admin_routes` / `staff_profile_routes` /
+  `team_leader_precheck_authorization` (8 total failures, same
+  bootstrap-vs-seeded-admin conflict). None of these were introduced or
+  worsened by this change, and none were touched — fixing pre-existing,
+  unrelated test failures was out of scope for this task.
+- `admin-shell/ui`: `npx tsc -b` and `npx vite build` both clean (a
+  working Node toolchain was available in this sandbox for this piece,
+  unlike the Dart/Flutter case above).
+- Not verified: an actual live-server, real-browser click-through of
+  the new `MobileAccessPanel` UI (no running `api-server` + browser
+  session was exercised, only the build); a real Android/iOS mobile
+  build (no Flutter SDK in this sandbox, same constraint as Piece 1).
