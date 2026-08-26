@@ -2603,3 +2603,143 @@ desktop app is reviewed-by-hand only. Build and manually exercise
 `desktop-shell` (approve as a real logged-in manager; attempt to approve
 as an unrelated user) on a machine with the Tauri/GTK toolchain before
 treating this as fully proven.
+
+## Release build matrix scoped: server Windows-only, desktop apps stay cross-platform — verified 2026-08-26
+
+**The requirement, confirmed directly with the project owner.** Server
+binaries (`api-server`/`worker`/`migration-tool`/`sync-agent`) only need
+to run on Windows — the real production deployment is a Windows 10
+machine in the office, and there is no current plan to run the server on
+Linux or macOS. Both desktop apps (`desktop-shell`/"ONYX" and
+`admin-shell`/"ONYX Admin") need to keep shipping on all three platforms
+— Windows, macOS, and Debian Linux — since staff and admins use varied
+hardware.
+
+**What `release.yml` actually looked like before this — checked, not
+assumed.** `release-binaries` built the four server binaries for all
+three OSes (`ubuntu-24.04`/`x86_64-unknown-linux-gnu`,
+`macos-14`/`aarch64-apple-darwin`, `windows-2022`/`x86_64-pc-windows-msvc`)
+— more than the real deployment target needed.
+`release-desktop`/`release-admin-desktop` already built all three real
+targets (Linux `deb`+`appimage`, macOS `dmg`, Windows `msi`+`nsis`) —
+no OS was missing from either matrix. `release-images` (GHCR/Docker) was
+never OS-matrixed at all — one `ubuntu-24.04` runner builds every
+service's Linux container image regardless of native-binary platform
+support, since a Docker image is Linux-based by construction; it was
+correctly left untouched.
+
+**Real gap in the existing matrix, not one the task described.** Both
+desktop jobs' macOS coverage was `aarch64-apple-darwin` only — no
+`x86_64-apple-darwin` (Intel). This was raised explicitly via
+`AskUserQuestion` rather than assumed either way, and the person
+answering this session confirmed **Apple Silicon only** — no Intel Mac
+build added. Disclosed plainly: that confirmation came from whoever was
+in this chat session, not independently verified to be the same person
+as "the project owner" referenced elsewhere in this task's brief; if
+those are different people, this specific call should still be checked
+with whoever actually owns it.
+
+**The one matrix change made:** `release-binaries`'s `strategy.matrix`
+narrowed from three entries to one — `{os: windows-2022, target:
+x86_64-pc-windows-msvc}` — with a comment explaining why and why
+`release-images` is deliberately untouched.
+
+**Three real, unrelated bugs found and fixed via actual GitHub Actions
+runs, not by reading the YAML and assuming it worked.** This job's own
+existing comments claimed `apple-actions/import-codesign-certs`
+ad-hoc-signs and skips notarization when no real Apple credentials are
+configured, matching "Tauri's own documented fallback" — that claim had
+never actually been exercised end to end before this session. It was
+wrong in two different, specific ways:
+
+1. **Icon bundling failure (both desktop apps' macOS builds).** First
+   real run (`32718188664`) failed at
+   `failed to bundle project: Failed to create app icon: Format error
+   decoding Ico: The PNG is not in RGBA format!`. `desktop-shell`'s and
+   `admin-shell`'s `icons/icon.ico` each had embedded PNG frames that
+   decoded as RGB, not RGBA — Tauri's macOS bundler couldn't derive an
+   `.icns` from them. Windows/Linux builds were unaffected since neither
+   path decodes the `.ico` into an `.icns`. Fixed by regenerating both
+   apps' `icon.ico` (now genuine RGBA per frame, confirmed with `file`)
+   and generating a proper `icon.icns` via `tauri icon icons/icon.png`
+   against each app's existing source image — no new artwork. That
+   command also generates Android/iOS/MSIX assets neither app uses (no
+   mobile Tauri target, no Windows Store packaging); those were deleted
+   rather than committed, keeping `icons/` to exactly `icon.ico`,
+   `icon.png`, `icon.icns`. Added `icons/icon.icns` to both
+   `tauri.conf.json`'s `bundle.icon` list so macOS bundles from the
+   dedicated, higher-resolution `.icns` instead of re-deriving a
+   lower-res one from `icon.ico` (which tops out at a 256×256 frame).
+
+2. **Empty-string codesign identity (both apps' macOS builds).** Second
+   run (`32906999058`), after the icon fix, got past icon bundling and
+   failed instead with `Signing with identity ""` /
+   `error: The specified item could not be found in the keychain` /
+   `failed codesign application`. Root cause:
+   `${{ secrets.APPLE_SIGNING_IDENTITY }}` evaluates to an empty
+   string, not unset, when that secret doesn't exist (it doesn't — no
+   real Apple signing credentials are configured for this repo yet).
+   Tauri's bundler treats an explicitly-set-but-empty
+   `APPLE_SIGNING_IDENTITY` differently from a genuinely absent one: it
+   attempts `codesign` with identity `""` instead of falling back to
+   ad-hoc `"-"` signing. Fixed with
+   `${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}` on both jobs — falls
+   back to ad-hoc only when the secret is genuinely unset; a real
+   configured identity still wins.
+
+3. **Empty-credential notarization attempt (both apps' macOS builds).**
+   Third run (`32906999058`, same run as #2's fix landed for), after the
+   codesign fix, got past codesign (`Signing with identity "-"`
+   succeeded) and failed instead at notarization:
+   `Error: Team ID must be at least 3 characters`. Same root pattern as
+   #2, but `env: X || 'fallback'` can't fix it the same way this time —
+   there is no valid non-empty fallback value for a real Apple ID/team
+   the way `-` is a valid signing identity, and `${{ secrets.APPLE_ID }}`
+   etc. are still empty strings, not unset, so Tauri's bundler treated
+   "configured" as true and attempted notarization anyway. GitHub
+   Actions' `env:` mapping has no expression syntax to conditionally
+   omit a key. Fixed with a new "Configure macOS notarization
+   environment" step on both jobs, run before the `tauri-action` step,
+   that exports `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID` to
+   `$GITHUB_ENV` only when all three secrets are genuinely non-empty;
+   the three keys were removed from `tauri-action`'s own `env:` block
+   since `$GITHUB_ENV` already propagates them into the job's real
+   process environment when configured, and a truly-absent var there is
+   what correctly triggers Tauri's skip-notarization path (confirmed:
+   `tauri-action`'s bundler reads real process env vars via Rust's
+   `env::var`, which distinguishes absent from empty; GitHub Actions'
+   `env:` mapping cannot).
+
+**Verification actually run — the real, final green run.** Run
+`33003707428` (commit `de31739`) completed with every job green:
+`release-binaries` (Windows only) succeeded; `release-desktop` and
+`release-admin-desktop` each succeeded on all three platforms. Confirmed
+via `actions_list list_workflow_run_artifacts`, not assumed from the
+green checkmarks alone — all 7 expected artifacts present with real,
+non-trivial sizes:
+- `binaries-x86_64-pc-windows-msvc` (server, ~19 MB)
+- `desktop-x86_64-pc-windows-msvc` (ONYX Windows, ~15 MB)
+- `desktop-x86_64-unknown-linux-gnu` (ONYX Linux `.deb`+`.AppImage`, ~95 MB)
+- `desktop-aarch64-apple-darwin` (ONYX macOS `.dmg`, ~10 MB)
+- `admin-desktop-x86_64-pc-windows-msvc` (ONYX Admin Windows, ~6 MB)
+- `admin-desktop-x86_64-unknown-linux-gnu` (ONYX Admin Linux, ~81 MB)
+- `admin-desktop-aarch64-apple-darwin` (ONYX Admin macOS `.dmg`, ~5 MB)
+
+Each of the three bugs above was diagnosed from the actual job log text
+of a real failing run (via `mcp__github__get_job_logs`), fixed, pushed,
+and re-verified with a fresh `workflow_dispatch` run before moving to
+the next — four real runs total across this effort
+(`32718188664` → `32906999058` → `33003707428` succeeding), not one
+fix-and-hope pass.
+
+**What this does NOT cover.** Real, working code-signing/notarization
+for macOS (a real Apple Developer certificate + team ID) is still not
+configured for this repo — every macOS build in this matrix is
+ad-hoc-signed and unnotarized, which is fine for internal builds but
+would show Gatekeeper warnings for any real external distribution. That
+was already true before this session and is unchanged; flagged here so
+it isn't mistaken for having been fixed. Windows code-signing (a real
+Authenticode certificate) is likewise still unconfigured — GPG-signing
+of the release tarball/bundles only happens on a real tag push
+(`github.event_name == 'push'`), not on the `workflow_dispatch` runs
+used for this verification, so that path was not exercised here either.
