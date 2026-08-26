@@ -126,6 +126,39 @@ jobs:
         # comment) -- a signed build is not yet configured for this repo
         # and should not silently block every other platform's release.
         continue-on-error: true
+      - name: Configure macOS notarization environment
+        # Same class of bug as APPLE_SIGNING_IDENTITY above, for a
+        # variable GitHub Actions' `env:` mapping genuinely cannot fix
+        # in place: `${{ secrets.APPLE_ID }}` etc. evaluate to an empty
+        # string, not unset, when those secrets don't exist -- confirmed
+        # via a real release.yml run: Tauri's bundler treated that
+        # explicitly-set-but-empty APPLE_ID as "notarization credentials
+        # are configured" and attempted it, failing on notarytool's own
+        # "Team ID must be at least 3 characters" validation rather than
+        # skipping notarization the way an actually-absent APPLE_ID
+        # would. `${{ secrets.X || 'y' }}` (the APPLE_SIGNING_IDENTITY
+        # fix) only works because `-` is a valid real value there; there
+        # is no equivalent "valid empty" value for a real Apple ID/team.
+        # `env:` cannot conditionally omit a key based on an expression,
+        # so the actual fix is exporting to $GITHUB_ENV only when the
+        # secret is genuinely non-empty -- a truly absent env var here
+        # (checked with Rust's `env::var`, which tauri-action's bundler
+        # uses) is what correctly triggers Tauri's own skip-notarization
+        # path, not an empty string.
+        if: matrix.os == 'macos-14'
+        env:
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_ID_SECRET" ] && [ -n "$APPLE_PASSWORD_SECRET" ] && [ -n "$APPLE_TEAM_ID_SECRET" ]; then
+            echo "APPLE_ID=$APPLE_ID_SECRET" >> "$GITHUB_ENV"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD_SECRET" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID_SECRET" >> "$GITHUB_ENV"
+            echo "Real Apple notarization credentials configured; notarization will be attempted."
+          else
+            echo "No real Apple notarization credentials configured; leaving APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID unset so Tauri skips notarization."
+          fi
       - name: Build and bundle the desktop app
         # Deliberately omits tagName/releaseName/releaseId: per
         # tauri-action's own documented behavior, providing none of
@@ -155,9 +188,11 @@ jobs:
           # documented fallback only when the secret is genuinely unset;
           # a real configured identity still wins.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID are deliberately NOT
+          # set here -- see "Configure macOS notarization environment"
+          # above, which exports them via $GITHUB_ENV only when genuinely
+          # configured, so tauri-action's process environment sees them
+          # as truly absent (not empty-string) when there's no real cert.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -249,6 +284,24 @@ jobs:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         continue-on-error: true
+      - name: Configure macOS notarization environment
+        # Same fix as release-desktop's identically-named step -- see
+        # that step's comment for the full rationale (empty-string vs.
+        # genuinely-unset secrets, confirmed via a real release.yml run).
+        if: matrix.os == 'macos-14'
+        env:
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_ID_SECRET" ] && [ -n "$APPLE_PASSWORD_SECRET" ] && [ -n "$APPLE_TEAM_ID_SECRET" ]; then
+            echo "APPLE_ID=$APPLE_ID_SECRET" >> "$GITHUB_ENV"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD_SECRET" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID_SECRET" >> "$GITHUB_ENV"
+            echo "Real Apple notarization credentials configured; notarization will be attempted."
+          else
+            echo "No real Apple notarization credentials configured; leaving APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID unset so Tauri skips notarization."
+          fi
       - name: Build and bundle the Admin desktop app
         # Omitting tagName/releaseName/releaseId makes tauri-action build only.
         # `publish` below remains the one release-assembly owner. Cargo output
@@ -266,9 +319,8 @@ jobs:
           # documented fallback only when the secret is genuinely unset;
           # a real configured identity still wins.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID deliberately NOT set
+          # here -- see "Configure macOS notarization environment" above.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
