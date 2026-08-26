@@ -13,7 +13,7 @@ use crate::command_registry::{CommandResult, DecisionHandler};
 /// Wraps `api_server::handle_command` for `Mission`, for every
 /// `MissionCommand` variant other than `CreateMission`.
 ///
-/// `owner_authority` closes a real, confirmed gap (see `hierarchy.rs`'s
+/// `owner_authority` closes a real, confirmed gap (see `hierarchy_cache`'s
 /// module doc in `desktop-shell` for the full history): `RejectApproval`
 /// and `ActivateMission` previously had no check on *who* could issue
 /// them. `RequestApproval` is deliberately NOT gated by this — it is
@@ -113,7 +113,7 @@ impl DecisionHandler for MissionDecisionHandler {
 /// `owner_authority` closes the real, confirmed gap this session found:
 /// `ApproveTask`/`RejectTask` previously had no check at all on *who*
 /// was issuing them (only on the task's own status). See
-/// `desktop-shell::hierarchy`'s module doc for the full history and
+/// `client_composition::hierarchy_cache`'s module doc for the full history and
 /// `MissionDecisionHandler`'s doc comment for the equivalent Mission-side
 /// fix and why its scope differs slightly.
 pub struct TaskDecisionHandler {

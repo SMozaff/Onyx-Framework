@@ -2743,3 +2743,151 @@ Authenticode certificate) is likewise still unconfigured — GPG-signing
 of the release tarball/bundles only happens on a real tag push
 (`github.event_name == 'push'`), not on the `workflow_dispatch` runs
 used for this verification, so that path was not exercised here either.
+
+## Mobile Task/Mission approval authority — Rust/FFI layer closed, real gap found blocking the rest
+
+**The gap this closes.** `mobile-core`'s `mobile_core_new` passed
+`owner_authority: None` to `AppStateConfig`, which resolves to
+`client_composition::DenyAllOwnerAuthority` — every `ApproveTask`/
+`RejectTask`/`RejectApproval`/`ActivateMission` on mobile was denied
+unconditionally, for everyone, including a real manager (fail-closed,
+but non-functional). Confirmed exactly as a same-session planning
+document described before touching anything.
+
+**Design decisions, made explicitly, not assumed:**
+
+1. **FFI data hand-off: a separate `mobile_core_set_hierarchy(handle,
+   hierarchy_json)` call, not baked into `mobile_core_new`'s config.**
+   `mobile_core_new` must succeed (opening the local SQLite pool,
+   applying migrations) before any network call could possibly happen,
+   and login/hierarchy-fetch is a genuinely separate-timing event from
+   local-database bootstrap. A separate call keeps those two timelines
+   independent, matching the plan's own reasoning.
+
+2. **`HierarchyCache` splitting: moved to `client-composition`, not
+   split in place inside `desktop-shell`.** The plan posed this as
+   options (a) (extract the "replace from parsed data" logic into a
+   shared method, `refresh()` becomes a thin wrapper) vs. (b) (move the
+   whole type to a shared crate). On inspecting the actual dependency
+   graph, both options converge on the same real requirement neither
+   framing stated explicitly: `desktop-shell` is a **binary** crate, and
+   a binary cannot be a library dependency of `mobile-core` — the type
+   had to move to somewhere both binaries already depend on regardless.
+   `client-composition` is that place (it already houses
+   `AppState`/`DenyAllOwnerAuthority`, and both `desktop-shell` and
+   `mobile-core` already depend on it). Moved the whole `HierarchyCache`
+   type there (new module `client_composition::hierarchy_cache`,
+   `reqwest` added to that crate's dependencies), with `refresh()`
+   (HTTP-fetching, `desktop-shell`'s path) and a new
+   `load_from_json`/`replace_from_wire` split (JSON-only,
+   `mobile-core`'s path) sharing one real implementation of the id-
+   parsing/map-building logic — matching option (a)'s actual intent,
+   just correctly scoped to where the type needed to live. `desktop-
+   shell`'s own `hierarchy.rs` was deleted; its `lib.rs` now references
+   `client_composition::hierarchy_cache::HierarchyCache` directly. All 6
+   of that module's original unit tests carried over unmodified, plus a
+   new 7th (`load_from_json_populates_cache_from_the_same_wire_shape_
+   the_server_sends`) covering the new mobile-only data path.
+
+3. **`AppState` construction: interior-mutable cache handed in at
+   construction, not a `RwLock<Arc<AppState>>` rebuild.** The plan
+   flagged this as its own likely-correct answer and asked for
+   confirmation before assuming it. Confirmed: `mobile_core_new`
+   constructs one `HierarchyCache`, hands `Some(Arc::new(cache.clone())
+   as Arc<dyn OwnerAuthority>)` into `AppStateConfig.owner_authority` at
+   construction (not `None`), and keeps the same `HierarchyCache` on
+   `MobileApp` so the new `mobile_core_set_hierarchy` FFI function can
+   populate it later, in place. Because `HierarchyCache`'s internal
+   `Arc<RwLock<HashMap<...>>>` is the same shared instance `AppState`
+   already holds a reference to through `owner_authority`, populating it
+   after the fact is immediately visible to every subsequent authority
+   check — no `AppState` rebuild, no `MobileApp` handle-lifecycle change
+   at all.
+
+**Real, unanticipated gap found — flagged, not silently worked around or
+built past.** The plan's Step 1 ("fetch the hierarchy on the Dart side
+using the same `dio` client `OnyxHttpAuthApi` already authenticates,
+right after login") assumed an authenticated HTTP session exists in the
+same code path that constructs `mobile-core`'s `AppState`. Checked
+directly against `mobile/lib/main.dart`: **it does not.** `OnyxMobile`
+(the FFI transport, the one `owner_authority` actually lives on) and
+`OnyxHttpApi` (the HTTP transport, which has real login via
+`OnyxHttpAuthApi`) are two independent, mutually exclusive
+implementations of `OnyxApi` — `main.dart` picks exactly one per launch
+based on a saved `transport_mode` preference. FFI mode's
+`_initializeMobileCore` has **no login step of any kind**:
+`organization_id`/`user_id` come straight from `SharedPreferences`
+(defaulting to hardcoded placeholder UUIDs), with no server round-trip,
+no token, nothing to fetch `GET /api/users/hierarchy` with. `OnyxHttpApi`
+does have real login, but it has no local `mobile-core` `AppState` at
+all — every command goes straight to `api-server` over HTTP, which
+already enforces owner-authority server-side (this session's earlier
+`4ae6091` fix) — so it was never affected by this bug and has no local
+cache to populate either way. The mechanism this session built (the
+Rust FFI function, the shared cache, `OnyxApi.setHierarchy` on the
+interface, `OnyxMobile`'s real implementation via the new
+`mobile_core_set_hierarchy` FFI binding, `OnyxHttpApi`'s honest no-op)
+is real and independently tested, but **it has no call site that can
+actually run in production today** — FFI-mode mobile has no
+authentication mechanism to fetch a hierarchy with in the first place.
+Approvals therefore remains non-functional on mobile in practice (still
+fails closed, correctly, not open) until FFI-mode mobile gains some real
+login/auth mechanism — a separate, larger, unplanned piece of work this
+session deliberately did not start, per this project's own "don't
+silently expand scope" rule. A Dart-side hierarchy-fetch method was
+deliberately NOT added with no real caller, since it would be
+untestable dead code; that piece should be built together with whatever
+FFI-mode auth mechanism eventually exists to call it from.
+
+**Step 5 (Approvals screen's stale empty-state text) — checked, found
+to not apply, left untouched.** The plan assumed
+`mobile/lib/ui/screens/approvals.dart`'s "No local Approval aggregate is
+registered" message was about Task/Mission approval and would go stale
+once this fix landed. Checked directly: that screen's `controller.
+approvals` is `listAggregates('approval')` — a **different, unrelated
+aggregate type** (`ApprovalAggregate`, the same one referenced in
+`decision_handler.rs`'s list of aggregates with no owner concept — staff-
+loan/list-verification approvals, not Task/Mission `ApproveTask`).
+Confirmed no `"approval"` repository is registered anywhere in
+`client-composition::app_state` at all, on any client — the message is
+still completely accurate and was left unmodified. Task/Mission's own
+approve/reject state surfaces through the existing Missions/Tasks
+screens' own `status` field becoming `Approved`/`Rejected`, not through
+this screen. Whether `ApprovalAggregate` should ever be registered
+locally on mobile/desktop is a separate, real gap this session did not
+investigate further — flagged as a possible future task, not acted on.
+
+**Verification actually run:**
+- `cargo check`/`cargo clippy --workspace --exclude desktop-shell
+  --exclude admin-shell --all-targets --no-deps -- -D warnings` — clean
+  (the two excluded crates remain GTK-blocked in this sandbox, same
+  limitation as this session's earlier release-matrix work; `mobile-core`
+  and `client-composition` are both covered and both clean).
+- `cargo test -p client-composition` — the moved `hierarchy_cache`
+  module's full 8-test suite (7 original + 1 new) passes; no regression
+  in the full `work-domain`/`mission-domain`/`platform-contracts` suites
+  run alongside it.
+- `cargo test -p mobile-core` — the existing 9-test `ffi_integration`
+  suite still passes unmodified (no regression from adding
+  `owner_authority: Some(...)`/the new FFI function), plus a new real
+  end-to-end test, `hierarchy_authority_gate.rs`, through the actual
+  `extern "C"` FFI boundary (not an in-process shortcut): confirms
+  `ApproveTask` is denied for everyone before `mobile_core_set_hierarchy`
+  is ever called (the fail-closed default), confirms a stranger is still
+  denied after a real hierarchy is loaded, confirms the task's real
+  cache-resolved direct manager can approve, confirms `SubmitCompletion`
+  succeeds ungated throughout, and reloads via a fresh `GetTask` FFI
+  query afterward to confirm the approval genuinely persisted (caught
+  and fixed one real test-authoring bug in the process: the query
+  result nests aggregate fields under `"aggregate"`, not at the top
+  level — confirmed by printing the actual JSON rather than assuming
+  the shape).
+- Dart changes (`bridge.dart`'s new `setHierarchy`/FFI binding,
+  `onyx_http_api.dart`'s no-op implementation) were hand-verified
+  against the file's own existing patterns (exact `malloc.free`/FFI-
+  typedef shapes already used for every other binding) but **not**
+  compiled or analyzed — no Dart/Flutter SDK fits in this sandbox
+  (same disclosed constraint as the plan document itself noted). Should
+  be run through `dart analyze`/`flutter analyze` on a real toolchain
+  before being considered fully verified, the same standard this
+  project has applied to every other Dart change.

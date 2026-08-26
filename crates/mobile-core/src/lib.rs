@@ -70,6 +70,15 @@ pub struct MobileApp {
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<AppState>,
     pub(crate) background_task: tokio::task::JoinHandle<()>,
+    /// The same interior-mutable cache handed into `state`'s
+    /// `owner_authority` at construction (see `mobile_core_new`) — kept
+    /// here too so `mobile_core_set_hierarchy` can populate it after the
+    /// fact. Populating it in place (rather than rebuilding `state`)
+    /// works because `AppStateConfig::owner_authority` holds the same
+    /// `Arc`-shared `HierarchyCache`; every owner-gated authority check
+    /// `state` performs afterward reads through to whatever this cache
+    /// currently holds.
+    pub(crate) hierarchy_cache: client_composition::hierarchy_cache::HierarchyCache,
 }
 
 /// Opaque handle for an active event subscription, matching the header's
@@ -155,6 +164,12 @@ pub unsafe extern "C" fn mobile_core_new(
         Err(_) => return std::ptr::null_mut(),
     };
 
+    // Constructed before `AppState` and handed in via `owner_authority`
+    // below — see `MobileApp::hierarchy_cache`'s doc comment for why
+    // this makes a later, post-login population (via
+    // `mobile_core_set_hierarchy`) work without any `AppState` rebuild.
+    let hierarchy_cache = client_composition::hierarchy_cache::HierarchyCache::new();
+
     let state = runtime.block_on(async {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -228,16 +243,20 @@ pub unsafe extern "C" fn mobile_core_new(
             ),
             cloud_relay_socket_factory: Arc::new(NotYetImplementedSocketFactory),
             blob_store_root,
-            // mobile-core has no local user-hierarchy directory (same
-            // reasoning as desktop-shell's pre-login placeholder
-            // AppState — see client_composition::app_state's
-            // DenyAllOwnerAuthority doc comment): `None` here correctly
-            // falls back to denying every owner-gated Task/Mission
-            // approval decision rather than allowing one with no way to
-            // check it. mobile-core does not yet expose approval UI at
-            // all, so this is not a regression in practice, just the
-            // safe default until it does.
-            owner_authority: None,
+            // Handed in empty (see `hierarchy_cache` above); populated
+            // later by `mobile_core_set_hierarchy` once the Dart side
+            // has logged in and fetched `GET /api/users/hierarchy`
+            // itself. Until then every owner-gated Task/Mission approval
+            // decision correctly denies — `HierarchyCache::
+            // is_authorized_to_decide` returns `false` for any actor/
+            // owner it has no cached entry for, the same fail-closed
+            // behavior `DenyAllOwnerAuthority` (client_composition::
+            // app_state) provides for compositions with no strategy at
+            // all. `Some(...)` here (not `None`) is what makes the later
+            // in-place population actually take effect without an
+            // `AppState` rebuild — see `MobileApp::hierarchy_cache`'s
+            // doc comment.
+            owner_authority: Some(Arc::new(hierarchy_cache.clone()) as Arc<dyn api_server::OwnerAuthority>),
         };
 
         Some(Arc::new(AppState::new(pool, app_config).await))
@@ -253,9 +272,64 @@ pub unsafe extern "C" fn mobile_core_new(
         runtime,
         state,
         background_task,
+        hierarchy_cache,
     }));
     REGISTERED_BACKGROUND_APP.store(app, Ordering::Release);
     app
+}
+
+/// Populates (or replaces) the local Task/Mission approval-authority
+/// cache from `hierarchy_json` — the same `[{id, parent_user_id,
+/// is_admin}, ...]` shape `GET /api/users/hierarchy` returns.
+///
+/// # Why this is a separate call, not part of `mobile_core_new`'s config
+/// A real design decision, not an assumption: `mobile_core_new` must
+/// succeed (opening the local SQLite pool, applying migrations) before
+/// any network call could possibly happen, and mobile has no login/auth
+/// concept of its own at the FFI layer (see `client_composition::
+/// hierarchy_cache`'s module doc — the org's reporting-line directory
+/// is fetched from Dart's already-authenticated `OnyxHttpApi`, not
+/// re-fetched independently here). Baking hierarchy data into
+/// `mobile_core_new`'s `config_json` would force login+fetch to
+/// complete before local-database bootstrap could even start, coupling
+/// two things that don't need to be coupled and that happen at
+/// genuinely different times (`mobile_core_new` once per process;
+/// login/hierarchy-fetch whenever the person actually signs in, which
+/// may be well after the app — and its offline local data — is already
+/// usable). A separate call the Dart side invokes right after both
+/// `mobile_core_new` and its own HTTP fetch succeed keeps those two
+/// timelines independent.
+///
+/// Returns `0` on success, `-1` on invalid arguments (null pointer,
+/// non-UTF8 string) or if `hierarchy_json` fails to parse as the
+/// expected shape (see `HierarchyCache::load_from_json`'s own error
+/// cases — an id that isn't a valid UUID, malformed JSON).
+///
+/// # Safety
+/// `handle` must be a valid pointer from `mobile_core_new`.
+/// `hierarchy_json` must be a valid, NUL-terminated C string pointer.
+#[no_mangle]
+pub unsafe extern "C" fn mobile_core_set_hierarchy(
+    handle: *mut MobileApp,
+    hierarchy_json: *const c_char,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    let Some(hierarchy_json) = cstr_to_string(hierarchy_json) else {
+        return -1;
+    };
+    let app = &*handle;
+    let result = app.runtime.block_on(async {
+        app.hierarchy_cache.load_from_json(&hierarchy_json).await
+    });
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to load hierarchy JSON into local cache");
+            -1
+        }
+    }
 }
 
 /// Runs one background synchronization cycle against the registered mobile

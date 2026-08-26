@@ -27,7 +27,6 @@
 //! verified against v2.tauri.app before choosing this over a
 //! process-restart approach.
 
-mod hierarchy;
 mod relay_socket;
 mod secure_storage;
 mod session;
@@ -371,7 +370,7 @@ async fn login(
     state: tauri::State<'_, SharedAppState>,
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
     local_replica: tauri::State<'_, ReplicaId>,
-    hierarchy_cache: tauri::State<'_, hierarchy::HierarchyCache>,
+    hierarchy_cache: tauri::State<'_, client_composition::hierarchy_cache::HierarchyCache>,
     server_address: String,
     username: String,
     password: String,
@@ -415,7 +414,7 @@ async fn logout(
     app: AppHandle,
     state: tauri::State<'_, SharedAppState>,
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
-    hierarchy_cache: tauri::State<'_, hierarchy::HierarchyCache>,
+    hierarchy_cache: tauri::State<'_, client_composition::hierarchy_cache::HierarchyCache>,
 ) -> Result<(), ShellError> {
     session::clear(&storage).await?;
     let new_state = build_app_state(&app, OrganizationId::new_random(), None).await?;
@@ -516,7 +515,7 @@ async fn build_app_state(
         // client-composition's DenyAllOwnerAuthority (config value
         // `None`) rather than pointing at a cache that's empty anyway.
         owner_authority: session.map(|_| {
-            Arc::new(app.state::<hierarchy::HierarchyCache>().inner().clone())
+            Arc::new(app.state::<client_composition::hierarchy_cache::HierarchyCache>().inner().clone())
                 as Arc<dyn api_server::OwnerAuthority>
         }),
     };
@@ -621,11 +620,13 @@ pub fn run() {
                 app_handle_for_state.manage(local_replica);
                 app_handle_for_state.manage(storage.clone());
                 // Task/Mission approval-authority cache — see
-                // hierarchy.rs's module doc for the full gap this
-                // closes. Registered empty here; populated by `login`
+                // client_composition::hierarchy_cache's module doc for
+                // the full gap this closes (moved there from a
+                // desktop-shell-local module once mobile-core needed the
+                // same logic). Registered empty here; populated by `login`
                 // (and re-populated on resuming a saved session, below)
                 // via a real fetch, never assumed non-empty before that.
-                app_handle_for_state.manage(hierarchy::HierarchyCache::new());
+                app_handle_for_state.manage(client_composition::hierarchy_cache::HierarchyCache::new());
 
                 // Real login/org resolution (2026-08-19): check for a
                 // previously-saved session first. If one exists, resume
@@ -665,7 +666,7 @@ pub fn run() {
                 // to refresh this on startup must not block the rest of
                 // the app from opening.
                 if let Some(existing) = existing_session.as_ref() {
-                    let cache = app_handle_for_state.state::<hierarchy::HierarchyCache>();
+                    let cache = app_handle_for_state.state::<client_composition::hierarchy_cache::HierarchyCache>();
                     if let Err(e) = cache
                         .refresh(&existing.server_address, &existing.access_token)
                         .await

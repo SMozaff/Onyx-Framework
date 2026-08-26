@@ -36,6 +36,40 @@ typedef struct MobileApp MobileApp;
 struct MobileApp *mobile_core_new(const char *db_path, const char *config_json);
 
 /**
+ * Populates (or replaces) the local Task/Mission approval-authority
+ * cache from `hierarchy_json` — the same `[{id, parent_user_id,
+ * is_admin}, ...]` shape `GET /api/users/hierarchy` returns.
+ *
+ * # Why this is a separate call, not part of `mobile_core_new`'s config
+ * A real design decision, not an assumption: `mobile_core_new` must
+ * succeed (opening the local SQLite pool, applying migrations) before
+ * any network call could possibly happen, and mobile has no login/auth
+ * concept of its own at the FFI layer (see `client_composition::
+ * hierarchy_cache`'s module doc — the org's reporting-line directory
+ * is fetched from Dart's already-authenticated `OnyxHttpApi`, not
+ * re-fetched independently here). Baking hierarchy data into
+ * `mobile_core_new`'s `config_json` would force login+fetch to
+ * complete before local-database bootstrap could even start, coupling
+ * two things that don't need to be coupled and that happen at
+ * genuinely different times (`mobile_core_new` once per process;
+ * login/hierarchy-fetch whenever the person actually signs in, which
+ * may be well after the app — and its offline local data — is already
+ * usable). A separate call the Dart side invokes right after both
+ * `mobile_core_new` and its own HTTP fetch succeed keeps those two
+ * timelines independent.
+ *
+ * Returns `0` on success, `-1` on invalid arguments (null pointer,
+ * non-UTF8 string) or if `hierarchy_json` fails to parse as the
+ * expected shape (see `HierarchyCache::load_from_json`'s own error
+ * cases — an id that isn't a valid UUID, malformed JSON).
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`.
+ * `hierarchy_json` must be a valid, NUL-terminated C string pointer.
+ */
+int32_t mobile_core_set_hierarchy(struct MobileApp *handle, const char *hierarchy_json);
+
+/**
  * Runs one background synchronization cycle against the registered mobile
  * core instance. Intended for iOS `BGAppRefreshTask` and Android WorkManager.
  */

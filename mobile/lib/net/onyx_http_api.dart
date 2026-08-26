@@ -198,4 +198,13 @@ class OnyxHttpApi implements OnyxApi {
     await _eventStream.dispose();
     _client.dio.close();
   }
+
+  @override
+  Future<void> setHierarchy(String hierarchyJson) async {
+    // No-op: this transport has no local `mobile-core` `AppState` at
+    // all -- every command goes straight to `api-server` over HTTP,
+    // which already resolves owner-authority itself
+    // (`client_composition::decision_handler`'s owner_check, gated
+    // server-side). There is no local authority cache here to populate.
+  }
 }

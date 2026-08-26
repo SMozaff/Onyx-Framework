@@ -21,6 +21,7 @@ pub mod command_registry;
 pub mod event_bus;
 pub mod file_upload;
 pub mod handlers;
+pub mod hierarchy_cache;
 pub mod query_registry;
 pub mod sync_agent;
 

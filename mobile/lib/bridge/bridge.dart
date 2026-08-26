@@ -52,6 +52,22 @@ abstract interface class OnyxApi {
   Future<void> triggerSync();
   Future<void> subscribeEvents({List<String>? eventTypes});
   Future<void> dispose();
+
+  /// Loads the org's reporting-line tree (the same `[{id,
+  /// parent_user_id, is_admin}, ...]` shape `GET /api/users/hierarchy`
+  /// returns) into the local Task/Mission approval-authority cache, so
+  /// `ApproveTask`/`RejectTask`/`RejectApproval`/`ActivateMission` can
+  /// resolve "is this actor the owner's direct manager?" offline. See
+  /// `mobile_core_set_hierarchy`'s own Rust doc comment for why this is
+  /// a separate call rather than part of construction.
+  ///
+  /// Only meaningful for [OnyxMobile] (the FFI transport), which has its
+  /// own local authority cache to populate — [OnyxHttpApi] has no local
+  /// `AppState` at all and defers every authority decision to the
+  /// server, so its implementation of this method is a no-op. Declared
+  /// on the shared interface anyway so callers don't need to know which
+  /// transport they're driving before calling it.
+  Future<void> setHierarchy(String hierarchyJson);
 }
 
 class MobileCoreConfig {
@@ -396,6 +412,17 @@ class OnyxMobile implements OnyxApi {
   }
 
   @override
+  Future<void> setHierarchy(String hierarchyJson) async {
+    final json = hierarchyJson.toNativeUtf8();
+    try {
+      final code = _bindings.setHierarchy(_handle, json);
+      if (code != 0) throw StateError('mobile_core_set_hierarchy failed with code $code');
+    } finally {
+      malloc.free(json);
+    }
+  }
+
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
@@ -445,6 +472,8 @@ typedef _SubscribeDart = Pointer<Void> Function(
 );
 typedef _UnsubscribeNative = Void Function(Pointer<Void>);
 typedef _UnsubscribeDart = void Function(Pointer<Void>);
+typedef _SetHierarchyNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
+typedef _SetHierarchyDart = int Function(Pointer<Void>, Pointer<Utf8>);
 
 class _MobileCoreBindings {
   _MobileCoreBindings(DynamicLibrary library)
@@ -477,6 +506,9 @@ class _MobileCoreBindings {
         ),
         unsubscribe = library.lookupFunction<_UnsubscribeNative, _UnsubscribeDart>(
           'mobile_core_unsubscribe',
+        ),
+        setHierarchy = library.lookupFunction<_SetHierarchyNative, _SetHierarchyDart>(
+          'mobile_core_set_hierarchy',
         );
 
   final _NewDart newApp;
@@ -491,6 +523,7 @@ class _MobileCoreBindings {
   final _TriggerSyncDart triggerSync;
   final _SubscribeDart subscribeEvents;
   final _UnsubscribeDart unsubscribe;
+  final _SetHierarchyDart setHierarchy;
 }
 
 List<int> uuidToBytes(String uuid) {

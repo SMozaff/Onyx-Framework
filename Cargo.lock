@@ -1051,6 +1051,7 @@ dependencies = [
  "platform-kernel",
  "policy-domain",
  "query-application",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "sha2",
@@ -3353,6 +3354,7 @@ dependencies = [
 name = "mobile-core"
 version = "1.0.0"
 dependencies = [
+ "api-server",
  "async-trait",
  "cbindgen",
  "client-composition",
