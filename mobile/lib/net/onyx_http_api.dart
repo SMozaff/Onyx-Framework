@@ -207,4 +207,29 @@ class OnyxHttpApi implements OnyxApi {
     // (`client_composition::decision_handler`'s owner_check, gated
     // server-side). There is no local authority cache here to populate.
   }
+
+  @override
+  Future<Map<String, dynamic>> uploadFile(String path) async {
+    // Confirmed by reading `api-server`'s routes directly: there is no
+    // HTTP file upload/download route at all today (only
+    // `routes/profiles/batch.rs`'s unrelated multipart CSV import).
+    // `FileUploadCoordinator` is only reachable through a local
+    // `AppState`, which this transport does not have -- building a real
+    // HTTP file-upload endpoint is new backend work outside this
+    // change's scope. Throwing rather than silently no-op'ing or
+    // pretending to succeed, since a caller that gets back a bogus
+    // "success" would corrupt UI state.
+    throw UnsupportedError(
+      'File upload over the HTTP transport is not implemented: api-server has no '
+      'file upload/download route yet. Use the FFI (local database) transport instead.',
+    );
+  }
+
+  @override
+  Future<int> downloadFile(String contentHash, String destinationPath) async {
+    throw UnsupportedError(
+      'File download over the HTTP transport is not implemented: api-server has no '
+      'file upload/download route yet. Use the FFI (local database) transport instead.',
+    );
+  }
 }

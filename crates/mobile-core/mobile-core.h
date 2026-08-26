@@ -164,6 +164,50 @@ struct EventSubscription *mobile_core_subscribe_events(struct MobileApp *handle,
 void mobile_core_unsubscribe(struct EventSubscription *sub);
 
 /**
+ * Uploads the file at `path` from the local filesystem, returning a
+ * JSON string (caller must free via `mobile_core_free_string`) with the
+ * same shape as `client_composition::file_upload::UploadOutcome`
+ * (`file_asset_id`, `upload_session_id`, `content_hash`, `size_bytes`).
+ * Returns null on any failure — invalid arguments, an unreadable file,
+ * or a coordinator error.
+ *
+ * MIME type is hardcoded to `"application/octet-stream"`, matching
+ * `desktop-shell::upload_file`'s own documented choice: no MIME-sniffing
+ * library is a workspace dependency, and guessing from the file
+ * extension alone would be a half-measure that silently mislabels
+ * files. A real content-type detector is a follow-up for both clients,
+ * not something to invent differently here.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`. `path`,
+ * `organization_id`, `user_id`, and `device_id` must each be valid,
+ * NUL-terminated C string pointers.
+ */
+char *mobile_core_upload_file(struct MobileApp *handle,
+                              const char *path,
+                              const char *organization_id,
+                              const char *user_id,
+                              const char *device_id);
+
+/**
+ * Downloads the file content stored under `content_hash`, writing it to
+ * `destination_path` on the local filesystem. Returns the number of
+ * bytes written, or `-1` on any failure (invalid arguments, no stored
+ * content for that hash, or a write error) -- mirrors
+ * `desktop-shell::download_file`'s `u64`-bytes-written /
+ * `InvalidArgument` contract, adapted to a C-ABI-friendly `i64` sentinel
+ * since FFI has no `Result` to return through.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`.
+ * `content_hash` and `destination_path` must each be valid,
+ * NUL-terminated C string pointers.
+ */
+int64_t mobile_core_download_file(struct MobileApp *handle,
+                                  const char *content_hash,
+                                  const char *destination_path);
+
+/**
  * Lists locally stored aggregate projections for one aggregate type.
  * Returns a JSON array ordered by most recently updated first.
  *

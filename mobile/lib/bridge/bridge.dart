@@ -68,6 +68,19 @@ abstract interface class OnyxApi {
   /// on the shared interface anyway so callers don't need to know which
   /// transport they're driving before calling it.
   Future<void> setHierarchy(String hierarchyJson);
+
+  /// Uploads the file at the local filesystem `path`, returning the
+  /// resulting `UploadOutcome` (`file_asset_id`, `upload_session_id`,
+  /// `content_hash`, `size_bytes`) as a decoded JSON map. Mirrors
+  /// `desktop-shell`'s `upload_file` Tauri command exactly -- both sit
+  /// on the same shared `FileUploadCoordinator`.
+  Future<Map<String, dynamic>> uploadFile(String path);
+
+  /// Downloads the file content stored under `contentHash`, writing it
+  /// to `destinationPath` on the local filesystem. Returns the number
+  /// of bytes written. Mirrors `desktop-shell`'s `download_file` Tauri
+  /// command.
+  Future<int> downloadFile(String contentHash, String destinationPath);
 }
 
 class MobileCoreConfig {
@@ -423,6 +436,38 @@ class OnyxMobile implements OnyxApi {
   }
 
   @override
+  Future<Map<String, dynamic>> uploadFile(String path) async {
+    final pathPtr = path.toNativeUtf8();
+    final orgPtr = envelopeFactory.organizationId.toNativeUtf8();
+    final userPtr = envelopeFactory.userId.toNativeUtf8();
+    final devicePtr = envelopeFactory.deviceId.toNativeUtf8();
+    try {
+      final resultPtr = _bindings.uploadFile(_handle, pathPtr, orgPtr, userPtr, devicePtr);
+      final value = _decodeOwnedJson(resultPtr);
+      return Map<String, dynamic>.from(value as Map);
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(orgPtr);
+      malloc.free(userPtr);
+      malloc.free(devicePtr);
+    }
+  }
+
+  @override
+  Future<int> downloadFile(String contentHash, String destinationPath) async {
+    final hashPtr = contentHash.toNativeUtf8();
+    final destPtr = destinationPath.toNativeUtf8();
+    try {
+      final bytesWritten = _bindings.downloadFile(_handle, hashPtr, destPtr);
+      if (bytesWritten < 0) throw StateError('mobile_core_download_file failed');
+      return bytesWritten;
+    } finally {
+      malloc.free(hashPtr);
+      malloc.free(destPtr);
+    }
+  }
+
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
@@ -474,6 +519,22 @@ typedef _UnsubscribeNative = Void Function(Pointer<Void>);
 typedef _UnsubscribeDart = void Function(Pointer<Void>);
 typedef _SetHierarchyNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
 typedef _SetHierarchyDart = int Function(Pointer<Void>, Pointer<Utf8>);
+typedef _UploadFileNative = Pointer<Utf8> Function(
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+);
+typedef _UploadFileDart = Pointer<Utf8> Function(
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+);
+typedef _DownloadFileNative = Int64 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _DownloadFileDart = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>);
 
 class _MobileCoreBindings {
   _MobileCoreBindings(DynamicLibrary library)
@@ -509,6 +570,12 @@ class _MobileCoreBindings {
         ),
         setHierarchy = library.lookupFunction<_SetHierarchyNative, _SetHierarchyDart>(
           'mobile_core_set_hierarchy',
+        ),
+        uploadFile = library.lookupFunction<_UploadFileNative, _UploadFileDart>(
+          'mobile_core_upload_file',
+        ),
+        downloadFile = library.lookupFunction<_DownloadFileNative, _DownloadFileDart>(
+          'mobile_core_download_file',
         );
 
   final _NewDart newApp;
@@ -524,6 +591,8 @@ class _MobileCoreBindings {
   final _SubscribeDart subscribeEvents;
   final _UnsubscribeDart unsubscribe;
   final _SetHierarchyDart setHierarchy;
+  final _UploadFileDart uploadFile;
+  final _DownloadFileDart downloadFile;
 }
 
 List<int> uuidToBytes(String uuid) {

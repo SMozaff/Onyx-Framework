@@ -92,6 +92,29 @@ class FakeOnyxApi implements OnyxApi {
 
   @override
   Future<void> dispose() async => controller.close();
+
+  int setHierarchyCalls = 0;
+
+  @override
+  Future<void> setHierarchy(String hierarchyJson) async {
+    setHierarchyCalls += 1;
+  }
+
+  Map<String, dynamic>? lastUploadedPath;
+
+  @override
+  Future<Map<String, dynamic>> uploadFile(String path) async {
+    lastUploadedPath = <String, dynamic>{'path': path};
+    return <String, dynamic>{
+      'file_asset_id': uuidToBytes('cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
+      'upload_session_id': uuidToBytes('dddddddd-dddd-4ddd-8ddd-dddddddddddd'),
+      'content_hash': 'fake-content-hash',
+      'size_bytes': 0,
+    };
+  }
+
+  @override
+  Future<int> downloadFile(String contentHash, String destinationPath) async => 0;
 }
 
 LoadedAggregate testMission({String name = 'Recovery Mission', String status = 'Active'}) => LoadedAggregate(

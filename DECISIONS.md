@@ -3012,3 +3012,87 @@ implemented exactly as answered, not as the plan first suggested.
   the new `MobileAccessPanel` UI (no running `api-server` + browser
   session was exercised, only the build); a real Android/iOS mobile
   build (no Flutter SDK in this sandbox, same constraint as Piece 1).
+
+## Mobile file sharing — FFI layer and UI closed; HTTP-transport upload confirmed out of scope
+
+**Pre-implementation confirmation, per the plan's explicit requirement.**
+Before writing any code, checked whether `api-server` already has an
+HTTP file upload/download route (the plan flagged this as unconfirmed).
+Read `crates/bins/api-server/src/routes/` directly: the only multipart
+handling anywhere is `routes/profiles/batch.rs`'s CSV batch-import
+endpoint, which is unrelated (staff-profile bulk import, not general
+file storage). There is no HTTP route reaching
+`FileUploadCoordinator`/`BlobStore` at all — confirmed absent, not
+assumed. This means `OnyxHttpApi` (the HTTP transport) has no backend
+to call even if a Dart method were added for it; building that backend
+route was new, unplanned server work outside this piece's scope, so the
+HTTP transport's `uploadFile`/`downloadFile` throw a clear
+`UnsupportedError` explaining exactly why, rather than silently
+no-op'ing (which would look like success to a caller) or faking a
+route that doesn't exist.
+
+**What was built (FFI / local-first transport):**
+- `mobile-core/src/ffi_files.rs`: `mobile_core_upload_file`/
+  `mobile_core_download_file`, mirroring `desktop-shell`'s
+  `upload_file`/`download_file` Tauri commands exactly — both sit on
+  the same shared `client_composition::file_upload::FileUploadCoordinator`
+  via their own `AppState`. Takes a filesystem **path** in (not raw
+  bytes), for the same IPC-cost reason desktop-shell's own doc comment
+  gives: shipping up to a 100 MB file through an FFI/IPC boundary as an
+  argument would cost a full extra copy the native side reading the
+  file directly avoids. MIME type is hardcoded to
+  `"application/octet-stream"`, matching desktop-shell's own documented
+  choice (no MIME-sniffing library is a workspace dependency; guessing
+  from the extension would be a half-measure).
+  `mobile_core_download_file` returns bytes-written as `i64` with `-1`
+  as the failure sentinel (adapting desktop's `Result`-based contract
+  to C-ABI, which has no `Result`).
+- `mobile-core.h` auto-regenerated via the existing `build.rs`/cbindgen
+  pipeline — confirmed both new function signatures appear.
+- `mobile/lib/bridge/bridge.dart`: `OnyxApi` interface gains
+  `uploadFile`/`downloadFile`; `OnyxMobile` implements them via new FFI
+  typedefs/bindings, `OnyxHttpApi` throws the explicit
+  `UnsupportedError` described above.
+- `mobile/lib/ui/screens/files.dart`: new screen, added to the bottom
+  navigation between Approvals and Settings. Takes a filesystem path
+  via a plain `TextField` rather than integrating a file-picker
+  package: no such dependency exists in `pubspec.yaml` today, and this
+  sandbox has no Flutter/Dart toolchain to verify a new native
+  dependency actually builds on a real device — adding one unverified
+  would be a larger, riskier, unplanned change than this screen itself.
+  A real file-picker UI is a natural, flagged follow-up once it can be
+  built and tested on a real device or CI.
+- **Bug caught while adding this piece, unrelated to file sharing
+  itself:** `mobile/test/fakes.dart`'s `FakeOnyxApi` was already missing
+  the `setHierarchy` override Piece 1 added to the `OnyxApi` interface
+  — a real gap from that earlier piece that went uncaught because this
+  sandbox has no Dart toolchain to run `dart analyze` and catch a
+  missing `@override`. Fixed here (added `setHierarchy` alongside the
+  new `uploadFile`/`downloadFile` overrides), disclosed rather than
+  silently folded in as if it were always part of this piece.
+
+**Verification actually run:**
+- `cargo check -p mobile-core` and `cargo clippy -p mobile-core
+  --all-targets --no-deps -- -D warnings` — clean.
+- `cargo test -p mobile-core --test file_sharing` — two new real,
+  end-to-end tests through the actual FFI boundary:
+  `upload_then_download_round_trips_byte_for_byte_through_real_ffi`
+  (uploads a real 10,000-byte file from disk, downloads it back by its
+  returned content hash, and asserts the downloaded bytes match the
+  original exactly) and
+  `upload_rejects_a_file_exceeding_the_max_size_with_a_clear_failure`
+  (a real 100 MiB + 1 byte file on disk is rejected — confirmed the
+  domain-level `MAX_FILE_SIZE_BYTES` check, already enforced inside
+  `file-domain`'s aggregate and shared by both clients through
+  `FileUploadCoordinator`, needed no duplicate check added here). Both
+  pass.
+- Dart changes (`bridge.dart`'s new typedefs/bindings/implementations,
+  `onyx_http_api.dart`'s explicit-failure implementations,
+  `files.dart`'s new screen, `fakes.dart`'s fix) were hand-verified
+  against this file's own existing patterns but **not** compiled,
+  analyzed, or run — no Dart/Flutter SDK fits in this sandbox, the same
+  disclosed constraint as Pieces 1 and 2's Dart work. Should be run
+  through `dart analyze`/`flutter test` on a real toolchain before
+  being considered fully verified.
+- Not verified: a real Android/iOS build; an actual click-through of
+  the new Files screen in a running app.

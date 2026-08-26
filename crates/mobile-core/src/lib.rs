@@ -42,6 +42,7 @@ pub mod android_wifi_direct;
 pub mod android_workmanager;
 pub mod ffi_commands;
 pub mod ffi_events;
+pub mod ffi_files;
 pub mod ffi_mobile;
 pub mod ffi_queries;
 pub mod ffi_secure_storage;
@@ -51,6 +52,7 @@ pub mod ios_multipeer;
 
 pub use android_workmanager::mobile_core_android_do_work;
 pub use ffi_commands::mobile_core_execute_command;
+pub use ffi_files::{mobile_core_download_file, mobile_core_upload_file};
 pub use ffi_events::{
     mobile_core_subscribe_events, mobile_core_trigger_sync, mobile_core_unsubscribe,
 };

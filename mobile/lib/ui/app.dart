@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../bridge/bridge.dart';
 import 'screens/approvals.dart';
 import 'screens/dashboard.dart';
+import 'screens/files.dart';
 import 'screens/missions.dart';
 import 'screens/notifications.dart';
 import 'screens/settings.dart';
@@ -260,6 +261,7 @@ class _MobileShell extends StatelessWidget {
     TasksScreen(),
     NotificationsScreen(),
     ApprovalsScreen(),
+    FilesScreen(),
     SettingsScreen(),
   ];
 
@@ -314,6 +316,7 @@ class _MobileShell extends StatelessWidget {
           NavigationDestination(icon: Icon(Icons.task_alt_outlined), selectedIcon: Icon(Icons.task_alt), label: 'Tasks'),
           NavigationDestination(icon: Icon(Icons.notifications_outlined), selectedIcon: Icon(Icons.notifications), label: 'Alerts'),
           NavigationDestination(icon: Icon(Icons.approval_outlined), selectedIcon: Icon(Icons.approval), label: 'Approvals'),
+          NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'Files'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
