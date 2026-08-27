@@ -3096,3 +3096,27 @@ route that doesn't exist.
   being considered fully verified.
 - Not verified: a real Android/iOS build; an actual click-through of
   the new Files screen in a running app.
+
+## Correction to the class-based mobile access control piece: `web-ui` had been missed
+
+Re-verifying that piece on direct request surfaced a real gap in the
+original report: it claimed every first-party client sends
+`client_type`, but `web-ui` (`crates/bins/web-ui` was checked; the real
+app lives at the repo-root `web-ui/`) was never actually checked and
+did not send it — `web-ui/src/hooks/useAuth.ts`'s `login` mutation
+posted only `{username, password}`. Fixed by adding
+`client_type: "web"` there. This has no behavioral effect today (only
+`client_type: "mobile"` is ever gated), but the original claim of
+"every client" was inaccurate until this fix — recorded here rather
+than left silently corrected.
+
+Also strengthened `mobile_access_gate.rs` with the specific scenario
+requested when this piece was re-verified: a new test,
+`excluded_class_denied_on_mobile_allowed_on_desktop_granted_class_allowed_on_both`,
+grants only `"supervisor"` up front (never `"staff"`) and confirms
+`staff` is denied on `client_type: "mobile"` but succeeds on
+`client_type: "desktop"`, while `supervisor` succeeds on both. Real run:
+both tests in that file pass (`cargo test -p api-server --test
+mobile_access_gate` — 2 passed, 0 failed).
+
+`web-ui`'s `tsc -b` and `vite build` both re-run clean after the fix.

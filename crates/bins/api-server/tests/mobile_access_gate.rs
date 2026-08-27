@@ -141,3 +141,74 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
         .unwrap();
     assert_eq!(forbidden.status(), 403);
 }
+
+/// The exact scenario requested when this piece was verified: an org
+/// with `Staff` excluded from mobile access (never granted a row) and
+/// `Supervisor` granted from the outset. `Staff` must be denied on
+/// `client_type: "mobile"` but allowed on `client_type: "desktop"`;
+/// `Supervisor` must be allowed on both.
+#[tokio::test]
+async fn excluded_class_denied_on_mobile_allowed_on_desktop_granted_class_allowed_on_both() {
+    let (addr, http) = start_server("gate-two-classes").await;
+    let base = format!("http://{addr}");
+
+    let admin_login: serde_json::Value = login(&http, &base, "All-Father", "passvord0000", None)
+        .await
+        .json()
+        .await
+        .unwrap();
+    let admin_token = admin_login["access_token"].as_str().unwrap().to_string();
+
+    // Grant only "supervisor" mobile access up front; "staff" is never
+    // granted at all.
+    let grant = http
+        .put(format!("{base}/api/admin/mobile-access"))
+        .bearer_auth(&admin_token)
+        .json(&serde_json::json!({"allowed_classes": ["supervisor"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(grant.status(), 200);
+
+    async fn create_user_with_class(
+        http: &reqwest::Client,
+        base: &str,
+        admin_token: &str,
+        username: &str,
+        password: &str,
+        class: &str,
+    ) {
+        let create: serde_json::Value = http
+            .post(format!("{base}/api/admin/users"))
+            .bearer_auth(admin_token)
+            .json(&serde_json::json!({"username": username, "password": password}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let id = create["id"].as_str().expect("created user id").to_string();
+        http.post(format!("{base}/api/admin/users/{id}/class"))
+            .bearer_auth(admin_token)
+            .json(&serde_json::json!({"class": class}))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    create_user_with_class(&http, &base, &admin_token, "two-class-staffer", "two-class-staffer-pw", "staff").await;
+    create_user_with_class(&http, &base, &admin_token, "two-class-supervisor", "two-class-supervisor-pw", "supervisor").await;
+
+    // Excluded class ("staff"): denied on mobile, allowed on desktop.
+    let staff_mobile = login(&http, &base, "two-class-staffer", "two-class-staffer-pw", Some("mobile")).await;
+    assert_eq!(staff_mobile.status(), 403, "excluded class must be denied on client_type: mobile");
+    let staff_desktop = login(&http, &base, "two-class-staffer", "two-class-staffer-pw", Some("desktop")).await;
+    assert_eq!(staff_desktop.status(), 200, "excluded class must still succeed on client_type: desktop");
+
+    // Granted class ("supervisor"): allowed on both.
+    let supervisor_mobile = login(&http, &base, "two-class-supervisor", "two-class-supervisor-pw", Some("mobile")).await;
+    assert_eq!(supervisor_mobile.status(), 200, "granted class must succeed on client_type: mobile");
+    let supervisor_desktop = login(&http, &base, "two-class-supervisor", "two-class-supervisor-pw", Some("desktop")).await;
+    assert_eq!(supervisor_desktop.status(), 200, "granted class must also succeed on client_type: desktop");
+}
