@@ -3300,3 +3300,79 @@ recovery fields) still let someone type in arbitrary UUIDs by hand,
 untouched by this piece and out of its stated scope. Say so plainly
 rather than let the hardcoded-default fix stand in for a broader claim
 it doesn't cover.
+
+## Fixed: manual organization/user UUID entry was a real security hole, not a rough edge
+
+Immediately after the previous entry disclosed it, the project owner
+correctly classified this as a security hole, not a follow-up nicety —
+a manual UUID-entry path that bypasses login entirely defeats the whole
+point of real login/approval-authority gating just built: anyone with
+the app installed could type in someone else's real
+`organization_id`/`user_id` and have mobile-core act as them, no
+credentials required. Fixed immediately, ahead of the lower-severity
+token-refresh gap.
+
+**Two reachable instances, both closed:**
+
+1. `ui/screens/settings.dart` — the "Organization UUID"/"User UUID"
+   `TextField`s, saved via `OnyxController.saveSettings(organization:
+   ..., user: ...)`. Removed entirely, not merely hidden: `saveSettings`
+   itself no longer accepts an `organization`/`user` override at
+   all — replaced with `saveRelayEndpoint(String relay)`, which only
+   ever touches the Cloud Relay endpoint. This closes the hole at the
+   method level, not just the widget tree, so no other future caller of
+   `OnyxController` could reach it either. `organization_id`/`user_id`
+   are now shown **read-only** in this screen, with a pointer to the
+   new "Sign out" action for actually changing identity.
+2. `ui/startup_error_screen.dart` — the identical pattern, reachable
+   via a different route (any real startup failure, not just opening
+   Settings): "Organization UUID"/"User UUID" fields saved straight to
+   `SharedPreferences` with zero connection to login. Removed. Its
+   "Reset to defaults" recovery action is replaced with "Sign out and
+   retry": clears `FfiSessionStorage`'s tokens and the persisted
+   `organization_id`/`user_id`, unsets `hasRealFfiSessionKey`, and
+   retries — which (per `restartApp`'s own gate, added in the previous
+   piece) now correctly routes back to a real `FfiLoginScreen` rather
+   than either crashing (the old "reset to defaults" reset
+   `organization_id`/`user_id` to nothing while leaving a since-removed
+   placeholder-default fallback that no longer exists) or reopening
+   mobile-core under a stale identity. The Cloud Relay endpoint field is
+   left editable here, since a bad relay URL is a real, distinct,
+   non-identity cause of a startup failure this screen still needs to
+   help recover from.
+
+**What was deliberately left alone, and why:** neither fix touches how
+a real login actually resolves identity (`ffi_login_screen.dart`,
+unchanged) — this piece only removes the two free-text bypass routes
+around it. The Cloud Relay endpoint remains editable in both screens;
+it is a connection setting, not an identity claim, and editing it to a
+wrong value cannot let anyone act as someone else.
+
+**Verification actually run:**
+- `git status` confirms only `mobile/lib/ui/app.dart`,
+  `mobile/lib/ui/screens/settings.dart`, and
+  `mobile/lib/ui/startup_error_screen.dart` changed — no Rust crate
+  touched, so no `cargo test` applied here; `cargo check --workspace
+  --exclude desktop-shell --exclude admin-shell` re-run anyway as a
+  sanity check, clean (unsurprising).
+- Confirmed via `grep` that `saveSettings` has no other call site
+  anywhere in `mobile/lib` or `mobile/test` before renaming it to
+  `saveRelayEndpoint`, so nothing else broke by removing the
+  `organization`/`user` parameters.
+- Confirmed via `grep` that no existing test file references
+  `saveSettings`/`saveRelayEndpoint`, `organization`/`user`
+  `TextEditingController`s in either changed screen, or otherwise
+  depends on the removed fields — nothing in the existing test suite's
+  expectations was contradicted.
+- All three changed files hand-verified against this project's existing
+  patterns and brace-balance-checked, but **not** compiled or run — no
+  Dart/Flutter SDK exists in this sandbox, the same disclosed constraint
+  as every other Dart change this session. Must be run through
+  `flutter analyze` and exercised on a real device before being trusted
+  in production, same as the login work it closes the gap on.
+
+**Status:** the security hole described in the previous entry's third
+disclosed gap is closed. Fix #2 (no `/api/auth/refresh` route,
+lower severity — a session that silently degrades after an hour rather
+than a way to gain unauthorized access) is the next piece of work, not
+done in this entry.

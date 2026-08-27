@@ -140,18 +140,19 @@ class OnyxController extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> saveSettings({
-    required String organization,
-    required String user,
-    required String relay,
-  }) async {
-    uuidToBytes(organization);
-    uuidToBytes(user);
-    organizationId = organization;
-    userId = user;
+  /// Saves the Cloud Relay endpoint only. Deliberately does NOT accept
+  /// `organization`/`user` overrides anymore — this method used to let
+  /// anyone type in an arbitrary `organization_id`/`user_id` here and
+  /// have mobile-core act as that identity on the next restart, with no
+  /// connection to a real login at all. Now that FFI mode has a real
+  /// login (`ui/ffi_login_screen.dart`), that was a real security hole,
+  /// not a rough edge: it let a user bypass authentication entirely and
+  /// silently defeated the whole point of real login/approval-authority
+  /// gating. Identity now changes only via a real login or a
+  /// secure-storage-backed sign-out (see `net/session_storage.dart`),
+  /// never via free-text entry.
+  Future<void> saveRelayEndpoint(String relay) async {
     relayEndpoint = relay;
-    await preferences.setString('organization_id', organization);
-    await preferences.setString('user_id', user);
     await preferences.setString('relay_endpoint', relay);
     notifyListeners();
   }

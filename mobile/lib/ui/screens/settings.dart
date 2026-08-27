@@ -14,8 +14,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController organization;
-  late final TextEditingController user;
   late final TextEditingController relay;
   late String _transportMode;
 
@@ -23,16 +21,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     final controller = context.read<OnyxController>();
-    organization = TextEditingController(text: controller.organizationId);
-    user = TextEditingController(text: controller.userId);
     relay = TextEditingController(text: controller.relayEndpoint);
     _transportMode = controller.preferences.getString('transport_mode') ?? 'ffi';
   }
 
   @override
   void dispose() {
-    organization.dispose();
-    user.dispose();
     relay.dispose();
     super.dispose();
   }
@@ -119,42 +113,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 16),
         // Hidden when the app is currently running in HTTP mode: userId
         // there is server-derived from login (see HttpLoginScreen /
-        // OnyxHttpApi.loggedInUserId), not user-editable, and "Cloud
-        // relay endpoint" has no meaning at all for a direct HTTP
-        // connection (see onyx_http_api.dart's doc comment) — showing
-        // editable fields for values that either can't take effect or
-        // don't apply would be actively misleading, not just unused.
-        // Checked against the *active* controller.api's runtime type,
-        // not the possibly-just-changed-but-not-yet-applied
-        // `_transportMode` radio selection above, since that only takes
-        // effect after the restart the snackbar above already asks for.
+        // OnyxHttpApi.loggedInUserId), and "Cloud relay endpoint" has no
+        // meaning at all for a direct HTTP connection (see
+        // onyx_http_api.dart's doc comment) — showing fields for values
+        // that either can't take effect or don't apply would be actively
+        // misleading, not just unused. Checked against the *active*
+        // controller.api's runtime type, not the possibly-just-changed-
+        // but-not-yet-applied `_transportMode` radio selection above,
+        // since that only takes effect after the restart the snackbar
+        // above already asks for.
+        //
+        // `organization_id`/`user_id` are shown **read-only** here, not
+        // as editable fields. They used to be free-text `TextField`s
+        // saved via `OnyxController.saveSettings` — a real security
+        // hole once FFI mode gained a real login
+        // (`ui/ffi_login_screen.dart`): anyone could type in an
+        // arbitrary organization/user UUID and have mobile-core act as
+        // that identity on the next restart, with zero connection to a
+        // real login. Identity now only ever changes via a real login
+        // or the "Sign out" action below, never via free-text entry
+        // here.
         if (controller.api is! OnyxHttpApi)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  TextField(controller: organization, decoration: const InputDecoration(labelText: 'Organization UUID')),
-                  TextField(controller: user, decoration: const InputDecoration(labelText: 'User UUID')),
+                  Text('Signed in', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Organization: ${controller.organizationId}\n'
+                    'User: ${controller.userId}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'To act as a different account, use "Sign out" below and sign in '
+                    'again — this can no longer be changed by editing it directly.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
                   TextField(controller: relay, decoration: const InputDecoration(labelText: 'Cloud relay endpoint')),
                   const SizedBox(height: 16),
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton(
                       onPressed: () async {
-                        try {
-                          await controller.saveSettings(
-                            organization: organization.text.trim(),
-                            user: user.text.trim(),
-                            relay: relay.text.trim(),
+                        await controller.saveRelayEndpoint(relay.text.trim());
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Cloud relay endpoint saved. Restart the app to apply it.')),
                           );
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Settings saved. Restart the app to recreate mobile-core with the new tenant configuration.')),
-                            );
-                          }
-                        } on FormatException catch (error) {
-                          if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
                         }
                       },
                       child: const Text('Save'),

@@ -1,21 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../main.dart' show restartApp;
+import '../main.dart' show hasRealFfiSessionKey, restartApp;
+import '../net/session_storage.dart';
 
 /// Shown in place of [OnyxApp] when startup fails before an [OnyxController]
 /// can be constructed (see `main.dart`'s try/catch). Deliberately does not
 /// depend on `Provider`/`OnyxController` — that's exactly what failed to
 /// build, so this screen can't assume it exists.
 ///
-/// The organization/user/relay fields mirror `ui/screens/settings.dart`'s
-/// fields because the most likely real-world cause of a startup failure is
-/// exactly one of those three values being wrong (e.g. a hand-edited
-/// relay endpoint that isn't a valid URL, or a corrupted saved preference)
-/// — see `main.dart`'s `initializeFfiMobileCore`. Unlike settings.dart,
-/// saving here needs no "restart the app" step, since [_restart] rebuilds
-/// this whole subtree in place, which re-runs `main()`'s init/try/catch
-/// against the newly saved preferences without an OS-level relaunch.
+/// The relay field mirrors `ui/screens/settings.dart`'s equivalent field
+/// because the most likely real-world cause of a startup failure is a
+/// hand-edited relay endpoint that isn't a valid URL, or a corrupted
+/// saved preference — see `main.dart`'s `initializeFfiMobileCore`.
+/// Unlike settings.dart, saving here needs no "restart the app" step,
+/// since [_restart] rebuilds this whole subtree in place, which re-runs
+/// `main()`'s init/try/catch against the newly saved preferences without
+/// an OS-level relaunch.
+///
+/// # No editable organization/user fields (a real security hole,
+/// fixed, not just tidied)
+/// This screen used to let anyone type in an arbitrary
+/// `organization_id`/`user_id` here too, saved directly to
+/// `SharedPreferences` with no connection to a real login — the exact
+/// same hole `ui/screens/settings.dart` had, reachable via a different
+/// route (any real error at startup, not just the Settings screen).
+/// Once FFI mode gained a real login, this was not an acceptable
+/// "recovery" affordance: it let anyone with the app installed act as
+/// any organization/user they cared to type in, with zero
+/// authentication. Recovery from a bad startup now only ever offers
+/// [_resetToDefaults] — clearing the saved identity entirely and
+/// routing back to a real login screen — never a way to substitute a
+/// different identity by hand.
 class StartupErrorApp extends StatelessWidget {
   const StartupErrorApp({
     super.key,
@@ -66,8 +82,6 @@ class _StartupErrorScreen extends StatefulWidget {
 }
 
 class _StartupErrorScreenState extends State<_StartupErrorScreen> {
-  late final TextEditingController organization;
-  late final TextEditingController user;
   late final TextEditingController relay;
   bool _showDetails = false;
   bool _retrying = false;
@@ -75,40 +89,34 @@ class _StartupErrorScreenState extends State<_StartupErrorScreen> {
   @override
   void initState() {
     super.initState();
-    organization = TextEditingController(
-      text: widget.preferences.getString('organization_id') ?? '',
-    );
-    user = TextEditingController(text: widget.preferences.getString('user_id') ?? '');
     relay = TextEditingController(text: widget.preferences.getString('relay_endpoint') ?? '');
   }
 
   @override
   void dispose() {
-    organization.dispose();
-    user.dispose();
     relay.dispose();
     super.dispose();
   }
 
-  /// Clears the three tenant-config preferences back to `main.dart`'s
-  /// built-in defaults, then retries. Offered as a one-tap option because
-  /// a hand-edited/corrupted preference is a plausible real cause and the
-  /// safest recovery a user can trigger themselves without knowing what
-  /// the correct values are.
+  /// Clears the saved identity/session entirely and retries, which
+  /// (per `main.dart::restartApp`'s `hasRealFfiSessionKey` gate) routes
+  /// straight back to a real login screen rather than reopening
+  /// mobile-core under a stale or corrupted identity. This is now the
+  /// *only* recovery path this screen offers for a bad identity/session
+  /// — see this file's own doc comment on why letting someone hand-edit
+  /// `organization_id`/`user_id` here directly was removed as a real
+  /// security hole, not merely simplified. The relay endpoint is left
+  /// untouched (a bad relay URL, if that's the actual cause, doesn't
+  /// require signing out to fix — use the field below instead).
   Future<void> _resetToDefaults() async {
+    await FfiSessionStorage.clear();
     await widget.preferences.remove('organization_id');
     await widget.preferences.remove('user_id');
-    await widget.preferences.remove('relay_endpoint');
+    await widget.preferences.setBool(hasRealFfiSessionKey, false);
     if (mounted) await _restart();
   }
 
   Future<void> _saveAndRetry() async {
-    if (organization.text.trim().isNotEmpty) {
-      await widget.preferences.setString('organization_id', organization.text.trim());
-    }
-    if (user.text.trim().isNotEmpty) {
-      await widget.preferences.setString('user_id', user.text.trim());
-    }
     if (relay.text.trim().isNotEmpty) {
       await widget.preferences.setString('relay_endpoint', relay.text.trim());
     }
@@ -169,22 +177,14 @@ class _StartupErrorScreenState extends State<_StartupErrorScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
-                            Text('Tenant configuration', style: Theme.of(context).textTheme.titleSmall),
+                            Text('Cloud relay endpoint', style: Theme.of(context).textTheme.titleSmall),
                             const SizedBox(height: 4),
                             Text(
-                              'If a saved value here is invalid, fix it and retry — '
+                              'If this saved value is invalid, fix it and retry — '
                               'no need to reinstall the app.',
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                             const SizedBox(height: 12),
-                            TextField(
-                              controller: organization,
-                              decoration: const InputDecoration(labelText: 'Organization UUID'),
-                            ),
-                            TextField(
-                              controller: user,
-                              decoration: const InputDecoration(labelText: 'User UUID'),
-                            ),
                             TextField(
                               controller: relay,
                               decoration: const InputDecoration(labelText: 'Cloud relay endpoint'),
@@ -202,7 +202,7 @@ class _StartupErrorScreenState extends State<_StartupErrorScreen> {
                     const SizedBox(height: 8),
                     OutlinedButton(
                       onPressed: _resetToDefaults,
-                      child: const Text('Reset to defaults and retry'),
+                      child: const Text('Sign out and retry'),
                     ),
                   ],
                 ),
@@ -223,7 +223,7 @@ String _friendlyMessage(Object error) {
   if (text.contains('mobile_core_new failed')) {
     return 'The local database or sync engine could not be initialized. '
         'This can happen after a corrupted update or if storage is full. '
-        'Try "Reset to defaults" below, or check available device storage.';
+        'Try "Sign out and retry" below, or check available device storage.';
   }
   if (text.contains('Event subscription failed')) {
     return 'The app started but could not subscribe to live updates. '
