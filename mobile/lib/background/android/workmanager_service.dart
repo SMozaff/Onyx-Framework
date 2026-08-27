@@ -17,12 +17,23 @@ void onyxWorkmanagerDispatcher() {
     DartPluginRegistrant.ensureInitialized();
     try {
       final preferences = await SharedPreferences.getInstance();
+      // No real, logged-in identity yet (see main.dart's
+      // `hasRealFfiSessionKey`) — nothing has ever been created under a
+      // real organization/user for this device, so there is nothing
+      // real to sync. Previously this fell back to a hardcoded
+      // placeholder organization UUID and opened mobile-core under it
+      // anyway; that placeholder path is removed rather than left
+      // reachable from a background task too.
+      if (!(preferences.getBool('ffi_session.has_real_session') ?? false)) {
+        return true;
+      }
+      final organizationId = preferences.getString('organization_id');
+      if (organizationId == null) return true;
       final support = await getApplicationSupportDirectory();
       final api = await FfiOnyxMobile.open(
         databasePath: '${support.path}${Platform.pathSeparator}onyx.sqlite',
         config: MobileCoreConfig(
-          organizationId: preferences.getString('organization_id') ??
-              '11111111-1111-1111-1111-111111111111',
+          organizationId: organizationId,
           cloudRelayEndpoint: preferences.getString('relay_endpoint') ??
               'wss://relay.onyx.invalid/v1',
         ),

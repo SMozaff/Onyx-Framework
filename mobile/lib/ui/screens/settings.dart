@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../main.dart';
 import '../../net/onyx_http_api.dart';
+import '../../net/session_storage.dart';
 import '../app.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -198,6 +200,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ),
+        if (controller.api is! OnyxHttpApi) ...<Widget>[
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text('Account', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Signing out clears your saved login on this device — local data '
+                    'and sync history stay put, but you\'ll need to sign in again to '
+                    'resume Task/Mission approvals and syncing under your account.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        await FfiSessionStorage.clear();
+                        await controller.preferences.remove('organization_id');
+                        await controller.preferences.remove('user_id');
+                        await controller.preferences.setBool(hasRealFfiSessionKey, false);
+                        await controller.api.dispose();
+                        await restartApp();
+                      },
+                      child: const Text('Sign out'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

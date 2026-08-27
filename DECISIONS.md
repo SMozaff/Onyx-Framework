@@ -3120,3 +3120,183 @@ both tests in that file pass (`cargo test -p api-server --test
 mobile_access_gate` — 2 passed, 0 failed).
 
 `web-ui`'s `tsc -b` and `vite build` both re-run clean after the fix.
+
+## Real login for FFI-mode mobile — closes the placeholder-identity gap flagged after Piece 1
+
+**The gap.** Every prior mobile session in this project confirmed and
+disclosed the same thing: FFI-mode mobile (`main.dart`'s `restartApp`,
+`transport_mode != 'http'`) had no login step at all.
+`organization_id`/`user_id` came straight from
+`SharedPreferences.getString(...) ?? <hardcoded placeholder UUID>`
+(`'11111111-1111-1111-1111-111111111111'` /
+`'33333333-3333-4333-8333-333333333333'`), with zero server round-trip.
+This closes that gap.
+
+**Design decision, checked against the real current shape of
+`mobile_core_new`/`MobileConfig` first, not assumed** (confirmed by
+reading `crates/mobile-core/src/lib.rs` and
+`mobile/lib/bridge/bridge.dart`'s `MobileCoreConfig` directly): identity
+resolution stays entirely in Dart; **no changes to `mobile_core_new`'s
+FFI signature were needed.** Two things made this the clear choice, not
+a coin flip:
+
+1. `mobile_core_new` already takes `organization_id` as a plain,
+   client-supplied config value at construction, with no auth step of
+   its own — so there was nothing to "remove" from it to make room for
+   a login step; Dart already has to know the org id before calling it
+   either way.
+2. `mobile-core`'s Rust side has **no working `SecureStorage`
+   implementation at all** — confirmed by reading
+   `crates/mobile-core/src/ffi_secure_storage.rs` directly: genuinely
+   blocked on real JNI (Android Keystore) / Objective-C (iOS Keychain)
+   bridge code this sandbox cannot write or verify, same category of
+   gap as `mobile-core`'s missing MIME-sniffing library. A Rust-side
+   `mobile_core_login` that performs its own HTTP call would need
+   exactly that missing mechanism to persist tokens safely — building
+   it now would mean building two new, unverifiable things (a second
+   HTTP client duplicating `net/auth.dart`'s already-tested login logic,
+   plus a secure-storage bridge already known to be out of reach here)
+   instead of reusing one that already works.
+
+So this piece is **pure Dart, zero Rust crate changes** — confirmed by
+`git status` showing nothing under `crates/` touched. The shape mirrors
+Piece 1's own precedent exactly: fetch/decide in Dart
+(`OnyxHttpAuthApi`, already built and tested for HTTP-mode), hand the
+*result* to Rust as plain data via the existing FFI surface
+(`mobile_core_set_hierarchy`, unchanged) — never re-implement a second
+Rust-side HTTP client for something Dart already does correctly.
+
+**What was built:**
+
+- `mobile/lib/ui/ffi_login_screen.dart` (new) — real login screen shown
+  by `main.dart::restartApp` whenever no real session exists yet
+  (`SharedPreferences`'s new `ffi_session.has_real_session` flag is
+  unset). Performs a real `POST /api/auth/login`
+  (`client_type: "mobile"`) via the *same* `OnyxHttpAuthApi` HTTP-mode
+  already uses (`net/auth.dart` — reused, not duplicated), persists the
+  real `organization_id`/`user_id`/`username` (non-secret,
+  `SharedPreferences`) and the real access/refresh tokens (secret,
+  `FfiSessionStorage` — see below), opens mobile-core for real under the
+  real `organization_id` via `initializeFfiMobileCore`, and
+  best-effort-fetches the org's hierarchy and loads it via the existing
+  `OnyxApi.setHierarchy` — mirroring `desktop-shell::login`'s own
+  "best-effort, logged not propagated as a login failure" handling of
+  the identical step.
+- `mobile/lib/net/auth.dart` gains `OnyxHttpAuthApi.fetchHierarchyJson()`
+  — a thin `GET /api/users/hierarchy` wrapper returning the raw JSON
+  string `setHierarchy` expects. This is the exact Dart-side hierarchy
+  fetch Piece 1's own `DECISIONS.md` entry explicitly deferred building
+  ("would be untestable dead code" with no real caller at the time) —
+  it now has one.
+- `mobile/lib/main.dart`: `restartApp` gates FFI mode on
+  `hasRealFfiSessionKey`, routing to `FfiLoginScreen` when unset;
+  `_initializeMobileCore` renamed to public `initializeFfiMobileCore`
+  (reused by the login screen) and no longer falls back to the
+  placeholder UUIDs — both removed entirely, along with the
+  `defaultOrganizationId`/`defaultUserId` constants that supplied them.
+  A new best-effort, **fire-and-forget** (`unawaited`, deliberately not
+  blocking startup) hierarchy refresh runs on every successful open
+  using the previously-saved access token, so a reopened app doesn't
+  start every session with a cold, empty approval-authority cache.
+- `mobile/lib/background/android/workmanager_service.dart`: the
+  identical hardcoded-placeholder fallback existed here too (a second,
+  separate reachable path this session's own mobile audits had not
+  previously flagged) — the periodic background sync task now no-ops
+  cleanly (returns success, does nothing) when no real session exists,
+  instead of opening mobile-core under a fake organization.
+- `mobile/lib/ui/screens/settings.dart` gains a "Sign out" action for
+  FFI mode (parity with `desktop-shell`'s `logout` command): clears
+  `FfiSessionStorage`, clears the persisted identity, and restarts the
+  app back to `FfiLoginScreen`.
+- **`SharedPreferences` was judged inadequate for the real tokens, and
+  something more appropriate was used instead — stated plainly, not
+  silently assumed adequate.** `mobile/lib/net/session_storage.dart`
+  (new) adds `flutter_secure_storage` (Android Keystore-backed
+  `EncryptedSharedPreferences` / iOS Keychain — the same class of
+  OS-backed mechanism `desktop-shell`'s `SecureStorage` port already
+  uses) specifically for the access/refresh tokens, while
+  `organization_id`/`user_id`/`username` (non-secret facts, not
+  credentials) remain in `SharedPreferences` as before. This is a new
+  *native* dependency (bundles real Kotlin/Swift platform code) —
+  flagged as a materially bigger unverified-in-this-sandbox risk than
+  this project's other disclosed Dart gaps, for the same reason
+  `ffi_secure_storage.rs` already discloses for mobile-core's Rust side:
+  no Android/iOS toolchain here can build, link, or exercise real
+  platform secure-storage code at all.
+
+**A second, real, pre-existing gap found and disclosed while building
+this (not fixed — separate, unplanned server work):** `api-server` has
+**no `/api/auth/refresh` route anywhere** — confirmed by reading
+`routes/auth.rs`/`routes/mod.rs` directly. `POST /api/auth/login` issues
+a 1-hour access token and a 7-day refresh token, but nothing in this
+codebase has ever built a way to redeem the refresh token for a new
+access token. Consequence, stated plainly: the persisted FFI-mode
+session lets the app reopen under the correct, real
+`organization_id`/`user_id` indefinitely (those are stable facts), but
+the best-effort hierarchy refresh above stops succeeding roughly an hour
+after the last real login — at which point approvals correctly fail
+closed (the existing, safe empty-cache default) until the next real
+password login. This is a real limitation of "session persistence" here,
+not the full parity with `desktop-shell` a working refresh route would
+give; flagged rather than glossed over.
+
+**A third, pre-existing gap, left deliberately untouched and disclosed
+rather than silently fixed or silently ignored:**
+`ui/screens/settings.dart`'s existing "Organization UUID"/"User UUID"
+free-text fields (`OnyxController.saveSettings`) already let a person
+manually override their local identity to *any* UUID, with no
+connection to a real login at all — predates this piece, and this task
+was scoped to startup identity resolution, not this settings affordance.
+`ui/startup_error_screen.dart`'s manual recovery fields have the same
+property. Neither was touched; both remain a real, if narrower, way to
+run mobile-core under an identity nobody authenticated as. Not silently
+folded into "no placeholder identity path remains reachable" — it does,
+just not via a hardcoded default anymore.
+
+**Verification actually run:**
+- `git status` confirms zero files under `crates/` were touched by this
+  piece — no `cargo check`/`cargo test` runs were needed or possible for
+  a change that touched no Rust code; `cargo check --workspace
+  --exclude desktop-shell --exclude admin-shell` was re-run anyway as a
+  sanity check and remains clean (unsurprising, since nothing it covers
+  changed).
+- Dart changes (`ffi_login_screen.dart`, `session_storage.dart`,
+  `main.dart`, `auth.dart`, `settings.dart`,
+  `workmanager_service.dart`, `app.dart`/`startup_error_screen.dart`/
+  `bridge.dart` doc-comment fixes) were hand-verified against this
+  project's own existing patterns (mirroring `http_login_screen.dart`'s
+  structure closely, reusing `OnyxHttpAuthApi`/`OnyxHttpClient`
+  unchanged) and manually brace-balance-checked, but were **not**
+  compiled, analyzed, or run — this sandbox has no Dart/Flutter SDK at
+  all (`dart`/`flutter` both confirmed absent via `which`), the same
+  disclosed constraint as every prior mobile piece this session. This is
+  the largest Dart change in this project without compiler
+  verification to date and carries correspondingly more risk than
+  earlier, smaller pieces; it must be run through `flutter analyze` and
+  a real device/emulator test before being trusted in production.
+- No `OnyxApi` interface methods were added or changed, so
+  `mobile/test/fakes.dart`'s `FakeOnyxApi` needed no update this time
+  (checked directly — confirmed, not assumed, since Piece 3 already
+  found one real miss there).
+- Confirmed no existing Dart test imports `main.dart` or exercises
+  `restartApp`/`FfiLoginScreen`/`OnyxControllerHost`'s construction
+  path directly, so none of the existing test suite's expectations were
+  contradicted by these changes (all existing tests construct
+  `OnyxController` directly against fixed literal test UUIDs,
+  independent of `main.dart` entirely).
+
+**Explicit confirmation on remaining placeholder identity paths, per
+this project's own established standard of catching and disclosing
+this precisely (see the Piece 2 `web-ui` correction):** the hardcoded
+placeholder UUIDs (`defaultOrganizationId`/`defaultUserId`) and their
+use as a silent fallback are removed from every code path that
+previously reached them — `main.dart::restartApp`,
+`initializeFfiMobileCore`, and `workmanager_service.dart`'s background
+task. **However, "done" does not mean no path remains that can run
+mobile-core under an unauthenticated identity at all** — the two
+pre-existing manual-override surfaces named above
+(`settings.dart`'s identity fields, `startup_error_screen.dart`'s
+recovery fields) still let someone type in arbitrary UUIDs by hand,
+untouched by this piece and out of its stated scope. Say so plainly
+rather than let the hardcoded-default fix stand in for a broader claim
+it doesn't cover.

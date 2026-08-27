@@ -250,7 +250,7 @@ class OnyxMobile implements OnyxApi {
 
   /// Set by callers that need [buildCommandEnvelope] to work (i.e.
   /// anything using `OnyxController`) — see `main.dart`'s
-  /// `_initializeMobileCore`, which sets this right after construction.
+  /// `initializeFfiMobileCore`, which sets this right after construction.
   /// Not a constructor parameter because [open] doesn't know the
   /// organization/user ids at the point it constructs the FFI handle
   /// (those come from `SharedPreferences`, read by `main.dart` at the

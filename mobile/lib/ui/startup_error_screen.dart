@@ -12,7 +12,7 @@ import '../main.dart' show restartApp;
 /// fields because the most likely real-world cause of a startup failure is
 /// exactly one of those three values being wrong (e.g. a hand-edited
 /// relay endpoint that isn't a valid URL, or a corrupted saved preference)
-/// — see `main.dart`'s `_initializeMobileCore`. Unlike settings.dart,
+/// — see `main.dart`'s `initializeFfiMobileCore`. Unlike settings.dart,
 /// saving here needs no "restart the app" step, since [_restart] rebuilds
 /// this whole subtree in place, which re-runs `main()`'s init/try/catch
 /// against the newly saved preferences without an OS-level relaunch.

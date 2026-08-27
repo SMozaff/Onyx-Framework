@@ -35,6 +35,17 @@ dependencies:
   # (mirrors web-ui/src/api/events.ts, which uses the browser's built-in
   # WebSocket — Dart has no equivalent built-in, hence this dependency).
   web_socket_channel: ^2.4.0
+  # Secure, OS-backed persistence (Android Keystore-backed
+  # EncryptedSharedPreferences / iOS Keychain) for FFI-mode mobile's real
+  # login session tokens — see net/session_storage.dart's doc comment.
+  # Deliberately NOT shared_preferences, which this app already uses for
+  # non-secret settings but is plain, unencrypted storage, materially
+  # inappropriate for a real bearer token. This is a new native-code
+  # dependency (bundles real Kotlin/Swift platform code) that could not
+  # be built or verified in this sandbox — flagged explicitly, not
+  # silently assumed to work; must be exercised on a real device/CI
+  # before being trusted with real credentials in production.
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:

@@ -215,8 +215,10 @@ class OnyxApp extends StatelessWidget {
 ///
 /// Deliberately takes already-resolved `organizationId`/`userId`/
 /// `relayEndpoint` rather than reading `SharedPreferences` itself with
-/// its own defaults: the FFI path's real defaults live in `main.dart`
-/// (`defaultOrganizationId` etc.) and HTTP-mode's `HttpLoginScreen` has
+/// its own defaults: the FFI path's real values now come from a real
+/// login (`ui/ffi_login_screen.dart`, persisted in `SharedPreferences`
+/// only after that login succeeds — there is no placeholder default
+/// left to fall back to) and HTTP-mode's `HttpLoginScreen` has
 /// no equivalent defaults to fall back to (an empty LAN org ID is a
 /// caller-visible bug, not a sensible default) — a single default set
 /// baked into this widget would have been wrong for one path or the

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import 'http_client.dart';
@@ -56,6 +58,22 @@ class OnyxHttpAuthApi {
       refreshToken: data['refresh_token'] as String,
       user: Map<String, dynamic>.from(data['user'] as Map),
     );
+  }
+
+  /// Fetches the org's reporting-line tree from
+  /// `GET /api/users/hierarchy` (`{id, parent_user_id, is_admin}[]` —
+  /// see `api-server::routes::admin::HierarchyUserDto`) and returns it
+  /// as a raw JSON string, the exact shape
+  /// `OnyxApi.setHierarchy`/`mobile_core_set_hierarchy` expect. Added
+  /// for FFI-mode mobile's real login flow (`ui/ffi_login_screen.dart`)
+  /// — this is the Dart-side hierarchy fetch Piece 1's `DECISIONS.md`
+  /// entry explicitly deferred building until a real caller existed,
+  /// since an unwired one would have been untestable dead code. Requires
+  /// [login] to have already succeeded (relies on the bearer token
+  /// `_client`'s interceptor attaches from `_client.auth.accessToken`).
+  Future<String> fetchHierarchyJson() async {
+    final response = await _client.dio.get<List<dynamic>>('/api/users/hierarchy');
+    return jsonEncode(response.data ?? const <dynamic>[]);
   }
 
   /// Best-effort: clears local auth state regardless of whether the
