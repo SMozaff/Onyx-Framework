@@ -33,7 +33,10 @@ pub trait OwnerAuthority: Send + Sync {
 /// to satisfy `clippy::type_complexity` — see that parameter's own doc
 /// comment on `handle_command` for what it means and why it's shaped
 /// this way.
-pub type OwnerCheck<A> = Option<(Box<dyn Fn(&A) -> UserId + Send + Sync>, Arc<dyn OwnerAuthority>)>;
+pub type OwnerCheck<A> = Option<(
+    Box<dyn Fn(&A) -> UserId + Send + Sync>,
+    Arc<dyn OwnerAuthority>,
+)>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {

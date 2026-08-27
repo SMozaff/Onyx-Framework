@@ -66,8 +66,14 @@ async fn refresh_token_yields_a_working_new_access_token_and_rotates() {
     let refreshed: serde_json::Value = refresh_response.json().await.unwrap();
     let new_access_token = refreshed["access_token"].as_str().unwrap().to_string();
     let new_refresh_token = refreshed["refresh_token"].as_str().unwrap().to_string();
-    assert_ne!(new_access_token, original_access_token, "refresh must issue a genuinely new access token");
-    assert_ne!(new_refresh_token, original_refresh_token, "refresh must rotate to a genuinely new refresh token");
+    assert_ne!(
+        new_access_token, original_access_token,
+        "refresh must issue a genuinely new access token"
+    );
+    assert_ne!(
+        new_refresh_token, original_refresh_token,
+        "refresh must rotate to a genuinely new refresh token"
+    );
 
     // The new access token actually works against a real authenticated
     // endpoint (not just a well-formed-looking string).
@@ -77,7 +83,11 @@ async fn refresh_token_yields_a_working_new_access_token_and_rotates() {
         .send()
         .await
         .unwrap();
-    assert_eq!(hierarchy_response.status(), 200, "the refreshed access token must be usable for a real authenticated request");
+    assert_eq!(
+        hierarchy_response.status(),
+        200,
+        "the refreshed access token must be usable for a real authenticated request"
+    );
 
     // The original (now-rotated) refresh token can never be redeemed
     // again.
@@ -87,7 +97,11 @@ async fn refresh_token_yields_a_working_new_access_token_and_rotates() {
         .send()
         .await
         .unwrap();
-    assert_eq!(reuse_attempt.status(), 401, "a rotated-out refresh token must never be redeemable again");
+    assert_eq!(
+        reuse_attempt.status(),
+        401,
+        "a rotated-out refresh token must never be redeemable again"
+    );
 
     // The new refresh token, however, still works (rotation swaps which
     // token is valid; it does not brick the session).
@@ -135,7 +149,11 @@ async fn refresh_rejects_a_bogus_token_and_an_access_token_used_as_a_refresh_tok
         .send()
         .await
         .unwrap();
-    assert_eq!(wrong_type.status(), 401, "an access token must not be usable as a refresh token");
+    assert_eq!(
+        wrong_type.status(),
+        401,
+        "an access token must not be usable as a refresh token"
+    );
 }
 
 /// Proves the actual scenario this route exists for, deterministically
@@ -162,7 +180,8 @@ async fn refresh_rejects_a_bogus_token_and_an_access_token_used_as_a_refresh_tok
 /// a mock that could pass for a reason unrelated to expiry.
 #[tokio::test]
 async fn access_token_that_has_actually_expired_is_rejected_and_refresh_recovers() {
-    const SIGNING_KEY: &str = "hex:4242424242424242424242424242424242424242424242424242424242424242";
+    const SIGNING_KEY: &str =
+        "hex:4242424242424242424242424242424242424242424242424242424242424242";
     std::env::set_var("ONYX_AUTHORITY_SIGNING_KEY", SIGNING_KEY);
 
     let (addr, http) = start_server("expiry").await;
@@ -188,13 +207,20 @@ async fn access_token_that_has_actually_expired_is_rejected_and_refresh_recovers
         .send()
         .await
         .unwrap();
-    assert_eq!(sanity_check.status(), 200, "the freshly-issued access token must work before we deliberately expire it");
+    assert_eq!(
+        sanity_check.status(),
+        200,
+        "the freshly-issued access token must work before we deliberately expire it"
+    );
 
     // Decode the real token's real claims, and re-sign an
     // otherwise-identical token whose `exp` (and `iat`, so `iat > now`
     // is never separately tripped) sit safely in the past.
     let secret_provider = security_adapter::EnvironmentSecretProvider;
-    let secret = secret_provider.get("ONYX_AUTHORITY_SIGNING_KEY").await.unwrap();
+    let secret = secret_provider
+        .get("ONYX_AUTHORITY_SIGNING_KEY")
+        .await
+        .unwrap();
     let codec = Ed25519JwtCodec::from_rotating_secret(&secret).unwrap();
     let mut claims: TokenClaims = codec.decode(&fresh_access_token).unwrap();
     claims.iat = 0;
@@ -207,7 +233,11 @@ async fn access_token_that_has_actually_expired_is_rejected_and_refresh_recovers
         .send()
         .await
         .unwrap();
-    assert_eq!(expired_attempt.status(), 401, "a genuinely expired access token must be rejected");
+    assert_eq!(
+        expired_attempt.status(),
+        401,
+        "a genuinely expired access token must be rejected"
+    );
 
     // The refresh token issued alongside it (7-day TTL, untouched by
     // the access token's much shorter 1-hour one) redeems a working
@@ -218,7 +248,11 @@ async fn access_token_that_has_actually_expired_is_rejected_and_refresh_recovers
         .send()
         .await
         .unwrap();
-    assert_eq!(refresh_response.status(), 200, "the still-valid refresh token must successfully redeem a new access token");
+    assert_eq!(
+        refresh_response.status(),
+        200,
+        "the still-valid refresh token must successfully redeem a new access token"
+    );
     let refreshed: serde_json::Value = refresh_response.json().await.unwrap();
     let new_access_token = refreshed["access_token"].as_str().unwrap();
 

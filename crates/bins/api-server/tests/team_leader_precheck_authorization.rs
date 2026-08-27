@@ -14,16 +14,9 @@
 
 use std::net::SocketAddr;
 
-const BOOTSTRAP_TOKEN: &str = "team-leader-precheck-test-bootstrap";
-
 /// Boots an api-server on an ephemeral port against a throwaway SQLite
-/// file, bootstraps an admin, and returns the address plus a valid
-/// access token. Same shape as `user_hierarchy_admin_routes.rs`'s
-/// helper of the same name — kept as a separate copy since these are
-/// independent test binaries, matching that file's own precedent.
+/// file and authenticates the intentional seeded test-drive administrator.
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
-    std::env::set_var("ONYX_BOOTSTRAP_TOKEN", BOOTSTRAP_TOKEN);
-
     let db_path =
         std::env::temp_dir().join(format!("onyx-team-leader-precheck-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
@@ -43,16 +36,9 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    http.post(format!("{base}/api/admin/bootstrap"))
-        .header("x-onyx-bootstrap-token", BOOTSTRAP_TOKEN)
-        .json(&serde_json::json!({"username": "precheck-admin", "password": "precheck-test-password"}))
-        .send()
-        .await
-        .expect("bootstrap request");
-
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "precheck-admin", "password": "precheck-test-password"}))
+        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
         .send()
         .await
         .expect("login request")

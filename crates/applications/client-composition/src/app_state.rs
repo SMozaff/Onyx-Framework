@@ -233,7 +233,11 @@ struct DenyAllOwnerAuthority;
 
 #[async_trait::async_trait]
 impl api_server::OwnerAuthority for DenyAllOwnerAuthority {
-    async fn is_authorized(&self, _actor: platform_kernel::UserId, _owner: platform_kernel::UserId) -> bool {
+    async fn is_authorized(
+        &self,
+        _actor: platform_kernel::UserId,
+        _owner: platform_kernel::UserId,
+    ) -> bool {
         false
     }
 }

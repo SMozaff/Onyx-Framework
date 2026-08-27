@@ -126,7 +126,11 @@ pub async fn authenticate(
 
     let response = client
         .post(&url)
-        .json(&LoginRequest { username, password, client_type: "desktop" })
+        .json(&LoginRequest {
+            username,
+            password,
+            client_type: "desktop",
+        })
         .send()
         .await
         .map_err(|e| SessionError::Network(e.to_string()))?;

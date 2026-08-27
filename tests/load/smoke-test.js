@@ -20,7 +20,7 @@ export const options = {
 export function setup() {
   const response = http.post(
     `${baseUrl}/api/auth/login`,
-    JSON.stringify({ username: 'operator', password: 'onyx' }),
+    JSON.stringify({ username: 'All-Father', password: 'passvord0000' }),
     { headers: { 'content-type': 'application/json' } },
   );
   if (response.status !== 200) throw new Error(`login failed: ${response.status}`);

@@ -67,9 +67,7 @@ pub unsafe extern "C" fn mobile_core_upload_file(
     };
 
     let result = app.runtime.block_on(async {
-        let content = tokio::fs::read(&path)
-            .await
-            .map_err(|e| e.to_string())?;
+        let content = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
         let file_name = std::path::Path::new(&path)
             .file_name()
             .and_then(|n| n.to_str())
@@ -82,7 +80,12 @@ pub unsafe extern "C" fn mobile_core_upload_file(
         };
         app.state
             .file_upload_coordinator
-            .upload_new_file(actor, file_name, "application/octet-stream".to_string(), &content)
+            .upload_new_file(
+                actor,
+                file_name,
+                "application/octet-stream".to_string(),
+                &content,
+            )
             .await
             .map_err(|e| e.to_string())
     });
@@ -147,4 +150,3 @@ pub unsafe extern "C" fn mobile_core_download_file(
         }
     }
 }
-

@@ -47,7 +47,9 @@ class OnyxHttpAuthApi {
       );
       data = response.data!;
     } on DioException catch (e) {
-      final code = e.response?.data is Map ? (e.response?.data as Map)['error']?['code'] as String? : null;
+      final responseData = e.response?.data;
+      final error = responseData is Map ? responseData['error'] : null;
+      final code = error is Map ? error['code'] as String? : null;
       if (code == 'MOBILE_ACCESS_RESTRICTED') {
         throw const MobileAccessRestrictedException();
       }

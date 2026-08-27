@@ -364,6 +364,9 @@ async fn get_current_session(
 /// login — they are properties of this physical device/install, not of
 /// who happens to be logged in, and a second login (e.g. after logout)
 /// should not fragment sync history for data already on this machine.
+// Tauri maps command parameters directly from the established frontend IPC payload;
+// grouping these would be a breaking wire-contract change without reducing command complexity.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn login(
     app: AppHandle,
@@ -515,8 +518,11 @@ async fn build_app_state(
         // client-composition's DenyAllOwnerAuthority (config value
         // `None`) rather than pointing at a cache that's empty anyway.
         owner_authority: session.map(|_| {
-            Arc::new(app.state::<client_composition::hierarchy_cache::HierarchyCache>().inner().clone())
-                as Arc<dyn api_server::OwnerAuthority>
+            Arc::new(
+                app.state::<client_composition::hierarchy_cache::HierarchyCache>()
+                    .inner()
+                    .clone(),
+            ) as Arc<dyn api_server::OwnerAuthority>
         }),
     };
 

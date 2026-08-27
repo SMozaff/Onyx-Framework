@@ -8,12 +8,9 @@ use std::net::SocketAddr;
 
 use reqwest::StatusCode;
 
-const BOOTSTRAP_TOKEN: &str = "staff-loan-authorization-test-bootstrap";
 const ORG_ID: &str = "11111111-1111-1111-1111-111111111111";
 
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
-    std::env::set_var("ONYX_BOOTSTRAP_TOKEN", BOOTSTRAP_TOKEN);
-
     let db_path =
         std::env::temp_dir().join(format!("onyx-staff-loan-authorization-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
@@ -33,23 +30,13 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
 
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
-    http.post(format!("{base}/api/admin/bootstrap"))
-        .header("x-onyx-bootstrap-token", BOOTSTRAP_TOKEN)
-        .json(&serde_json::json!({
-            "username": "staff-loan-auth-admin",
-            "password": "staff-loan-auth-password",
-        }))
-        .send()
-        .await
-        .expect("bootstrap request")
-        .error_for_status()
-        .expect("bootstrap succeeds");
-
+    // ApiState creates the first administrator on a fresh database, so the
+    // token-gated bootstrap endpoint correctly rejects a second first account.
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
         .json(&serde_json::json!({
-            "username": "staff-loan-auth-admin",
-            "password": "staff-loan-auth-password",
+            "username": "All-Father",
+            "password": "passvord0000",
         }))
         .send()
         .await
