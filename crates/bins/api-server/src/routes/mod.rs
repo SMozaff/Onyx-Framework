@@ -407,6 +407,12 @@ pub fn router(state: ApiState) -> Router {
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/ready", get(readiness))
         .route("/api/auth/login", post(auth::login))
+        // Redeems a still-valid refresh token for a new access token —
+        // see `auth::refresh`'s own doc comment for the real,
+        // pre-existing gap this closes (no client in this codebase
+        // ever had a way to renew an access token short of a full
+        // login again).
+        .route("/api/auth/refresh", post(auth::refresh))
         // Lightweight active-user identities for ordinary authenticated
         // assignment and staff-loan pickers. Unlike `/api/admin/users`,
         // this route intentionally returns no privilege or hierarchy data.

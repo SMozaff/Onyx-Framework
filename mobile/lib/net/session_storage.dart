@@ -28,25 +28,23 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// verified here either). Must be exercised on a real device/CI before
 /// being trusted with real credentials in production.
 ///
-/// # `api-server`'s missing token-refresh route (a real, pre-existing,
-/// separate gap — confirmed by reading `routes/auth.rs`/`routes/mod.rs`
-/// directly, not assumed)
+/// # `api-server`'s token-refresh route (previously missing, now closed)
 /// `POST /api/auth/login` issues a 1-hour access token and a 7-day
-/// refresh token, but there is no `POST /api/auth/refresh` (or
-/// equivalent) route anywhere in `api-server` that redeems a refresh
-/// token for a new access token — no client in this codebase has ever
-/// actually solved token refresh. This means a persisted FFI-mode
-/// session lets the app reopen under the correct, real
-/// `organization_id`/`user_id` indefinitely (those are stable facts,
-/// not time-limited), but the stored access token stops being usable
-/// to re-fetch the Task/Mission approval-authority hierarchy after
-/// roughly an hour — at that point `mobile_core_set_hierarchy` is
-/// simply not called again until the next real password login, and
-/// approvals correctly fail closed in the meantime (the same safe
-/// default `HierarchyCache` already provides for an empty cache).
-/// Building a real refresh route is separate, unplanned server work,
-/// out of scope here, and is flagged rather than silently worked
-/// around.
+/// refresh token. `POST /api/auth/refresh` did not exist anywhere in
+/// `api-server` when this file was first written — confirmed by reading
+/// `routes/auth.rs`/`routes/mod.rs` directly, not assumed — meaning a
+/// persisted FFI-mode session's stored access token stopped being
+/// usable to re-fetch the Task/Mission approval-authority hierarchy
+/// after roughly an hour, with no way to renew it short of a full
+/// password login. That route now exists (`auth::refresh`, rotates the
+/// refresh token on every use) and `main.dart`'s
+/// `_refreshHierarchyBestEffort` calls it via
+/// `OnyxHttpAuthApi.refresh` whenever the stored access token has
+/// expired, persisting the rotated tokens back here. A session still
+/// eventually requires a real password login again once the *refresh*
+/// token itself expires (7 days) or is revoked — this closes the
+/// unnecessary ~1-hour ceiling, not the need to ever re-authenticate at
+/// all.
 class FfiSessionStorage {
   FfiSessionStorage._();
 

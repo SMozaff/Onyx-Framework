@@ -72,6 +72,18 @@ pub struct LogoutRequest {
     pub refresh_token: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: u64,
+}
+
 pub async fn login(
     State(state): State<ApiState>,
     Json(payload): Json<LoginRequest>,
@@ -207,6 +219,97 @@ pub async fn login(
             is_admin: user.is_admin,
             class: user.class.map(|c| c.as_str().to_string()),
         },
+    }))
+}
+
+/// `POST /api/auth/refresh` — redeems a still-valid `refresh` token for
+/// a new `access` token, without the caller re-entering credentials.
+///
+/// # Provenance
+/// Confirmed absent by reading this file and `routes/mod.rs` directly
+/// (not assumed): `login` has always issued a 7-day refresh token
+/// alongside the 1-hour access token, but until this route existed
+/// nothing in this codebase ever redeemed one — every client's access
+/// token simply expired after an hour with no way to renew it short of
+/// a full password login again. Flagged explicitly as a real,
+/// pre-existing gap when FFI-mode mobile's own session-persistence work
+/// first needed one (see `DECISIONS.md`), and closed here as a
+/// standalone fix any client can use, not something mobile-specific.
+///
+/// # Rotation
+/// The refresh token presented is revoked (added to `revoked_tokens`,
+/// same mechanism `logout` already uses) and a **new** refresh token is
+/// issued alongside the new access token, rather than reissuing only
+/// the access token and leaving the same refresh token valid
+/// indefinitely across every renewal. This bounds how long a single
+/// refresh token value remains useful if it were ever leaked, at the
+/// cost of the caller needing to persist the new refresh token from
+/// every response — the same tradeoff most refresh-token
+/// implementations make. Rotation is enforced by the same in-memory
+/// `revoked_tokens` set `logout` uses, so it shares that mechanism's
+/// already-disclosed limitation (audit finding H-02: revocation is
+/// in-memory and non-durable, not persisted across a server restart).
+///
+/// The user is re-fetched from the store (not trusted from the token's
+/// own claims) and confirmed still active, mirroring `login`'s and
+/// `authenticate_headers`'s own "never trust cached flags from a token
+/// that could have been minted before a demotion/deactivation"
+/// reasoning.
+pub async fn refresh(
+    State(state): State<ApiState>,
+    Json(payload): Json<RefreshRequest>,
+) -> Result<Json<RefreshResponse>, ApiError> {
+    let claims = validate_token(&state, &payload.refresh_token, "refresh").await?;
+
+    let user = state
+        .user_store
+        .find_by_id(&claims.sub)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "user store lookup failed during token refresh");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "USER_STORE_UNAVAILABLE",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?
+        .filter(|u| u.is_active)
+        .ok_or_else(|| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
+
+    let access_token = issue_token(&state, &user, "access", 3600)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "TOKEN_ISSUANCE_FAILED",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
+    let refresh_token = issue_token(&state, &user, "refresh", 7 * 24 * 3600)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "TOKEN_ISSUANCE_FAILED",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
+
+    state.revoked_tokens.write().await.insert(payload.refresh_token);
+
+    Ok(Json(RefreshResponse {
+        access_token,
+        refresh_token,
+        expires_in: 3600,
     }))
 }
 

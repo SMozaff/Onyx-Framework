@@ -76,6 +76,36 @@ class OnyxHttpAuthApi {
     return jsonEncode(response.data ?? const <dynamic>[]);
   }
 
+  /// Redeems `refreshToken` via `POST /api/auth/refresh` for a new
+  /// access token, updating `_client.auth` in place so subsequent
+  /// requests on this client immediately use it. Returns the new
+  /// refresh token (the server rotates it — see `auth::refresh`'s own
+  /// doc comment on why the old one is revoked and must not be reused),
+  /// so the caller can persist it; this method does not persist
+  /// anything itself, matching [login]'s own "return data, let the
+  /// caller decide what to persist and where" shape.
+  ///
+  /// Added to close a real, disclosed gap: this route did not exist in
+  /// `api-server` until FFI-mode mobile's own session-persistence work
+  /// surfaced it (see `DECISIONS.md`) — every access token in this
+  /// codebase previously just expired after an hour with no way to
+  /// renew it short of a full password login again. Throws
+  /// [DioException] on failure (an expired/revoked/already-used refresh
+  /// token, or the user having been deactivated since — the server
+  /// re-checks `is_active`, not just the token's own claims).
+  Future<String> refresh({required String refreshToken}) async {
+    final response = await _client.dio.post<Map<String, dynamic>>(
+      '/api/auth/refresh',
+      data: <String, dynamic>{'refresh_token': refreshToken},
+    );
+    final data = response.data!;
+    final newAccessToken = data['access_token'] as String;
+    final newRefreshToken = data['refresh_token'] as String;
+    _client.auth.accessToken = newAccessToken;
+    _client.auth.refreshToken = newRefreshToken;
+    return newRefreshToken;
+  }
+
   /// Best-effort: clears local auth state regardless of whether the
   /// server call succeeds, since a failed logout call (e.g. server
   /// unreachable) should not trap the user in a logged-in-looking state

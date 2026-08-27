@@ -3376,3 +3376,82 @@ disclosed gap is closed. Fix #2 (no `/api/auth/refresh` route,
 lower severity — a session that silently degrades after an hour rather
 than a way to gain unauthorized access) is the next piece of work, not
 done in this entry.
+
+## Fixed: added `POST /api/auth/refresh`, closing the token-refresh gap (Fix #2)
+
+Per the project owner's own severity ranking — a real bug, not a
+security hole, since nobody gains unauthorized access from a missing
+refresh route; sessions just degrade (denied/logged-out) when they
+shouldn't — this was done after, not before, the manual-UUID-entry fix.
+
+**What was built:**
+
+- `crates/bins/api-server/src/routes/auth.rs`: new `POST
+  /api/auth/refresh` handler, `refresh()`. Takes `{refresh_token}`,
+  validates it via the existing `validate_token(state, token,
+  "refresh")` (the same function `authenticate_headers`/`logout`
+  already use, just with `expected_type = "refresh"` instead of
+  `"access"` — no new token-validation logic was written), re-fetches
+  the user from the store and confirms `is_active` (mirrors `login`'s
+  own "never trust cached claims from a token that could predate a
+  demotion/deactivation" reasoning), then issues a **new** access token
+  *and* a new refresh token via the existing `issue_token` helper.
+  **Rotates**: the presented refresh token is added to
+  `state.revoked_tokens` (the same in-memory set `logout` already
+  writes to) so it can never be redeemed a second time — a caller must
+  persist the new refresh token from every response, not just the new
+  access token. Registered at `/api/auth/refresh` in `routes/mod.rs`,
+  right alongside `/api/auth/login`.
+- `mobile/lib/net/auth.dart`: `OnyxHttpAuthApi` gains `refresh({required
+  refreshToken})`, calling the new route and updating `_client.auth` in
+  place, returning the rotated refresh token for the caller to persist.
+- `mobile/lib/main.dart`'s `_refreshHierarchyBestEffort` (added in the
+  previous piece) now tries the stored access token first, and on
+  failure redeems the stored refresh token via `OnyxHttpAuthApi.refresh`,
+  persists the rotated tokens via `FfiSessionStorage`, and retries the
+  hierarchy fetch once — closing the ~1-hour ceiling that piece's own
+  entry disclosed. Still fully best-effort and non-blocking on startup,
+  same as before; a refresh token that has itself expired (7 days) or
+  been revoked still requires a real password login, which is
+  unavoidable and not part of what this fix claims to solve.
+- `mobile/lib/net/session_storage.dart`'s doc comment updated to
+  reflect the route now exists and is used, rather than continuing to
+  describe it as an open gap.
+
+**Verification actually run:**
+- `cargo check -p api-server` and `cargo clippy -p api-server
+  --all-targets --no-deps -- -D warnings` — clean. Re-ran across the
+  whole non-GTK workspace (`cargo check`/`clippy --workspace --exclude
+  desktop-shell --exclude admin-shell`) too — also clean.
+- New real, end-to-end HTTP tests,
+  `crates/bins/api-server/tests/auth_refresh.rs`:
+  `refresh_token_yields_a_working_new_access_token_and_rotates` (logs in
+  as the seeded admin, redeems the refresh token, confirms the new
+  access token actually works against a real authenticated endpoint —
+  `GET /api/users/hierarchy` — not just that the response looked
+  well-formed, confirms the *old* refresh token is rejected with 401 on
+  reuse, and confirms the *new* refresh token still works) and
+  `refresh_rejects_a_bogus_token_and_an_access_token_used_as_a_refresh_token`
+  (a garbage string, and — importantly — a real *access* token
+  presented where a refresh token belongs, are both rejected with 401,
+  proving `expected_type` is actually enforced and not just accepted
+  for any well-signed token). Both pass:
+  `cargo test -p api-server --test auth_refresh` → 2 passed, 0 failed.
+- Re-ran `mobile_access_gate` (2 passed) and the full `api-server` test
+  suite alongside this change: the only failure is the same
+  pre-existing, already-disclosed `query_id_normalization` bootstrap
+  conflict (confirmed unrelated to this change in an earlier entry via
+  `git stash` against unmodified `main`) — no new failures introduced.
+- Dart changes (`auth.dart`'s `refresh()`, `main.dart`'s updated
+  `_refreshHierarchyBestEffort`, `session_storage.dart`'s doc comment)
+  hand-verified against this file's own existing patterns and
+  brace-balance-checked, but **not** compiled or run — no Dart/Flutter
+  SDK exists in this sandbox, the same disclosed constraint as every
+  other Dart change this session.
+
+**Status:** both disclosed gaps from the FFI-mode-login piece are now
+closed — the security hole (Fix #1) and the token-refresh limitation
+(Fix #2). The remaining, deliberately-untouched item from that same
+piece is unchanged: `settings.dart`'s Cloud Relay endpoint field and
+Sign-out action are the only identity-adjacent controls left, and
+identity itself now only ever changes via a real login or sign-out.

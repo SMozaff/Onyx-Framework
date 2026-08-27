@@ -186,20 +186,44 @@ Future<OnyxApi> initializeFfiMobileCore(SharedPreferences preferences) async {
 /// cache (which would fail-closed every `ApproveTask`/etc. until the
 /// person logs in again). Best-effort by design — see the call site's
 /// own doc comment for why this is fire-and-forget rather than blocking
-/// startup, and `net/session_storage.dart`'s doc comment for the real,
-/// disclosed reason this silently does nothing useful once the stored
-/// access token is more than about an hour old (no `/api/auth/refresh`
-/// route exists anywhere in this codebase yet).
+/// startup.
+///
+/// If the stored access token has expired (the common case once more
+/// than roughly an hour has passed since the last login or refresh),
+/// this now redeems the stored refresh token via
+/// `OnyxHttpAuthApi.refresh` and persists the rotated tokens before
+/// retrying once — closing the gap `net/session_storage.dart`'s doc
+/// comment previously disclosed (`api-server` had no
+/// `POST /api/auth/refresh` route at all). Still fully best-effort: a
+/// refresh token that has itself expired (7 days) or was revoked
+/// requires a real password login again, same as before this fix — this
+/// only removes the unnecessary ~1-hour ceiling, not the eventual need
+/// to re-authenticate.
 Future<void> _refreshHierarchyBestEffort(SharedPreferences preferences, OnyxApi api) async {
   final serverAddress = preferences.getString('ffi_session.server_address');
   final accessToken = await FfiSessionStorage.readAccessToken();
   if (serverAddress == null || accessToken == null) return;
+  final auth = OnyxHttpAuth()..accessToken = accessToken;
+  final client = OnyxHttpClient(baseUrl: serverAddress, auth: auth);
+  final authApi = OnyxHttpAuthApi(client);
   try {
-    final auth = OnyxHttpAuth()..accessToken = accessToken;
-    final client = OnyxHttpClient(baseUrl: serverAddress, auth: auth);
-    final hierarchyJson = await OnyxHttpAuthApi(client).fetchHierarchyJson();
+    final hierarchyJson = await authApi.fetchHierarchyJson();
+    await api.setHierarchy(hierarchyJson);
+    return;
+  } catch (error) {
+    debugPrint('Hierarchy fetch with the stored access token failed, trying a refresh: $error');
+  }
+  try {
+    final refreshToken = await FfiSessionStorage.readRefreshToken();
+    if (refreshToken == null) return;
+    final newRefreshToken = await authApi.refresh(refreshToken: refreshToken);
+    await FfiSessionStorage.save(
+      accessToken: auth.accessToken!,
+      refreshToken: newRefreshToken,
+    );
+    final hierarchyJson = await authApi.fetchHierarchyJson();
     await api.setHierarchy(hierarchyJson);
   } catch (error) {
-    debugPrint('Best-effort hierarchy refresh failed (stale/expired token, or offline): $error');
+    debugPrint('Best-effort hierarchy refresh failed even after a token refresh attempt (refresh token also expired, revoked, or offline): $error');
   }
 }
