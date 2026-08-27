@@ -3455,3 +3455,109 @@ closed — the security hole (Fix #1) and the token-refresh limitation
 piece is unchanged: `settings.dart`'s Cloud Relay endpoint field and
 Sign-out action are the only identity-adjacent controls left, and
 identity itself now only ever changes via a real login or sign-out.
+
+## Fix #2, completed to the stricter standard actually asked for: proactive refresh + a real-expiry test
+
+A follow-up task asked for both fixes again with more specific
+acceptance criteria than the previous two entries met. Re-checked the
+real, current code against every assumption in that task rather than
+re-doing work already done — most of it, it turned out, already held:
+
+- **Fix #1 (manual UUID entry) needed no further changes.** Re-read
+  `settings.dart`/`startup_error_screen.dart`/`app.dart` directly:
+  `saveSettings` no longer exists (renamed to `saveRelayEndpoint`,
+  relay-only), both screens show identity read-only, and
+  `organization_id`/`user_id` in `SharedPreferences` are only ever
+  written by `ffi_login_screen.dart`'s real login response or
+  `http_login_screen.dart`'s login flow — confirmed via `grep` across
+  every `setString('organization_id'/'user_id', ...)` call site.
+  Nothing further to fix.
+- **One adjacent thing checked and found genuinely different, not
+  silently equated with the fixed bug:** `http_login_screen.dart` (the
+  *HTTP*-transport login screen, unrelated to the FFI-mode screens the
+  security hole was in) still has a free-text "Organization UUID"
+  field. Read `routes/command.rs`/`routes/query.rs` directly to check
+  whether this is exploitable the same way: it is not — both
+  `/api/command` and `/api/query` independently reject
+  `envelope.organization_id != auth.organization_id` with
+  `403 TENANT_MISMATCH`/`FORBIDDEN`, so a wrong or malicious org id
+  typed there only ever produces failed requests against a real
+  server, never impersonation, since the HTTP transport has no local
+  `AppState` trusting client-asserted identity the way FFI mode's local
+  command dispatch did. Left untouched — flagged as worth a second
+  look someday, not treated as part of this fix.
+- **Fix #2 (`/api/auth/refresh`) needed two real additions the earlier
+  entry hadn't done:**
+  1. **Proactive renewal, not just reactive-after-failure.** The
+     earlier implementation only ever called `refresh` once, at
+     startup, and only after a hierarchy fetch had already failed. A
+     session left open for hours had no mechanism to renew its token
+     again after that single startup attempt. `OnyxController`
+     (`ui/app.dart`) now runs a `Timer.periodic` (45 minutes — safely
+     inside the confirmed 3600-second/1-hour access-token TTL read
+     directly from `issue_token(&state, &user, "access", 3600)`'s two
+     call sites in `auth.rs`) for the lifetime of the running app, only
+     when `api is OnyxMobile` (the HTTP transport has no local cache to
+     keep fresh and re-authenticates every restart by design already).
+     The reactive retry-on-401 path in `refreshHierarchyBestEffort`
+     (now public, called by both the one-shot startup path and this
+     timer) stays as a safety net, not the primary mechanism.
+  2. **A real test that reaches actual expiry, not just proves the
+     endpoint returns 200 in isolation.** Added
+     `access_token_that_has_actually_expired_is_rejected_and_refresh_recovers`
+     to `auth_refresh.rs`: fixes `ONYX_AUTHORITY_SIGNING_KEY` to the
+     same non-production default `ApiState::new` itself falls back to,
+     decodes a real, freshly-issued access token's real claims with the
+     same `Ed25519JwtCodec` the server uses, rewrites only
+     `exp`/`iat` to genuinely-in-the-past values, and re-signs with the
+     same key — a real, validly-signed, genuinely-expired token, not a
+     mock or a malformed one. Confirms that token is rejected
+     (`401`) by the exact `GET /api/users/hierarchy` endpoint mobile's
+     `fetchHierarchyJson` calls to populate the approval-authority
+     cache, then confirms the refresh token issued alongside it
+     redeems a replacement that immediately works again against that
+     same endpoint. This is the server-side half of "the
+     approval-authority cache keeps working across a refresh" — the
+     Dart/FFI half (an actual `mobile_core_set_hierarchy` call
+     succeeding post-refresh) cannot be exercised in this sandbox at
+     all, disclosed below, not glossed over.
+- **Checked, per the task's explicit instruction, whether
+  `desktop-shell` has ever used a refresh path: it has not.**
+  `crates/bins/desktop-shell/src/lib.rs` calls `hierarchy_cache.refresh(...)`
+  in two places — confirmed by reading both call sites directly this
+  is `HierarchyCache::refresh` (an unrelated method that re-fetches the
+  reporting-line tree), not a token refresh. `desktop-shell` has never
+  redeemed a refresh token and still doesn't; its access token expires
+  after the same 1 hour with no renewal, identical to mobile's
+  pre-Fix-#2 state. Not fixed here — out of this task's stated scope
+  (mobile FFI session only) — and named explicitly rather than left for
+  someone to discover independently later.
+
+**Verification actually run:**
+- `cargo test -p api-server --test auth_refresh` → **3 passed, 0
+  failed** (the two from the prior entry plus the new real-expiry
+  test). `cargo clippy -p api-server --all-targets --no-deps -- -D
+  warnings` and `cargo check`/`clippy --workspace --exclude
+  desktop-shell --exclude admin-shell` — all clean.
+- Full `cargo test -p api-server` re-run: only the same pre-existing,
+  already-disclosed `query_id_normalization` bootstrap-conflict failure
+  — no new failures from this change.
+- `mobile/lib/ui/app.dart`'s new `Timer.periodic` and
+  `mobile/lib/main.dart`'s renamed public `refreshHierarchyBestEffort`
+  hand-verified against this project's existing patterns and
+  brace-balance-checked, but **not** compiled or run — no Dart/Flutter
+  SDK exists in this sandbox, the same disclosed constraint as every
+  other Dart change this session. The claim that the approval-authority
+  cache "keeps working across a refresh" is proven server-side only
+  (the new Rust test above); the actual Dart timer firing and calling
+  `mobile_core_set_hierarchy` successfully has not been observed
+  running, only written to match tested, working pieces
+  (`refreshHierarchyBestEffort` itself, `OnyxHttpAuthApi.refresh`) that
+  were each independently verified where they could be.
+
+**Status:** both fixes now meet the stricter standard asked for. Fix
+#1 required no new work; Fix #2 gained proactive renewal and a real
+deterministic-expiry test. The `http_login_screen.dart` free-text org-id
+field and `desktop-shell`'s own missing token refresh are both real,
+adjacent, and explicitly not fixed here — named rather than left for
+a future correction to have to find independently.

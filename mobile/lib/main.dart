@@ -116,7 +116,12 @@ Future<void> restartApp() async {
     // successful refresh or login). Deliberately not awaited: it would
     // otherwise put a real LAN/network round-trip on every app launch's
     // critical path, which this app must not require to work offline.
-    unawaited(_refreshHierarchyBestEffort(preferences, api));
+    // This is only the *startup* refresh; `OnyxController.initialize`
+    // additionally schedules a periodic proactive refresh for the
+    // lifetime of the running app — see that method's own doc comment
+    // for why a once-at-startup call alone isn't enough for a session
+    // left open for hours.
+    unawaited(refreshHierarchyBestEffort(preferences, api));
 
     runApp(OnyxControllerHost(
       api: api,
@@ -188,6 +193,20 @@ Future<OnyxApi> initializeFfiMobileCore(SharedPreferences preferences) async {
 /// own doc comment for why this is fire-and-forget rather than blocking
 /// startup.
 ///
+/// Public (not `main.dart`-private) so `OnyxController.initialize`
+/// (`ui/app.dart`) can call this exact same logic on a periodic timer
+/// for the lifetime of the running app, not just once at startup — a
+/// session left open for hours would otherwise only ever have
+/// refreshed its access token once, at launch, and would sit on a
+/// stale/expired token (and therefore a stale, un-refreshed
+/// approval-authority cache) for the rest of that run. The periodic
+/// timer's interval is chosen well inside the access token's 1-hour TTL
+/// specifically so this proactively renews the token *before* it
+/// expires, not only reactively after a request has already started
+/// failing (see the retry-after-401 logic below, which still exists as
+/// a safety net for e.g. a stale token that outlives its expected TTL
+/// due to clock drift, not as the primary renewal mechanism).
+///
 /// If the stored access token has expired (the common case once more
 /// than roughly an hour has passed since the last login or refresh),
 /// this now redeems the stored refresh token via
@@ -199,7 +218,7 @@ Future<OnyxApi> initializeFfiMobileCore(SharedPreferences preferences) async {
 /// requires a real password login again, same as before this fix — this
 /// only removes the unnecessary ~1-hour ceiling, not the eventual need
 /// to re-authenticate.
-Future<void> _refreshHierarchyBestEffort(SharedPreferences preferences, OnyxApi api) async {
+Future<void> refreshHierarchyBestEffort(SharedPreferences preferences, OnyxApi api) async {
   final serverAddress = preferences.getString('ffi_session.server_address');
   final accessToken = await FfiSessionStorage.readAccessToken();
   if (serverAddress == null || accessToken == null) return;

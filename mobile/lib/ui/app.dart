@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../bridge/bridge.dart';
+import '../main.dart' show refreshHierarchyBestEffort;
 import 'screens/approvals.dart';
 import 'screens/dashboard.dart';
 import 'screens/files.dart';
@@ -44,6 +45,20 @@ class OnyxController extends ChangeNotifier {
   int navigationIndex = 0;
   StreamSubscription<dynamic>? _eventSubscription;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _hierarchyRefreshTimer;
+
+  /// How often the FFI/local-first session proactively re-fetches the
+  /// approval-authority hierarchy and renews its access token, while
+  /// this controller (and therefore the app) is running. Chosen well
+  /// inside the server's 1-hour access-token TTL
+  /// (`api-server::routes::auth::issue_token(..., "access", 3600)`) so
+  /// a long-running session's token is renewed *before* it expires,
+  /// not only reactively after a request starts failing — see
+  /// `refreshHierarchyBestEffort`'s own doc comment in `main.dart` for
+  /// the full reasoning, including why the one-shot startup call this
+  /// timer supplements is not, by itself, enough for a session left
+  /// open for hours.
+  static const _hierarchyRefreshInterval = Duration(minutes: 45);
 
   Future<void> initialize() async {
     _eventSubscription = api.events.listen((_) => refresh());
@@ -51,6 +66,18 @@ class OnyxController extends ChangeNotifier {
       hasNetwork = results.any((result) => result != ConnectivityResult.none);
       notifyListeners();
     });
+    // Only meaningful for the FFI/local-first transport (`OnyxMobile`)
+    // — it's the only one with a local approval-authority cache to keep
+    // fresh and a server-issued access token to renew at all; the HTTP
+    // transport (`OnyxHttpApi`) has no local cache and requires signing
+    // in again on every restart by design (see that class's own doc
+    // comment), so there is nothing for this timer to do there.
+    if (api is OnyxMobile) {
+      _hierarchyRefreshTimer = Timer.periodic(
+        _hierarchyRefreshInterval,
+        (_) => unawaited(refreshHierarchyBestEffort(preferences, api)),
+      );
+    }
     await refresh();
   }
 
@@ -166,6 +193,7 @@ class OnyxController extends ChangeNotifier {
   void dispose() {
     _eventSubscription?.cancel();
     _connectivitySubscription?.cancel();
+    _hierarchyRefreshTimer?.cancel();
     unawaited(api.dispose());
     super.dispose();
   }

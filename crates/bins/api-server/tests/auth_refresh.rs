@@ -1,10 +1,17 @@
 //! Real, end-to-end proof that `POST /api/auth/refresh` actually works
 //! over real HTTP (same harness style as `mobile_access_gate.rs`):
 //! redeems a valid refresh token for a new access token, rotates the
-//! refresh token (the old one can never be redeemed twice), and rejects
-//! a bogus/already-used refresh token outright.
+//! refresh token (the old one can never be redeemed twice), rejects a
+//! bogus/already-used refresh token outright, and — the scenario this
+//! route exists for — an access token that has genuinely reached its
+//! real expiry is rejected, while the still-valid refresh token issued
+//! alongside it can still redeem a working replacement.
 
 use std::net::SocketAddr;
+
+use api_server::routes::TokenClaims;
+use security_adapter::Ed25519JwtCodec;
+use security_application::SecretProvider;
 
 async fn start_server(db_label: &str) -> (SocketAddr, reqwest::Client) {
     let db_path = std::env::temp_dir().join(format!("onyx-auth-refresh-test-{db_label}.db"));
@@ -129,4 +136,101 @@ async fn refresh_rejects_a_bogus_token_and_an_access_token_used_as_a_refresh_tok
         .await
         .unwrap();
     assert_eq!(wrong_type.status(), 401, "an access token must not be usable as a refresh token");
+}
+
+/// Proves the actual scenario this route exists for, deterministically
+/// rather than by waiting a real hour: an access token that has
+/// genuinely reached its real, signed `exp` claim is rejected by a real
+/// authenticated endpoint, and the refresh token issued alongside it —
+/// still within its own, much longer, validity window — successfully
+/// redeems a fresh access token that immediately works again against
+/// that same endpoint. This is the exact `GET /api/users/hierarchy`
+/// call `mobile/lib/net/auth.dart`'s `fetchHierarchyJson` makes to
+/// populate the local Task/Mission approval-authority cache
+/// (`mobile_core_set_hierarchy`) — proving this endpoint keeps working
+/// across a refresh is the server-side half of proving that cache
+/// keeps working across one too; the Dart/FFI half cannot be exercised
+/// in this sandbox (no Flutter/Dart toolchain — see `DECISIONS.md`).
+///
+/// Constructs the expired token itself (same signing key `ApiState::new`
+/// defaults `ONYX_AUTHORITY_SIGNING_KEY` to outside production — see
+/// `routes/mod.rs`'s own doc comment on that default) by decoding a
+/// real, freshly-issued access token's real claims, rewriting only
+/// `exp`/`iat` to the past, and re-signing with the same codec
+/// `api-server` itself uses — so this is a genuinely valid signature
+/// over a genuinely expired token, not a forged/malformed one, and not
+/// a mock that could pass for a reason unrelated to expiry.
+#[tokio::test]
+async fn access_token_that_has_actually_expired_is_rejected_and_refresh_recovers() {
+    const SIGNING_KEY: &str = "hex:4242424242424242424242424242424242424242424242424242424242424242";
+    std::env::set_var("ONYX_AUTHORITY_SIGNING_KEY", SIGNING_KEY);
+
+    let (addr, http) = start_server("expiry").await;
+    let base = format!("http://{addr}");
+
+    let login: serde_json::Value = http
+        .post(format!("{base}/api/auth/login"))
+        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let fresh_access_token = login["access_token"].as_str().unwrap().to_string();
+    let refresh_token = login["refresh_token"].as_str().unwrap().to_string();
+
+    // Confirm the fresh token actually works first, so the later 401 is
+    // proven to be *because* of expiry, not some unrelated auth failure.
+    let sanity_check = http
+        .get(format!("{base}/api/users/hierarchy"))
+        .bearer_auth(&fresh_access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sanity_check.status(), 200, "the freshly-issued access token must work before we deliberately expire it");
+
+    // Decode the real token's real claims, and re-sign an
+    // otherwise-identical token whose `exp` (and `iat`, so `iat > now`
+    // is never separately tripped) sit safely in the past.
+    let secret_provider = security_adapter::EnvironmentSecretProvider;
+    let secret = secret_provider.get("ONYX_AUTHORITY_SIGNING_KEY").await.unwrap();
+    let codec = Ed25519JwtCodec::from_rotating_secret(&secret).unwrap();
+    let mut claims: TokenClaims = codec.decode(&fresh_access_token).unwrap();
+    claims.iat = 0;
+    claims.exp = 1; // 1970-01-01T00:00:01Z -- unambiguously, genuinely expired.
+    let expired_access_token = codec.encode(&claims).unwrap();
+
+    let expired_attempt = http
+        .get(format!("{base}/api/users/hierarchy"))
+        .bearer_auth(&expired_access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(expired_attempt.status(), 401, "a genuinely expired access token must be rejected");
+
+    // The refresh token issued alongside it (7-day TTL, untouched by
+    // the access token's much shorter 1-hour one) redeems a working
+    // replacement.
+    let refresh_response = http
+        .post(format!("{base}/api/auth/refresh"))
+        .json(&serde_json::json!({"refresh_token": refresh_token}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refresh_response.status(), 200, "the still-valid refresh token must successfully redeem a new access token");
+    let refreshed: serde_json::Value = refresh_response.json().await.unwrap();
+    let new_access_token = refreshed["access_token"].as_str().unwrap();
+
+    let recovered = http
+        .get(format!("{base}/api/users/hierarchy"))
+        .bearer_auth(new_access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered.status(),
+        200,
+        "the refreshed access token must immediately work again against the same real endpoint mobile's hierarchy fetch uses"
+    );
 }
