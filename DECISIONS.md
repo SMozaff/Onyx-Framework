@@ -4181,3 +4181,155 @@ full-workspace compile. A second `workflow_dispatch` run, now that the
 download) and its `Build` step drop well below 8 minutes; not run here
 since `load-smoke` passing for a real, evidenced reason was the task's
 actual bar, already cleared.
+
+## Fixing `mobile-ios`'s "Cannot find 'BackgroundService' in scope" error
+
+### A stale-checkout discrepancy, resolved before this task started
+
+The task handed to this session opened by pointedly requiring a fresh,
+*verified* `git fetch`/`log` rather than an assumed local state — a
+direct response to a real discrepancy raised immediately prior: the
+user's local copy of `ci.yml` showed `load-smoke`'s "Start optimized
+API" step as plain `cargo run --package api-server` (no `--release`),
+contradicting the previous report's claim that it already read `cargo
+run --release --package api-server` before that fix. Traced with
+`git log -p --all -- .github/workflows/ci.yml`: the line was
+originally added without `--release` in commit `62fea331`
+(2026-08-16), then `--release` was added in `bf726ae5` ("fix:
+stabilize cross-platform CI validation", 2026-08-27 23:13 UTC), which
+merged into `main` via `25d6172` (2026-08-28 12:46 UTC) — before either
+of the two commits in the previous task (`f4805a3` at 13:40 UTC,
+`e0d94a7` at 17:49 UTC). `git merge-base --is-ancestor bf726ae HEAD`
+confirmed `bf726ae` really is an ancestor of current `main`. The
+previous report's claim was accurate to the file as it existed on
+`main` at the time of that work; the user's copy was simply stale
+relative to `main`'s tip, not a divergent branch. Resolved by directly
+walking the commit history rather than re-asserting either side's
+memory of the file's contents. This task's own instruction to verify
+`git fetch origin main && git log origin/main --oneline -5` before
+doing anything else was followed for exactly this reason, and
+confirmed tip at `9535efe` before any other action below was taken.
+
+### Diagnosis, independently confirmed
+
+The task arrived with a diagnosis already attached (`BackgroundService`
+present on disk, referenced from `AppDelegate.swift`, but absent from
+`Runner.xcodeproj/project.pbxproj`) and an explicit instruction not to
+just trust it. Checked directly rather than assumed:
+
+- `mobile/ios/Runner/AppDelegate.swift` line 10:
+  `BackgroundService.register()`, inside `application(_:didFinishLaunchingWithOptions:)`.
+- `mobile/ios/Runner/BackgroundService.swift` exists on disk (1307
+  bytes) and genuinely defines `final class BackgroundService` with a
+  `static func register()` — the exact symbol `AppDelegate.swift`
+  calls. Not a typo or a missing method; the type is real and correct.
+- `grep -n "BackgroundService" mobile/ios/Runner.xcodeproj/project.pbxproj`
+  returned **zero matches** before this fix — confirmed directly, not
+  inferred from the task's framing.
+- Cross-checked against `AppDelegate.swift`'s own four touchpoints in
+  the same file (`PBXBuildFile`, `PBXFileReference`, the `Runner` group's
+  `children`, and the `PBXSourcesBuildPhase`'s `files` list) to confirm
+  the expected shape of a correctly wired Swift source, and against the
+  `Runner` target's `source_build_phase.files` via the `xcodeproj` gem
+  (below), which listed exactly three files — `AppDelegate.swift`,
+  `GeneratedPluginRegistrant.m`, `SceneDelegate.swift` — with
+  `BackgroundService.swift` genuinely absent.
+
+Diagnosis confirmed exactly as stated: the file was never added to the
+Xcode project, so the compiler was never asked to compile it, so the
+type is unknown at the call site. Not a Swift language bug, not a
+missing import, not a stub needing implementation.
+
+### The fix: `xcodeproj` gem, not hand-edited UUIDs
+
+Per the task's own explicit caution, `.pbxproj` was not hand-edited.
+This sandbox is Linux with no Xcode/`xcodebuild` available (confirmed:
+`uname -a` reports Linux; `which xcodebuild flutter` found neither),
+but the `xcodeproj` Ruby gem is pure Ruby with no Xcode dependency, so
+it was installed (`gem install xcodeproj`, pulled `xcodeproj 1.28.1`
+and its four dependencies from rubygems.org) and used directly against
+the real project file:
+
+```ruby
+require 'xcodeproj'
+project = Xcodeproj::Project.open('Runner.xcodeproj')
+runner_group = project.main_group['Runner']
+runner_target = project.targets.find { |t| t.name == 'Runner' }
+file_ref = runner_group.new_reference('BackgroundService.swift')
+runner_target.add_file_references([file_ref])
+project.save
+```
+
+This generated fresh, unique UUIDs (`9869D906FD53C8C42688EE8E` for the
+`PBXBuildFile` entry, `44117543AA7C8B2EE194D81C` for the
+`PBXFileReference`) and added exactly the four entries
+`AppDelegate.swift` already has — `PBXBuildFile`, `PBXFileReference`,
+the `Runner` group's `children`, and the `Runner` target's
+`PBXSourcesBuildPhase` `files` list — confirmed both by grepping the
+saved file and by re-opening the saved project with the same gem
+afterward and listing `runner_target.source_build_phase.files`, which
+now shows all four: `AppDelegate.swift`, `GeneratedPluginRegistrant.m`,
+`SceneDelegate.swift`, `BackgroundService.swift`. New UUIDs checked
+against every existing ID in the file for collisions (none).
+
+One side effect of the gem's save was caught and reverted before
+committing: it cosmetically rewrote the comment label on the existing
+`XCLocalSwiftPackageReference` object (from
+`/* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */`
+to the shorter `/* XCLocalSwiftPackageReference "FlutterGeneratedPluginSwiftPackage" */`)
+— a comment only, the underlying `relativePath` value was untouched,
+but it was unrelated to this fix and reverted with a targeted `sed` to
+keep the diff to exactly the four intended additions. Final diff:
+`mobile/ios/Runner.xcodeproj/project.pbxproj`, 4 insertions, 0
+deletions, nothing else touched.
+
+### Checked for compounding issues before assuming this alone is sufficient
+
+Per the task's own caution (the `mobile-android` AGP fix earlier this
+session cascaded into a second, unrelated Kotlin-version error once
+the first was fixed) — checked whether `BackgroundService.swift`
+itself would compile cleanly once actually included, rather than
+assuming target membership was the only gap:
+
+- Its three imports (`BackgroundTasks`, `Darwin`, `Foundation`) are
+  all standard system/SDK modules; none require an extra dependency,
+  Swift package, or explicit "Frameworks and Libraries" linker entry
+  — Swift auto-links system frameworks referenced via `import` at the
+  SDK level, unlike C/Objective-C's explicit linker-flag requirement,
+  and the project's own `PBXFrameworksBuildPhase` confirms no other
+  system framework is explicitly listed there either (only the
+  Flutter Swift package), consistent with that convention already
+  being followed elsewhere in this exact project.
+- `BGTaskScheduler.register(forTaskWithIdentifier: "com.onyx.sync", ...)`
+  requires the same identifier to appear in `Info.plist`'s
+  `BGTaskSchedulerPermittedIdentifiers` array, or the call throws at
+  runtime (not a compile-time gate, but worth checking regardless).
+  Checked directly: `mobile/ios/Runner/Info.plist` already has
+  `BGTaskSchedulerPermittedIdentifiers` → `["com.onyx.sync"]`, matching
+  the file's own `taskIdentifier` constant exactly. No plist gap.
+- `runNativeSync` resolves `mobile_core_background_sync_registered` via
+  `dlsym` against `RTLD_DEFAULT` (`UnsafeMutableRawPointer(bitPattern: -2)`)
+  rather than a compile-time linked symbol, so a missing native symbol
+  would fail softly at runtime (`guard let symbol = ... else { return 0 }`),
+  not as a link error — consistent with the file's own defensive
+  design, and not something target membership changes either way.
+
+No compounding issue found. This is judged, not asserted outright,
+since this sandbox has no way to run a real Swift compiler — the real
+test is the CI run below.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `grep BackgroundService project.pbxproj` before fix | 0 matches (confirmed) |
+| `grep BackgroundService project.pbxproj` after fix | 4 matches, matching `AppDelegate.swift`'s own 4-touchpoint shape |
+| `xcodeproj` gem re-open + `source_build_phase.files` listing | `BackgroundService.swift` present alongside the other 3 Runner sources |
+| UUID collision check against all existing IDs in the file | none |
+| Local `xcodebuild`/`flutter build ios` | not possible — this sandbox is Linux, no Xcode toolchain (confirmed via `uname -a` and `which xcodebuild flutter`) |
+| Fresh `workflow_dispatch` of `ci.yml` | see the real run's job table and log excerpt below |
+
+Not touched, per the task's explicit exclusions: the 6 pre-existing
+`api-server` integration test failures (still out of scope), and
+nothing beyond this one `.pbxproj` fix — no other file in `mobile/ios/`
+was modified.
