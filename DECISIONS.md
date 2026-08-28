@@ -3958,7 +3958,40 @@ than asserted from the local run.
 | `cargo check --workspace` | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | `cargo test --workspace --no-fail-fast` (local, no Postgres/D-Bus) | 6 previously-named baseline failures now pass; distinct, disk/infra-explained failures in `keyring_adapter` and `persistence-postgres`/journey tests, unrelated to this diff |
-| Fresh `workflow_dispatch` of `ci.yml` | see report for the run's real job table |
+| Fresh `workflow_dispatch` of `ci.yml` | `check` green for the first time (run `33176531805`, commit `f4805a3`) — see below |
 
 This is a pure-formatting commit: `crates/bins/desktop-shell/src/lib.rs`
 only, nothing else staged alongside it.
+
+### The real `workflow_dispatch` result (run `33176531805`, commit `f4805a3`)
+
+| Job | Baseline (`33144081403`, `68e4cf2`) | This run (`f4805a3`) |
+|---|---|---|
+| `check` | failure (Format step) | **success** — Format, Clippy, Build, Test, Docs, migration idempotency, and contract verification all pass, first time this job has ever gone fully green |
+| `web` | success | success |
+| `deploy-check` | success | success |
+| `mobile-dart` | success | success |
+| `native-ui-evidence` | success | success |
+| `mobile-android` | success | success |
+| `mobile-ios` | failure (`AppDelegate.swift:10`, `BackgroundService` not in scope) | failure — confirmed **same** error, same file, same line, unrelated to this fix |
+| `load-smoke` | skipped (gated on `check`) | **failure** — first time this job has ever executed |
+
+**`check` finally goes green end-to-end**, confirming the local
+`cargo test --workspace` divergence noted above really was this
+sandbox's missing D-Bus/Postgres, not a real regression: CI's own
+`check` job starts a D-Bus session with an unlocked gnome-keyring
+specifically for the `secure_storage` tests, and runs Postgres as a
+service container, and with both present, `Test` passes clean —
+including the `keyring_adapter` and `persistence-postgres` tests that
+failed locally.
+
+**`load-smoke` is a newly-*visible* (not newly-*caused*) failure**,
+the same category as `mobile-ios` in the prior entry. It never ran
+before because it depends on `check`, which never passed. Its actual
+failure: the job's own "Start optimized API" step polls
+`curl http://127.0.0.1:3000` for 60s and the server never comes up in
+that window, so `k6`'s `setup()` fails immediately with "connection
+refused" before a single real load-test request is attempted. Nothing
+in this task's one-line formatting diff touches that job, that script,
+or API startup. Not fixed here: out of scope, flagged for a future
+task rather than silently absorbed into "done."
