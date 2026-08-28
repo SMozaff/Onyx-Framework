@@ -535,8 +535,11 @@ async fn build_app_state(
         // client-composition's DenyAllOwnerAuthority (config value
         // `None`) rather than pointing at a cache that's empty anyway.
         owner_authority: session.map(|_| {
-            Arc::new(app.state::<client_composition::hierarchy_cache::HierarchyCache>().inner().clone())
-                as Arc<dyn api_server::OwnerAuthority>
+            Arc::new(
+                app.state::<client_composition::hierarchy_cache::HierarchyCache>()
+                    .inner()
+                    .clone(),
+            ) as Arc<dyn api_server::OwnerAuthority>
         }),
     };
 

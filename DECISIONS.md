@@ -3867,3 +3867,98 @@ newly-discovered only because fixing `mobile-dart` was what finally let
 CI reach it at all. Flagged for a future task rather than silently
 absorbed into "done" or silently left for someone else to rediscover
 from scratch.
+
+## Clearing the `cargo fmt` drift — getting `check`'s Format step green
+
+### What changed
+
+A fresh `git pull` on `main` showed the tip had moved to `25d6172` (a
+merge of `fix/ci-platform-validation`, forked from `bf726ae`) since the
+last task — not `8878fa1` as assumed going in. That merge had, as a side
+effect of its own unrelated work, already applied `rustfmt` to nearly
+all of the ~58 diffs across ~15 files previously logged as pre-existing,
+out-of-scope drift. Re-running `cargo fmt --all -- --check` against the
+real, current tip found exactly **one** diff left: the same
+`crates/bins/desktop-shell/src/lib.rs` block (from `0400f81`, the mobile
+approval-authority piece) already identified by name in the prior
+task's report. Running `cargo fmt --all` for real reformatted that one
+`Arc::new(...) as Arc<dyn OwnerAuthority>` expression's line-wrapping —
+purely whitespace/layout, no tokens added, removed, or reordered beyond
+where rustfmt breaks a long chained call across lines. `git diff --stat`
+confirms the scope: 1 file, 5 insertions, 2 deletions.
+
+### Why this was judged safe to commit on its own
+
+`cargo fmt` restricts itself to whitespace and line layout by
+construction, but per this project's own standing discipline that gets
+verified rather than assumed:
+
+- `cargo fmt --all -- --check` — clean (0 diffs) after the real run.
+- `cargo check --workspace` — clean, matching the pre-formatting state.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean,
+  matching the known-clean state from `68e4cf2`.
+- `cargo test --workspace` — see below; not a clean apples-to-apples
+  local comparison, but nothing in the result points at the formatting
+  diff as a cause.
+
+### The `cargo test --workspace` complication (disclosed, not glossed over)
+
+This sandbox has much less free disk than a full workspace test build
+needs — a clean `cargo test --workspace` build alone consumes on the
+order of 15–16 GiB of `target/`, and doing it back-to-back with `check`
+and `clippy` (each leaving their own `dev`-profile artifacts behind)
+exhausted the disk mid-build the first two attempts, aborting with
+`rustc-LLVM ERROR: IO failure on output stream: No space left on
+device` — an infrastructure failure, not a real test result (`grep` for
+`test result:`/`FAILED` against those logs returned nothing; no test
+binary ever finished linking). Freed by `cargo clean` between each of
+`check`, `clippy`, and `test` (tooling from the prior mobile task —
+`/opt/android-sdk`, `/opt/flutter`, `/root/.gradle` — was left in place
+rather than removed, since deleting it wasn't authorized for this task;
+`cargo clean` on the Rust `target/` alone was sufficient and safe to
+redo, since it's pure derived output).
+
+With disk no longer the blocker, a full `cargo test --workspace
+--no-fail-fast` run completed. It did **not** reproduce the same 6
+named baseline failures this task expected to re-confirm
+(`query_id_normalization`, `relay_switchboard`,
+`staff_loan_authorization`, `user_hierarchy_admin_routes`,
+`staff_profile_routes`, `team_leader_precheck_authorization`) — every
+one of those 6 **passed** in this run. Instead, a different set failed:
+2 `desktop-shell::secure_storage::keyring_adapter` tests, and roughly
+16 tests across `persistence-postgres` (concurrency/idempotency/outbox/
+repository) and `client-composition`'s SQLite/journey integration
+tests. Investigated rather than assumed unrelated:
+
+- The `keyring_adapter` failures are a documented property of the
+  `keyring` crate's Linux Secret Service backend, confirmed against its
+  own docs (via Context7): it depends on a D-Bus session daemon
+  (gnome-keyring/KeePassXC) and is explicitly documented as unsuitable
+  for headless environments. This sandbox has no D-Bus session bus.
+- The `persistence-postgres` and journey/integration failures are
+  consistent with the same root cause class — this sandbox has no live
+  Postgres instance for those tests to run against, unlike CI's `check`
+  job which provisions one as a service container.
+
+Neither category is plausibly caused by a whitespace-only edit to
+`desktop-shell/src/lib.rs`'s `owner_authority` closure — nothing in that
+diff touches keyring code, Postgres access, or test fixtures. This
+sandbox simply cannot reproduce the CI job's exact test-pass baseline
+locally (it's missing services CI provisions), so CI's own `check` run
+— which does have Postgres and runs in a normal Ubuntu runner, not this
+constrained container — remains the authoritative comparison for the 6
+named failures, and its result is reported alongside this entry rather
+than asserted from the local run.
+
+### Verification checklist
+
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean (0 diffs), after real `cargo fmt --all` |
+| `cargo check --workspace` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` (local, no Postgres/D-Bus) | 6 previously-named baseline failures now pass; distinct, disk/infra-explained failures in `keyring_adapter` and `persistence-postgres`/journey tests, unrelated to this diff |
+| Fresh `workflow_dispatch` of `ci.yml` | see report for the run's real job table |
+
+This is a pure-formatting commit: `crates/bins/desktop-shell/src/lib.rs`
+only, nothing else staged alongside it.
