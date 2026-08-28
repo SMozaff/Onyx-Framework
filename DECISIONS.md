@@ -4115,3 +4115,69 @@ Not touched, per the task's explicit exclusions: `mobile-ios`'s
 `BackgroundService` Swift error (still the same disclosed, unrelated,
 pre-existing failure), and the 6 pre-existing `api-server` integration
 test failures inside `check`'s own `Test` step (still out of scope).
+
+### The real `workflow_dispatch` result (run `33196473346`, commit `e0d94a7`)
+
+| Job | Baseline (`33176531805`, `f4805a3`) | This run (`e0d94a7`) |
+|---|---|---|
+| `check` | success | success |
+| `web` | success | success |
+| `deploy-check` | success | success |
+| `mobile-dart` | success | success |
+| `native-ui-evidence` | success | success |
+| `mobile-android` | success | success |
+| `mobile-ios` | failure (`AppDelegate.swift:10`, `BackgroundService` not in scope) | failure — confirmed **same** error, same file, same line, unrelated to this fix |
+| `load-smoke` | **failure** (`rustc` still an orphan process at cleanup; server never bound the port in 60s) | **success** — for a real reason, detailed below |
+
+**`load-smoke` passes for real, not just "the timeout logic changed."**
+Its own step timings from this run:
+
+- `Build API release binary` (new step): **started 18:11:12, finished
+  18:13:12 — 120s.** This is the first-ever population of the new
+  `release-build` shared cache key, so this number already includes
+  whatever cold-compile cost remained; it is not a warm-cache number.
+  Contrast with the baseline: at the old 60s mark, the equivalent work
+  (`cargo run --release`) had *not finished compiling at all* —
+  confirmed by the orphaned `rustc` processes still running at job
+  cleanup. 120s-to-a-finished-binary vs. never-finishes-in-60s is the
+  real before/after: the fix didn't make the build faster in the
+  abstract, it gave the build a place to run to completion instead of
+  racing a clock designed to measure something else.
+- `Start optimized API` (the health-check loop, now just execing the
+  already-built binary): **started 18:13:12, finished 18:13:13 — 1
+  second.** This is the number the 60-iteration loop was always meant
+  to measure — real server startup time — and now it's actually
+  measuring it, cleanly separated from compilation.
+- `k6 run ... --vus 100 --duration 60s`: **ran the full 60.2s**,
+  completing **36,514 real iterations** against the running server at
+  ~607 req/s, 42 MB received / 83 MB sent, job step conclusion
+  `success`. Contrast with the baseline, where the entire k6 run
+  produced exactly one HTTP attempt total (`connection refused`) before
+  `setup()` threw and the run aborted in under a second. This run is a
+  real load test that actually exercised the server, not a
+  fast-failing stub.
+
+**On the caching half of the fix specifically:** this run cannot yet
+show a warm-cache speedup for `load-smoke`'s own restore, because
+`release-build` is a brand-new cache key with nothing to restore from
+before this run populated it (`check`'s own `Run Swatinem/rust-cache@v2`
+step this run took only ~2s — a cache-miss/nothing-to-restore duration,
+not a several-hundred-MB download; its `Build` step then ran a full
+~8 minutes, consistent with a genuinely cold compile). The caching
+benefit that matters for *this* task — `load-smoke` restoring the
+dependency tree `check` already compiled in the *same* run, rather
+than compiling it a second time from zero — is real and already
+visible in the numbers above: `load-smoke`'s own `Build API release
+binary` step only had to compile `api-server`'s own crate and its
+immediate workspace-local dependencies on top of that shared,
+already-built dependency tree (confirmed via Context7 against
+Swatinem/rust-cache's own docs: `cache-workspace-crates` defaults to
+`false`, so only third-party dependency artifacts carry over, not
+workspace crates' own compiled output) — which is why it finished in
+120s rather than repeating anything close to `check`'s own ~8-minute
+full-workspace compile. A second `workflow_dispatch` run, now that the
+`release-build` key holds a saved cache from this run, would show
+`check`'s own restore step take noticeably longer than 2s (an actual
+download) and its `Build` step drop well below 8 minutes; not run here
+since `load-smoke` passing for a real, evidenced reason was the task's
+actual bar, already cleared.
