@@ -3827,7 +3827,43 @@ once, here, disclosed.
 | `cargo fmt --all -- --check` | 58 pre-existing diffs found, deliberately not included (see above) |
 | Fresh `workflow_dispatch` of `ci.yml` | see below |
 
-(GitHub Actions dispatch result recorded once the real run completes —
-see the addendum immediately following this entry, or the session's
-final report, for the actual job-by-job table; not fabricated here
-ahead of the run.)
+### The real `workflow_dispatch` result (run `33144081403`, commit `68e4cf2`)
+
+| Job | Baseline (`33127510920`, `769bdcb`) | This run (`68e4cf2`) |
+|---|---|---|
+| `check` | failure (Format step; Clippy/Build/Test never reached) | failure — **same** Format step, same pre-existing reason, Clippy/Build/Test again never reached |
+| `web` | success | success |
+| `deploy-check` | success | success |
+| `mobile-dart` | **failure** (`Analyze` step — the exact `auth.dart:50` bug) | **success** — `Analyze`, `flutter test`, and the mobile structural contract all pass |
+| `native-ui-evidence` | success | success |
+| `mobile-android` | **skipped** (blocked on `mobile-dart`) | **success** — including the real `cargo-ndk` cross-compile (`build_rust_android.sh`, ~10 min) and `flutter build apk --debug`, artifact uploaded |
+| `mobile-ios` | **skipped** (blocked on `mobile-dart`) | **failure** — a genuinely different, pre-existing Swift compile error, `Cannot find 'BackgroundService' in scope` (`mobile/ios/Runner/AppDelegate.swift:10`), unrelated to any of the three fixes in this task |
+| `load-smoke` | skipped | skipped (same trigger condition) |
+
+**`check` still fails, exactly as anticipated by the `cargo fmt` decision
+above** — the job's `Format` step runs before `Clippy`, so the
+pre-existing, disclosed, out-of-scope formatting drift keeps `Clippy`
+(Fix #2's real CI proof) from ever running in this job. Fix #2 was
+verified for real, but locally (`cargo clippy --workspace --all-targets
+-- -D warnings`, clean) rather than by this specific job going green —
+a direct, foreseeable, and already-disclosed consequence of not running
+`cargo fmt --all`, not a surprise.
+
+**`mobile-dart` and `mobile-android` — the two jobs this task actually
+named — both pass for real,** the first time either has ever reached a
+non-skipped state in this repository's CI history for `mobile-android`
+specifically (it depends on `mobile-dart`, which has never passed
+before this fix).
+
+**`mobile-ios` is a real, newly-*visible* (not newly-*caused*) failure.**
+It was `skipped` in the baseline run and every prior run for the same
+reason `mobile-android` was — blocked on `mobile-dart`, which always
+failed first. This is the first time `mobile-ios` has ever actually
+executed in this repository's CI. Its failure is a Swift compile error
+in a file (`AppDelegate.swift`) none of this task's three fixes
+touched, on a platform (`macos-latest`, Xcode/CocoaPods) none of them
+concern. Not fixed here: out of this task's explicit scope, and
+newly-discovered only because fixing `mobile-dart` was what finally let
+CI reach it at all. Flagged for a future task rather than silently
+absorbed into "done" or silently left for someone else to rediscover
+from scratch.
