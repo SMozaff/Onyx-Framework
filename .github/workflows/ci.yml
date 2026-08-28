@@ -52,7 +52,12 @@ jobs:
             libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Ensure rustfmt is installed
         run: rustup component add rustfmt
+      # shared-key lets load-smoke (needs: check, so it always runs after
+      # this job's cache is saved) restore the exact same release
+      # target/ this job just built, instead of recompiling from scratch.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-build"
       - name: Format
         run: cargo fmt --check
       - name: Clippy
@@ -231,7 +236,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.97.1"
+      # Same shared-key as check's rust-cache step: this job runs after
+      # check (needs: check) in the same workflow run, so it restores the
+      # dependency artifacts check's own release build already compiled,
+      # rather than compiling the whole workspace's dependency tree from
+      # scratch. Confirmed necessary by the first-ever load-smoke run
+      # (33176531805): it timed out with `rustc` still mid-compile when
+      # this job had no cache at all and built api-server cold.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-build"
       - uses: grafana/setup-k6-action@v1
+      # A prior version ran `cargo run --release` directly in the
+      # health-check loop below, so compilation and startup were both
+      # counted against the same 60s window -- a cold compile alone could
+      # (and did) exceed it before the server ever bound the port. Building
+      # first, as its own step with the job's full remaining time budget,
+      # means the health-check loop afterward is actually measuring server
+      # startup, not compilation.
+      - name: Build API release binary
+        run: cargo build --release --package api-server
       - name: Start optimized API
         env:
           ONYX_ENV: test
@@ -240,7 +264,7 @@ jobs:
           ONYX_BIND: 127.0.0.1:3000
           DATABASE_URL: sqlite://load-test.db?mode=rwc
         run: |
-          cargo run --release --package api-server >api.log 2>&1 &
+          ./target/release/api-server >api.log 2>&1 &
           echo $! > api.pid
           for i in {1..60}; do curl -fsS http://127.0.0.1:3000/health && break; sleep 1; done
       - run: k6 run tests/load/smoke-test.js --vus 100 --duration 60s

@@ -3995,3 +3995,123 @@ refused" before a single real load-test request is attempted. Nothing
 in this task's one-line formatting diff touches that job, that script,
 or API startup. Not fixed here: out of scope, flagged for a future
 task rather than silently absorbed into "done."
+
+## Fixing `load-smoke`'s server-startup timeout
+
+### Diagnosis, not assumption
+
+The task handed to this session came with a plausible-sounding
+hypothesis already attached — that `cargo run --package api-server`
+was a *debug* build compiling cold on an uncached runner within the
+60s health-check window. Read against the actual workflow file before
+touching anything, that hypothesis was already half wrong: the "Start
+optimized API" step (`.github/workflows/ci.yml`) was already running
+`cargo run --release --package api-server`, not a debug build. Assuming
+the stated hypothesis and "fixing" the wrong half of it (e.g. adding
+`--release` to something already `--release`) would have shipped a
+no-op.
+
+What actually confirmed the real cause was in the failed run's own log
+(run `33176531805`, job `98871920069`, retrieved via
+`mcp__github__get_job_logs`), at the very end during the runner's
+orphan-process cleanup, well after `k6` had already failed and the
+job was tearing down:
+
+```
+Terminate orphan process: pid (7051) (rustc)
+Terminate orphan process: pid (7183) (rustc)
+```
+
+`rustc` was still running when the 60-second health-check loop gave up
+and the whole job moved on. That is direct, load-bearing evidence —
+not an inference from timing alone — that the server process never
+finished *compiling*, let alone binding port 3000: this genuinely is
+case 1 from the task's own diagnostic script ("does it crash" vs.
+"does it just take longer than 60s"), and the second op, not a crash,
+config error, or missing env var. `api.log` itself (the redirected
+server stdout/stderr) was correspondingly empty/never-written in the
+run's artifacts — consistent with the process never getting past
+`rustc` to produce a running binary at all.
+
+With the crash/config-error branch ruled out, the task's own second
+diagnostic question — caching — was checked directly against the
+workflow file rather than assumed: `check` (line ~55) already has a
+`Swatinem/rust-cache@v2` step; `load-smoke` had none at all. Every
+other Rust-compiling job in this workflow either shares `check`'s
+cache indirectly (by not compiling anything itself) or has its own
+cache step; `load-smoke` was the one job doing a from-scratch release
+compile of the entire dependency tree (tokio, sqlx, axum, and
+everything api-server pulls in) with nothing cached, on every single
+run.
+
+### The fix: both preferred options at once, not either/or
+
+The task's ranked list treated "add caching" and "separate build from
+run" as alternatives to try in order. They aren't mutually exclusive
+here, and doing only one leaves a real gap:
+
+1. **Caching alone**, without splitting the build out of `cargo run`,
+   would still count whatever compile time remains (now much shorter,
+   but non-zero — `cache-workspace-crates` defaults to `false` in
+   Swatinem/rust-cache, confirmed via Context7 against the action's
+   own docs, so only third-party dependency artifacts are cached, not
+   `api-server`'s own crate output) against the same 60s window used
+   to detect server *startup* problems. A slow runner or a slightly
+   larger dependency delta could still blow through it, and a real
+   startup regression would look identical to a compile hiccup in the
+   logs — exactly the ambiguity this task was asked to resolve.
+
+2. **Splitting build from run alone**, without caching, would still
+   pay the full cold compile of the entire dependency tree every run
+   — just no longer racing a 60s clock while doing it, so the failure
+   mode changes from "times out" to "takes several minutes longer than
+   it should," which is real waste on every single `load-smoke` run
+   forever, not a one-time cost.
+
+Applied both, in `.github/workflows/ci.yml`:
+
+- **`check`'s existing `Swatinem/rust-cache@v2` step now takes
+  `shared-key: "release-build"`.** `load-smoke` declares
+  `needs: check`, so it only starts once `check`'s own job — including
+  its post-job cache save — has fully completed in the same workflow
+  run. Confirmed against the action's own docs (via Context7) that
+  `shared-key` is exactly the documented mechanism for exactly this:
+  letting a later job in the same run reuse an earlier job's cache
+  instead of each job getting an isolated one (the default,
+  `add-job-id-key: true` behavior). `check` already runs
+  `cargo build --workspace --release` (line ~66), which compiles the
+  same dependency tree `load-smoke` needs; sharing the key means
+  `load-smoke` restores those already-built dependency artifacts
+  instead of recompiling axum, sqlx, tokio, etc. from zero.
+- **`load-smoke` gets its own `Swatinem/rust-cache@v2` step**, same
+  `shared-key: "release-build"`, added right after the toolchain setup.
+- **The build is now its own step** (`Build API release binary`,
+  running `cargo build --release --package api-server`), given the
+  job's full remaining time budget rather than sharing the 60s loop.
+- **"Start optimized API" now execs the already-built binary directly**
+  (`./target/release/api-server`) instead of `cargo run --release`,
+  which would otherwise re-invoke Cargo's own (now near-instant,
+  post-build) up-to-date check on every start — harmless once already
+  built, but removing it makes the step do exactly one thing: start
+  the binary and wait for it to answer `/health`. The 60-iteration,
+  1s-interval health-check loop is now actually measuring server
+  startup time, not compilation, which is what it was always supposed
+  to measure.
+
+This composes with the existing `postgres` service container and env
+vars in the job unchanged — nothing about database wiring, the smoke
+test script, or the load profile (100 VUs / 60s) was touched, matching
+the task's explicit scope.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `python3 -c "import yaml; yaml.safe_load(...)"` on `ci.yml` | valid YAML |
+| `actionlint` | not available in this sandbox; not run |
+| Fresh `workflow_dispatch` of `ci.yml` | see the real run's job table and `load-smoke` step timing below |
+
+Not touched, per the task's explicit exclusions: `mobile-ios`'s
+`BackgroundService` Swift error (still the same disclosed, unrelated,
+pre-existing failure), and the 6 pre-existing `api-server` integration
+test failures inside `check`'s own `Test` step (still out of scope).
