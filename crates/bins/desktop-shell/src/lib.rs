@@ -364,6 +364,23 @@ async fn get_current_session(
 /// login — they are properties of this physical device/install, not of
 /// who happens to be logged in, and a second login (e.g. after logout)
 /// should not fragment sync history for data already on this machine.
+/// The three real input values `login` needs from the caller, grouped
+/// into one struct so the command itself stays under Clippy's
+/// `too_many_arguments` limit (7) once the five injected Tauri state
+/// handles are also counted — confirmed via a real `cargo clippy
+/// --workspace -- -D warnings` failure (`8/7`) before this existed, not
+/// a speculative refactor. `#[serde(rename_all = "camelCase")]` so the
+/// frontend's `invoke("login", { credentials: { serverAddress, ... } })`
+/// call (camelCase, matching every other Tauri command's convention in
+/// this file) deserializes without a separate rename per field.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoginRequest {
+    server_address: String,
+    username: String,
+    password: String,
+}
+
 #[tauri::command]
 async fn login(
     app: AppHandle,
@@ -371,10 +388,13 @@ async fn login(
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
     local_replica: tauri::State<'_, ReplicaId>,
     hierarchy_cache: tauri::State<'_, client_composition::hierarchy_cache::HierarchyCache>,
-    server_address: String,
-    username: String,
-    password: String,
+    credentials: LoginRequest,
 ) -> Result<SessionInfo, ShellError> {
+    let LoginRequest {
+        server_address,
+        username,
+        password,
+    } = credentials;
     let authenticated = session::authenticate(&server_address, &username, &password).await?;
 
     session::save(&storage, &authenticated).await?;

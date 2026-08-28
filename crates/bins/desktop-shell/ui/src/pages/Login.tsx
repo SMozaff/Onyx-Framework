@@ -53,9 +53,11 @@ export default function Login({
     setLoading(true);
     try {
       const session = await invoke<SessionWire>("login", {
-        serverAddress: normalizedAddress,
-        username,
-        password,
+        credentials: {
+          serverAddress: normalizedAddress,
+          username,
+          password,
+        },
       });
       onAuthenticated(session);
       navigate("/", { replace: true });

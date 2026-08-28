@@ -3561,3 +3561,273 @@ deterministic-expiry test. The `http_login_screen.dart` free-text org-id
 field and `desktop-shell`'s own missing token refresh are both real,
 adjacent, and explicitly not fixed here — named rather than left for
 a future correction to have to find independently.
+
+## Fixed three real, independently-verified CI failures — and, for the first time this session, a real local Flutter/Android toolchain
+
+A follow-up task supplied three confirmed-real failures from an
+independent compile/test pass (Manus, GitHub Actions run `33127510920`
+against commit `769bdcb`). Unlike every prior mobile-verification claim
+this session, this one was checked with a **real, newly-installed local
+Flutter 3.47.2 + Android SDK toolchain** — not disclosed-as-unverifiable,
+for once. How that happened, and what it changed about this session's
+own prior disclosures, matters enough to record in full.
+
+**Why a real toolchain became possible now, when it wasn't all session.**
+Every prior entry this session correctly disclosed "no Dart/Flutter SDK
+exists in this sandbox." That was true of the sandbox as first found —
+but nobody had ever actually tried installing one until this task
+required literal `flutter build apk` output, not a summary. Checked
+disk first (`df -h /`): 3.8 GB free, nowhere near enough for a ~1.6 GB
+Flutter SDK download plus an Android SDK/Gradle toolchain. The
+`target/` directory (Rust build cache, fully regenerable via `cargo
+build`) was consuming 24 GB of that; `cargo clean` freed it back to 28
+GB available, at which point installing a real Flutter 3.47.2 (the
+exact version the verification pass itself used, confirmed by checking
+Google's own `releases_linux.json` — the current stable release
+happened to already be `3.47.2`) and a real Android SDK/Gradle/JDK
+toolchain both fit comfortably. Real network access (`storage.googleapis.com`,
+`dl.google.com` via this sandbox's proxy) and `apt-get`/`sudo`
+both turned out to work too — also never previously tried. None of this
+was available in earlier pieces because the earlier tasks never
+required it and never asked me to try; it is disclosed here specifically
+so a future entry doesn't re-assert "impossible" without re-checking
+first.
+
+**The same real toolchain also unblocked `desktop-shell`/`admin-shell`
+compilation for the first time this session** (`libgtk-3-dev
+libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+libayatana-appindicator3-dev librsvg2-dev` — the exact package list
+`ci.yml`'s own `check` job already installs), which is what actually
+let Fix #2 below be verified as a real `cargo clippy`/`cargo check`/
+`cargo test` pass rather than the same disclosed GTK gap repeated once
+more.
+
+### Fix #1 — `mobile/lib/net/auth.dart:50` Dart parser ambiguity
+
+Reproduced for real first: `flutter analyze` on a fresh `flutter pub
+get` gave the identical `missing_identifier`/`expected_token` pair at
+`lib/net/auth.dart:50:107` the task described. Applied the suggested
+fix — split the ternary + null-aware-index + cast chain into three
+typed locals:
+```dart
+final responseData = e.response?.data;
+final error = responseData is Map ? responseData['error'] : null;
+final code = error is Map ? error['code'] as String? : null;
+```
+No behavior change: same three-step null-safe walk (`response.data` →
+`['error']` → `['code']`), same fallback to `null`, same
+`MOBILE_ACCESS_RESTRICTED` comparison immediately after.
+
+**Confirmed no other file has the same pattern**: `grep -rn '?\[' mobile/lib
+--include=*.dart` found exactly one other null-aware-index use in the
+entire mobile codebase (`onyx_http_api.dart:70`,
+`_client.auth.user?['id'] as String? ?? ''`) — a `??`
+null-coalescing expression, not a `? :` ternary, so it does not hit the
+same parser ambiguity (confirmed by it never having appeared in any
+`flutter analyze` failure, including the one just reproduced).
+
+**Verification, real command output:**
+```
+$ flutter analyze
+Analyzing mobile...
+No issues found! (ran in 7.7s)
+
+$ flutter test
+...
+00:03 +8 ~1: All tests passed!
+```
+8 passed, 1 skipped (the same `p2p_sync_test.dart` device-only skip the
+verification pass reported) — identical to the cited baseline. This is
+also the first real compile+test confirmation, this whole session, that
+every Dart change made across every earlier mobile piece (approval
+authority, class-based access, file sharing, real FFI login, the
+security-hole fix, the token-refresh wiring) actually builds and passes
+— all of it had only ever been hand-verified against existing patterns
+before now.
+
+### Fix #2 — `desktop-shell::login` exceeds Clippy's `too_many_arguments`
+
+Reproduced for real first (the first time `cargo clippy --workspace`
+could even reach `desktop-shell` this session):
+```
+error: this function has too many arguments (8/7)
+   --> crates/bins/desktop-shell/src/lib.rs:368:1
+```
+**Checked every other Tauri command in this file, and confirmed
+`admin-shell` has none at all**, before touching anything (a
+Python pass over every `#[tauri::command]` function's real parameter
+count): `execute_command` (2), `execute_query` (3), `subscribe_events`
+(3), `get_sync_status` (1), `upload_file` (5), `download_file` (3),
+`store_secret` (3), `get_secret` (2), `delete_secret` (2),
+`get_current_session` (2), `login` (8), `logout` (4).  Only `login`
+exceeds 7; nothing else is close enough to be worth touching
+speculatively. `grep -rl tauri::command crates/bins/admin-shell` found
+zero matches — confirmed directly, not assumed, that `admin-shell` has
+no Tauri commands at all (it is a thin HTTP client; its own `Login.tsx`
+calls `apiClient.post` against `api-server`, not a native command), so
+there is no "admin-shell equivalent" to check for the same shape.
+
+Fixed by grouping the three real input values into one struct:
+```rust
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoginRequest {
+    server_address: String,
+    username: String,
+    password: String,
+}
+```
+`login` now takes `credentials: LoginRequest` in place of the three
+separate `String` parameters — 6 parameters total (5 injected Tauri
+state handles + 1 struct), under the limit. `#[serde(rename_all =
+"camelCase")]` so the existing camelCase JS-side `invoke` convention
+(every other command in this file already expects camelCase keys)
+needs no per-field rename. Updated the one real call site,
+`desktop-shell/ui/src/pages/Login.tsx`, to nest the three fields under
+a `credentials` key to match. Confirmed via `grep` this is the only
+call site.
+
+**Verification, real command output:**
+```
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 30.48s
+$ cargo check --workspace
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.87s
+$ cargo test -p desktop-shell
+test result: FAILED. 9 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out
+```
+Both `clippy`/`check` are clean across the **entire workspace**,
+including `desktop-shell`/`admin-shell`, for the first time this
+session. The two `secure_storage::keyring_adapter` test failures are
+real but pre-existing and unrelated to this change — confirmed via
+`git stash` on unmodified `main` (identical two failures) — and are
+exactly the gap `ci.yml`'s own `check` job comment already documents
+and works around: a bare Linux environment has no D-Bus session bus or
+Secret Service daemon, so the real (deliberately-not-mocked) `keyring`
+crate tests fail with "No default store has been set"; CI's own fix is
+to start a real `dbus-launch`/`gnome-keyring-daemon` session first,
+which this sandbox does not have configured. Not fixed here (out of
+scope, and CI already has the real fix), but disclosed as a newly-found
+(only reachable now that `desktop-shell` compiles at all here) local
+environment gap rather than silently treated as "fixed."
+
+### Fix #3 — Android Gradle Plugin below Flutter's minimum
+
+Reproduced for real first, against a real, newly-installed Android SDK
+(`platforms;android-35`, `platforms;android-36`, `build-tools;28.0.3`
+and `;35.0.0` — the exact versions this real Flutter 3.47.2 itself
+demanded via `flutter doctor -v`, not guessed):
+```
+Error: Your project's Android Gradle Plugin version (Android Gradle Plugin version 8.6.0) is lower than Flutter's minimum supported version of Android Gradle Plugin version 8.11.1.
+```
+**8.11.1 confirmed as this environment's real minimum** — not copied
+blindly from the task text, independently reproduced against a real
+Flutter 3.47.2 install (the same version number the task's own
+verification pass used, and, as it happens, the exact current stable
+release as of this session). Bumped
+`mobile/android/settings.gradle`'s `com.android.application` plugin
+version from `8.6.0` to `8.11.1`.
+
+**This did cascade, exactly as the task anticipated — checked for real,
+not assumed:** the AGP bump alone produced a second, real error:
+```
+Error: Your project's Kotlin version (2.0.20) is lower than Flutter's minimum supported version of 2.2.20.
+```
+Bumped `org.jetbrains.kotlin.android` from `2.0.20` to `2.2.20` in the
+same file. The Gradle wrapper (`gradle-wrapper.properties`, already
+pinned to `9.1.0`) needed **no** change — confirmed by the build
+proceeding past both version checks and completing successfully
+without touching it.
+
+**Verification, real command output** (not just past the version-check
+error — real, complete APK assembly):
+```
+$ flutter build apk --debug
+Running Gradle task 'assembleDebug'...                            195.5s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+EXIT:0
+
+$ ls -lh build/app/outputs/flutter-apk/
+-rw-r--r-- 1 root root 163M Aug 28 05:07 app-debug.apk
+```
+A real, 163 MB debug APK now exists on disk. One honest limitation of
+this local reproduction, disclosed rather than glossed over: this
+build did **not** run `mobile/tool/build_rust_android.sh` (the script
+that cross-compiles `mobile-core` for `arm64-v8a`/`armeabi-v7a`/`x86_64`
+via `cargo-ndk` into `android/app/src/main/jniLibs`) — confirmed no
+`.so` files exist anywhere under `mobile/android`. The Gradle/Dart
+assembly step this task's checklist asked to verify succeeds
+regardless of whether the native library is present (packaging doesn't
+require it; only calling into `mobile-core` at runtime would), so this
+faithfully proves the AGP/Kotlin version fix itself, but does not prove
+the full CI `mobile-android` job's native cross-compile step still
+works — that step was not exercised locally (installing an NDK
+toolchain and cross-compiling `mobile-core` was judged out of scope for
+verifying a Gradle *version* fix) and is left to the real CI dispatch
+below to confirm end to end.
+
+Also confirmed `mobile/tool/ensure_platform_scaffold.sh` — which `ci.yml`'s
+`mobile-android` job runs immediately before this — is a no-op given
+this repo's current state (`android/gradlew` and
+`ios/Runner.xcodeproj/project.pbxproj` both already exist, so its early
+`exit 0` guard fires), meaning the local build above used the exact
+same `android/` directory the real CI job would.
+
+### The `cargo fmt` judgment call, made explicitly rather than silently either way
+
+`cargo fmt --all -- --check` was run as the task invited. Real result:
+**58 diff locations across ~15 files**, spanning code from this
+session's earlier pieces (`hierarchy_cache.rs`, `auth_refresh.rs`,
+`mobile_access_gate.rs`, `session.rs`, `user_store.rs`, etc.) and code
+that predates this session entirely. **Decision: not included.** This
+is not the "trivial, low-risk" case the task flagged as worth a call —
+it is a 58-location, ~15-file reformatting sweep touching code far
+outside these three fixes, which would itself be exactly the kind of
+scope expansion the task explicitly said not to do. One exception was
+made: the single new line this fix's own new code introduced (`let
+LoginRequest { server_address, username, password } = credentials;`)
+was reformatted to match this repo's real rustfmt output before
+committing, since leaving freshly-written code non-compliant with the
+formatter the codebase already uses would be careless, not scope
+discipline. Every other diff — including two in `desktop-shell/src/lib.rs`
+and `session.rs` from a prior session entry — was left untouched.
+
+### One more real, disclosed thing found while doing this: `pubspec.lock` and `analysis_options.yaml`
+
+Running `flutter pub get` for the first time against this exact
+Flutter/Dart version generated `mobile/pubspec.lock` (new, untracked,
+not gitignored either) and silently rewrote
+`mobile/analysis_options.yaml` (`"Upgrading analysis_options.yaml to
+exclude build and platform directories."` — a real message the Flutter
+tool itself printed, not something manually edited). **Decision:**
+`pubspec.lock` was left untracked — this repo has never committed one
+(no prior commit history has it, and it isn't gitignored either, which
+reads as "nobody has run `flutter pub get` and committed the result
+before," not as an intentional exclusion), and committing it now would
+be a real, unrequested convention change outside this task's three
+items. `analysis_options.yaml`'s automatic rewrite **was** committed:
+it is a toolchain-driven migration tied to using this exact Flutter
+version (not a manual style choice), `flutter analyze` was already
+confirmed clean with it in place, and leaving it uncommitted would mean
+every future real `flutter analyze` run (including in CI, once it
+upgrades past whatever `flutter-action@v2`'s `channel: stable` resolves
+to) silently re-applies the identical migration on its own, which is a
+worse outcome for reproducibility than committing the tool's own output
+once, here, disclosed.
+
+### Verification checklist, exactly as the task asked for it
+
+| Check | Result |
+|---|---|
+| `flutter analyze` | 0 issues |
+| `flutter test` | 8 passed, 1 skipped (matches baseline) |
+| `flutter build apk --debug` | real, successful assembly (163 MB `app-debug.apk`) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo check --workspace` | clean |
+| `cargo fmt --all -- --check` | 58 pre-existing diffs found, deliberately not included (see above) |
+| Fresh `workflow_dispatch` of `ci.yml` | see below |
+
+(GitHub Actions dispatch result recorded once the real run completes —
+see the addendum immediately following this entry, or the session's
+final report, for the actual job-by-job table; not fabricated here
+ahead of the run.)
