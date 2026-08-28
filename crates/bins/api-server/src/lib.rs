@@ -34,5 +34,7 @@ pub mod query_handler;
 pub mod routes;
 pub mod verifier_resolution;
 
-pub use command_handler::{handle_command, CommandError, CommandResult, OwnerAuthority, OwnerCheck};
+pub use command_handler::{
+    handle_command, CommandError, CommandResult, OwnerAuthority, OwnerCheck,
+};
 pub use query_handler::load_aggregate;

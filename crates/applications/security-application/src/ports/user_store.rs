@@ -277,7 +277,10 @@ pub trait UserStore: Send + Sync {
     /// every class in this organization until an admin adds a grant —
     /// per the explicit, restrictive-by-default product decision this
     /// table implements, absence of a row is never treated as "allow".
-    async fn list_mobile_access(&self, organization_id: &str) -> Result<Vec<String>, UserStoreError>;
+    async fn list_mobile_access(
+        &self,
+        organization_id: &str,
+    ) -> Result<Vec<String>, UserStoreError>;
 
     /// Replaces the full set of mobile-access grants for
     /// `organization_id` with exactly `classes` (each a

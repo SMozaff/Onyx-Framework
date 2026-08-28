@@ -5,17 +5,9 @@
 
 use std::net::SocketAddr;
 
-const BOOTSTRAP_TOKEN: &str = "user-hierarchy-test-bootstrap";
-
 /// Boots an api-server on an ephemeral port against a throwaway SQLite
-/// file, bootstraps an admin, and returns the address plus a valid
-/// access token. Nearly identical to `relay_switchboard.rs`'s helper of
-/// the same name — kept as a separate copy rather than shared, since
-/// these are two independent test binaries (integration tests each
-/// compile as their own crate) and the duplication is small.
+/// file and authenticates its intentionally seeded test-drive administrator.
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
-    std::env::set_var("ONYX_BOOTSTRAP_TOKEN", BOOTSTRAP_TOKEN);
-
     let db_path = std::env::temp_dir().join(format!("onyx-user-hierarchy-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
     let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -34,16 +26,9 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    http.post(format!("{base}/api/admin/bootstrap"))
-        .header("x-onyx-bootstrap-token", BOOTSTRAP_TOKEN)
-        .json(&serde_json::json!({"username": "hierarchy-admin", "password": "hierarchy-test-password"}))
-        .send()
-        .await
-        .expect("bootstrap request");
-
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "hierarchy-admin", "password": "hierarchy-test-password"}))
+        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
         .send()
         .await
         .expect("login request")

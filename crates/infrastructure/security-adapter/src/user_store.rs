@@ -337,7 +337,10 @@ impl UserStore for PostgresUserStore {
         Ok(count.max(0) as u64)
     }
 
-    async fn list_mobile_access(&self, organization_id: &str) -> Result<Vec<String>, UserStoreError> {
+    async fn list_mobile_access(
+        &self,
+        organization_id: &str,
+    ) -> Result<Vec<String>, UserStoreError> {
         let rows: Vec<String> = sqlx::query_scalar(
             "SELECT user_class FROM mobile_class_access WHERE organization_id = $1",
         )
@@ -634,7 +637,10 @@ impl UserStore for SqliteUserStore {
         Ok(count.max(0) as u64)
     }
 
-    async fn list_mobile_access(&self, organization_id: &str) -> Result<Vec<String>, UserStoreError> {
+    async fn list_mobile_access(
+        &self,
+        organization_id: &str,
+    ) -> Result<Vec<String>, UserStoreError> {
         let rows: Vec<String> = sqlx::query_scalar(
             "SELECT user_class FROM mobile_class_access WHERE organization_id = ?1",
         )
@@ -925,7 +931,10 @@ mod tests {
 
         // Restrictive default: an org with no grants at all returns an
         // empty list, not every class or an error.
-        assert_eq!(store.list_mobile_access(&org_a).await.unwrap(), Vec::<String>::new());
+        assert_eq!(
+            store.list_mobile_access(&org_a).await.unwrap(),
+            Vec::<String>::new()
+        );
 
         store
             .set_mobile_access(&org_a, &["staff".to_string(), "supervisor".to_string()])
@@ -936,7 +945,10 @@ mod tests {
         assert_eq!(granted, vec!["staff".to_string(), "supervisor".to_string()]);
 
         // A second org's grants are independent.
-        assert_eq!(store.list_mobile_access(&org_b).await.unwrap(), Vec::<String>::new());
+        assert_eq!(
+            store.list_mobile_access(&org_b).await.unwrap(),
+            Vec::<String>::new()
+        );
 
         // Replacing wholesale drops anything not in the new set, rather
         // than merging with the old one.
@@ -944,11 +956,17 @@ mod tests {
             .set_mobile_access(&org_a, &["staff".to_string()])
             .await
             .unwrap();
-        assert_eq!(store.list_mobile_access(&org_a).await.unwrap(), vec!["staff".to_string()]);
+        assert_eq!(
+            store.list_mobile_access(&org_a).await.unwrap(),
+            vec!["staff".to_string()]
+        );
 
         // An empty replacement is valid and means "deny every class".
         store.set_mobile_access(&org_a, &[]).await.unwrap();
-        assert_eq!(store.list_mobile_access(&org_a).await.unwrap(), Vec::<String>::new());
+        assert_eq!(
+            store.list_mobile_access(&org_a).await.unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[tokio::test]

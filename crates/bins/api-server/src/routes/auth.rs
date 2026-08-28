@@ -304,7 +304,11 @@ pub async fn refresh(
             )
         })?;
 
-    state.revoked_tokens.write().await.insert(payload.refresh_token);
+    state
+        .revoked_tokens
+        .write()
+        .await
+        .insert(payload.refresh_token);
 
     Ok(Json(RefreshResponse {
         access_token,

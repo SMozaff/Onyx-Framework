@@ -232,16 +232,15 @@ jobs:
         with:
           toolchain: "1.97.1"
       - uses: grafana/setup-k6-action@v1
-      - name: Start API
+      - name: Start optimized API
         env:
           ONYX_ENV: test
           ONYX_TEST_MODE: "1"
           ONYX_COMMAND_RATE_LIMIT: "1000000"
           ONYX_BIND: 127.0.0.1:3000
           DATABASE_URL: sqlite://load-test.db?mode=rwc
-          ONYX_GOVERNANCE_DATABASE_URL: postgres://onyx:onyx@127.0.0.1:5432/onyx
         run: |
-          cargo run --package api-server >api.log 2>&1 &
+          cargo run --release --package api-server >api.log 2>&1 &
           echo $! > api.pid
           for i in {1..60}; do curl -fsS http://127.0.0.1:3000/health && break; sleep 1; done
       - run: k6 run tests/load/smoke-test.js --vus 100 --duration 60s

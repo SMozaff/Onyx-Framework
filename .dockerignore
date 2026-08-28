@@ -1,0 +1,16 @@
+.git
+.github
+**/target
+**/node_modules
+**/dist
+**/.dart_tool
+**/.gradle
+**/build
+**/.terraform
+**/*.db
+**/*.log
+artifacts
+release
+playwright-report
+test-results
+test-reports

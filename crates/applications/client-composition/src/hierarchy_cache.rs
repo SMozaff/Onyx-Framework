@@ -172,8 +172,8 @@ impl HierarchyCache {
     /// Dart's `OnyxHttpApi` already fetched — the mobile-side equivalent
     /// of [`refresh`](Self::refresh) minus the HTTP request itself.
     pub async fn load_from_json(&self, json: &str) -> Result<(), HierarchyError> {
-        let wire: Vec<HierarchyUserWire> =
-            serde_json::from_str(json).map_err(|e| HierarchyError::UnexpectedResponse(e.to_string()))?;
+        let wire: Vec<HierarchyUserWire> = serde_json::from_str(json)
+            .map_err(|e| HierarchyError::UnexpectedResponse(e.to_string()))?;
         self.replace_from_wire(wire).await
     }
 
@@ -183,7 +183,10 @@ impl HierarchyCache {
     /// two. Replaces wholesale, not merged: a member who was deactivated
     /// or reassigned since the last fetch must actually disappear/
     /// update, not linger from a stale entry.
-    pub async fn replace_from_wire(&self, wire: Vec<HierarchyUserWire>) -> Result<(), HierarchyError> {
+    pub async fn replace_from_wire(
+        &self,
+        wire: Vec<HierarchyUserWire>,
+    ) -> Result<(), HierarchyError> {
         let mut parsed = HashMap::with_capacity(wire.len());
         for entry in wire {
             let id = ObjectId::from_uuid_str(&entry.id)
@@ -327,7 +330,11 @@ mod tests {
     async fn refresh_replaces_rather_than_merges() {
         let owner = id(1);
         let old_manager = id(2);
-        let cache = cache_with(vec![(owner, Some(old_manager), false), (old_manager, None, false)]).await;
+        let cache = cache_with(vec![
+            (owner, Some(old_manager), false),
+            (old_manager, None, false),
+        ])
+        .await;
         assert!(cache.is_authorized_to_decide(old_manager, owner).await);
 
         let new_manager = id(3);

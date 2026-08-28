@@ -113,10 +113,12 @@ async fn owner_submits_manager_approves_stranger_denied() {
         managers: HashMap::from([(owner, manager)]),
     });
 
-    let repo: Arc<dyn query_application::Repository> =
-        Arc::new(persistence_sqlite::SqliteRepository::new(pool.clone(), "task"));
-    let unit_factory: Arc<dyn query_application::UnitOfWorkFactory> =
-        Arc::new(persistence_sqlite::SqliteUnitOfWorkFactory::new(pool.clone()));
+    let repo: Arc<dyn query_application::Repository> = Arc::new(
+        persistence_sqlite::SqliteRepository::new(pool.clone(), "task"),
+    );
+    let unit_factory: Arc<dyn query_application::UnitOfWorkFactory> = Arc::new(
+        persistence_sqlite::SqliteUnitOfWorkFactory::new(pool.clone()),
+    );
     let idempotency_store: Arc<dyn query_application::IdempotencyStore> =
         Arc::new(InMemoryIdempotencyStore::new());
 

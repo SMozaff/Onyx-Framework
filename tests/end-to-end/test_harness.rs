@@ -167,66 +167,28 @@ fn infer_aggregate_type(state: &serde_json::Value) -> anyhow::Result<&'static st
 //
 // Added by the production-readiness audit (finding H-01). The delivered tests
 // logged in with the compile-time constants `operator`/`onyx`. Those constants
-// were the vulnerability and have been removed, so tests must now provision a
-// real user the same way an operator would: call the one-time bootstrap
-// endpoint, then log in.
+// were the vulnerability and have been removed. The current API initializer
+// deliberately seeds a controlled test-drive administrator in a fresh
+// database, so tests authenticate through that
+// account rather than attempting a second first-user bootstrap.
 // ---------------------------------------------------------------------------
 
-/// Bootstrap token used by the test suite.
-///
-/// This is a *test fixture*, not a credential with any production meaning: the
-/// bootstrap endpoint reads `ONYX_BOOTSTRAP_TOKEN` from the environment, and
-/// [`bootstrap_and_login`] sets it on the spot for the process under test.
-pub const TEST_BOOTSTRAP_TOKEN: &str = "test-bootstrap-token";
+/// Credentials of the intentional test-drive administrator created by
+/// `ApiState::new` in a fresh harness database.
+pub const TEST_ADMIN_PASSWORD: &str = "passvord0000";
+pub const TEST_ADMIN_USERNAME: &str = "All-Father";
 
-/// Password used for the bootstrapped test admin.
+/// Authenticates the seeded administrator and returns a bearer access token.
 ///
-/// Must satisfy the production policy (>= 12 characters), because the tests
-/// exercise the real validation path rather than bypassing it.
-pub const TEST_ADMIN_PASSWORD: &str = "test-admin-passphrase";
-
-/// The username the test suite bootstraps.
-pub const TEST_ADMIN_USERNAME: &str = "test-admin";
-
-/// Provisions the first admin via `/api/admin/bootstrap`, logs in, and returns
-/// a bearer access token.
-///
-/// Safe to call once per freshly-started harness. The bootstrap endpoint is
-/// one-shot by design: a second call against a non-empty user table returns
-/// 409, so this must not be invoked twice against the same database.
+/// The established public function name is retained so existing end-to-end
+/// journeys keep their call surface while API initialization owns first-admin
+/// provisioning.
 pub async fn bootstrap_and_login(app: axum::Router) -> anyhow::Result<String> {
     use axum::{
         body::{to_bytes, Body},
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
-
-    // The API server reads this at request time, so setting it here is
-    // sufficient and keeps the token out of the committed environment.
-    std::env::set_var("ONYX_BOOTSTRAP_TOKEN", TEST_BOOTSTRAP_TOKEN);
-
-    let bootstrap = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/admin/bootstrap")
-                .header("content-type", "application/json")
-                .header("x-onyx-bootstrap-token", TEST_BOOTSTRAP_TOKEN)
-                .body(Body::from(
-                    serde_json::json!({
-                        "username": TEST_ADMIN_USERNAME,
-                        "password": TEST_ADMIN_PASSWORD,
-                    })
-                    .to_string(),
-                ))?,
-        )
-        .await?;
-    anyhow::ensure!(
-        bootstrap.status() == StatusCode::CREATED,
-        "bootstrap failed with status {}",
-        bootstrap.status()
-    );
 
     let login = app
         .oneshot(

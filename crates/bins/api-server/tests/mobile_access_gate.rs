@@ -58,15 +58,24 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
     // closed (`BOOTSTRAP_ALREADY_COMPLETED`) from the instant the
     // server starts against an empty store.
     let admin_login_resp = login(&http, &base, "All-Father", "passvord0000", None).await;
-    assert_eq!(admin_login_resp.status(), 200, "seeded admin login must succeed");
+    assert_eq!(
+        admin_login_resp.status(),
+        200,
+        "seeded admin login must succeed"
+    );
     let admin_login: serde_json::Value = admin_login_resp.json().await.unwrap();
     let admin_token = admin_login["access_token"].as_str().unwrap().to_string();
 
     // Admin logging in with client_type "mobile" must succeed even
     // though no mobile_class_access row exists yet -- Admin bypasses
     // this gate entirely.
-    let admin_mobile_login = login(&http, &base, "All-Father", "passvord0000", Some("mobile")).await;
-    assert_eq!(admin_mobile_login.status(), 200, "Admin must always be allowed to log in from mobile");
+    let admin_mobile_login =
+        login(&http, &base, "All-Father", "passvord0000", Some("mobile")).await;
+    assert_eq!(
+        admin_mobile_login.status(),
+        200,
+        "Admin must always be allowed to log in from mobile"
+    );
 
     // Create an ordinary Staff user via the admin route, then assign
     // its class.
@@ -92,15 +101,36 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
     // Restrictive default: no mobile_class_access row for "staff" yet
     // -- mobile login must be denied with the specific error code,
     // even though the password is correct.
-    let denied = login(&http, &base, "mobile-staffer", "mobile-staffer-password", Some("mobile")).await;
+    let denied = login(
+        &http,
+        &base,
+        "mobile-staffer",
+        "mobile-staffer-password",
+        Some("mobile"),
+    )
+    .await;
     assert_eq!(denied.status(), 403);
     let denied_body: serde_json::Value = denied.json().await.unwrap();
-    assert_eq!(denied_body["error"]["code"], serde_json::json!("MOBILE_ACCESS_RESTRICTED"));
+    assert_eq!(
+        denied_body["error"]["code"],
+        serde_json::json!("MOBILE_ACCESS_RESTRICTED")
+    );
 
     // The same credentials with client_type "desktop" (or omitted)
     // must succeed -- the gate only applies to client_type "mobile".
-    let desktop_login = login(&http, &base, "mobile-staffer", "mobile-staffer-password", Some("desktop")).await;
-    assert_eq!(desktop_login.status(), 200, "non-mobile client_type must never be gated");
+    let desktop_login = login(
+        &http,
+        &base,
+        "mobile-staffer",
+        "mobile-staffer-password",
+        Some("desktop"),
+    )
+    .await;
+    assert_eq!(
+        desktop_login.status(),
+        200,
+        "non-mobile client_type must never be gated"
+    );
 
     // Confirm GET /api/admin/mobile-access starts empty (restrictive
     // default is visible through the read endpoint too, not just
@@ -114,7 +144,10 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
         .json()
         .await
         .unwrap();
-    assert_eq!(initial_access["allowed_classes"], serde_json::json!(Vec::<String>::new()));
+    assert_eq!(
+        initial_access["allowed_classes"],
+        serde_json::json!(Vec::<String>::new())
+    );
 
     // Grant "staff" mobile access via the admin route.
     let grant = http
@@ -127,8 +160,19 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
     assert_eq!(grant.status(), 200);
 
     // Mobile login for the same Staff user must now succeed.
-    let allowed = login(&http, &base, "mobile-staffer", "mobile-staffer-password", Some("mobile")).await;
-    assert_eq!(allowed.status(), 200, "staff must be allowed to log in from mobile once granted");
+    let allowed = login(
+        &http,
+        &base,
+        "mobile-staffer",
+        "mobile-staffer-password",
+        Some("mobile"),
+    )
+    .await;
+    assert_eq!(
+        allowed.status(),
+        200,
+        "staff must be allowed to log in from mobile once granted"
+    );
 
     // A non-admin cannot read or write the mobile-access grant list.
     let staff_token: serde_json::Value = allowed.json().await.unwrap();
@@ -197,18 +241,78 @@ async fn excluded_class_denied_on_mobile_allowed_on_desktop_granted_class_allowe
             .unwrap();
     }
 
-    create_user_with_class(&http, &base, &admin_token, "two-class-staffer", "two-class-staffer-pw", "staff").await;
-    create_user_with_class(&http, &base, &admin_token, "two-class-supervisor", "two-class-supervisor-pw", "supervisor").await;
+    create_user_with_class(
+        &http,
+        &base,
+        &admin_token,
+        "two-class-staffer",
+        "two-class-staffer-pw",
+        "staff",
+    )
+    .await;
+    create_user_with_class(
+        &http,
+        &base,
+        &admin_token,
+        "two-class-supervisor",
+        "two-class-supervisor-pw",
+        "supervisor",
+    )
+    .await;
 
     // Excluded class ("staff"): denied on mobile, allowed on desktop.
-    let staff_mobile = login(&http, &base, "two-class-staffer", "two-class-staffer-pw", Some("mobile")).await;
-    assert_eq!(staff_mobile.status(), 403, "excluded class must be denied on client_type: mobile");
-    let staff_desktop = login(&http, &base, "two-class-staffer", "two-class-staffer-pw", Some("desktop")).await;
-    assert_eq!(staff_desktop.status(), 200, "excluded class must still succeed on client_type: desktop");
+    let staff_mobile = login(
+        &http,
+        &base,
+        "two-class-staffer",
+        "two-class-staffer-pw",
+        Some("mobile"),
+    )
+    .await;
+    assert_eq!(
+        staff_mobile.status(),
+        403,
+        "excluded class must be denied on client_type: mobile"
+    );
+    let staff_desktop = login(
+        &http,
+        &base,
+        "two-class-staffer",
+        "two-class-staffer-pw",
+        Some("desktop"),
+    )
+    .await;
+    assert_eq!(
+        staff_desktop.status(),
+        200,
+        "excluded class must still succeed on client_type: desktop"
+    );
 
     // Granted class ("supervisor"): allowed on both.
-    let supervisor_mobile = login(&http, &base, "two-class-supervisor", "two-class-supervisor-pw", Some("mobile")).await;
-    assert_eq!(supervisor_mobile.status(), 200, "granted class must succeed on client_type: mobile");
-    let supervisor_desktop = login(&http, &base, "two-class-supervisor", "two-class-supervisor-pw", Some("desktop")).await;
-    assert_eq!(supervisor_desktop.status(), 200, "granted class must also succeed on client_type: desktop");
+    let supervisor_mobile = login(
+        &http,
+        &base,
+        "two-class-supervisor",
+        "two-class-supervisor-pw",
+        Some("mobile"),
+    )
+    .await;
+    assert_eq!(
+        supervisor_mobile.status(),
+        200,
+        "granted class must succeed on client_type: mobile"
+    );
+    let supervisor_desktop = login(
+        &http,
+        &base,
+        "two-class-supervisor",
+        "two-class-supervisor-pw",
+        Some("desktop"),
+    )
+    .await;
+    assert_eq!(
+        supervisor_desktop.status(),
+        200,
+        "granted class must also succeed on client_type: desktop"
+    );
 }

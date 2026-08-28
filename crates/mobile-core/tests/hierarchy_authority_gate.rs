@@ -25,7 +25,10 @@ use std::ffi::{CStr, CString};
 
 fn test_db_path() -> String {
     std::env::temp_dir()
-        .join(format!("mobile-core-hierarchy-test-{}.sqlite", uuid::Uuid::new_v4()))
+        .join(format!(
+            "mobile-core-hierarchy-test-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ))
         .to_string_lossy()
         .into_owned()
 }
@@ -92,13 +95,19 @@ fn command_envelope(
     .to_string()
 }
 
-fn execute(handle: *mut mobile_core::MobileApp, envelope_json: String) -> Result<serde_json::Value, ()> {
+fn execute(
+    handle: *mut mobile_core::MobileApp,
+    envelope_json: String,
+) -> Result<serde_json::Value, ()> {
     let c = CString::new(envelope_json).unwrap();
     let result_ptr = unsafe { mobile_core_execute_command(handle, c.as_ptr()) };
     if result_ptr.is_null() {
         return Err(());
     }
-    let result_str = unsafe { CStr::from_ptr(result_ptr) }.to_str().unwrap().to_string();
+    let result_str = unsafe { CStr::from_ptr(result_ptr) }
+        .to_str()
+        .unwrap()
+        .to_string();
     unsafe { mobile_core_free_string(result_ptr) };
     Ok(serde_json::from_str(&result_str).unwrap())
 }
@@ -142,12 +151,26 @@ fn owner_submits_manager_approves_stranger_denied_through_real_ffi() {
     // of these are owner-gated).
     execute(
         handle,
-        command_envelope("MarkReady", task_id, organization_id, 0, owner, serde_json::json!({"MarkReady": {"reason": "ready"}})),
+        command_envelope(
+            "MarkReady",
+            task_id,
+            organization_id,
+            0,
+            owner,
+            serde_json::json!({"MarkReady": {"reason": "ready"}}),
+        ),
     )
     .expect("MarkReady should succeed");
     execute(
         handle,
-        command_envelope("StartTask", task_id, organization_id, 1, owner, serde_json::json!({"StartTask": {"reason": "starting"}})),
+        command_envelope(
+            "StartTask",
+            task_id,
+            organization_id,
+            1,
+            owner,
+            serde_json::json!({"StartTask": {"reason": "starting"}}),
+        ),
     )
     .expect("StartTask should succeed");
     execute(
@@ -170,7 +193,14 @@ fn owner_submits_manager_approves_stranger_denied_through_real_ffi() {
     // everyone -- the safe, fail-closed default.
     let denied_before_hierarchy = execute(
         handle,
-        command_envelope("ApproveTask", task_id, organization_id, 3, manager, serde_json::json!({"ApproveTask": {"reason": "approving"}})),
+        command_envelope(
+            "ApproveTask",
+            task_id,
+            organization_id,
+            3,
+            manager,
+            serde_json::json!({"ApproveTask": {"reason": "approving"}}),
+        ),
     );
     assert!(
         denied_before_hierarchy.is_err(),
@@ -188,12 +218,22 @@ fn owner_submits_manager_approves_stranger_denied_through_real_ffi() {
     .to_string();
     let hierarchy_c = CString::new(hierarchy_json).unwrap();
     let set_result = unsafe { mobile_core_set_hierarchy(handle, hierarchy_c.as_ptr()) };
-    assert_eq!(set_result, 0, "mobile_core_set_hierarchy should succeed for well-formed input");
+    assert_eq!(
+        set_result, 0,
+        "mobile_core_set_hierarchy should succeed for well-formed input"
+    );
 
     // 5. A stranger with no authority relationship to `owner` is denied.
     let denied = execute(
         handle,
-        command_envelope("ApproveTask", task_id, organization_id, 3, stranger, serde_json::json!({"ApproveTask": {"reason": "approving"}})),
+        command_envelope(
+            "ApproveTask",
+            task_id,
+            organization_id,
+            3,
+            stranger,
+            serde_json::json!({"ApproveTask": {"reason": "approving"}}),
+        ),
     );
     assert!(
         denied.is_err(),
@@ -203,7 +243,14 @@ fn owner_submits_manager_approves_stranger_denied_through_real_ffi() {
     // 6. The task's real, cache-resolved direct manager can approve.
     let approved = execute(
         handle,
-        command_envelope("ApproveTask", task_id, organization_id, 3, manager, serde_json::json!({"ApproveTask": {"reason": "approving"}})),
+        command_envelope(
+            "ApproveTask",
+            task_id,
+            organization_id,
+            3,
+            manager,
+            serde_json::json!({"ApproveTask": {"reason": "approving"}}),
+        ),
     )
     .expect("the task owner's real direct manager must be authorized to approve");
     assert_eq!(approved["success"], serde_json::json!(true));
@@ -214,7 +261,10 @@ fn owner_submits_manager_approves_stranger_denied_through_real_ffi() {
     let query_c = CString::new(query_json).unwrap();
     let query_result_ptr = unsafe { mobile_core_execute_query(handle, query_c.as_ptr()) };
     assert!(!query_result_ptr.is_null());
-    let query_result_str = unsafe { CStr::from_ptr(query_result_ptr) }.to_str().unwrap().to_string();
+    let query_result_str = unsafe { CStr::from_ptr(query_result_ptr) }
+        .to_str()
+        .unwrap()
+        .to_string();
     unsafe { mobile_core_free_string(query_result_ptr) };
     let query_result: serde_json::Value = serde_json::from_str(&query_result_str).unwrap();
     assert_eq!(

@@ -11,11 +11,7 @@
 
 use std::net::SocketAddr;
 
-const BOOTSTRAP_TOKEN: &str = "query-id-test-bootstrap";
-
 async fn start_server(db_label: &str) -> (SocketAddr, String, String) {
-    std::env::set_var("ONYX_BOOTSTRAP_TOKEN", BOOTSTRAP_TOKEN);
-
     let db_path = std::env::temp_dir().join(format!("onyx-query-id-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
     let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -34,16 +30,12 @@ async fn start_server(db_label: &str) -> (SocketAddr, String, String) {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    http.post(format!("{base}/api/admin/bootstrap"))
-        .header("x-onyx-bootstrap-token", BOOTSTRAP_TOKEN)
-        .json(&serde_json::json!({"username": "qid-admin", "password": "qid-test-password"}))
-        .send()
-        .await
-        .expect("bootstrap request");
-
+    // ApiState seeds the first administrator in a fresh database, so bootstrap
+    // correctly refuses a second initial account. Authenticate through that
+    // intentional test-drive account instead of ignoring a bootstrap conflict.
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "qid-admin", "password": "qid-test-password"}))
+        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
         .send()
         .await
         .expect("login request")

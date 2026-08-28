@@ -52,10 +52,10 @@ pub mod ios_multipeer;
 
 pub use android_workmanager::mobile_core_android_do_work;
 pub use ffi_commands::mobile_core_execute_command;
-pub use ffi_files::{mobile_core_download_file, mobile_core_upload_file};
 pub use ffi_events::{
     mobile_core_subscribe_events, mobile_core_trigger_sync, mobile_core_unsubscribe,
 };
+pub use ffi_files::{mobile_core_download_file, mobile_core_upload_file};
 pub use ffi_mobile::{
     mobile_core_get_sync_status, mobile_core_list_aggregates, mobile_core_list_conflicts,
     mobile_core_resolve_conflict,
@@ -258,7 +258,9 @@ pub unsafe extern "C" fn mobile_core_new(
             // in-place population actually take effect without an
             // `AppState` rebuild — see `MobileApp::hierarchy_cache`'s
             // doc comment.
-            owner_authority: Some(Arc::new(hierarchy_cache.clone()) as Arc<dyn api_server::OwnerAuthority>),
+            owner_authority: Some(
+                Arc::new(hierarchy_cache.clone()) as Arc<dyn api_server::OwnerAuthority>
+            ),
         };
 
         Some(Arc::new(AppState::new(pool, app_config).await))
@@ -322,9 +324,9 @@ pub unsafe extern "C" fn mobile_core_set_hierarchy(
         return -1;
     };
     let app = &*handle;
-    let result = app.runtime.block_on(async {
-        app.hierarchy_cache.load_from_json(&hierarchy_json).await
-    });
+    let result = app
+        .runtime
+        .block_on(async { app.hierarchy_cache.load_from_json(&hierarchy_json).await });
     match result {
         Ok(()) => 0,
         Err(e) => {

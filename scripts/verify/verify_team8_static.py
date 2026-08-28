@@ -45,10 +45,11 @@ def text(path: str) -> str:
 
 
 required = [
+    # CI was consolidated from eight increment workflows into the current
+    # platform- and purpose-based workflow set.
     ".github/workflows/ci.yml", ".github/workflows/release.yml",
-    *[f".github/workflows/increment{i}-{name}.yml" for i, name in [
-        (1, "domain"), (2, "persistence"), (3, "sync"), (4, "networking"),
-        (5, "clients"), (6, "web"), (7, "observability"), (8, "release")]],
+    ".github/workflows/Debug.yml", ".github/workflows/devcontainer-check.yml",
+    ".github/workflows/fmt-fix.yml",
     "scripts/ci-pipeline.sh", "scripts/release.sh", "scripts/canary-rollout.sh",
     "scripts/verify/verify_crdt_determinism.sh",
     "scripts/verify/verify_migration_idempotency.sh",
@@ -86,7 +87,7 @@ required = [
         "incident-response", "backup-restore", "performance-tuning", "on-call",
         "disaster-recovery", "outbox-backlog", "conflict-resolution"]],
     "docs/release/go-live-checklist.md", "docs/release/signoff-template.md",
-    "TEAM8_README.md", "TEAM8_VERIFICATION.md", "DECISIONS.md",
+    "docs/TEAM8_README.md", "docs/TEAM8_VERIFICATION.md", "docs/DECISIONS.md",
 ]
 for item in required:
     check((ROOT / item).is_file(), f"required Team 8 artifact absent: {item}")
@@ -263,8 +264,9 @@ check("subject-digest: ${{ steps.build.outputs.digest }}" in release_workflow,
 check("sbom-path:" in release_workflow, "SBOM attestation missing")
 check("find \"release/${VERSION}\" -type f" in release_script,
       "release checksums do not safely enumerate files")
-check("cargo generate-lockfile" in release_workflow and "cargo generate-lockfile" in release_script,
-      "stale inherited Cargo.lock workaround missing")
+check("cargo metadata --locked --no-deps" in release_workflow
+      and "cargo generate-lockfile" in release_script,
+      "release workflow lockfile validation or release-script regeneration missing")
 
 # Runbook and formal signoff contracts.
 runbooks = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "docs/runbooks").glob("*.md"))
@@ -275,7 +277,7 @@ check(re.search(r"RPO.{0,40}(five|5) minutes", runbooks, re.I | re.S) is not Non
 check("NO-GO" in text("docs/release/go-live-checklist.md"), "go-live checklist lacks NO-GO guard")
 
 # Decision record.
-decisions = text("DECISIONS.md")
+decisions = text("docs/DECISIONS.md")
 for ruling in [f"R{i}" for i in range(1, 12)]:
     check(ruling in decisions, f"Team 8 ruling not recorded: {ruling}")
 for decision in [f"T8-D{i}" for i in range(1, 18)]:

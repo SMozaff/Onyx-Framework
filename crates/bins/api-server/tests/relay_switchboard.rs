@@ -13,13 +13,9 @@ use platform_kernel::{ObjectId, ReplicaId, SchemaVersion, Timestamp};
 use sync_transport::{message::MessageId, SyncMessage, SyncMessageType};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-const BOOTSTRAP_TOKEN: &str = "relay-test-bootstrap";
-
-/// Boots an api-server on an ephemeral port against a throwaway SQLite file,
-/// bootstraps an admin, and returns the address plus a valid access token.
+/// Boots an api-server on an ephemeral port against a throwaway SQLite file
+/// and authenticates its intentionally seeded test-drive administrator.
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
-    std::env::set_var("ONYX_BOOTSTRAP_TOKEN", BOOTSTRAP_TOKEN);
-
     // A file rather than `:memory:` — the pool opens multiple connections and
     // each would otherwise get its own private empty database.
     let db_path = std::env::temp_dir().join(format!("onyx-relay-test-{db_label}.db"));
@@ -40,16 +36,9 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    http.post(format!("{base}/api/admin/bootstrap"))
-        .header("x-onyx-bootstrap-token", BOOTSTRAP_TOKEN)
-        .json(&serde_json::json!({"username": "relay-tester", "password": "relay-test-password"}))
-        .send()
-        .await
-        .expect("bootstrap request");
-
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "relay-tester", "password": "relay-test-password"}))
+        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
         .send()
         .await
         .expect("login request")
@@ -80,8 +69,8 @@ fn frame(sender: ReplicaId, target: Option<ReplicaId>, org: ObjectId, payload: &
     .serialize()
 }
 
-/// The organization the bootstrap admin is created in. Relay frames must
-/// carry this or they are treated as cross-tenant.
+/// The organization the seeded test-drive admin is created in. Relay frames
+/// must carry this or they are treated as cross-tenant.
 fn test_org() -> ObjectId {
     let uuid = uuid::Uuid::parse_str(api_server::routes::ORGANIZATION_ID).unwrap();
     ObjectId(*uuid.as_bytes())

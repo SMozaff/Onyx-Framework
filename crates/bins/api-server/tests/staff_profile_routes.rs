@@ -6,11 +6,7 @@
 
 use std::net::SocketAddr;
 
-const BOOTSTRAP_TOKEN: &str = "profiles-test-bootstrap";
-
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
-    std::env::set_var("ONYX_BOOTSTRAP_TOKEN", BOOTSTRAP_TOKEN);
-
     let db_path = std::env::temp_dir().join(format!("onyx-profiles-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
     let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -29,16 +25,11 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    http.post(format!("{base}/api/admin/bootstrap"))
-        .header("x-onyx-bootstrap-token", BOOTSTRAP_TOKEN)
-        .json(&serde_json::json!({"username": "profiles-admin", "password": "profiles-test-password"}))
-        .send()
-        .await
-        .expect("bootstrap request");
-
+    // A fresh ApiState has the intentional test-drive administrator already,
+    // so bootstrap correctly rejects a second first account.
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "profiles-admin", "password": "profiles-test-password"}))
+        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
         .send()
         .await
         .expect("login request")
