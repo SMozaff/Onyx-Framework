@@ -4333,3 +4333,42 @@ Not touched, per the task's explicit exclusions: the 6 pre-existing
 `api-server` integration test failures (still out of scope), and
 nothing beyond this one `.pbxproj` fix — no other file in `mobile/ios/`
 was modified.
+
+### The real `workflow_dispatch` result (run `33201335832`, commit `95dbf09`)
+
+| Job | Baseline (`33196473346`, `e0d94a7`) | This run (`95dbf09`) |
+|---|---|---|
+| `check` | success | success |
+| `web` | success | success |
+| `deploy-check` | success | success |
+| `mobile-dart` | success | success |
+| `native-ui-evidence` | success | success |
+| `mobile-android` | success | success |
+| `load-smoke` | success | success |
+| `mobile-ios` | **failure** (`AppDelegate.swift:10`, `BackgroundService` not in scope) | **success** — for real, detailed below |
+
+**Every job in this workflow is green in the same run for the first
+time in this repository's CI history.**
+
+**`mobile-ios` passes for a real reason, not a masked one.** The exact
+step that always failed — `Run flutter build ios --simulator` — ran to
+completion: `Running Xcode build... / Xcode build done. 91.6s`,
+followed by `✓ Built build/ios/iphonesimulator/Runner.app`. One honest
+caveat, checked rather than glossed over: Flutter's `flutter build ios`
+suppresses `xcodebuild`'s own per-file compiler output on a
+*successful* build (verbose compile lines only surface on failure, as
+seen in every prior failing run's log, which did show the specific
+`AppDelegate.swift:10` compiler error line-and-column). So there is no
+literal `Compiling BackgroundService.swift` line to grep from this
+run's log — the proof is structural, not textual: this is the exact
+same command, on the exact same commit-minus-one-file-diff, that
+previously failed with `Cannot find 'BackgroundService' in scope` at
+this exact step, now completing and producing the real `.app` bundle,
+with the `.pbxproj` compile-sources wiring being the only change in
+between. Nothing else in `mobile/ios/` changed that could otherwise
+explain the flip from failure to success.
+
+**Nothing else regressed.** `mobile-dart`, `mobile-android`, and
+`load-smoke` — the three jobs fixed or verified across this session's
+prior two tasks — all stayed green in this same run, run back to back
+with no cache-clearing or other reset in between.
