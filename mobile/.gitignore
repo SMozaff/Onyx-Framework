@@ -1,3 +1,13 @@
+# pubspec.lock: this repo has never committed one for the mobile/ app
+# (no prior commit has it, and it was not previously gitignored either —
+# generating one via a real `flutter pub get` during CI-failure
+# verification work made that gap concrete rather than just implicit).
+# Committing it now would be an unrequested convention change outside
+# any specific task's scope, so it's ignored explicitly instead of left
+# as recurring untracked noise every time someone runs `flutter pub get`
+# locally.
+pubspec.lock
+
 # Miscellaneous
 *.class
 *.log
