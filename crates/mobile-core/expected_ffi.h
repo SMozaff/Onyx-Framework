@@ -36,6 +36,40 @@ typedef struct MobileApp MobileApp;
 struct MobileApp *mobile_core_new(const char *db_path, const char *config_json);
 
 /**
+ * Populates (or replaces) the local Task/Mission approval-authority
+ * cache from `hierarchy_json` — the same `[{id, parent_user_id,
+ * is_admin}, ...]` shape `GET /api/users/hierarchy` returns.
+ *
+ * # Why this is a separate call, not part of `mobile_core_new`'s config
+ * A real design decision, not an assumption: `mobile_core_new` must
+ * succeed (opening the local SQLite pool, applying migrations) before
+ * any network call could possibly happen, and mobile has no login/auth
+ * concept of its own at the FFI layer (see `client_composition::
+ * hierarchy_cache`'s module doc — the org's reporting-line directory
+ * is fetched from Dart's already-authenticated `OnyxHttpApi`, not
+ * re-fetched independently here). Baking hierarchy data into
+ * `mobile_core_new`'s `config_json` would force login+fetch to
+ * complete before local-database bootstrap could even start, coupling
+ * two things that don't need to be coupled and that happen at
+ * genuinely different times (`mobile_core_new` once per process;
+ * login/hierarchy-fetch whenever the person actually signs in, which
+ * may be well after the app — and its offline local data — is already
+ * usable). A separate call the Dart side invokes right after both
+ * `mobile_core_new` and its own HTTP fetch succeed keeps those two
+ * timelines independent.
+ *
+ * Returns `0` on success, `-1` on invalid arguments (null pointer,
+ * non-UTF8 string) or if `hierarchy_json` fails to parse as the
+ * expected shape (see `HierarchyCache::load_from_json`'s own error
+ * cases — an id that isn't a valid UUID, malformed JSON).
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`.
+ * `hierarchy_json` must be a valid, NUL-terminated C string pointer.
+ */
+int32_t mobile_core_set_hierarchy(struct MobileApp *handle, const char *hierarchy_json);
+
+/**
  * Runs one background synchronization cycle against the registered mobile
  * core instance. Intended for iOS `BGAppRefreshTask` and Android WorkManager.
  */
@@ -77,13 +111,16 @@ void mobile_core_free_string(char *str);
 int mobile_core_android_do_work(struct MobileApp *handle, void *_env, void *_thiz);
 
 /**
- * Executes a command. Returns a JSON string with the result (the caller
- * must free it via `mobile_core_free_string`), or null on failure
- * (invalid arguments, or a dispatch error — the error itself is not
- * currently surfaced to the caller as anything richer than "null";
- * flagged, not silently treated as complete, since Team Prompt 5 §3.3
- * doesn't specify an error-reporting mechanism for this function beyond
- * "returns JSON string with the result"). Team Prompt 5 §3.3.
+ * Executes a command. Returns a JSON string (the caller must free it via
+ * `mobile_core_free_string`): either the real success payload (as
+ * `command_handler::handle_command` produces it, `"success": true`
+ * among other fields), or `{"success": false, "error": "<message>"}` if
+ * dispatch itself rejected the command (see this module's doc comment).
+ * Returns null only for a malformed FFI call itself — an invalid
+ * `handle`, an undecodable `command_json` string, or an envelope that
+ * doesn't even parse into `CommandEnvelope<Value>` — never for a
+ * well-formed command the domain layer decided to reject. Team Prompt 5
+ * §3.3.
  *
  * # Safety
  * `handle` must be a valid pointer from `mobile_core_new`. `command_json`
@@ -128,6 +165,50 @@ struct EventSubscription *mobile_core_subscribe_events(struct MobileApp *handle,
  * `mobile_core_subscribe_events`, not yet freed.
  */
 void mobile_core_unsubscribe(struct EventSubscription *sub);
+
+/**
+ * Uploads the file at `path` from the local filesystem, returning a
+ * JSON string (caller must free via `mobile_core_free_string`) with the
+ * same shape as `client_composition::file_upload::UploadOutcome`
+ * (`file_asset_id`, `upload_session_id`, `content_hash`, `size_bytes`).
+ * Returns null on any failure — invalid arguments, an unreadable file,
+ * or a coordinator error.
+ *
+ * MIME type is hardcoded to `"application/octet-stream"`, matching
+ * `desktop-shell::upload_file`'s own documented choice: no MIME-sniffing
+ * library is a workspace dependency, and guessing from the file
+ * extension alone would be a half-measure that silently mislabels
+ * files. A real content-type detector is a follow-up for both clients,
+ * not something to invent differently here.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`. `path`,
+ * `organization_id`, `user_id`, and `device_id` must each be valid,
+ * NUL-terminated C string pointers.
+ */
+char *mobile_core_upload_file(struct MobileApp *handle,
+                              const char *path,
+                              const char *organization_id,
+                              const char *user_id,
+                              const char *device_id);
+
+/**
+ * Downloads the file content stored under `content_hash`, writing it to
+ * `destination_path` on the local filesystem. Returns the number of
+ * bytes written, or `-1` on any failure (invalid arguments, no stored
+ * content for that hash, or a write error) -- mirrors
+ * `desktop-shell::download_file`'s `u64`-bytes-written /
+ * `InvalidArgument` contract, adapted to a C-ABI-friendly `i64` sentinel
+ * since FFI has no `Result` to return through.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`.
+ * `content_hash` and `destination_path` must each be valid,
+ * NUL-terminated C string pointers.
+ */
+int64_t mobile_core_download_file(struct MobileApp *handle,
+                                  const char *content_hash,
+                                  const char *destination_path);
 
 /**
  * Lists locally stored aggregate projections for one aggregate type.

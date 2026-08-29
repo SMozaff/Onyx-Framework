@@ -83,6 +83,26 @@ abstract interface class OnyxApi {
   Future<int> downloadFile(String contentHash, String destinationPath);
 }
 
+/// A command the backend genuinely rejected — as opposed to a transport/
+/// FFI-level failure (`StateError`, a decode error, etc.). Carries the
+/// real, specific message the domain layer produced (e.g.
+/// `CommandError::OwnerAuthorityDenied`'s own "actor ... is not
+/// authorized to decide on behalf of owner ..." text), not a generic
+/// "something failed" string — most mobile users legitimately cannot
+/// approve most tasks/missions, so this is an expected, common outcome
+/// that UI code needs to render specifically, not lump in with a real
+/// bug. See `OnyxMobile.executeCommand`'s handling of
+/// `mobile_core_execute_command`'s `{"success": false, "error": ...}`
+/// payload (added alongside this class — that function used to collapse
+/// every dispatch error, denials included, to a bare null pointer).
+class CommandFailedException implements Exception {
+  const CommandFailedException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class MobileCoreConfig {
   const MobileCoreConfig({
     required this.organizationId,
@@ -318,6 +338,15 @@ class OnyxMobile implements OnyxApi {
     final value = _callJson((json) => _bindings.executeCommand(_handle, json), envelope);
     if (value is! Map<String, dynamic>) {
       throw StateError('Command returned a non-object response');
+    }
+    // `mobile_core_execute_command` now serializes a real dispatch
+    // rejection (e.g. OwnerAuthorityDenied) as `{"success": false,
+    // "error": "..."}` instead of the bare null pointer it used to
+    // return for every such error alike (see that function's own doc
+    // comment) — surface it as a real, specific exception here rather
+    // than returning it to the caller as if it were a successful result.
+    if (value['success'] == false) {
+      throw CommandFailedException(value['error'] as String? ?? 'Command failed');
     }
     return value;
   }

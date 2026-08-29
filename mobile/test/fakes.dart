@@ -8,6 +8,7 @@ class FakeOnyxApi implements OnyxApi {
     this.tasks = const <LoadedAggregate>[],
     this.conflicts = const <SyncConflict>[],
     this.snapshot = SyncSnapshot.empty,
+    this.executeCommandOverride,
   });
 
   List<LoadedAggregate> missions;
@@ -17,6 +18,15 @@ class FakeOnyxApi implements OnyxApi {
   int syncCalls = 0;
   int commandCalls = 0;
   final controller = StreamController<Map<String, dynamic>>.broadcast();
+  List<Map<String, dynamic>> executedEnvelopes = <Map<String, dynamic>>[];
+
+  /// Lets a test replace the default always-succeeds behavior below —
+  /// e.g. to simulate a real [CommandFailedException] denial the way
+  /// `OnyxMobile.executeCommand` throws one for a real `{"success":
+  /// false, "error": ...}` FFI payload, without needing a real native
+  /// library loaded (this sandbox has no Android/iOS runtime to link
+  /// one against).
+  Future<Map<String, dynamic>> Function(Map<String, dynamic> envelope)? executeCommandOverride;
 
   @override
   Stream<Map<String, dynamic>> get events => controller.stream;
@@ -58,6 +68,9 @@ class FakeOnyxApi implements OnyxApi {
   @override
   Future<Map<String, dynamic>> executeCommand(Map<String, dynamic> envelope) async {
     commandCalls += 1;
+    executedEnvelopes.add(envelope);
+    final override = executeCommandOverride;
+    if (override != null) return override(envelope);
     return <String, dynamic>{'success': true, 'operation_id': envelope['operation_id']};
   }
 

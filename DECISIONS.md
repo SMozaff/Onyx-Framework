@@ -4372,3 +4372,284 @@ explain the flip from failure to success.
 `load-smoke` — the three jobs fixed or verified across this session's
 prior two tasks — all stayed green in this same run, run back to back
 with no cache-clearing or other reset in between.
+
+## Wiring mobile Approvals to the real backend gate
+
+### The stated diagnosis, confirmed — and one real correction to it
+
+Directly audited before writing anything, per the task's own
+instruction not to trust the framing uncritically:
+
+- `mobile/lib/ui/screens/approvals.dart` did still show the literal
+  stale text "No local Approval aggregate is registered in
+  mobile-core..." — confirmed, no longer accurate.
+- `mobile/lib/ui/screens/task_detail.dart` was genuinely a read-only
+  debug view with zero interactive actions — confirmed.
+- `mobile/lib/ui/screens/mission_detail.dart` (not part of the original
+  audit, flagged as worth checking) is the exact same shape — also
+  zero interactive actions.
+- `TaskCommand::ApproveTask { reason: String }` / `RejectTask { reason:
+  String }` confirmed directly in `crates/domains/work-domain/src/
+  command.rs`. Mission's equivalents, checked rather than assumed to
+  mirror Task's names: `MissionCommand::ActivateMission { reason:
+  String }` (approve) and `RejectApproval { reason: String }` (reject)
+  — genuinely different names, same single-`reason` payload shape.
+
+**One real correction to the task's own framing, found by tracing the
+data path rather than trusting the doc's characterization of it:** the
+stale placeholder text was *literally accurate*, not just stale copy.
+`controller.approvals` (`mobile/lib/ui/app.dart`) is backed by
+`api.listAggregates('approval')`, which queries the local SQLite
+`aggregates` table for `aggregate_type = 'approval'`
+(`crates/mobile-core/src/ffi_mobile.rs`). Checked every place an
+`aggregate_type` string is ever registered for a local repository
+(`crates/applications/client-composition/src/app_state.rs`,
+`AppStateConfig`'s repository wiring): mission, task, conversation,
+message, file_asset, upload_session, policy, legal_hold,
+connection_request, notification — never `"approval"`. That local
+query can **never** return anything on mobile, by construction, not
+because "the adapter hasn't been delivered yet" in some soon-to-change
+sense.
+
+Widening the search turned up a second, genuinely separate finding:
+`api-server`'s own HTTP routes (`crates/bins/api-server/src/
+routes/{mod,command,query_handler}.rs`) *do* register a real
+`"approval"` repository and real `approval.Approve`/`approval.Reject`
+commands, against an inline `ApprovalAggregate` struct
+(`title`/`description`/`status`/`requested_by`/`target_id`/
+`target_type`/...) defined right there in `routes/command.rs` — a
+generic, standalone approval-request bookkeeping mechanism, explicitly
+`owner_check: None` (no owner-authority gate at all), never wired into
+`client-composition` (so unreachable from either `desktop-shell`'s or
+`mobile-core`'s local command path). This is a real, separate concept
+from Task/Mission's own approval commands — not what the stale
+placeholder text was gesturing at needing "delivery," and not what
+this task is about. Confirmed, then deliberately left alone: `mobile/
+lib/ui/app.dart`'s `controller.approvals` field and its
+`listAggregates('approval')` call were **not removed** — deciding
+whether that separate `ApprovalAggregate` subsystem should ever be
+wired into `client-composition` is a different, larger question this
+task wasn't asked to adjudicate, and the field is simply unused now
+rather than actively harmful. The real fix, instead: stop the
+Approvals *screen* from depending on that always-empty query at all,
+and build it against data that genuinely exists locally.
+
+### What was built
+
+1. **`approvals.dart` rewritten** to filter `controller.tasks` for
+   `status == 'Submitted'` and `controller.missions` for `status ==
+   'AwaitingApproval'` — the same local projections `TasksScreen`/
+   `MissionsScreen` already load via `listAggregates('task'/'mission')`,
+   confirmed real by grep against `work-domain`/`mission-domain`'s
+   `state_machine.rs` (no `#[serde(rename_all = ...)]` on either enum,
+   so the wire string is exactly the Rust variant name — matches
+   `desktop-shell`'s own `Approvals.tsx` check of `status ===
+   "Submitted"` verbatim). Each item is tappable, routing to the
+   existing `TaskDetailScreen`/`MissionDetailScreen` — reusing
+   `TaskCard`/`MissionCard`'s exact `Navigator.push(MaterialPageRoute(...))`
+   pattern, not a new one. Empty state now reads "No tasks or missions
+   are currently awaiting approval." — accurate, no longer describing
+   an architectural gap that isn't the actual blocker.
+2. **Real Approve/Reject actions added to `task_detail.dart`/
+   `mission_detail.dart`**, not the list screen — see the placement
+   decision below. Both converted from `StatelessWidget` to
+   `StatefulWidget` (matching `files.dart`'s established busy/error/
+   `TextEditingController` pattern) to host a reason field and
+   busy/error state.
+3. **One new `OnyxController.decide(...)` method** (`app.dart`),
+   covering all four commands (`ApproveTask`/`RejectTask`/
+   `ActivateMission`/`RejectApproval`) with one implementation rather
+   than four near-identical ones, since they share the exact
+   `{reason: String}` payload shape — calling
+   `api.buildCommandEnvelope`/`executeCommand` exactly the way
+   `createMission`/`createTask` already do, using the *target
+   aggregate's own* `version`/`lifecycleEpoch`/`authorityEpoch` (it's
+   mutating existing state, not creating new state) and calling
+   `refresh()` afterward, matching the existing pattern exactly.
+4. **A real, necessary, disclosed fix to `mobile-core`'s FFI error
+   surfacing** — not part of the original ask, but load-bearing for
+   requirement #3 ("a clear, specific error... not a generic
+   failure"). Detailed in its own section below.
+
+### Design decisions, explicitly resolved
+
+**Placement: `task_detail.dart`/`mission_detail.dart`, not the
+Approvals list itself.** Checked `desktop-shell`'s own equivalent
+(`crates/bins/desktop-shell/ui/src/pages/Approvals.tsx` +
+`components/ApprovalDialog`) before assuming, per the task's
+instruction — and found it puts the action inline on its Approvals
+page, not a task detail page. Deliberately *not* followed here, for a
+disclosed reason found by reading desktop's own code comments: desktop
+puts it there because desktop has **no backend query to list "every
+task currently Submitted"** (`Approvals.tsx`'s own comment: "a real
+'queue of everything Submitted' view needs a projection query the
+backend doesn't have yet ... this page works against one task at a
+time by id"). Mobile has no such limitation — it already holds the
+full local Task/Mission list via `listAggregates`, so its Approvals
+screen can be a real filtered list, and this app's own established
+convention for "a list item you can act on" is tap-through-to-detail
+(`TaskCard`/`MissionCard`'s existing `Navigator.push`, confirmed by
+reading them). Matching *this app's own* internal convention was
+judged the correct choice over copying desktop's, since desktop's
+placement was itself a workaround for a constraint mobile doesn't
+share.
+
+**Reason field policy: matches `desktop-shell`'s `ApprovalDialog`
+exactly** — optional for Approve/Activate, required for Reject (the
+Reject button stays disabled until non-empty) — checked directly
+(`reasonPolicy = { approve: { required: false }, reject: { required:
+true } }`) per the task's instruction to check desktop's handling for
+cross-platform consistency, and reused rather than re-decided.
+
+**Button visibility: always shown, not hidden pre-emptively.** Checked
+whether `mobile-core`'s FFI surface exposes anything the Dart side
+could use to know in advance whether the current actor could
+succeed — confirmed it does not (no "can this actor decide" query
+exists), and building one would be new FFI surface this task didn't
+ask for. Also checked desktop-shell's own precedent: `Approvals.tsx`
+shows its "Review" button unconditionally too, with no advance
+eligibility check. The backend fails closed either way (an empty/
+unset `HierarchyCache` denies everyone), so showing-then-denying is
+safe, and matches the one cross-platform precedent that exists rather
+than inventing a new pattern.
+
+### The real, necessary FFI error-surfacing fix (disclosed, not silent)
+
+Confirmed directly, not assumed: `mobile_core_execute_command`
+(`crates/mobile-core/src/ffi_commands.rs`) collapsed *every* dispatch
+error — including `CommandError::OwnerAuthorityDenied`, the actual
+gate this task wires up to — to a bare null pointer, identical to a
+malformed/undecodable request. The file's own prior doc comment
+disclosed this as a known gap ("the error itself is not currently
+surfaced to the caller as anything richer than 'null'"). On the Dart
+side, `OnyxMobile.executeCommand`'s `_decodeOwnedJson` turned *any*
+null into `StateError('mobile-core returned null')` — genuinely
+indistinguishable from a client bug. Since requirement #3 explicitly
+demands "a clear, specific error... not a generic failure" for
+exactly this denial path, fixing this was necessary to satisfy the
+task as given, not an expansion of scope — it's the mechanism the
+requirement depends on.
+
+**The fix:** a dispatch error (envelope parsed fine, `CommandRegistry::
+dispatch` itself rejected it) now serializes to `{"success": false,
+"error": "<the real Display message>"}` instead of null — reusing the
+same `"success"` boolean key `command_handler::handle_command`'s real
+success payload already uses, so callers check one field either way,
+not two different shapes. Confirmed via `CommandDispatchError`'s own
+`#[error(transparent)] Decision(#[from] api_server::CommandError)`
+(`client-composition/src/command_registry.rs`) that `.to_string()`
+carries `OwnerAuthorityDenied`'s exact message ("actor ... is not
+authorized to decide on behalf of owner ...") all the way through.
+**Deliberately unchanged:** a null/invalid `handle`, an undecodable
+`command_json` string, or an envelope that fails to deserialize into
+`CommandEnvelope<Value>` at all still return null — these are
+malformed-FFI-call bugs, genuinely different from a well-formed
+command the domain layer rejected; confirmed the one existing test
+covering exactly this path
+(`execute_command_returns_null_for_unknown_command_type`) needed no
+change, since it exercises the JSON-parse-failure branch, not
+dispatch.
+
+On the Dart side: a new `CommandFailedException` (`bridge/bridge.dart`)
+carries the real message; `OnyxMobile.executeCommand` now checks
+`value['success'] == false` and throws it instead of returning the
+error payload as if it were a successful result. `task_detail.dart`/
+`mission_detail.dart` catch it and render `error.toString()` directly
+in the review card — the literal denial text, not a generic message.
+
+**A real, pre-existing gap found and fixed along the way:**
+`crates/mobile-core/expected_ffi.h` (the frozen ABI baseline
+`scripts/verify/verify_ffi_signatures.sh` diffs against) was already
+stale *before* this task — missing `mobile_core_set_hierarchy`/
+`mobile_core_upload_file`/`mobile_core_download_file` entirely, from
+earlier session work that never updated it. This script is not
+actually wired into `ci.yml` (confirmed: `check`'s "Contract
+verification" step runs `verify_team7.sh`/`verify_team8.sh`, not this
+one), so the staleness was silently non-blocking — but updating the
+baseline is purely mechanical (`cp mobile-core.h expected_ffi.h`,
+exactly what the script's own comment prescribes) and fixes both the
+pre-existing gap and this task's own new doc-comment diff in one
+clean, disclosed step, rather than leaving it further out of sync.
+
+### Real end-to-end proof, at the correct rigor
+
+Per the task's own explicit standard ("mirroring the rigor of
+`task_owner_authority_gate.rs`'s existing Rust-side test"), two new
+tests added to `crates/mobile-core/tests/ffi_integration.rs`, going
+through the *real* `mobile_core_new`/`_execute_command`/
+`_set_hierarchy` FFI functions (not `CommandRegistry` in-process,
+which `client-composition`'s own test already covers) — the actual
+boundary Dart calls through:
+
+- `execute_command_owner_authority_denial_surfaces_a_real_error_not_null`:
+  creates a real task, drives it Draft → Ready → Active → Submitted as
+  its owner, then has an unrelated stranger attempt `ApproveTask` with
+  no hierarchy ever loaded — asserts the FFI call returns a non-null,
+  real `{"success": false, "error": "..."}` payload whose message
+  contains "not authorized to decide on behalf of", not the old bare
+  null.
+- `execute_command_owner_authoritys_real_manager_approves_via_ffi`:
+  same setup, but loads a real hierarchy via `mobile_core_set_hierarchy`
+  first (owner → manager), then confirms the owner's real,
+  cache-resolved manager succeeds through the same FFI path.
+
+A third, **pre-existing** test was found broken by this fix and
+corrected: `crates/mobile-core/tests/hierarchy_authority_gate.rs`'s
+`owner_submits_manager_approves_stranger_denied_through_real_ffi`
+(written in an earlier session, not touched by this task's own
+`ffi_integration.rs` additions) had its own `execute()` helper treat
+*only* a null pointer as denial — exactly the old contract this fix
+intentionally changes. Its `denied_before_hierarchy.is_err()` assertion
+started failing for the right reason (a real `{"success": false, ...}`
+payload is no longer `Err(())` under the old helper), confirming the
+fix works, not that something broke. Fixed by teaching that test's
+`execute()` helper to also treat a decoded `"success": false` payload
+as a denial — every one of its existing `.is_err()`/`.expect(...)`
+assertions keeps meaning exactly what it already said, with no
+call-site changes needed. Re-ran clean afterward.
+
+On the Dart side, 8 new tests in `mobile/test/unit/approvals_test.dart`
+(using a `FakeOnyxApi.executeCommandOverride` hook added to
+`test/fakes.dart` for driving a controlled denial without a real
+native library — this sandbox has no Android/iOS runtime to link one
+against): the accurate empty-state text, correct Submitted/
+AwaitingApproval filtering, tap-through navigation, the Reject-disabled-
+until-non-empty / Approve-always-enabled reason policy, a real
+successful `ApproveTask` call with the exact envelope shape asserted
+and pop-on-success, a simulated `CommandFailedException` denial
+rendering its specific text without crashing the widget tree (and
+*not* popping, unlike the success case), and Mission's
+`ActivateMission`/`RejectApproval` command routing.
+
+**What could not be tested in this sandbox, disclosed rather than
+implied:** no real simulator/emulator exists here (confirmed: `uname
+-a` reports Linux, no Xcode; Android build/test infrastructure here
+builds real `.so`s and a real `.apk` but does not run either). The
+Rust-level FFI tests above are the closest real substitute — they
+exercise the actual compiled `mobile-core` library through its actual
+C ABI, including a real SQLite database and real command dispatch, not
+a mock — but a literal on-device tap-and-observe end-to-end run was
+not performed, and is not claimed to have been.
+
+### Verification checklist
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | 120 test binaries `ok`; 18 failing tests, identical in name and cause to this session's already-disclosed infra limitation (no live Postgres/D-Bus in this sandbox — see the `cargo fmt` task's entry); zero of this task's own new/changed tests among them |
+| `cargo test -p mobile-core` | 14 passed (11 `ffi_integration` + 2 `file_sharing` + 1 `hierarchy_authority_gate`), 0 failed |
+| `scripts/verify/verify_ffi_signatures.sh` | clean after baseline update |
+| `flutter analyze --no-fatal-warnings` | 0 issues |
+| `flutter test` | 16 passed, 1 skipped (baseline 8 passed/1 skipped + 8 new tests, all passing) |
+| `flutter build apk --debug` | real, successful assembly — `app-debug.apk`, 189.9 MB, includes the rebuilt `libmobile_core.so`/`libsync_transport_mobile.so` for arm64-v8a/armeabi-v7a/x86_64 |
+| `flutter build ios --simulator` | not possible in this sandbox (Linux, no Xcode — confirmed via `uname -a`); CI's `mobile-ios` job (macOS runner) is the real verification, reported below |
+| `npx tsc -b` / `npx vite build` (`admin-shell`, `web-ui`) | clean; both build |
+| Fresh `workflow_dispatch` of `ci.yml` | see the real run's job table below |
+
+Out of scope, confirmed untouched: the 6 pre-existing `api-server`
+integration test failures; Files, Missions, Dashboard, Notifications,
+Settings screens (beyond the shared `OnyxController.decide` addition
+and the `bridge.dart` exception type, both generic infrastructure, not
+screen-specific logic); the separate `ApprovalAggregate` subsystem's
+own fate.

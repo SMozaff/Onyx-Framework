@@ -162,6 +162,49 @@ class OnyxController extends ChangeNotifier {
     await refresh();
   }
 
+  /// Decides on a Task or Mission that is awaiting approval: `ApproveTask`/
+  /// `RejectTask` (target type `'task'`) or `ActivateMission`/
+  /// `RejectApproval` (target type `'mission'`) — the four real,
+  /// owner-authority-gated commands `TaskDecisionHandler`/
+  /// `MissionDecisionHandler` handle (`crates/domains/work-domain/src/
+  /// command.rs`, `crates/domains/mission-domain/src/command.rs`). All
+  /// four share the exact same `{reason: String}` payload shape, so one
+  /// method covers every case rather than four near-identical ones.
+  ///
+  /// `target`'s own `version`/`lifecycleEpoch`/`authorityEpoch` are used
+  /// as the command's optimistic-concurrency expectations, exactly like
+  /// [createTask]/[createMission] use fresh values for a brand-new
+  /// aggregate — here they come from the already-loaded aggregate
+  /// instead, since this mutates existing state rather than creating it.
+  ///
+  /// Throws [CommandFailedException] with the real, specific denial
+  /// message (e.g. "actor ... is not authorized to decide on behalf of
+  /// owner ...") if the backend's owner-authority gate rejects the
+  /// actor — most callers legitimately cannot decide most Tasks/
+  /// Missions, so this is an expected outcome for UI code to catch and
+  /// display, not treat as a bug.
+  Future<void> decide({
+    required LoadedAggregate target,
+    required String targetType,
+    required String commandType,
+    required String reason,
+  }) async {
+    await api.executeCommand(
+      api.buildCommandEnvelope(
+        commandType: commandType,
+        targetType: targetType,
+        targetId: target.id,
+        payload: <String, dynamic>{
+          commandType: <String, dynamic>{'reason': reason},
+        },
+        expectedVersion: target.version,
+        lifecycleEpoch: target.lifecycleEpoch,
+        authorityEpoch: target.authorityEpoch,
+      ),
+    );
+    await refresh();
+  }
+
   Future<void> resolveConflict(SyncConflict conflict, ConflictChoice choice) async {
     await api.resolveConflict(conflict, choice);
     await refresh();

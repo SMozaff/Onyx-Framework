@@ -95,6 +95,18 @@ fn command_envelope(
     .to_string()
 }
 
+/// Returns `Err(())` for a denial/rejection, `Ok(value)` for a real
+/// success payload.
+///
+/// # Real-error-surfacing update (mobile Approvals task)
+/// `mobile_core_execute_command` no longer returns a bare null pointer
+/// for a dispatch rejection like `OwnerAuthorityDenied` — it returns a
+/// real `{"success": false, "error": "..."}` JSON payload instead (see
+/// that function's own doc comment in `ffi_commands.rs`), so a non-null
+/// pointer alone no longer means success. This helper checks the
+/// decoded payload's own `success` field too, so this test's existing
+/// `.is_err()`/`.expect(...)` assertions keep meaning exactly what they
+/// already say without changing every call site.
 fn execute(
     handle: *mut mobile_core::MobileApp,
     envelope_json: String,
@@ -109,7 +121,11 @@ fn execute(
         .unwrap()
         .to_string();
     unsafe { mobile_core_free_string(result_ptr) };
-    Ok(serde_json::from_str(&result_str).unwrap())
+    let value: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+    if value["success"] == serde_json::json!(false) {
+        return Err(());
+    }
+    Ok(value)
 }
 
 #[test]

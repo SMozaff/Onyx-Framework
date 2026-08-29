@@ -111,13 +111,16 @@ void mobile_core_free_string(char *str);
 int mobile_core_android_do_work(struct MobileApp *handle, void *_env, void *_thiz);
 
 /**
- * Executes a command. Returns a JSON string with the result (the caller
- * must free it via `mobile_core_free_string`), or null on failure
- * (invalid arguments, or a dispatch error — the error itself is not
- * currently surfaced to the caller as anything richer than "null";
- * flagged, not silently treated as complete, since Team Prompt 5 §3.3
- * doesn't specify an error-reporting mechanism for this function beyond
- * "returns JSON string with the result"). Team Prompt 5 §3.3.
+ * Executes a command. Returns a JSON string (the caller must free it via
+ * `mobile_core_free_string`): either the real success payload (as
+ * `command_handler::handle_command` produces it, `"success": true`
+ * among other fields), or `{"success": false, "error": "<message>"}` if
+ * dispatch itself rejected the command (see this module's doc comment).
+ * Returns null only for a malformed FFI call itself — an invalid
+ * `handle`, an undecodable `command_json` string, or an envelope that
+ * doesn't even parse into `CommandEnvelope<Value>` — never for a
+ * well-formed command the domain layer decided to reject. Team Prompt 5
+ * §3.3.
  *
  * # Safety
  * `handle` must be a valid pointer from `mobile_core_new`. `command_json`
