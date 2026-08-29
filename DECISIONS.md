@@ -4647,9 +4647,77 @@ not performed, and is not claimed to have been.
 | `npx tsc -b` / `npx vite build` (`admin-shell`, `web-ui`) | clean; both build |
 | Fresh `workflow_dispatch` of `ci.yml` | see the real run's job table below |
 
-Out of scope, confirmed untouched: the 6 pre-existing `api-server`
-integration test failures; Files, Missions, Dashboard, Notifications,
-Settings screens (beyond the shared `OnyxController.decide` addition
-and the `bridge.dart` exception type, both generic infrastructure, not
-screen-specific logic); the separate `ApprovalAggregate` subsystem's
-own fate.
+Out of scope, confirmed untouched: Files, Missions, Dashboard,
+Notifications, Settings screens (beyond the shared
+`OnyxController.decide` addition and the `bridge.dart` exception type,
+both generic infrastructure, not screen-specific logic); the separate
+`ApprovalAggregate` subsystem's own fate.
+
+### Correction: the "6 pre-existing api-server failures" label was never actually true
+
+A user follow-up pressed on an inference I'd made without verifying it:
+I had described `query_id_normalization`, `relay_switchboard`,
+`staff_loan_authorization`, `staff_profile_routes`,
+`team_leader_precheck_authorization`, and `user_hierarchy_admin_routes`
+as "6 pre-existing, disclosed `api-server` failures" carried over from
+earlier session work, and separately reported "18 failing tests" from
+this task's own local `cargo test --workspace` run, without ever
+reconciling the two numbers or checking whether the 6 named tests were
+even among the 18.
+
+Checked directly, twice:
+
+1. **Local sandbox** (`/tmp/cargo_test_workspace3.log`, this task's own
+   run): grepping for all 6 test files by name shows all 6 ran and
+   **all passed** — `query_id_normalization`: 4/4 ok,
+   `relay_switchboard`: 3/3 ok, `staff_loan_authorization`: 3/3 ok,
+   `staff_profile_routes`: 8/8 ok, `team_leader_precheck_authorization`:
+   3/3 ok, `user_hierarchy_admin_routes`: 8/8 ok. The 18 local failures
+   are a completely disjoint set from these 6 (0 overlap) — they are
+   Postgres/D-Bus-dependent tests failing for lack of that
+   infrastructure in this local sandbox, same root cause already
+   disclosed elsewhere in this file, unrelated to the 6 named tests.
+
+2. **Real CI**, run `33279194057` (commit `9f4ed77`, `check` job, job
+   id `99171315636`, the "Test" step, with real Postgres + a real D-Bus
+   session confirmed by the job's own preceding "Run database
+   migrations" and "Start a D-Bus session..." steps):
+   pulled the literal log content (not the job's aggregate
+   success/failure conclusion — the actual per-test lines) and
+   confirmed the same result: all 6 files ran, every individual test in
+   all 6 passed, 0 failures, e.g. `test result: ok. 4 passed; 0 failed`
+   for `query_id_normalization`, `... 8 passed; 0 failed` for both
+   `staff_profile_routes` and `user_hierarchy_admin_routes`, etc.
+
+**Conclusion:** nothing in this session's mobile-Approvals work (or any
+other change) "fixed" these 6 tests — they were never actually broken
+in a properly provisioned environment. The "pre-existing failure" label
+was carried forward from an earlier report without ever being
+confirmed against real infrastructure; it was itself an artifact of the
+same class of problem as the 18 local-only failures (missing
+Postgres/D-Bus in whatever sandbox first produced that label), not a
+real, load-bearing defect. This is now corrected: there are no known
+`api-server` test failures against real infrastructure as of this
+commit.
+
+### Real CI run: full job table
+
+`workflow_dispatch` run `33279194057`, commit `9f4ed77`, compared
+against the prior real run `33201335832`, commit `95dbf09`:
+
+| Job | Baseline (`95dbf09`) | This run (`9f4ed77`) | Regression? |
+|---|---|---|---|
+| mobile-dart | success | success | no |
+| web | success | success | no |
+| check | success | success | no |
+| deploy-check | success | success | no |
+| mobile-android | success | success | no |
+| mobile-ios | success | success | no |
+| native-ui-evidence | success | success | no |
+| load-smoke | success | success | no |
+
+All 8 jobs green, no regressions. `mobile-android`'s `flutter build apk
+--debug` and `mobile-ios`'s `flutter build ios --simulator` (the two
+jobs this sandbox itself cannot run) both completed successfully on
+their real runners, confirmed via each job's own step list rather than
+inferred from the run's overall conclusion.
