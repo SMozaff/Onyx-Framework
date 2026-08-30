@@ -5372,3 +5372,186 @@ landed and CI-confirmed. H6 Part 2 (native acceptance gates) is deliberately
 scoped, not built, per the original plan and this task's own instructions --
 its assessment above is the explicit next step for a future, dedicated task.
 This closes out the production-readiness audit as originally scoped.
+
+## Hardening H7 (relay ticket self-identity binding)
+
+A second-pass, independent re-audit of the H1-H6 work above found a
+genuinely new P1 in the very feature H4(b) built to close the previous
+relay-token problem. This is that fix.
+
+### The gap H4(b) left open
+
+`POST /api/relay-ticket` (`crates/bins/api-server/src/routes/relay.rs`,
+`issue_ticket`) mints a real, well-designed ticket -- 30s TTL, single-use
+via `jti`, correctly scoped to a specific `target_id`. But
+`IssueTicketRequest` only ever carried `target_id`; the minted
+`TokenClaims` never said anything about which *replica* the caller was
+entitled to register as once it opened the WebSocket. Separately,
+`RelayAuth` (the WS-upgrade query params) has its own `self_replica`
+field -- a plain, unauthenticated URL query parameter, parsed at
+`relay_route` and handed straight into `RelayRegistry::register()` with
+zero verification against the ticket's own claims. The ticket proved who
+the authenticated user was and which target they could reach; it proved
+nothing about which replica identity they were allowed to claim as their
+own on connection.
+
+**Practical consequence, preserved here in the re-auditor's own precise
+framing because it is the accurate severity, not a rounder-sounding one:**
+a compromised or malicious authenticated client *inside* an organization
+could connect while asserting another legitimate replica's UUID as
+`self_replica`. Because `register()` replaces whatever was previously
+registered under that UUID, this was a **same-tenant
+replica-impersonation / connection-displacement / denial-of-service
+vector -- not cross-tenant** (the existing organization check on every
+frame still held). The relay's existing check that a frame's
+`sender_replica` matches the connection's declared `self_id` only proved
+internal consistency with the attacker's own unverified declaration, not
+actual ownership of that declaration.
+
+### Resolving the `device_id`-vs-`self_replica` question first
+
+The task's own instructions asked to check, before building anything,
+whether the relay's replica identity is meant to be the *same* concept as
+the already-authenticated actor's `device_id` (`platform-kernel::authority`'s
+`ActorContext`) -- if so, the smaller fix is to derive `self_replica` from
+that already-verified identity instead of adding a new table.
+
+Read with real evidence, not assumed either way:
+
+- `platform-kernel::versioning::ReplicaId` is a genuinely distinct Rust
+  type from `DeviceId` (itself just `pub type DeviceId = ObjectId`) --
+  not a literal alias.
+- But `desktop-shell/src/lib.rs`'s `SessionInfo::from_session` derives the
+  app's own "device_id" (the value returned to the frontend) *directly*
+  from `local_replica: ReplicaId`, and `login`'s own doc comment says the
+  device's `ReplicaId` is "a property of this physical device/install, not
+  of who happens to be logged in" -- strong evidence the two concepts
+  really are meant to be the same identity in this codebase's design.
+- However, reading the actual wire request both real clients send at
+  login settles the practical question: `desktop-shell/src/session.rs`'s
+  `LoginRequest { username, password, client_type }` and
+  `mobile/lib/net/auth.dart`'s equivalent body carry **no device_id or
+  replica_id field at all**. Neither does `TokenClaims`/`AuthenticatedUser`
+  for ordinary access/refresh tokens.
+
+So the "preferred, smaller" path is not available today without also
+extending the login contract across all three real clients and the JWT
+schema for every token type -- a materially larger, riskier change than
+this task should make. **Decision: implement Option A**, a durable
+ownership table, checked at ticket-issuance time. Option B (per-replica
+cryptographic keypairs) is the stronger long-term answer, correctly
+identified as such by the re-auditor, and is explicitly deferred future
+work -- the same treatment H3 gave the deferred Redis/NATS shared-bus
+option, not silently dropped.
+
+### The fix
+
+- **`migrations/{postgres,sqlite}/20260110000000_add_replica_ownership.{up,down}.sql`** --
+  a new `replica_ownership` table: `replica_id` primary key, `user_id`,
+  `organization_id`, `claimed_at`. First-claim-wins, enforced by the
+  primary key itself: `INSERT ... ON CONFLICT (replica_id) DO NOTHING`
+  followed by a `SELECT` of the actual owner relies on the database to
+  resolve two concurrent first claims atomically, with no
+  `SELECT`-then-`INSERT` race window (`claim_replica_ownership` in
+  `relay.rs`).
+- **`IssueTicketRequest`** gained a required `self_replica` field. The
+  caller now declares, at mint time, which replica identity it intends to
+  register as.
+- **`issue_ticket`** calls `claim_replica_ownership` before minting
+  anything: if `self_replica` is unclaimed, it is claimed for the calling
+  `user_id` now; if it is already claimed by that same user, minting
+  proceeds as before; if it is claimed by a *different* user, minting is
+  refused (401) and the attempt is logged.
+- **`TokenScope`** (`routes/mod.rs`) gained an optional
+  `#[serde(default)] self_replica: Option<String>` field, `None` for
+  every existing access/refresh token, `Some(...)` only for a
+  `relay_ticket`-typed token whose `self_replica` has passed the ownership
+  check above. This reuses `validate_token`'s existing generic
+  exp/revocation logic unmodified -- no second claims type was needed.
+- **`relay_route`** now checks `claims.scope.self_replica` against the
+  WebSocket's `self` query parameter and rejects a mismatch *before* the
+  upgrade is accepted, in addition to the pre-existing `target_id` scope
+  check. This is the actual fix: the query parameter is still
+  unauthenticated on its own, but it can no longer diverge from what the
+  ownership-checked ticket actually authorized.
+- **`desktop-shell/src/relay_socket.rs`**'s `mint_relay_ticket` now sends
+  `self_replica` (the factory's own `local_replica`, which it already held)
+  in the ticket-mint request body -- the one real client in this codebase
+  that calls this endpoint.
+- The "Ticket design" doc comment on `issue_ticket`, and `RelayAuth`'s
+  doc comment on its `self` field, were both updated to describe this
+  binding -- their previous silence on self-identity verification is part
+  of why the original re-audit caught this and the first one didn't.
+
+### Known, disclosed limitation -- not a reopening of the vulnerability
+
+The ownership model is permanent-per-user by design (first-claim-wins).
+`desktop-shell`'s own doc comment says a device's `ReplicaId` is stable
+per physical install and is deliberately *not* reset on login, so that a
+second login after logout doesn't fragment sync history already on that
+machine -- which also means a *different* real employee logging into the
+same shared physical install would legitimately reuse that same
+persisted `ReplicaId`. Under this fix, if a first employee has already
+claimed that id under their own `user_id`, a second employee sharing the
+device will be refused a relay ticket for it.
+
+This is an availability inconvenience in an intentionally narrow scenario
+(a shared desktop install used by more than one person), not a security
+hole: refusing to mint the ticket is the fail-safe direction, and it does
+not let anyone connect as a replica they don't own. The real fix for this
+edge case is the same one that would also obsolete this whole table --
+extending the login contract to carry a verified device identity (the
+"preferred" path examined and set aside above), or Option B's per-replica
+keypairs. Both are deferred, not built here, and both are noted so this
+tradeoff isn't rediscovered as a surprise later.
+
+### Verification
+
+Two new tests in `crates/bins/api-server/tests/relay_switchboard.rs`,
+against a real bound server and real WebSocket connections (same harness
+as every other test in that file, not mocked):
+
+- `relay_rejects_a_connection_that_declares_a_different_replica_than_the_ticket` --
+  mints a ticket honestly bound to one replica id, then attempts to open
+  the WebSocket declaring a *different*, un-owned replica id via `self`;
+  confirms the connection is now genuinely refused (the HTTP upgrade
+  itself fails), not just differently formatted.
+- `relay_ticket_issuance_refuses_a_replica_owned_by_another_user` -- the
+  seeded admin claims a replica id via a real minted ticket; a second,
+  genuinely distinct authenticated user (created via the real
+  `POST /api/admin/users` route and logged in for a real access token)
+  then attempts to mint a ticket declaring that same replica id as their
+  own `self_replica`; confirms the mint itself is refused before a ticket
+  ever exists.
+
+Both pre-existing legitimate-path assertions in the same file
+(`relay_forwards_a_frame_between_two_replicas`, and every `open()` call
+throughout the suite, which always mints and connects with the *same*
+replica id for the same authenticated user) continue to pass unchanged,
+proving the ordinary case still works exactly as before.
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo test -p api-server --test relay_switchboard` | 7 passed (5 pre-existing H4(b) tests unchanged, 2 new H7 tests), 0 failed |
+| `cargo test --workspace --exclude desktop-shell` | all passing except the same 7 disclosed, Docker-dependent `crates/team8-e2e-tests` journeys as every prior task in this session (no Docker daemon in this sandbox) -- no new regressions |
+| `cargo clippy --workspace --exclude desktop-shell --all-targets -- -D warnings` | clean |
+| `cargo clippy -p desktop-shell --all-targets -- -D warnings` | clean (run separately from the rest of the workspace purely to manage this sandbox's limited disk space during Tauri/WebKit's large build; not a narrower check) |
+| Existing single-use (`redeem_ticket_once`), target-scoping (`object_id`), and 30s-TTL properties from H4(b) | all three's original tests (`relay_ticket_cannot_be_redeemed_twice`, `relay_ticket_cannot_be_used_against_a_different_target`, and `exp` via `validate_token`) still pass unmodified -- this task added the missing binding without weakening anything already correctly built |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+### Not acted on in this task (flagged by the same re-audit, lower priority)
+
+Two other findings the re-audit surfaced are deliberately out of scope
+here and noted so they aren't lost:
+
+- `load-smoke`'s real run-to-run variance at the identical commit
+  (0.60%/1.54s p95 vs. 0%/191ms), and the fact it runs
+  `DATABASE_URL=sqlite://...` despite spinning up a Postgres service
+  alongside it -- meaning it never actually exercises the production
+  Postgres path. A real, separate test-design gap.
+- Documentation drift: the README's "27 crates"/"Rust 1.75" claims (the
+  real count is 41 workspace members, the real toolchain is 1.97.1 per
+  `rust-toolchain.toml`), and other docs still describing the pre-H4(a)
+  `allow_origin(Any)` CORS behavior and the pre-H5 lockfile-regeneration
+  pattern as if current.

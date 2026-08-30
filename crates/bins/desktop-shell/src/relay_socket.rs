@@ -62,6 +62,7 @@ fn encode_query_value(value: &str) -> String {
 async fn mint_relay_ticket(
     relay_url: &str,
     target_id: uuid::Uuid,
+    self_replica: uuid::Uuid,
     bearer_token: &str,
 ) -> Result<String, TransportError> {
     let mut ticket_url = reqwest::Url::parse(relay_url)
@@ -86,7 +87,10 @@ async fn mint_relay_ticket(
     let response = reqwest::Client::new()
         .post(ticket_url)
         .bearer_auth(bearer_token)
-        .json(&serde_json::json!({ "target_id": target_id.to_string() }))
+        .json(&serde_json::json!({
+            "target_id": target_id.to_string(),
+            "self_replica": self_replica.to_string(),
+        }))
         .send()
         .await
         .map_err(|e| TransportError::Platform(format!("relay ticket request failed: {e}")))?;
@@ -140,9 +144,10 @@ impl RelaySocketFactory for TungsteniteRelaySocketFactory {
         // less: it authorizes exactly one connection attempt, to exactly
         // this target, for a handful of seconds.
         let target_id = uuid::Uuid::from_bytes(peer.id.0);
+        let self_replica = uuid::Uuid::from_bytes(self.local_replica.0);
         let ticket = tokio::time::timeout(
             timeout,
-            mint_relay_ticket(relay_url, target_id, bearer_token),
+            mint_relay_ticket(relay_url, target_id, self_replica, bearer_token),
         )
         .await
         .map_err(|_| TransportError::Timeout)??;
@@ -151,7 +156,7 @@ impl RelaySocketFactory for TungsteniteRelaySocketFactory {
         let url = format!(
             "{relay_url}{separator}ticket={}&self={}",
             encode_query_value(&ticket),
-            uuid::Uuid::from_bytes(self.local_replica.0)
+            self_replica
         );
 
         let request = url

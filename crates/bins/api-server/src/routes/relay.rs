@@ -48,7 +48,8 @@ use sync_transport::SyncMessage;
 use tokio::sync::{mpsc, RwLock};
 
 use super::{
-    authenticate_headers, unix_seconds, validate_token, ApiError, ApiState, TokenClaims, TokenScope,
+    authenticate_headers, unix_seconds, validate_token, ApiError, ApiState, ProjectionPool,
+    TokenClaims, TokenScope,
 };
 
 /// One connected replica's inbound mailbox, plus the tenant it authenticated
@@ -166,6 +167,86 @@ const RELAY_TICKET_TTL_SECONDS: u64 = 30;
 #[derive(Debug, Deserialize)]
 pub struct IssueTicketRequest {
     pub target_id: String,
+    /// The replica identity the caller intends to register as once it
+    /// dials the WebSocket with the minted ticket. Checked against
+    /// `replica_ownership` here (H7) rather than trusted as the
+    /// unauthenticated `self` query parameter it used to be — see
+    /// `claim_replica_ownership` and this fn's "Ticket design" doc comment.
+    pub self_replica: String,
+}
+
+/// First-claim-wins ownership check for a relay replica identity, backing
+/// audit finding H7. `INSERT ... ON CONFLICT DO NOTHING` followed by a
+/// `SELECT` relies on the table's own primary key to resolve concurrent
+/// first claims atomically — no `SELECT`-then-`INSERT` race window.
+///
+/// Returns `Ok(())` if `replica_id` is unclaimed (and claims it for
+/// `user_id` now) or already claimed by this same `user_id`. Returns
+/// `Err(())` if it is already claimed by a different user — the caller
+/// must refuse to mint a ticket in that case.
+///
+/// Known, disclosed limitation (see DECISIONS.md): this is permanent
+/// per-user, so a second real employee logging into the same shared
+/// physical install (which legitimately reuses one persisted `ReplicaId`
+/// per desktop-shell's own design, see `SessionInfo::from_session`) will
+/// be refused a ticket for it once a first employee has claimed it. That
+/// is an availability inconvenience for an intentionally narrow scenario,
+/// not a reopening of the vulnerability this table closes.
+async fn claim_replica_ownership(
+    pool: &ProjectionPool,
+    replica_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    organization_id: uuid::Uuid,
+) -> Result<(), sqlx::Error> {
+    let now = unix_seconds() as i64;
+    match pool {
+        ProjectionPool::Sqlite(pool) => {
+            sqlx::query(
+                "INSERT INTO replica_ownership (replica_id, user_id, organization_id, claimed_at) \
+                 VALUES (?, ?, ?, ?) ON CONFLICT (replica_id) DO NOTHING",
+            )
+            .bind(replica_id.as_bytes().to_vec())
+            .bind(user_id.as_bytes().to_vec())
+            .bind(organization_id.as_bytes().to_vec())
+            .bind(now)
+            .execute(pool)
+            .await?;
+
+            let owner: (Vec<u8>,) =
+                sqlx::query_as("SELECT user_id FROM replica_ownership WHERE replica_id = ?")
+                    .bind(replica_id.as_bytes().to_vec())
+                    .fetch_one(pool)
+                    .await?;
+            if owner.0 == user_id.as_bytes().to_vec() {
+                Ok(())
+            } else {
+                Err(sqlx::Error::RowNotFound)
+            }
+        }
+        ProjectionPool::Postgres(pool) => {
+            sqlx::query(
+                "INSERT INTO replica_ownership (replica_id, user_id, organization_id, claimed_at) \
+                 VALUES ($1, $2, $3, $4) ON CONFLICT (replica_id) DO NOTHING",
+            )
+            .bind(replica_id)
+            .bind(user_id)
+            .bind(organization_id)
+            .bind(now)
+            .execute(pool)
+            .await?;
+
+            let owner: (uuid::Uuid,) =
+                sqlx::query_as("SELECT user_id FROM replica_ownership WHERE replica_id = $1")
+                    .bind(replica_id)
+                    .fetch_one(pool)
+                    .await?;
+            if owner.0 == user_id {
+                Ok(())
+            } else {
+                Err(sqlx::Error::RowNotFound)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -197,6 +278,15 @@ pub struct IssueTicketResponse {
 ///   upgrade is accepted (see `relay_route`). Presenting the same ticket
 ///   twice — whether replayed by an attacker who intercepted it, or by a
 ///   buggy client retry — succeeds at most once.
+/// - **Self-identity binding (H7)**: also bound to the specific
+///   `self_replica` the caller declared, via `TokenScope::self_replica`.
+///   Minting refuses (401) unless `claim_replica_ownership` confirms the
+///   caller's `user_id` owns that replica id (first-claim-wins, durable in
+///   `replica_ownership`). `relay_route` then requires the WebSocket's
+///   `self` query parameter to match this bound claim exactly, rather than
+///   trusting that unauthenticated query string directly — closing the
+///   same-tenant replica-impersonation/connection-displacement gap the
+///   original design left open (see DECISIONS.md).
 pub async fn issue_ticket(
     State(state): State<ApiState>,
     headers: axum::http::HeaderMap,
@@ -214,6 +304,36 @@ pub async fn issue_ticket(
             serde_json::json!({ "message": "target_id must be a replica UUID" }),
         )
     })?;
+    let self_replica_id = uuid::Uuid::parse_str(&payload.self_replica).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_REPLICA_ID",
+            "VALIDATION",
+            "NON_RETRYABLE",
+            correlation_id.clone(),
+            serde_json::json!({ "message": "self_replica must be a replica UUID" }),
+        )
+    })?;
+
+    let actor_user_id = uuid::Uuid::parse_str(&actor.user_id)
+        .map_err(|_| ApiError::unauthorized(correlation_id.clone()))?;
+    let actor_org_id = uuid::Uuid::parse_str(&actor.organization_id)
+        .map_err(|_| ApiError::unauthorized(correlation_id.clone()))?;
+    claim_replica_ownership(
+        &state.projection_pool,
+        self_replica_id,
+        actor_user_id,
+        actor_org_id,
+    )
+    .await
+    .map_err(|_| {
+        tracing::warn!(
+            organization_id = %actor.organization_id,
+            self_replica = %self_replica_id,
+            "relay: refused to mint a ticket for a replica id the caller does not own"
+        );
+        ApiError::unauthorized(correlation_id.clone())
+    })?;
 
     let now = unix_seconds();
     let claims = TokenClaims {
@@ -226,6 +346,7 @@ pub async fn issue_ticket(
             object_id: Some(target_id.to_string()),
             command_types: Vec::new(),
             delegation_depth: 0,
+            self_replica: Some(self_replica_id.to_string()),
         },
         iat: now,
         exp: now + RELAY_TICKET_TTL_SECONDS,
@@ -268,6 +389,12 @@ pub struct RelayAuth {
     /// first frame arrives before its target has finished registering and is
     /// silently dropped. Declaring identity in the handshake makes a
     /// connection addressable the moment it is open.
+    ///
+    /// H7: this is still a plain, unauthenticated query parameter — it is
+    /// not itself trusted. `relay_route` requires it to match the
+    /// `self_replica` claim bound into the ticket at mint time (see
+    /// `issue_ticket`'s "Ticket design" doc comment); a mismatch is
+    /// rejected before the WebSocket upgrade is ever accepted.
     #[serde(rename = "self")]
     pub self_replica: String,
 }
@@ -311,6 +438,21 @@ pub async fn relay_route(
     // any other path segment, including a legitimate, still-live ticket
     // simply retargeted by an attacker who intercepted the URL.
     if claims.scope.object_id.as_deref() != Some(default_target.to_string().as_str()) {
+        return Err(ApiError::unauthorized(correlation_id));
+    }
+
+    // H7: the `self` query parameter is not authenticated by itself — it
+    // must match the replica identity the ticket was actually minted for
+    // (verified against `replica_ownership` at mint time). Without this
+    // check an attacker could present a valid ticket for `target_id` while
+    // declaring an arbitrary, un-owned `self_replica` in the URL, since
+    // this parameter is otherwise never cross-checked against anything.
+    if claims.scope.self_replica.as_deref() != Some(self_replica.to_string().as_str()) {
+        tracing::warn!(
+            organization_id = %claims.organization_id,
+            declared_self = %self_replica,
+            "relay: rejected a ticket whose bound self_replica does not match the connection's declared identity"
+        );
         return Err(ApiError::unauthorized(correlation_id));
     }
 

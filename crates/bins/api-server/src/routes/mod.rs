@@ -758,6 +758,12 @@ pub struct TokenScope {
     pub object_id: Option<String>,
     pub command_types: Vec<String>,
     pub delegation_depth: u32,
+    /// Bound relay replica identity for `relay_ticket`-typed tokens only.
+    /// Verified against `replica_ownership` at mint time (see relay.rs);
+    /// `None` for every other token type. Optional/defaulted so existing
+    /// access/refresh tokens without this field still deserialize.
+    #[serde(default)]
+    pub self_replica: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -859,6 +865,7 @@ pub async fn issue_token(
                 "staff_loan.ExpireStaffLoan".to_string(),
             ],
             delegation_depth: 0,
+            self_replica: None,
         },
         iat: now,
         exp: now + ttl_seconds,
