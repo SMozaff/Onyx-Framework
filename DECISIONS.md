@@ -4899,3 +4899,26 @@ names where each already existed, to avoid erasing either trail.
 Out of scope, confirmed untouched: H3 (relay topology, relay-ticket
 auth), H4(b) (transport/TLS enforcement), H5 (Docker lockfile
 reproducibility), H6 (mobile CI immutability/native acceptance gates).
+
+### Real CI caught a real bug: off-by-one in H2's per-user watermark
+
+The first `workflow_dispatch` of the above (run `33289176310`, commit
+`540682c`) genuinely exercised the two new tests' Docker-backed Postgres
+path for the first time (this sandbox cannot run testcontainers at all —
+see above) and found a real defect, not a sandbox artifact:
+`session_revocation.rs`'s cross-replica deactivation test failed —
+`left: 200, right: 401` — while `logout_on_one_replica_revokes_...` and
+`production_bootstrap.rs` both genuinely passed in that same run.
+
+Root cause: `validate_token`'s watermark check was `claims.iat <
+revoked_before`, and both values come from `unix_seconds()` — 1-second
+resolution. The test logs in and calls `deactivate_user` fast enough
+that both timestamps land in the same second, so `iat == revoked_before`
+and the strict `<` treated the token as still valid. Fixed by changing
+the comparison to `<=` (`crates/bins/api-server/src/routes/mod.rs`) —
+fail-closed on the tie. The only cost is a legitimate caller who logs in
+again within the same second a deactivation/password-reset watermark was
+set getting one extra rejected request; the alternative (a token that
+should be dead staying valid) is the actual security property H2 exists
+to close, so the tradeoff is the right one. Pushed as `67ebf8b`; a second
+`workflow_dispatch` re-verifies both new tests for real against this fix.
