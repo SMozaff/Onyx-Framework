@@ -905,7 +905,18 @@ pub async fn validate_token(
         .await
         .map_err(|_| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?
     {
-        if claims.iat < revoked_before {
+        // `<=`, not `<`: `iat`/`revoked_before` share the same 1-second
+        // resolution (`unix_seconds()`), so a token minted in the same
+        // wall-clock second as a subsequent deactivation/password-reset
+        // would otherwise tie with its own revocation watermark and be
+        // treated as still valid — confirmed as a real, reproducing bug
+        // via `tests/end-to-end/session_revocation.rs`'s cross-replica
+        // deactivation test failing in real CI (left: 200, right: 401)
+        // before this fix. A token legitimately reissued in that same
+        // second after a reset is rejected too; the caller simply logs
+        // in again, which is the correct fail-closed direction for a
+        // revocation check.
+        if claims.iat <= revoked_before {
             return Err(ApiError::unauthorized(uuid::Uuid::new_v4().to_string()));
         }
     }
