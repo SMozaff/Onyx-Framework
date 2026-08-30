@@ -8,7 +8,9 @@ use serde_json::json;
 
 use security_application::UserRecord;
 
-use super::{authenticate_headers, issue_token, validate_token, ApiError, ApiState};
+use super::{
+    authenticate_headers, issue_token, token_hash, unix_seconds, validate_token, ApiError, ApiState,
+};
 
 /// Single failure response for every authentication failure mode.
 ///
@@ -237,18 +239,18 @@ pub async fn login(
 /// standalone fix any client can use, not something mobile-specific.
 ///
 /// # Rotation
-/// The refresh token presented is revoked (added to `revoked_tokens`,
-/// same mechanism `logout` already uses) and a **new** refresh token is
-/// issued alongside the new access token, rather than reissuing only
-/// the access token and leaving the same refresh token valid
-/// indefinitely across every renewal. This bounds how long a single
-/// refresh token value remains useful if it were ever leaked, at the
-/// cost of the caller needing to persist the new refresh token from
-/// every response — the same tradeoff most refresh-token
-/// implementations make. Rotation is enforced by the same in-memory
-/// `revoked_tokens` set `logout` uses, so it shares that mechanism's
-/// already-disclosed limitation (audit finding H-02: revocation is
-/// in-memory and non-durable, not persisted across a server restart).
+/// The refresh token presented is revoked (recorded in the shared
+/// `token_revocation_store`, same mechanism `logout` already uses) and a
+/// **new** refresh token is issued alongside the new access token, rather
+/// than reissuing only the access token and leaving the same refresh
+/// token valid indefinitely across every renewal. This bounds how long a
+/// single refresh token value remains useful if it were ever leaked, at
+/// the cost of the caller needing to persist the new refresh token from
+/// every response — the same tradeoff most refresh-token implementations
+/// make. Rotation is enforced by the same durable, shared store `logout`
+/// uses (audit finding H-02, closed: revocation is now visible to every
+/// API replica immediately, not just the one that handled this request,
+/// and durable — see `security_application::ports::token_revocation`).
 ///
 /// The user is re-fetched from the store (not trusted from the token's
 /// own claims) and confirmed still active, mirroring `login`'s and
@@ -305,10 +307,20 @@ pub async fn refresh(
         })?;
 
     state
-        .revoked_tokens
-        .write()
+        .token_revocation_store
+        .revoke_token(&token_hash(&payload.refresh_token), unix_seconds())
         .await
-        .insert(payload.refresh_token);
+        .map_err(|error| {
+            tracing::error!(error = %error, "token revocation store failed during refresh rotation");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "TOKEN_REVOCATION_STORE_UNAVAILABLE",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
 
     Ok(Json(RefreshResponse {
         access_token,
@@ -324,8 +336,27 @@ pub async fn logout(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let auth = authenticate_headers(&state, &headers).await?;
     let _ = validate_token(&state, &payload.refresh_token, "refresh").await?;
-    let mut revoked = state.revoked_tokens.write().await;
-    revoked.insert(auth.token);
-    revoked.insert(payload.refresh_token);
+    let now = unix_seconds();
+    let revoke_err = |error: security_application::TokenRevocationError| {
+        tracing::error!(error = %error, "token revocation store failed during logout");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "TOKEN_REVOCATION_STORE_UNAVAILABLE",
+            "INFRASTRUCTURE",
+            "TRANSIENT",
+            uuid::Uuid::new_v4().to_string(),
+            json!({}),
+        )
+    };
+    state
+        .token_revocation_store
+        .revoke_token(&token_hash(&auth.token), now)
+        .await
+        .map_err(revoke_err)?;
+    state
+        .token_revocation_store
+        .revoke_token(&token_hash(&payload.refresh_token), now)
+        .await
+        .map_err(revoke_err)?;
     Ok(Json(json!({"success":true})))
 }

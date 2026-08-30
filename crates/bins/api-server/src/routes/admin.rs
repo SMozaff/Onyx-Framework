@@ -176,6 +176,24 @@ fn store_error(error: UserStoreError) -> ApiError {
     }
 }
 
+/// H-02: `deactivate_user` and `set_user_password` both need to
+/// invalidate every session a user currently has, not just stop future
+/// logins — a store failure here must be a real 500, not silently
+/// swallowed, since a caller relying on "deactivated means logged out
+/// everywhere" needs to know if that guarantee didn't actually take
+/// effect.
+fn revocation_error(error: security_application::TokenRevocationError) -> ApiError {
+    tracing::error!(error = %error, "token revocation store failure");
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "TOKEN_REVOCATION_STORE_UNAVAILABLE",
+        "INFRASTRUCTURE",
+        "TRANSIENT",
+        correlation(),
+        json!({}),
+    )
+}
+
 fn password_error(error: security_adapter::PasswordError) -> ApiError {
     match error {
         security_adapter::PasswordError::Policy(message) => ApiError::new(
@@ -706,6 +724,18 @@ pub async fn deactivate_user(
         .set_active(&user_id, false)
         .await
         .map_err(store_error)?;
+    // H-02: deactivation must invalidate every session this user
+    // currently holds, not just block future logins — otherwise an
+    // already-issued access/refresh token pair keeps working for up to
+    // its full TTL after the account is deactivated. The server never
+    // tracked which individual tokens this user has outstanding, so a
+    // per-user watermark (any token issued before now) is how this is
+    // expressed — see security_application::ports::token_revocation.
+    state
+        .token_revocation_store
+        .revoke_all_for_user(&user_id, super::unix_seconds())
+        .await
+        .map_err(revocation_error)?;
     Ok(Json(json!({"success": true})))
 }
 
@@ -741,9 +771,15 @@ pub async fn set_user_password(
         .set_password_hash(&user_id, &hash)
         .await
         .map_err(store_error)?;
-    // NOTE: existing tokens for this user remain valid until they expire.
-    // Durable, cross-replica revocation is audit finding H-02 and is tracked
-    // separately; the in-memory revocation set cannot express "revoke all
-    // tokens for a user" across pods.
+    // H-02, closed: a password reset must invalidate every session this
+    // user currently holds -- otherwise a token issued before the reset
+    // (e.g. one an attacker who prompted the reset already had) keeps
+    // working for up to its full TTL regardless of the new password. See
+    // deactivate_user's identical reasoning just above.
+    state
+        .token_revocation_store
+        .revoke_all_for_user(&user_id, super::unix_seconds())
+        .await
+        .map_err(revocation_error)?;
     Ok(Json(json!({"success": true})))
 }

@@ -4721,3 +4721,181 @@ All 8 jobs green, no regressions. `mobile-android`'s `flutter build apk
 jobs this sandbox itself cannot run) both completed successfully on
 their real runners, confirmed via each job's own step list rather than
 inferred from the run's overall conclusion.
+
+## Hardening H1, H2, H4(a) — production bootstrap, distributed session revocation, CORS fix
+
+Three of six agreed hardening tracks from an independent production-
+readiness audit (H3/relay-ticket auth and H4(b)/transport-TLS are
+separate follow-up tasks; H5/H6 are out of scope here). Every diagnosis
+below was re-confirmed directly against the real source at the current
+`main` tip before any code changed, not assumed from the task text.
+
+### H1 — Production bootstrap
+
+**Diagnosis confirmed.** A deliberately authorized development shortcut
+currently seeds a known administrator credential on an empty database.
+The implementation clearly documents the tradeoff, so this is not an
+undisclosed implementation error. However, the exception is not
+sufficiently isolated from production execution and therefore remains a
+production release blocker.
+
+Concretely: `ApiState::new` (`crates/bins/api-server/src/routes/mod.rs`)
+seeded `"All-Father"` / `"passvord0000"` whenever `user_store.count()
+== 0`, with no environment check at all — a fresh production install is
+also an empty database, so production got exactly the same shortcut as
+local dev. The token-gated `POST /api/admin/bootstrap` flow
+(`ONYX_BOOTSTRAP_TOKEN`, `routes/admin.rs`) was never touched by the
+original change and still works correctly; it was simply never the path
+actually exercised, since the seed always won the race by running first
+in `ApiState::new`.
+
+**Fix.** The seed now reads `if environment != "production" &&
+user_store.count().await? == 0`. `ONYX_ENV=production` categorically
+refuses to seed, full stop — and the function's own pre-existing gates
+already guarantee that a real production boot has a genuine Postgres
+primary, a real `ONYX_AUTHORITY_SIGNING_KEY`, and a real
+`ONYX_GOVERNANCE_DATABASE_URL`, so production's only remaining path to a
+first admin is the untouched, token-gated `/api/admin/bootstrap` flow —
+restored to being the authoritative production path rather than a
+fallback nothing production-side ever exercised.
+
+**New test.** `tests/end-to-end/production_bootstrap.rs`
+(`production_env_never_seeds_the_known_admin_account`): boots a real
+`ApiState` with `ONYX_ENV=production` and a genuinely empty database
+(backed by a real, ephemeral Postgres container via the existing
+`PostgresHarness`/testcontainers harness, exercising the same
+production-only gates a real deployment would hit), asserts `SELECT
+COUNT(*) FROM users` is `0` afterward, then asserts a login attempt with
+the known `"All-Father"` / `"passvord0000"` credentials returns 401. This
+is the test that proves the fix, not just that the gating line changed.
+
+### H2 — Distributed session revocation
+
+**Diagnosis confirmed, and one part of the task's own framing corrected.**
+`revoked_tokens: Arc<RwLock<HashSet<String>>>` was real, in-process,
+per-instance memory — genuinely incompatible with a multi-replica
+deployment, exactly as described. However, checking every call site
+directly (not assumed) found that only `logout` and refresh-token
+rotation ever touched it. `deactivate_user` and `set_user_password`
+(`routes/admin.rs`) did **not** touch it at all — their own existing doc
+comments said so explicitly ("existing tokens for this user remain valid
+until they expire... the in-memory revocation set cannot express 'revoke
+all tokens for a user' across pods"). So this fix isn't just "move four
+existing call sites to a shared store" — two of the four never had any
+revocation behavior to move, and had to be wired up for the first time.
+
+**Design decision: both models, not one.** The task asked for an explicit
+choice between individual-token tracking and session/family tracking.
+The honest answer is that a single model doesn't cover both real call
+sites:
+- `logout` and refresh-token rotation each hand back **one** specific
+  token they hold. Individual-token revocation (a hash of the token,
+  looked up on every `validate_token` call) matches this exactly and
+  changes nothing about existing behavior.
+- `deactivate_user` and `set_user_password` need to invalidate **every**
+  session a user currently has, and the server has never tracked which
+  individual tokens are outstanding for a user (no session table, no
+  enumeration). Individual-token tracking cannot express this without
+  retroactively building that tracking. A per-user watermark
+  (`user_token_revocations.revoked_before`, compared against each
+  token's own `iat` claim) expresses "everything issued before now is
+  dead" in one write, independent of how many sessions exist.
+
+Implemented as a new `TokenRevocationStore` port
+(`security_application::ports::token_revocation`) with both operations,
+backed by `PostgresTokenRevocationStore`
+(`security-adapter/src/token_revocation.rs`) — real, shared, durable,
+selected by `ApiState::new` via the exact same governance-pool-then-
+primary-pool precedence `PostgresSlidingWindowRateLimiter` already uses.
+An `InMemoryTokenRevocationStore` fallback exists only for a pure-
+SQLite, single-instance, no-governance-database composition (local dev),
+carrying the same disclosed non-durability the old field had everywhere
+— now honestly scoped to the one topology where it's harmless. Production
+can never reach it: `ONYX_ENV=production` already requires a Postgres
+primary and `ONYX_GOVERNANCE_DATABASE_URL`, both of which route to
+`PostgresTokenRevocationStore`. Two new tables
+(`20260109000000_add_token_revocation.{up,down}.sql`, both migration
+sets, mirroring the existing `rate_limit_events` migration's dual-
+directory convention): `revoked_tokens (token_hash, revoked_at)` and
+`user_token_revocations (user_id, revoked_before)`. Tokens are hashed
+(SHA-256) before storage, never stored raw. `validate_token` now checks
+both: an individually-revoked hash, and the caller's per-user watermark
+against the token's `iat`.
+
+**New tests**, both in `tests/end-to-end/`, both proving the actual
+production-topology property (a revocation performed on one replica must
+be visible to a second, independent replica that shares nothing but the
+database — the exact thing an in-process `HashSet` could never satisfy):
+- `session_revocation.rs`'s
+  `logout_on_one_replica_revokes_the_token_on_a_second_independent_replica`:
+  two separate `ApiState`/`Router` instances against one real Postgres
+  database; confirms the token works against replica B before logout (so
+  the later rejection is attributable to the revocation, not a generic
+  auth failure), logs out via replica A only, then confirms replica B
+  rejects the same token.
+- `deactivating_a_user_on_one_replica_revokes_their_session_on_a_second_replica`:
+  same two-replica structure, proving the per-user watermark path
+  (previously nonexistent) is genuinely shared too, not just the
+  single-token path.
+
+### H4(a) — CORS fix
+
+**Diagnosis confirmed, and the task's own hint to "check for real" paid
+off.** `allow_methods([GET, POST, OPTIONS])` was indeed missing `PUT`
+for `/api/admin/mobile-access`'s `.put(admin::set_mobile_access)` as
+described — but auditing every `.route(...)` call in the router (not
+assuming that was the only one) found a **second**, undisclosed PUT
+mismatch: `/api/admin/profiles` (`put(profiles::upsert_profile_route)`)
+is a PUT-only route with no GET/POST alternative at all, so it was
+completely unreachable cross-origin from a browser, not merely missing
+one verb alongside others. Every other registered route in this router
+uses GET or POST only — confirmed by reading the whole router body, not
+sampled.
+
+**Fix, part 1 (small, mechanical):** added `Method::PUT` to
+`allow_methods`, covering both real routes.
+
+**Fix, part 2 (origin allow-list — the real open question):** moved off
+`allow_origin(Any)` toward an explicit, config-driven allow-list
+(`ONYX_CORS_ALLOWED_ORIGINS`, comma-separated), required and validated in
+production. The concrete origin list could not honestly be hardcoded:
+checked this repo's actual deployment config directly
+(`deploy/helm/`, `deploy/docker/`) and confirmed neither `web-ui` nor
+`admin-shell` has a Dockerfile, Helm chart, or ingress entry anywhere —
+both exist today only as local Vite dev servers (ports 5173 and 5174
+respectively). Only `api-server` itself is deployed
+(`deploy/helm/onyx-api`, `api.onyx.example.com`). Since no real
+production origin for either browser client has been decided or
+deployed yet, this is genuinely a deployment-time config decision, not
+something the code can guess — `ApiState::new` refuses to boot in
+production without `ONYX_CORS_ALLOWED_ORIGINS` set to at least one valid
+origin, with an error message explaining exactly why, rather than
+silently falling back to permissive or to an invented placeholder
+domain. Outside production the permissive `Any` default is unchanged, so
+every existing local dev/test workflow (both Vite dev servers,
+desktop-shell's webview, mobile emulators, the `web`/`native-ui-
+evidence` CI jobs) keeps working exactly as before.
+
+**Note on numbering:** this task's H1/H2/H4(a) labels are a task-local
+renumbering. This repository's own `docs/AUDIT_REGISTER.md` calls these
+same three items H-01 (bootstrap portion)/H-02/H-03 respectively; its H-04
+is an unrelated dependency-currency finding, not this task's H4(b). Both
+numbering schemes are preserved verbatim in code comments/migration
+names where each already existed, to avoid erasing either trail.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean (after one `cargo fmt` pass on the 3 new files) |
+| `cargo test -p api-server --release` | 31 passed, 0 failed — includes all 6 previously-verified tests, confirmed still passing, zero regression from the `validate_token`/`logout`/`refresh`/`deactivate_user`/`set_user_password` rewiring |
+| `cargo test --workspace --release --no-fail-fast -- --test-threads=1` (real D-Bus/gnome-keyring session started locally, matching CI's own setup step exactly, including the `--components=secrets --daemonize` unlock this session's own keyring tests need) | 557 passed, 19 failed — every failure is a disclosed, pre-existing infra gap this local sandbox cannot provide: 7 from `crates/team8-e2e-tests` (testcontainers needs a live Docker daemon; `docker info` confirms none is running here) and 12 from `persistence-postgres`'s own direct-Postgres integration tests (`DATABASE_URL must be set`, requiring the real Postgres service only CI's `check` job provisions) — zero unexplained or newly-introduced failures |
+| H1's new test (`production_bootstrap.rs`) | fails locally only because it also needs the same live-Postgres testcontainers harness as the e2e crate (`Socket not found: /var/run/docker.sock`) — cannot be verified in this sandbox; will run for real in CI, where GitHub-hosted runners provide Docker natively (same reasoning `tests/end-to-end`'s pre-existing journeys already rely on) |
+| H2's two new tests (`session_revocation.rs`) | same testcontainers/Docker limitation as above — not verifiable in this sandbox, will run for real in CI |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table below |
+
+Out of scope, confirmed untouched: H3 (relay topology, relay-ticket
+auth), H4(b) (transport/TLS enforcement), H5 (Docker lockfile
+reproducibility), H6 (mobile CI immutability/native acceptance gates).

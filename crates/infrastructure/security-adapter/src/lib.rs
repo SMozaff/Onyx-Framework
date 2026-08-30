@@ -7,10 +7,12 @@ pub mod authority;
 pub mod password;
 pub mod rate_limiter;
 pub mod secret_provider;
+pub mod token_revocation;
 pub mod user_store;
 
 pub use authority::{Ed25519AuthorityVerifier, Ed25519JwtCodec};
 pub use password::{constant_time_eq, PasswordError, PasswordHasher};
 pub use rate_limiter::{InMemorySlidingWindowRateLimiter, PostgresSlidingWindowRateLimiter};
 pub use secret_provider::EnvironmentSecretProvider;
+pub use token_revocation::{InMemoryTokenRevocationStore, PostgresTokenRevocationStore};
 pub use user_store::{PostgresUserStore, SqliteUserStore};

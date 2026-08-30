@@ -10,6 +10,10 @@ mod mission_lifecycle;
 mod notification_sync;
 #[path = "../../../tests/end-to-end/p2p_sync.rs"]
 mod p2p_sync;
+#[path = "../../../tests/end-to-end/production_bootstrap.rs"]
+mod production_bootstrap;
+#[path = "../../../tests/end-to-end/session_revocation.rs"]
+mod session_revocation;
 #[path = "../../../tests/end-to-end/task_workflow.rs"]
 mod task_workflow;
 #[path = "../../../tests/end-to-end/test_harness.rs"]

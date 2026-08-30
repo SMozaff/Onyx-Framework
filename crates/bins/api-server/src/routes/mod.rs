@@ -12,7 +12,7 @@ pub mod relay;
 pub mod todo_admin;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     str::FromStr,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use audit_application::AuditWriter;
 use axum::{
     extract::State,
-    http::{HeaderMap, Method, StatusCode},
+    http::{HeaderMap, HeaderValue, Method, StatusCode},
     middleware,
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -34,10 +34,11 @@ use persistence_sqlite::{SqliteRepository, SqliteUnitOfWorkFactory};
 use platform_kernel::{ObjectId, OrganizationId};
 use query_application::{IdempotencyError, IdempotencyStore, Repository, UnitOfWorkFactory};
 use security_adapter::{
-    Ed25519JwtCodec, EnvironmentSecretProvider, InMemorySlidingWindowRateLimiter, PasswordHasher,
-    PostgresSlidingWindowRateLimiter, PostgresUserStore, SqliteUserStore,
+    Ed25519JwtCodec, EnvironmentSecretProvider, InMemorySlidingWindowRateLimiter,
+    InMemoryTokenRevocationStore, PasswordHasher, PostgresSlidingWindowRateLimiter,
+    PostgresTokenRevocationStore, PostgresUserStore, SqliteUserStore,
 };
-use security_application::{RateLimiter, SecretProvider, UserStore};
+use security_application::{RateLimiter, SecretProvider, TokenRevocationStore, UserStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -46,8 +47,8 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     PgPool, SqlitePool,
 };
-use tokio::sync::{broadcast, RwLock};
-use tower_http::cors::{Any, CorsLayer};
+use tokio::sync::broadcast;
+use tower_http::cors::CorsLayer;
 
 use crate::query_handler::ProjectionPool;
 
@@ -68,7 +69,12 @@ pub struct ApiState {
     pub unit_factory: Arc<dyn UnitOfWorkFactory>,
     pub idempotency_store: Arc<dyn IdempotencyStore>,
     pub events: broadcast::Sender<Value>,
-    pub revoked_tokens: Arc<RwLock<HashSet<String>>>,
+    /// Durable, shared token/session revocation (audit finding H-02).
+    /// Backed by Postgres in production (and any deployment with a
+    /// governance or primary Postgres pool); an in-memory fallback only
+    /// for a pure-SQLite, single-instance dev/test composition. See
+    /// `security_application::ports::token_revocation`.
+    pub token_revocation_store: Arc<dyn TokenRevocationStore>,
     pub secret_provider: Arc<dyn SecretProvider>,
     pub rate_limiter: Arc<dyn RateLimiter>,
     pub audit_writer: Arc<dyn AuditWriter>,
@@ -106,6 +112,17 @@ pub struct ApiState {
     /// dials `/api/relay/:target`; see `routes::relay` for why presence is
     /// per-instance and what that means for horizontal scaling.
     pub relay_registry: relay::RelayRegistry,
+    /// Explicit CORS origin allow-list (audit finding H-03 / hardening
+    /// track H4(a)), parsed once at startup from
+    /// `ONYX_CORS_ALLOWED_ORIGINS`. `None` means "reflect any origin"
+    /// (`tower_http::cors::Any`) — the unchanged, permissive default
+    /// outside production, so every existing local dev/test workflow
+    /// (web-ui's and admin-shell's Vite dev servers, desktop-shell's
+    /// webview, mobile emulators) keeps working exactly as before.
+    /// `ApiState::new` refuses to start in production without this being
+    /// `Some` and non-empty — see its own comment for why a concrete
+    /// default cannot be hardcoded here.
+    pub cors_allowed_origins: Option<Vec<HeaderValue>>,
 }
 
 /// The storage-backend-specific handles `ApiState::new` assembles, before
@@ -250,44 +267,99 @@ impl ApiState {
         if environment == "production" && governance_url.is_none() {
             anyhow::bail!("ONYX_GOVERNANCE_DATABASE_URL is required in production");
         }
-        let (rate_limiter, audit_writer): (Arc<dyn RateLimiter>, Arc<dyn AuditWriter>) =
-            if let Some(url) = governance_url {
-                let governance_pool = PgPoolOptions::new()
-                    .max_connections(10)
-                    .connect(&url)
-                    .await?;
-                sqlx::migrate!("../../../migrations/postgres")
-                    .run(&governance_pool)
-                    .await?;
-                (
-                    Arc::new(PostgresSlidingWindowRateLimiter::new(
-                        governance_pool.clone(),
-                    )),
-                    Arc::new(HashChainAuditWriter::postgres(governance_pool)),
-                )
-            } else if let Some(pool) = primary_postgres_pool {
-                (
-                    Arc::new(PostgresSlidingWindowRateLimiter::new(pool.clone())),
-                    Arc::new(HashChainAuditWriter::postgres(pool)),
-                )
-            } else {
-                let pool = sqlite_pool.expect("SQLite composition must retain its pool");
-                (
-                    Arc::new(InMemorySlidingWindowRateLimiter::default()),
-                    Arc::new(HashChainAuditWriter::sqlite(pool)),
-                )
-            };
+
+        // H-03 / H4(a): explicit CORS origin allow-list, driven by config
+        // rather than hardcoded. A concrete origin list cannot honestly be
+        // hardcoded here: confirmed by reading this repo's actual
+        // deployment config (deploy/helm/, deploy/docker/) that neither
+        // `web-ui` nor `admin-shell` has a Dockerfile, Helm chart, or
+        // ingress entry at all today — both currently exist only as local
+        // Vite dev servers (ports 5173/5174 respectively; see their
+        // vite.config.ts). Only `api-server` itself is deployed
+        // (`deploy/helm/onyx-api`, host `api.onyx.example.com`). Since no
+        // real production origin for either browser client has been
+        // decided or deployed, this is properly a deployment-time config
+        // value, not something this code can guess — set
+        // `ONYX_CORS_ALLOWED_ORIGINS` (comma-separated) to whatever origin(s)
+        // web-ui/admin-shell actually get deployed under once that happens.
+        let cors_allowed_origins = {
+            let configured = std::env::var("ONYX_CORS_ALLOWED_ORIGINS").ok();
+            let parsed = configured
+                .as_deref()
+                .map(|list| {
+                    list.split(',')
+                        .map(str::trim)
+                        .filter(|origin| !origin.is_empty())
+                        .map(HeaderValue::from_str)
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()
+                .map_err(|error| {
+                    anyhow::anyhow!("ONYX_CORS_ALLOWED_ORIGINS contains an invalid origin: {error}")
+                })?
+                .filter(|origins| !origins.is_empty());
+            if environment == "production" && parsed.is_none() {
+                anyhow::bail!(
+                    "ONYX_CORS_ALLOWED_ORIGINS is required in production (audit finding H-03): \
+                     no deployed origin exists yet for web-ui/admin-shell in this repo's \
+                     deploy/ config, so a default cannot be assumed -- set it explicitly to \
+                     the real deployed origin(s) of every trusted browser client"
+                );
+            }
+            parsed
+        };
+        let (rate_limiter, audit_writer, token_revocation_store): (
+            Arc<dyn RateLimiter>,
+            Arc<dyn AuditWriter>,
+            Arc<dyn TokenRevocationStore>,
+        ) = if let Some(url) = governance_url {
+            let governance_pool = PgPoolOptions::new()
+                .max_connections(10)
+                .connect(&url)
+                .await?;
+            sqlx::migrate!("../../../migrations/postgres")
+                .run(&governance_pool)
+                .await?;
+            (
+                Arc::new(PostgresSlidingWindowRateLimiter::new(
+                    governance_pool.clone(),
+                )),
+                Arc::new(HashChainAuditWriter::postgres(governance_pool.clone())),
+                Arc::new(PostgresTokenRevocationStore::new(governance_pool)),
+            )
+        } else if let Some(pool) = primary_postgres_pool {
+            (
+                Arc::new(PostgresSlidingWindowRateLimiter::new(pool.clone())),
+                Arc::new(HashChainAuditWriter::postgres(pool.clone())),
+                Arc::new(PostgresTokenRevocationStore::new(pool)),
+            )
+        } else {
+            let pool = sqlite_pool.expect("SQLite composition must retain its pool");
+            (
+                Arc::new(InMemorySlidingWindowRateLimiter::default()),
+                Arc::new(HashChainAuditWriter::sqlite(pool)),
+                Arc::new(InMemoryTokenRevocationStore::default()),
+            )
+        };
 
         let password_hasher = Arc::new(PasswordHasher::new());
 
-        // --- Fixed seeded admin account (replaces token-gated bootstrap) ---
+        // --- Fixed seeded admin account: development/test convenience ONLY ---
         //
-        // Per explicit instruction this session: the one-time
+        // A deliberately authorized development shortcut currently seeds a
+        // known administrator credential on an empty database. The
+        // implementation clearly documents the tradeoff, so this is not an
+        // undisclosed implementation error. However, the exception is not
+        // sufficiently isolated from production execution and therefore
+        // remains a production release blocker (audit finding H-01
+        // follow-up, hardening track H1) — fixed here.
+        //
+        // Per explicit instruction the session this was added: the one-time
         // `POST /api/admin/bootstrap` flow (token-gated, see
         // routes/admin.rs) was blocking a Windows Codex agent run with a
         // Windows Credential Manager "secret longer than platform limit"
         // error while it tried to establish admin-shell credentials. Rather
-        // than debug that further, a fixed admin account is now seeded
+        // than debug that further, a fixed admin account was seeded
         // automatically on first startup (when the `users` table is empty),
         // exactly once, the same way `seed_if_empty` above seeds mission/
         // task/notification fixtures.
@@ -323,15 +395,28 @@ impl ApiState {
         // account now exists with a fixed, known password the moment the
         // server starts against an empty database, no token or HTTP call
         // required. Anyone with a copy of this source or binary knows the
-        // login. Acceptable only for the internal, non-public office
-        // test-drive this milestone targets — explicitly requested despite
-        // this tradeoff being raised. `/api/admin/bootstrap` itself
-        // (routes/admin.rs) is untouched and still works exactly as before
-        // for any *additional* accounts; it will just correctly refuse to
-        // create a second "first" admin once this seeded one exists
-        // (BOOTSTRAP_ALREADY_COMPLETED), same as it always has once any
-        // user exists.
-        if user_store.count().await? == 0 {
+        // login.
+        //
+        // H1 fix: this is now gated behind an explicit, unambiguous
+        // non-production signal — `ONYX_ENV` being anything other than
+        // literally `"production"` (unset defaults to `"development"`
+        // above) — not merely "the users table happens to be empty",
+        // which is equally true of a fresh production install. A fresh
+        // production database (`ONYX_ENV=production`) NEVER seeds this
+        // account, full stop; the earlier top-of-function checks already
+        // guarantee `ONYX_ENV=production` has a real Postgres primary, a
+        // real `ONYX_AUTHORITY_SIGNING_KEY`, and a real
+        // `ONYX_GOVERNANCE_DATABASE_URL`, so production's *only* path to a
+        // first admin is the pre-existing, untouched, token-gated
+        // `POST /api/admin/bootstrap` flow (`ONYX_BOOTSTRAP_TOKEN`,
+        // routes/admin.rs) — restored to being the authoritative
+        // production path rather than a fallback nothing production-side
+        // ever exercised. `/api/admin/bootstrap` itself is unmodified and
+        // still works exactly as before for any *additional* accounts; it
+        // will just correctly refuse to create a second "first" admin once
+        // any user exists (`BOOTSTRAP_ALREADY_COMPLETED`), same as it
+        // always has.
+        if environment != "production" && user_store.count().await? == 0 {
             let password_hash = password_hasher
                 .hash(SEEDED_ADMIN_PASSWORD)
                 .map_err(|e| anyhow::anyhow!("failed to hash seeded admin password: {e}"))?;
@@ -348,7 +433,7 @@ impl ApiState {
                 })
                 .await?;
             tracing::warn!(
-                "seeded fixed admin account 'All-Father' (see routes/mod.rs comment for context/tradeoff)"
+                "seeded fixed admin account 'All-Father' (development/test only — see routes/mod.rs comment for context/tradeoff)"
             );
         }
 
@@ -365,7 +450,7 @@ impl ApiState {
             unit_factory,
             idempotency_store,
             events,
-            revoked_tokens: Arc::new(RwLock::new(HashSet::new())),
+            token_revocation_store,
             secret_provider,
             rate_limiter,
             audit_writer,
@@ -373,6 +458,7 @@ impl ApiState {
             user_store,
             password_hasher,
             relay_registry: relay::RelayRegistry::new(),
+            cors_allowed_origins,
         })
     }
 
@@ -403,6 +489,23 @@ pub fn router(state: ApiState) -> Router {
         state.clone(),
         crate::middleware::rate_limit::rate_limit_command,
     ));
+    // H4(a): PUT added -- /api/admin/mobile-access and /api/admin/profiles
+    // are both real, currently-registered PUT routes (see below); neither
+    // was in the previous allow-list, so a browser-based caller failed
+    // CORS preflight on either. Audited every other `.route(...)` call in
+    // this router for its actual registered methods: everything else here
+    // is GET or POST only, so no further methods are needed.
+    let cors_methods = [Method::GET, Method::POST, Method::PUT, Method::OPTIONS];
+    let cors_layer = match state.cors_allowed_origins.clone() {
+        Some(origins) => CorsLayer::new()
+            .allow_origin(origins)
+            .allow_headers(tower_http::cors::Any)
+            .allow_methods(cors_methods),
+        None => CorsLayer::new()
+            .allow_origin(tower_http::cors::Any)
+            .allow_headers(tower_http::cors::Any)
+            .allow_methods(cors_methods),
+    };
     Router::new()
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/ready", get(readiness))
@@ -497,12 +600,7 @@ pub fn router(state: ApiState) -> Router {
             state.clone(),
             crate::middleware::rate_limit::observe_request,
         ))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_headers(Any)
-                .allow_methods([Method::GET, Method::POST, Method::OPTIONS]),
-        )
+        .layer(cors_layer)
         .with_state(state)
 }
 
@@ -684,6 +782,13 @@ pub fn unix_seconds() -> u64 {
         .as_secs()
 }
 
+/// Hashes a raw bearer token for storage in `token_revocation_store`
+/// (audit finding H-02) — the store must never hold raw, replayable
+/// tokens, only a one-way digest of them.
+pub fn token_hash(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
 /// Mints a signed token for an **already-authenticated** principal.
 ///
 /// Audit finding H-01: this previously hardcoded `sub`, `username` and
@@ -767,9 +872,6 @@ pub async fn validate_token(
     token: &str,
     expected_type: &str,
 ) -> Result<TokenClaims, ApiError> {
-    if state.revoked_tokens.read().await.contains(token) {
-        return Err(ApiError::unauthorized(uuid::Uuid::new_v4().to_string()));
-    }
     let secret = state
         .secret_provider
         .get("ONYX_AUTHORITY_SIGNING_KEY")
@@ -785,6 +887,27 @@ pub async fn validate_token(
         || claims.token_type != expected_type
     {
         return Err(ApiError::unauthorized(uuid::Uuid::new_v4().to_string()));
+    }
+    // H-02: two independent revocation checks against the shared store —
+    // see security_application::ports::token_revocation for why both
+    // exist. Either one failing rejects the token.
+    let revoked = state
+        .token_revocation_store
+        .is_token_revoked(&token_hash(token))
+        .await
+        .map_err(|_| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
+    if revoked {
+        return Err(ApiError::unauthorized(uuid::Uuid::new_v4().to_string()));
+    }
+    if let Some(revoked_before) = state
+        .token_revocation_store
+        .user_revoked_before(&claims.sub)
+        .await
+        .map_err(|_| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?
+    {
+        if claims.iat < revoked_before {
+            return Err(ApiError::unauthorized(uuid::Uuid::new_v4().to_string()));
+        }
     }
     Ok(claims)
 }
