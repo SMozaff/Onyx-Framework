@@ -1,0 +1,31 @@
+{{- if .Values.ingress.enabled }}
+# A second Ingress object for onyx-api's own host, carrying only the
+# /api/relay path -- see values.yaml's ingress comment for why this
+# actually routes relay traffic here rather than to onyx-api's scaled
+# Rollout, instead of merely hoping clients dial the right place.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "onyx-api-relay.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  annotations:
+    # WebSocket connections are long-lived; the default proxy-read-timeout
+    # would silently kill an idle-but-open relay connection.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ .Values.ingress.tlsSecret }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /api/relay
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "onyx-api-relay.fullname" . }}
+                port: {name: http}
+{{- end }}

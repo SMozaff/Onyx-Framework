@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { getServerAddress, isPlausibleServerAddress, setServerAddress } from "@/utils/serverAddress";
+import {
+  getServerAddress,
+  isPlausibleServerAddress,
+  isSecureEnoughForProduction,
+  setServerAddress,
+} from "@/utils/serverAddress";
 
 const LOCAL_ADDRESS = "http://127.0.0.1:3000";
 type ConnectionMode = "local" | "network";
@@ -28,6 +33,11 @@ export default function ConnectionSettings() {
     if (!isPlausibleServerAddress(normalized)) {
       setStatus("error");
       setMessage("Enter a full address including http:// or https://.");
+      return;
+    }
+    if (!isSecureEnoughForProduction(normalized)) {
+      setStatus("error");
+      setMessage("For security, only https:// addresses (or http://127.0.0.1 on this computer) can be saved.");
       return;
     }
     setStatus("testing");

@@ -596,6 +596,12 @@ pub fn router(state: ApiState) -> Router {
         // Cloud Relay (Part II §8.2). The path segment is the replica being
         // dialled, matching the URL CloudRelayTransport::connect builds.
         .route("/api/relay/:target_id", get(relay::relay_route))
+        // Mints the short-lived relay ticket relay_route above requires
+        // (H4(b)) -- deliberately a sibling of /api/relay rather than a
+        // child path (`/api/relay/ticket`), so the dedicated relay
+        // Deployment's `/api/relay` Ingress prefix rule cannot also catch
+        // this route; see routes::relay::issue_ticket's doc comment.
+        .route("/api/relay-ticket", post(relay::issue_ticket))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::rate_limit::observe_request,

@@ -4922,3 +4922,210 @@ set getting one extra rejected request; the alternative (a token that
 should be dead staying valid) is the actual security property H2 exists
 to close, so the tradeoff is the right one. Pushed as `67ebf8b`; a second
 `workflow_dispatch` re-verifies both new tests for real against this fix.
+
+## Hardening H3 (relay topology isolation) and H4(b) (transport security)
+
+Two of the audit's remaining tracks, deliberately scoped together because both
+touch `crates/bins/api-server/src/routes/relay.rs` (H1/H2/H4(a) landed
+separately as commit `540682c`; H5/H6 remain future work).
+
+### Discrepancy resolved first: "3-20" vs "5-30" replicas
+
+The audit cited "3-20 replicas"; a direct check of
+`deploy/helm/onyx-api/values-production.yaml` found `replicaCount: 5` and
+`autoscaling: {minReplicas: 5, maxReplicas: 30}` instead. Both numbers are
+real and current, not a stale audit figure: `deploy/helm/onyx-api/values.yaml`
+(the base chart's own defaults, read directly rather than assumed) has
+`replicaCount: 3` / `autoscaling: {minReplicas: 3, maxReplicas: 20}` --
+exactly the audit's figure. `values-production.yaml` is an environment
+overlay applied via `-f values-production.yaml` at deploy time, raising the
+production numbers to 5/5-30. Neither file is wrong; they are different
+layers of the same Helm chart. As anticipated, the exact number does not
+change either fix below -- what matters is "more than one replica,
+autoscaled," which is true under either figure.
+
+### H3 -- Relay topology isolation
+
+**Diagnosis confirmed.** `RelayRegistry` (`routes/relay.rs`) is genuinely
+in-memory, per-process peer presence with no cross-process forwarding. Two
+users landed on different `onyx-api` replicas could not reach each other over
+Cloud Relay -- a silent correctness failure, not a crash, exactly as
+described.
+
+**Code-coupling check performed, not assumed.** Read `relay_route` and
+`serve_relay` in full before deciding: their only real dependencies are
+`ApiState::relay_registry`, `ApiState::secret_provider`, and
+`ApiState::token_revocation_store` (via `validate_token`) -- narrow. But
+`ApiState::new` unconditionally constructs the *entire* application state on
+every boot (every repository, migrations, the rate limiter, the audit
+writer, the password hasher, the user store) with no lighter-weight
+constructor, and `router()` wires every route into one `Router`
+unconditionally. Splitting relay into a genuinely separate binary would mean
+introducing a second, parallel "minimal ApiState" construction path and a
+second router -- real new surface area, and a second thing to keep in sync
+with every future `ApiState` field. That is a bigger, riskier change than
+"immediate containment" calls for.
+
+**Design chosen: same binary, separate Helm release, decoupled routing.**
+New chart `deploy/helm/onyx-api-relay/` reuses the exact `onyx-api` container
+image (confirmed via `deploy/docker/api-server.Dockerfile` -- no new
+Dockerfile needed) but is deployed as its own release:
+
+- `templates/deployment.yaml` hardcodes `replicas: 1` directly in the
+  template -- not `{{ .Values.replicaCount }}` -- and the value is not
+  exposed in `values.yaml` at all. This is deliberate: a plain Deployment
+  (no Argo `Rollout`, no HPA, no canary) whose replica count cannot be
+  changed by any values override, environment file, or `helm upgrade --set`,
+  because there is nothing to override. Uses `strategy: {type: Recreate}`
+  rather than the default `RollingUpdate`, so a deploy never briefly runs two
+  pods of this Deployment (which the default 25% `maxSurge` would round up to
+  for a single-replica Deployment) -- a short full outage of relay during
+  deploys, in exchange for the single-replica invariant genuinely never being
+  violated even transiently.
+- A second `Ingress` object (`templates/ingress.yaml`) on the *same* host as
+  `onyx-api`'s own ingress, carrying only the `/api/relay` path.
+  nginx-ingress-controller merges every Ingress object for a given host into
+  one compiled routing table and matches by path specificity regardless of
+  which Ingress resource (or Helm release) a rule came from, so `/api/relay`
+  always wins over `onyx-api`'s own `/` catch-all -- this is what actually
+  routes relay WebSocket traffic to the dedicated pod, not an assumption that
+  clients dial the right place. `/api/relay-ticket` (new, see H4(b) below) is
+  deliberately a sibling path, not a child of `/api/relay`, specifically so
+  this Prefix rule does not also catch ticket-minting traffic and pull it off
+  the scaled, autoscaled `onyx-api` fleet where it belongs (minting is
+  stateless and cheap).
+- `RelayRegistry`'s own doc comment (`routes/relay.rs`) now states this is
+  the actual, enforced production topology, not an aspirational note about a
+  known limitation -- corrected as part of this change, not left stale.
+
+**Deferred, explicitly, not built:** the long-term fix is shared presence
+plus inter-node pub/sub (Redis or NATS) so relay itself can run more than one
+replica. Moving `RelayRegistry` into Postgres alone -- the audit's own
+rejected alternative -- would only have fixed presence *discovery*, not
+actual cross-process WebSocket frame forwarding, which needs a real message
+bus between nodes. Not attempted here; this task is containment only.
+
+**Real verification, not a YAML review.** Installed Helm 3.15.3 (matching
+`ci.yml`'s pinned version) and actually rendered the chart:
+- `helm template ... --set replicaCount=5` on `onyx-api-relay` still renders
+  `replicas: 1` -- confirmed live, not just claimed: the override has zero
+  effect because the value was never wired to anything.
+- Confirmed exactly one `Deployment` and zero `HorizontalPodAutoscaler`
+  objects render from the chart.
+- Rendered `onyx-api` with `-f values-production.yaml` and confirmed its own
+  HPA still renders with `minReplicas: 5` / `maxReplicas: 30`, unaffected by
+  the new chart's existence -- ordinary API replicas keep scaling
+  independently.
+- `helm lint` passes on the new chart.
+- All of the above is now also a real CI step (`deploy-check` job, "Verify
+  the relay chart genuinely renders single-replica (H3)"), not just something
+  run once locally.
+
+### H4(b) -- Transport security
+
+**Item 1: plaintext HTTP for non-loopback Admin connections.**
+
+Confirmed two real, independent save paths for the server address, not one:
+`Login.tsx`'s `ConnectionSettings` component and `Settings.tsx`'s
+`ServerConnectionSettings` -- both fixed. Checked for an existing client-side
+equivalent to the server's `ONYX_ENV` first, rather than assuming one exists
+or inventing a new one blind: none exists anywhere in `admin-shell/ui`. One
+was not needed, though -- Vite's own, already-real build-mode flag,
+`import.meta.env.PROD`, already exactly tracks "is this the packaged,
+distributed app" vs. "a local `npm run dev` / `tauri dev` session," since
+`package.json`'s `build` script (what `tauri build` invokes to produce the
+real shipped app) always runs `vite build`, which sets `PROD = true`
+unconditionally regardless of `--mode`. Introducing a parallel
+`ONYX_ENV`-style variable would just be a second flag carrying the same
+meaning Vite already provides for free.
+
+`isSecureEnoughForProduction()` (`utils/serverAddress.ts`): allows any
+`https://` address, allows `http://` only to `127.0.0.1`/`localhost`/`::1`,
+rejects every other `http://` address, and is a no-op (returns `true`
+unconditionally) outside `import.meta.env.PROD` so every local dev/test
+workflow is unchanged. Wired into both save paths (reject before the health
+check even runs) and, as a backstop, into `api/client.ts`'s request
+interceptor -- covering an address saved by a build predating this check, or
+one edited directly in `localStorage`, not just the two UI save flows.
+
+**Real verification, not a code read.** No test framework exists in
+`admin-shell/ui` at all (no vitest/jest, no `test` script in `package.json`)
+-- confirmed by searching, not assumed; adding one for a single check would
+be a real scope expansion beyond this task. Instead ran the actual production
+build (`npm run build` -- real `tsc -b && vite build`, the same command
+`tauri build` invokes) and inspected the emitted bundle directly:
+`dist/assets/client-*.js` contains the compiled `isSecureEnoughForProduction`
+with the `if (!import.meta.env.PROD) return true` branch entirely absent --
+Vite statically evaluated `import.meta.env.PROD` to the literal `true` for
+every `vite build` invocation and dead-code-eliminated the bypass, proving
+the guard is unconditionally live in the real, shipped artifact, not merely
+reachable in theory. `tsc -b` (part of the same build command) and `oxlint`
+both pass clean.
+
+**Item 2: relay auth token in the WebSocket query string.**
+
+Confirmed present exactly as described: `/api/relay/:target_id?token=...`
+put the real, hour-long, full-API-scope bearer access token in a URL.
+Replaced with a purpose-built relay ticket:
+
+- **New route**: `POST /api/relay-ticket` (`routes/relay::issue_ticket`),
+  authenticated normally (`authenticate_headers`), takes `{"target_id": ...}`.
+  Deliberately a normal, stateless route left on the scaled `onyx-api` fleet
+  (see the Ingress placement above) -- it reads only the shared JWT signing
+  key every replica already has, so it does not need the single relay
+  replica the WebSocket upgrade itself requires.
+- **Lifetime**: 30 seconds (`RELAY_TICKET_TTL_SECONDS`), enforced by the
+  exact same `exp` check `validate_token` already applies to access/refresh
+  tokens -- long enough to cover minting-then-connecting over a real network
+  including one retry, short enough that a leaked ticket is nearly worthless
+  by the time anyone could act on it.
+- **Scope**: bound to the specific `target_id` requested, carried in the
+  reused `TokenScope::object_id` field. `relay_route` rejects a ticket
+  whose `object_id` does not match the path segment actually dialled --
+  proven directly by
+  `relay_ticket_cannot_be_used_against_a_different_target` (new test).
+- **Single-use**: enforced by `RelayRegistry::redeem_ticket_once`, keyed on
+  the ticket's own `jti`. This is intentionally process-local, in-memory
+  state -- which would have been the wrong choice before this task (see H2's
+  reasoning for `revoked_tokens` in the earlier entry), but is the *correct*
+  choice here specifically because H3 (above) now guarantees exactly one
+  relay process exists: there is no cross-replica redemption race to defend
+  against, because there is only ever one replica. Proven directly by
+  `relay_ticket_cannot_be_redeemed_twice` (new test): an identical, unexpired,
+  correctly-scoped ticket is refused the second time it is presented.
+- Reuses the existing `TokenClaims`/`Ed25519JwtCodec` machinery rather than
+  inventing a parallel token format, with a new `token_type` discriminator
+  (`"relay_ticket"`) so a ticket can never be accepted where an access/refresh
+  token belongs or vice versa. `validate_token`'s existing revocation checks
+  (`is_token_revoked`, `user_revoked_before`) apply to tickets for free, so a
+  deactivated user's in-flight ticket is also correctly invalidated.
+
+**Real client fix, not server-only.** The only real, shipping relay client in
+this codebase is `desktop-shell`'s `TungsteniteRelaySocketFactory`
+(`mobile-core`'s equivalent is still `NotYetImplementedSocketFactory`, a
+placeholder -- confirmed, nothing to fix there). Updated it to call
+`POST /api/relay-ticket` over real HTTPS (deriving the ticket endpoint's host
+from the relay's own WebSocket URL, swapping `wss`/`ws` for `https`/`http`)
+before dialling the WebSocket, and to send the returned ticket, not the raw
+bearer token, as the `ticket=` query parameter.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo test -p api-server --release` | 33 passed, 0 failed -- includes all 6 previously-verified tests and both of H1/H2's prior new tests (via the shared harness in the earlier task), plus 2 new relay-ticket tests, with zero regressions |
+| `cargo test --workspace --release --no-fail-fast` (real D-Bus/gnome-keyring session) | 559 passed, 19 failed -- the identical, already-disclosed set from the prior task (7 testcontainers/Docker-dependent e2e tests, 12 `persistence-postgres` direct-Postgres tests), zero new or unexplained failures |
+| `helm lint deploy/helm/onyx-api-relay` | clean |
+| `helm template` single-replica proof (see H3 above) | confirmed live, both locally and as a new CI step |
+| `npm run build` (admin-shell/ui) | clean; production bundle inspected directly and confirms the H4(b) item 1 guard is unconditionally compiled in |
+| `oxlint` (admin-shell/ui) | clean |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+Out of scope, confirmed untouched: the long-term shared-bus relay redesign
+(documented above as deferred), H5 (Docker lockfile reproducibility), H6
+(mobile CI immutability/native acceptance gates), and `/api/events`'s own,
+separate `?token=` query parameter (a different route, not part of this
+task).

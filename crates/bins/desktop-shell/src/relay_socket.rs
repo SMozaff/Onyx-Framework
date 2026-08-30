@@ -49,6 +49,62 @@ fn encode_query_value(value: &str) -> String {
     out
 }
 
+/// Mints a short-lived, single-use relay ticket over a normal authenticated
+/// HTTPS call (audit finding H4(b) item 2), rather than putting the real
+/// bearer access token in the WebSocket URL.
+///
+/// Derives the ticket-minting endpoint from `relay_url` (swapping
+/// `wss`/`ws` for `https`/`http`, keeping the same host) rather than taking
+/// a second configured URL: the relay ticket endpoint always lives on the
+/// same host as the relay itself, and a second, independently-configurable
+/// URL would be one more place for the two to drift out of sync with no
+/// benefit.
+async fn mint_relay_ticket(
+    relay_url: &str,
+    target_id: uuid::Uuid,
+    bearer_token: &str,
+) -> Result<String, TransportError> {
+    let mut ticket_url = reqwest::Url::parse(relay_url)
+        .map_err(|e| TransportError::Platform(format!("invalid relay URL: {e}")))?;
+    let https_scheme = match ticket_url.scheme() {
+        "wss" => "https",
+        "ws" => "http",
+        other => other,
+    }
+    .to_string();
+    ticket_url
+        .set_scheme(&https_scheme)
+        .map_err(|_| TransportError::Platform("relay URL has an unexpected scheme".to_string()))?;
+    // Deliberately NOT under /api/relay -- see routes::relay's own module
+    // doc comment: that path prefix is reserved for the dedicated,
+    // single-replica relay Deployment's Ingress rule, while minting a
+    // ticket is a cheap, stateless, horizontally-scalable operation that
+    // belongs on the ordinary, autoscaled API fleet instead.
+    ticket_url.set_path("/api/relay-ticket");
+    ticket_url.set_query(None);
+
+    let response = reqwest::Client::new()
+        .post(ticket_url)
+        .bearer_auth(bearer_token)
+        .json(&serde_json::json!({ "target_id": target_id.to_string() }))
+        .send()
+        .await
+        .map_err(|e| TransportError::Platform(format!("relay ticket request failed: {e}")))?;
+    if !response.status().is_success() {
+        return Err(TransportError::Platform(format!(
+            "relay ticket request returned {}",
+            response.status()
+        )));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| TransportError::Platform(format!("invalid relay ticket response: {e}")))?;
+    body["ticket"].as_str().map(str::to_string).ok_or_else(|| {
+        TransportError::Platform("relay ticket response missing 'ticket'".to_string())
+    })
+}
+
 /// Carries this replica's own id because the relay needs it in the handshake:
 /// a connection is registered — and therefore addressable — from the moment it
 /// opens, not lazily from whatever it happens to send first.
@@ -67,21 +123,34 @@ impl RelaySocketFactory for TungsteniteRelaySocketFactory {
     async fn connect(
         &self,
         relay_url: &str,
-        _peer: &PeerInfo,
+        peer: &PeerInfo,
         bearer_token: &str,
         timeout: Duration,
     ) -> Result<Box<dyn RelaySocket>, TransportError> {
-        // The relay authenticates with the same access token the rest of the
-        // API uses, passed as a query parameter rather than an Authorization
-        // header. That is not a stylistic choice: the server reads it via
-        // axum's `Query` extractor exactly as `/api/events` does, and browser
-        // WebSocket clients cannot set request headers at all, so a
-        // header-only scheme would make the relay unreachable from one of the
-        // platforms that has to reach it.
+        // H4(b): mint a narrow, short-lived, single-use ticket scoped to
+        // this specific target replica, rather than sending the real
+        // bearer access token as a URL query parameter -- a credential
+        // valid for the rest of the API for a full hour, sitting in a URL
+        // that can propagate into reverse-proxy/access/diagnostic logs
+        // even over WSS. The ticket is still passed as a query parameter
+        // (browser WebSocket clients cannot set request headers at all,
+        // so a header-only scheme would make the relay unreachable from
+        // one of the platforms that has to reach it — see the module's
+        // prior note on this), but a leaked ticket is worth dramatically
+        // less: it authorizes exactly one connection attempt, to exactly
+        // this target, for a handful of seconds.
+        let target_id = uuid::Uuid::from_bytes(peer.id.0);
+        let ticket = tokio::time::timeout(
+            timeout,
+            mint_relay_ticket(relay_url, target_id, bearer_token),
+        )
+        .await
+        .map_err(|_| TransportError::Timeout)??;
+
         let separator = if relay_url.contains('?') { '&' } else { '?' };
         let url = format!(
-            "{relay_url}{separator}token={}&self={}",
-            encode_query_value(bearer_token),
+            "{relay_url}{separator}ticket={}&self={}",
+            encode_query_value(&ticket),
             uuid::Uuid::from_bytes(self.local_replica.0)
         );
 

@@ -122,6 +122,39 @@ jobs:
           helm lint deploy/helm/onyx-api
           helm lint deploy/helm/onyx-worker
           helm lint deploy/helm/onyx-sync-agent
+          helm lint deploy/helm/onyx-api-relay
+      - name: Verify the relay chart genuinely renders single-replica (H3)
+        # Real proof, not a review of the YAML source: renders the chart
+        # exactly as `helm install` would and asserts the actual output.
+        # Also proves an attempt to override the replica count from the
+        # CLI (the normal way a values.yaml default gets overridden in
+        # this repo's other charts) has no effect, since replicaCount is
+        # deliberately not exposed as a value at all -- see
+        # onyx-api-relay/templates/deployment.yaml's own comment.
+        run: |
+          set -euo pipefail
+          rendered=$(helm template relay-check deploy/helm/onyx-api-relay --set replicaCount=5)
+          echo "$rendered" | grep -E '^\s*replicas: 1$'
+          if echo "$rendered" | grep -qE '^\s*replicas: 5$'; then
+            echo "::error::onyx-api-relay rendered replicas: 5 -- replicaCount must not be settable for this chart"
+            exit 1
+          fi
+          if [ "$(echo "$rendered" | grep -c '^kind: Deployment$')" -ne 1 ]; then
+            echo "::error::expected exactly one Deployment in the rendered onyx-api-relay chart"
+            exit 1
+          fi
+          if echo "$rendered" | grep -qi 'HorizontalPodAutoscaler'; then
+            echo "::error::onyx-api-relay must not define an HPA -- it is deliberately not autoscaled"
+            exit 1
+          fi
+          # Confirms the ordinary, horizontally-scaled onyx-api Rollout is
+          # unaffected by the relay chart's existence -- its own HPA still
+          # renders with its own real min/max, independent of the relay
+          # chart's fixed single replica.
+          api_rendered=$(helm template api-check deploy/helm/onyx-api -f deploy/helm/onyx-api/values-production.yaml)
+          echo "$api_rendered" | grep -q 'kind: HorizontalPodAutoscaler'
+          echo "$api_rendered" | grep -E '^\s*minReplicas: 5$'
+          echo "$api_rendered" | grep -E '^\s*maxReplicas: 30$'
       - name: Terraform validate
         run: |
           terraform -chdir=deploy/terraform init -backend=false
