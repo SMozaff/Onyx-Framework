@@ -5129,3 +5129,246 @@ Out of scope, confirmed untouched: the long-term shared-bus relay redesign
 (mobile CI immutability/native acceptance gates), and `/api/events`'s own,
 separate `?token=` query parameter (a different route, not part of this
 task).
+
+## Hardening H5 (deterministic release builds) and H6 (CI immutability + native acceptance gates)
+
+The last two of six hardening tracks from the production-readiness audit.
+H1/H2/H4(a) (`540682c`/`67ebf8b`/`2024dbe`) and H3/H4(b) (`57b826e`) are both
+already done and CI-confirmed; this task is independent of both (no code
+overlap -- confirmed by reading the diffs, not assumed) and closes the audit
+out.
+
+### H5 -- Deterministic release builds
+
+**Diagnosis confirmed, and it turned out to run deeper than the audit's
+single cited example.** Direct grep confirmed the buggy
+`cargo generate-lockfile && cargo build --locked --release` pattern in all 5
+Dockerfiles (`api-server`, `desktop-shell`, `migration-tool`, `sync-agent`,
+`worker`) -- self-defeating, since regenerating the lockfile immediately
+before a `--locked` build means `--locked` can never catch drift against a
+lockfile it just wrote itself. The exact same pattern was also present in
+`scripts/release.sh` (line 19, immediately before its own `--locked` build)
+-- not mentioned in the task text, found by reading the script in full while
+tracing what `verify_team8_static.py`'s second check (below) actually
+validated.
+
+**Fix:** removed `cargo generate-lockfile &&` from all 5 Dockerfiles, which
+now build `cargo build --locked --release -p <crate>` directly against
+`Cargo.lock` as committed (already present via `COPY . .`). `release.sh`'s
+`cargo generate-lockfile` was replaced with a read-only
+`cargo metadata --locked` check (see below) rather than simply deleted, so a
+stale lockfile is caught with a clear error before a multi-minute release
+build starts, instead of failing confusingly partway through or (worse)
+silently succeeding against freshly-rewritten dependencies.
+
+**`verify_team8_static.py`'s two checks, handled as the task asked --
+distinctly, not blanket-removed:**
+
+- **Line ~100** (Docker pattern): previously required the literal buggy
+  string to be present -- inverted to require the corrected pattern
+  (`cargo build --locked --release` present, `cargo generate-lockfile`
+  absent) in every Dockerfile body.
+- **Line ~267-268** (release workflow/script pairing): read this one's full
+  context before touching it, per the task's explicit instruction, since it
+  visibly combined two different files. Confirmed `release_workflow`
+  (`.github/workflows/release.yml`)'s own `cargo metadata --locked --no-deps`
+  gate was already present in all three of its build jobs, ahead of their
+  own `--locked` builds -- genuinely correct on first read. The
+  `release_script` half required `scripts/release.sh` to literally contain
+  `cargo generate-lockfile` -- which is exactly the same bug being fixed
+  elsewhere, just required by the verifier as if it were a correctness
+  property. Not blanket-removed: replaced with a requirement that
+  `release.sh` contain the same corrected `cargo metadata --locked` gate
+  instead, so the check now enforces the fixed pattern in both files rather
+  than the bug's presence in one of them.
+
+**A second, more consequential bug found by actually testing the "already
+correct" gate, not by reading it.** Before concluding `cargo metadata
+--locked --no-deps` was a legitimate check worth preserving, it was tested
+directly: pinned a workspace dependency (`anyhow`) to an exact version the
+committed `Cargo.lock` cannot satisfy, then ran the exact command. It exited
+`0` -- passed -- despite genuine, real drift. `--no-deps` skips full
+dependency-graph resolution entirely, so `--locked` has nothing left to
+validate against; `cargo metadata --locked` (same command, `--no-deps`
+dropped) correctly failed the identical test with a real
+`failed to select a version for the requirement` error. This means the
+"legitimate" gate the task described was itself silently non-functional
+everywhere it existed: all three `release.yml` build jobs, and a third file
+not mentioned in the task at all -- `.github/workflows/Debug.yml` (a manual,
+Windows-only debug-build workflow), which had the identical broken
+`--no-deps` pattern in three more places. Fixed by dropping `--no-deps` in
+every one of these locations (`release.yml` x3, `Debug.yml` x3,
+`scripts/release.sh`, plus the new `ci.yml` step below), and updated
+`verify_team8_static.py`'s line-267 check accordingly (requires the base
+string present and the broken `--no-deps` variant absent, in both files).
+
+**`ci.yml` had no lockfile-drift gate at all.** Confirmed by grep before
+assuming otherwise: `cargo metadata --locked` appeared nowhere in `ci.yml`.
+A lockfile drifted out of sync with `Cargo.toml` on an ordinary push/PR was
+never caught there -- only at actual release time, if at all (given the
+`--no-deps` bug above, not even then). Added a "Verify locked dependency
+graph" step to the `check` job, placed before Clippy/Build so a stale
+lockfile is reported as exactly that rather than a confusing downstream
+compile error.
+
+**`cargo sqlx prepare --check`, added per the original plan.** This repo
+carries committed `.sqlx/` offline query metadata (`SQLX_OFFLINE=true` in
+`ci.yml`), so a query that changes without regenerating that metadata would
+previously build successfully against the stale cache with no warning.
+Added `cargo sqlx prepare --check --workspace -- --all-targets` (after
+`sqlx-cli` installation and after the `check` job's own migration step,
+since unlike the workspace build itself this genuinely needs a live,
+migrated schema to check queries against).
+
+**Real verification, both properties, not assumed:**
+- Installed Helm... no -- installed a real local PostgreSQL 16 (already
+  present in this sandbox's apt cache) and `sqlx-cli`, ran migrations, then
+  ran `cargo sqlx prepare --check` against the real, current `.sqlx/`
+  metadata: passed silently (exit 0, the correct behavior on a match).
+  Deleted one `.sqlx/query-*.json` file to simulate real drift and reran:
+  failed with `.sqlx is missing one or more queries; you should re-run sqlx
+  prepare` (exit 1) -- restored the file afterward, confirmed `git status`
+  clean.
+- Deliberately staled `Cargo.lock` (pinned `anyhow = "=1.0.200"` in the
+  workspace manifest, a version the lock cannot satisfy, without touching
+  `Cargo.lock`): `cargo metadata --locked` (the corrected command, no
+  `--no-deps`) failed with a real, specific error naming the unsatisfiable
+  requirement; reverted with `git checkout --` and confirmed clean again.
+  This is the actual property H5 exists to guarantee, tested directly
+  rather than inferred from the Dockerfiles looking different.
+- `python3 scripts/verify/verify_team8_static.py`: 363/363 checks pass
+  against the fixed files.
+
+### H6 -- CI immutability (mobile) + native acceptance gates
+
+**Part 1 (done). Diagnosis confirmed exactly as described** in `ci.yml`'s
+`mobile-dart` job: `flutter pub upgrade` ran immediately after `flutter pub
+get`, silently bumping every dependency to the latest version its
+constraints allowed before anything was validated -- a green run proved the
+*upgraded* tree passed, not the tree actually committed in
+`pubspec.lock`. `dart fix --apply || true` ran after that, mutating source
+in place, with `|| true` additionally swallowing any failure from the fix
+step itself so CI never reported whether it even succeeded.
+
+Removed both. Installed a real Flutter 3.47.2 SDK in this sandbox (not
+previously present) to verify the replacement job for real rather than by
+inspection:
+- `flutter pub get` alone (no `upgrade`) installs cleanly from the committed
+  `pubspec.lock`.
+- `flutter analyze` (no `dart fix` beforehand) reports **zero issues**
+  against the current tree -- confirmed directly, not assumed, before
+  deciding whether fatal warnings were safe to enable. Since there is no
+  existing backlog, making warnings fatal (dropping `--no-fatal-warnings`)
+  cannot turn CI red for anything unrelated to a given change, so it was
+  enabled outright rather than deferred. This also directly confirms the
+  task's premise: `flutter analyze` alone is sufficient to catch real
+  issues -- this session's own earlier `mobile/lib/net/auth.dart` parser
+  ambiguity was caught by `flutter analyze` directly, never by an auto-fix
+  step, which only ever mutates, never diagnoses.
+- `flutter test`: 16 passed, 1 skipped (the same pre-existing device-lab
+  skip noted below), unaffected by removing the mutation steps.
+- `bash scripts/verify/verify_mobile.sh`: passes.
+
+**Part 2 (scoping only, per the task -- nothing built).** Read all three
+currently-`#[ignore]`d native journeys in full, not just their attribute
+text:
+
+- `tests/end-to-end/p2p_sync.rs` (`journey_6_p2p_sync`) --
+  `#[ignore = "requires signed Team 5 desktop/mobile clients and radio
+  adapters"]`. Empty body (`{}`) -- a reserved slot, not a partially-blocked
+  test.
+- `tests/end-to-end/background_sync.rs` (`journey_7_background_sync`) --
+  `#[ignore = "requires Team 5 iOS BGTask and Android WorkManager release
+  builds"]`. Also an empty body.
+- `tests/end-to-end/notification_sync.rs` (`journey_5_notification_sync`) --
+  `#[ignore = "Team 5 client event integration is not production-complete"]`,
+  with its own doc comment citing "Team 8 ruling R11: keeps client-dependent
+  journeys ignored until Team 5 native-client completion and release signing
+  are available." Also an empty body; its own comment notes the backend
+  half (command/query flow) is already covered elsewhere (Team 6 integration
+  tests) -- this journey is specifically the *client* half.
+
+The mobile-side counterpart, `mobile/test/integration/p2p_sync_test.dart`,
+is instructive about how far the scaffolding for this already goes: it
+gates on `ONYX_MOBILE_DEVICE_TEST=1` and, even when that variable is set,
+its body only calls a fake `triggerSync()` against a mocked API -- the
+env-var gate exists as a naming convention for a future real device-lab
+run, not a working one today.
+
+**Honest assessment, per journey:**
+
+1. **`journey_6_p2p_sync` (Wi-Fi Direct / BLE).** Highest cost, most
+   infrastructure-heavy of the three. These radios cannot be virtualized in
+   any meaningful way -- a cloud CI runner has no Bluetooth/Wi-Fi Direct
+   hardware at all, and there is no credible emulator substitute for actual
+   short-range radio behavior (discovery, pairing, real-world interference,
+   range). Converting this into a real gate needs a physical device lab:
+   at minimum two real phones (one iOS, one Android, per the ignore reason)
+   on a persistent bench or a managed device-farm service with radio
+   support (most cloud device farms, e.g. Firebase Test Lab, explicitly do
+   not support BLE-to-BLE or Wi-Fi Direct pairing between two rented
+   devices in the same session -- this would likely require an
+   in-house/self-hosted lab, not a SaaS farm). Feasibility: low without a
+   real hardware investment and ongoing maintenance (device OS updates,
+   battery/charging management, physical security); the test itself is
+   also going to be flakier than anything running purely on CI hardware,
+   since it's exercising real radio conditions.
+2. **`journey_7_background_sync` (iOS BGTask / Android WorkManager).**
+   Medium cost. Android WorkManager behaves reasonably well in an emulator
+   for basic scheduling, but real fidelity (Doze mode, battery-optimization
+   task killing, actual background execution windows) is only fully
+   trustworthy on real hardware. iOS's BGTaskScheduler is the harder half:
+   the iOS Simulator does not fire background tasks on its own timeline at
+   all -- triggering one requires either a real device or manually invoking
+   the task via a debugger/`simctl` command, which tests *that the handler
+   runs when invoked*, not that the OS actually schedules and fires it
+   under real conditions. A CI-hosted acceptance gate could plausibly cover
+   the "handler executes correctly when triggered" half on
+   simulators/emulators relatively cheaply; the "OS actually decides to run
+   it in the background, on schedule, under real power/network conditions"
+   half realistically still needs real devices. Feasibility: medium --
+   partial automation is achievable now, full-fidelity acceptance testing
+   is not.
+3. **`journey_5_notification_sync` (client notification-event integration).**
+   Lowest cost of the three, but blocked on unfinished native-client work
+   rather than infrastructure alone -- its own ignore reason says the
+   client integration itself is "not production-complete," not that a test
+   environment is missing. Whether this needs real devices or could run on
+   emulators/simulators depends on a fact not yet established from this
+   codebase alone: whether "notification" here means an in-app event
+   delivered over this system's own sync transport (fully emulator-testable
+   -- no OS push infrastructure involved) or an OS-level push notification
+   (would need real or virtual APNs/FCM credentials and device-token
+   plumbing, meaningfully more setup). This should be the first thing a
+   dedicated follow-up task confirms, since it changes the feasibility
+   assessment substantially.
+
+None of this is committed to or built here -- per the task, this is scoping
+for a future, dedicated task, and the three journeys remain `#[ignore]`d.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean (no Rust source changed this task -- Dockerfiles, shell scripts, and workflow YAML only) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo test -p api-server --release` | all passing, no regressions |
+| `cargo test --workspace --release --no-fail-fast` (real D-Bus/gnome-keyring session, and for the first time in this session a real local Postgres instead of none) | 571 passed, 7 failed -- the 7 are the same disclosed `crates/team8-e2e-tests` testcontainers/Docker-dependent journeys as every prior task (no Docker daemon in this sandbox); having a real local Postgres available this time genuinely resolved all 12 of the previously-disclosed `persistence-postgres` failures, confirming those were exactly the infra gap they were always described as, not a masked defect |
+| `python3 scripts/verify/verify_team8_static.py` | 363/363 |
+| Deliberately-stale `Cargo.lock` test (see above) | genuinely fails `cargo metadata --locked`; genuinely passes once reverted |
+| Deliberately-stale `.sqlx/` test (see above) | genuinely fails `cargo sqlx prepare --check`; genuinely passes once restored |
+| `flutter analyze` (real Flutter 3.47.2, installed fresh this session) | 0 issues |
+| `flutter test` | 16 passed, 1 skipped (device-lab journey, see H6 Part 2) |
+| `bash scripts/verify/verify_mobile.sh` | passes |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+### All six hardening tracks are now complete
+
+H1 (production bootstrap), H2 (distributed session revocation), H3 (relay
+topology isolation), H4(a) (CORS), H4(b) (transport security), H5
+(deterministic release builds), and H6 Part 1 (CI immutability) are all
+landed and CI-confirmed. H6 Part 2 (native acceptance gates) is deliberately
+scoped, not built, per the original plan and this task's own instructions --
+its assessment above is the explicit next step for a future, dedicated task.
+This closes out the production-readiness audit as originally scoped.

@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config ca-certificates libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY . .
-RUN cargo generate-lockfile && cargo build --locked --release -p desktop-shell
+RUN cargo build --locked --release -p desktop-shell
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \

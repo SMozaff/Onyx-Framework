@@ -60,6 +60,22 @@ jobs:
           shared-key: "release-build"
       - name: Format
         run: cargo fmt --check
+      # H5: read-only -- fails if Cargo.lock doesn't match Cargo.toml,
+      # without writing anything. Every release.yml build job already has
+      # this ahead of its own --locked build; ci.yml itself had no
+      # equivalent gate at all, so a lockfile drifted out of sync with
+      # Cargo.toml on a regular push/PR was never caught here, only (if
+      # at all) at actual release time. Placed before Clippy/Build so a
+      # stale lockfile is reported as exactly that, not as a confusing
+      # downstream compile error. Deliberately NOT `--no-deps`: tested
+      # directly (deliberately pinning a workspace dependency to a version
+      # the committed lockfile can't satisfy) and confirmed `--no-deps`
+      # makes this check pass regardless of drift, because it skips full
+      # dependency resolution entirely -- there's nothing left for
+      # --locked to check against. Without it, the same test genuinely
+      # fails.
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
@@ -74,6 +90,18 @@ jobs:
       # service container started every prior run with no schema at all.
       - name: Run database migrations
         run: cargo run --package migration-tool -- up
+      # H5: this repo carries committed .sqlx/ offline query metadata
+      # (SQLX_OFFLINE=true above) so sqlx macros compile without a live
+      # database. If a query changes but .sqlx/ isn't regenerated, the
+      # build still succeeds against the stale cached metadata -- this is
+      # the only thing that catches that drift. Needs sqlx-cli (not a
+      # built-in cargo subcommand) and, unlike the workspace build itself,
+      # a real schema to check queries against -- placed after migrations
+      # run above, not before.
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres,rustls --locked
+      - name: Verify sqlx offline metadata is current
+        run: cargo sqlx prepare --check --workspace -- --all-targets
       # desktop-shell's secure_storage tests exercise the real `keyring`
       # crate against a live Secret Service, deliberately not mocked (see
       # keyring_adapter.rs's own test doc comments). A bare ubuntu-latest
@@ -317,12 +345,26 @@ jobs:
           cache: true
       - name: Complete Flutter-owned platform scaffold
         run: bash tool/ensure_platform_scaffold.sh
+      # H6: install from the committed pubspec.lock only. `flutter pub
+      # upgrade` used to run right after this, silently bumping every
+      # dependency to its latest allowed version before validating
+      # anything -- a green run proved the *upgraded* tree passed, not
+      # the tree actually checked in. `dart fix --apply || true` used to
+      # run after that: it mutates source in place, and the `|| true`
+      # additionally swallowed any failure from the fix step itself, so
+      # CI never even reported whether it succeeded. Neither mutation is
+      # needed for real validation -- `flutter analyze` below is the
+      # actual check, confirmed independently this same session: an
+      # earlier `auth.dart` syntax error was caught by `flutter analyze`
+      # directly, not by an auto-fix step.
       - run: flutter pub get
-      - run: flutter pub upgrade
-      - name: Apply automatic fixes (dart fix)
-        run: dart fix --apply || true
-      - name: Analyze (allow warnings for now)
-        run: flutter analyze --no-fatal-warnings
+      # H6: fatal by default (no --no-fatal-warnings). Checked the real,
+      # current warning count first rather than assuming: `flutter
+      # analyze` reports zero issues against this tree today, so there is
+      # no backlog to clear or defer -- turning warnings fatal here
+      # cannot turn CI red for anything unrelated to a given change.
+      - name: Analyze
+        run: flutter analyze
       - run: flutter test
       - name: Mobile structural contract
         working-directory: .
