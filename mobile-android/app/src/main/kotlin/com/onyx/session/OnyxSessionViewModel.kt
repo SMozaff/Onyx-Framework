@@ -45,7 +45,18 @@ private const val DEFAULT_CLOUD_RELAY_ENDPOINT = "wss://relay.onyx.invalid/v1"
 sealed interface OnyxUiState {
     data object Loading : OnyxUiState
     data object NeedsLogin : OnyxUiState
-    data class Ready(val username: String, val organizationId: String) : OnyxUiState
+
+    /**
+     * `handle`/`userId` were added for A4: [com.onyx.controller.OnyxController]
+     * (the shared-refresh, single-source-of-truth ViewModel every real
+     * screen reads from -- Kotlin's port of `ui/app.dart`'s
+     * `OnyxController`) needs both the live native handle and the
+     * caller's own user id to build real command envelopes
+     * ([com.onyx.model.CommandEnvelopeFactory]), exactly mirroring how
+     * Dart's `main.dart::initializeFfiMobileCore` sets
+     * `api.envelopeFactory` right after construction.
+     */
+    data class Ready(val username: String, val organizationId: String, val userId: String, val handle: Long) : OnyxUiState
     data class StartupError(val message: String, val technicalDetail: String) : OnyxUiState
 }
 
@@ -99,10 +110,10 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             _state.value = OnyxUiState.NeedsLogin
             return
         }
-        openMobileCoreAndGoReady(organizationId, username)
+        openMobileCoreAndGoReady(organizationId, userId, username)
     }
 
-    private suspend fun openMobileCoreAndGoReady(organizationId: String, username: String) {
+    private suspend fun openMobileCoreAndGoReady(organizationId: String, userId: String, username: String) {
         try {
             freeNativeHandleIfAny()
             val dbPath = File(getApplication<Application>().filesDir, "onyx.sqlite").absolutePath
@@ -132,7 +143,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             }
 
             scheduleProactiveTokenRefresh()
-            _state.value = OnyxUiState.Ready(username = username, organizationId = organizationId)
+            _state.value = OnyxUiState.Ready(username = username, organizationId = organizationId, userId = userId, handle = handle)
         } catch (error: Exception) {
             Log.e(TAG, "Startup failed", error)
             _state.value = OnyxUiState.StartupError(
@@ -164,7 +175,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
                 sessionPrefs.userId = result.userId
                 sessionPrefs.hasRealSession = true
 
-                openMobileCoreAndGoReady(result.organizationId, result.username)
+                openMobileCoreAndGoReady(result.organizationId, result.userId, result.username)
             } catch (error: Exception) {
                 Log.w(TAG, "Login failed", error)
                 _loginError.value = friendlyLoginError(error)

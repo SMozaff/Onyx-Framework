@@ -216,27 +216,105 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteComman
                 command_json.as_ptr(),
             )
         };
-        if result_ptr.is_null() {
-            return Ok(std::ptr::null_mut());
-        }
-
-        // Copy the C string into a JVM string *before* freeing it via
-        // mobile-core's own deallocator -- `new_string` allocates its
-        // own JVM-owned copy, so ownership of `result_ptr` stays
-        // entirely within this function, never crossing into Kotlin.
-        // Safety: result_ptr is non-null and was just returned by
-        // mobile_core_execute_command, which documents it as a valid
-        // NUL-terminated string to be freed via mobile_core_free_string
-        // exactly once -- done immediately after this copy.
-        let result_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy().into_owned() };
-        unsafe { mobile_core::mobile_core_free_string(result_ptr as *mut c_char) };
-
-        match env.new_string(result_str) {
-            Ok(s) => Ok(s.into_raw()),
-            Err(e) => Err(e),
-        }
+        copy_and_free_c_string(env, result_ptr)
     })
     .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeListAggregates` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeListAggregates(handle: Long, aggregateType: String): String?`.
+///
+/// Added for A4 (core screens): every screen's list data
+/// (missions/tasks/notifications) comes from this one function, per
+/// the shared-refresh architecture `OnyxController` (A4's own Kotlin
+/// port of `ui/app.dart`'s `OnyxController`) fans out on `refresh()`.
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeListAggregates<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    aggregate_type: JString<'local>,
+) -> jstring {
+    env.with_env(|env| -> Result<jstring, JniError> {
+        let Some(aggregate_type) = jstring_to_cstring(env, &aggregate_type) else {
+            return Ok(std::ptr::null_mut());
+        };
+        // Safety: same contract as nativeExecuteCommand above.
+        let result_ptr = unsafe {
+            mobile_core::mobile_core_list_aggregates(
+                handle as *mut MobileApp,
+                aggregate_type.as_ptr(),
+            )
+        };
+        copy_and_free_c_string(env, result_ptr)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeGetSyncStatus` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeGetSyncStatus(handle: Long): String?`.
+/// Added for A4 -- one of the shared-refresh cycle's six calls
+/// (Dashboard reads `pendingOutboxCount` from this).
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeGetSyncStatus<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| -> Result<jstring, JniError> {
+        // Safety: same contract as nativeExecuteCommand above.
+        let result_ptr =
+            unsafe { mobile_core::mobile_core_get_sync_status(handle as *mut MobileApp) };
+        copy_and_free_c_string(env, result_ptr)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeListConflicts` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeListConflicts(handle: Long): String?`.
+/// Added for A4 -- one of the shared-refresh cycle's six calls
+/// (Dashboard reads the conflict count from this).
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeListConflicts<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| -> Result<jstring, JniError> {
+        // Safety: same contract as nativeExecuteCommand above.
+        let result_ptr =
+            unsafe { mobile_core::mobile_core_list_conflicts(handle as *mut MobileApp) };
+        copy_and_free_c_string(env, result_ptr)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// Shared tail end of every `*mut c_char`-returning wrapper above: copy
+/// the C string into a JVM-owned string *before* freeing it via
+/// `mobile_core_free_string` (`new_string` allocates its own copy, so
+/// ownership of `result_ptr` never crosses into Kotlin), returning
+/// `null` unchanged for a null `result_ptr` -- every wrapped function's
+/// own "malformed FFI call, not a domain rejection" convention (see
+/// `nativeExecuteCommand`'s doc comment) is preserved by construction,
+/// not re-implemented per call site.
+fn copy_and_free_c_string(
+    env: &mut jni::Env<'_>,
+    result_ptr: *mut c_char,
+) -> Result<jstring, JniError> {
+    if result_ptr.is_null() {
+        return Ok(std::ptr::null_mut());
+    }
+    // Safety: result_ptr is non-null and was just returned by one of
+    // this crate's wrapped mobile-core functions, each of which
+    // documents it as a valid NUL-terminated string to be freed via
+    // mobile_core_free_string exactly once -- done immediately after
+    // this copy.
+    let result_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy().into_owned() };
+    unsafe { mobile_core::mobile_core_free_string(result_ptr) };
+    match env.new_string(result_str) {
+        Ok(s) => Ok(s.into_raw()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Converts a JVM `String` to an owned, NUL-terminated `CString` for

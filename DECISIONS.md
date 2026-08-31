@@ -6206,3 +6206,173 @@ Missions, Tasks, etc. are A4/A5. No login/auth FFI function was added
 to `mobile-core` (confirmed unnecessary and architecturally wrong
 above). No changes to `mobile/` (frozen) or `mobile-pwa/` (not
 started).
+
+## H10.A4 (core screens: Dashboard, Missions, Tasks, Detail, Notifications)
+
+Android Work Package A4 (ONYX-MOB-01 §25). Builds the five real screens
+this task scopes, plus the shared-refresh `OnyxController` they all
+read from -- re-verified fresh against the current, real Dart reference
+files for this task (not from an earlier session's summary), per A4's
+own instruction.
+
+### Real Dart reference behavior, confirmed screen by screen
+
+- **`mission_detail.dart`/`task_detail.dart` are real, substantial,
+  interactive screens** -- confirmed directly, matching this task's own
+  starting assumption: real `ApproveTask`/`RejectTask` (Task) and
+  `ActivateMission`/`RejectApproval` (Mission) actions gated by a
+  required, non-empty reason for Reject only, wired to the real
+  owner-authority command dispatch. Mission and Task genuinely use
+  *different* command name pairs and *different* status vocabularies
+  for "awaiting a decision" (`AwaitingApproval` vs. `Submitted`) --
+  confirmed directly in both files, not assumed symmetric.
+- **The single, shared, centralized refresh model is real and was
+  mirrored, not "improved."** `ui/app.dart`'s `OnyxController.refresh()`
+  fans out exactly six calls in parallel (`Future.wait`):
+  `listAggregates('mission'/'task'/'approval'/'notification')`,
+  `getSyncStatus()`, `listConflicts()`. Kotlin's `OnyxController`
+  reproduces this exactly (`async`/`awaitAll`, the direct equivalent),
+  including fetching `'approval'` every cycle even though **no real
+  screen anywhere -- Dart's own `ApprovalsScreen` included -- ever
+  reads the result** (confirmed in the parity matrix's §6 finding,
+  re-confirmed here): the call is still made because Dart's
+  `Future.wait` treats a failure there as failing the *entire* refresh,
+  and reproducing only the calls whose results a screen happens to read
+  today would silently change that failure behavior. `missions.dart`/
+  `tasks.dart` list screens are real create-then-refresh flows (a FAB
+  dialog; Tasks additionally short-circuits via a `SnackBar`, not a
+  disabled FAB, when no mission exists yet to attach a task to -- both
+  confirmed directly, not assumed). `notifications.dart` is confirmed
+  genuinely minimal (a direct, un-embellished list) -- no scope was
+  added beyond it.
+
+### Kotlin architecture: `ViewModel` + `StateFlow`, confirmed current via Context7
+
+Dart's `ChangeNotifier`/`context.watch` has no literal Kotlin
+equivalent; the current, real Android pattern (confirmed via Context7,
+developer.android.com/develop/ui/compose/state-hoisting) is a
+`ViewModel` exposing `StateFlow`s, obtained via `viewModel()` --
+documented to return the *same instance* to every composable scoped to
+the same owner, which is exactly the "one shared controller instance
+every screen reads from" property Dart's architecture depends on.
+`OnyxController` (new) is that ViewModel: `missions`/`tasks`/
+`notifications`/`sync`/`conflictCount`/`isLoading`/`error` are all
+`StateFlow`s; `refresh()` is the only method that calls
+`MobileCoreBridge.nativeListAggregates`/`nativeGetSyncStatus`/
+`nativeListConflicts` -- no screen composable calls these directly,
+mirroring Dart's "no screen independently re-queries the backend"
+invariant by construction (there is no other code path to the native
+list-data calls). `isLoading` starts `true` and is never reset to
+`true` again, matching Dart's own documented behavior that a
+mutation-triggered `refresh()` never re-shows a full-screen spinner.
+
+Because `OnyxController` needs the live native handle and the
+CommandEnvelopeFactory user id at construction time (unlike a
+no-arg-constructible ViewModel), it's built via a
+`ViewModelProvider.Factory` (`OnyxController.Factory`), and
+`MainActivity` calls `viewModel(key = handle.toString(), factory = ...)`
+-- keyed on the handle specifically so a sign-out (which frees that
+handle) followed by a fresh login (which mints a new one) gets a
+genuinely new `OnyxController` instance, never one still holding a
+freed/stale native pointer.
+
+### Three new JNI wrappers (`mobile-android-jni`, following A1's exact template)
+
+`nativeListAggregates`/`nativeGetSyncStatus`/`nativeListConflicts`
+follow the same wrapper pattern A1 established for
+`nativeExecuteCommand` (string in where applicable, string out,
+`mobile_core_free_string` called exactly once). The shared tail --
+copy the C string into a JVM string, free it, return `null` unchanged
+for a null result pointer -- was factored into one
+`copy_and_free_c_string` helper rather than left duplicated a fourth
+time, since duplicating it a fourth time would have been the real
+reuse smell A4's own instructions warn against, not a hypothetical one.
+
+### `CommandEnvelopeFactory`: ported field-for-field, placeholders included, not "fixed"
+
+Kotlin's `CommandEnvelopeFactory` reproduces Dart's real, current
+`CommandEnvelopeFactory.create` (`mobile/lib/bridge/bridge.dart`)
+exactly, including two real placeholders this task deliberately did
+NOT "improve": the fixed `deviceId` literal
+(`"22222222-2222-4222-8222-222222222222"`, no real per-device identity
+concept exists yet at this layer) and the `authority_proof` shape
+(`proof_type: "Jwt"`, `signature: null`, a maximal `expires_at`) --
+Dart's own real, current stand-in for a local-first FFI mode that does
+not verify a real JWT. Both are confirmed present in Dart's own real,
+current code, not independently invented here; reproducing them
+exactly (rather than tightening them unilaterally) is what "mirror
+what Dart's reference actually does" requires per A4's own instructions
+-- a real, specific reason to diverge did not emerge, so none was
+taken.
+
+### A real, necessary correction found while implementing `LoadedAggregate`
+
+`HierarchyUserWire.id` (A3's own finding) is a UUID string, but
+`LoadedAggregate.id` -- confirmed directly against Dart's
+`bridge.dart` -- is a raw 16-byte array, matching `mobile_core_new`'s
+`MobileConfig.organization_id` shape, not the hierarchy DTO's. Kotlin's
+`LoadedAggregate.fromJson` parses `id` as a `JSONArray` of ints (via
+`UuidCodec.bytesToUuid`), confirmed against a real unit test fixture
+matching the exact byte layout used throughout this task's prior host-
+JVM proofs, not assumed consistent with the hierarchy DTO by
+similarity of name.
+
+### Real, executed verification
+
+Two real build-time errors were hit and fixed while wiring the Compose
+screens, both worth recording as genuine mistakes corrected, not
+hypothetical risks: (1) `Card(onClick = ...)`/`TopAppBar` are
+`@ExperimentalMaterial3Api` under the resolved Compose BOM version --
+fixed with `@OptIn(ExperimentalMaterial3Api::class)` on each screen
+that needed it; (2) `ExposedDropdownMenuBox`/`ExposedDropdownMenu` (the
+Tasks screen's mission picker) proved more version-fragile than
+warranted for this task's real scope -- replaced with a plain
+`OutlinedButton` + `DropdownMenu` (stable API), a real, deliberate
+simplification, not a silent scope cut (the picker's actual behavior --
+select one of the existing missions -- is unchanged).
+
+14 real, executed local JVM unit tests (`src/test/kotlin/com/onyx/`,
+`testDebugUnitTest`, all passing) prove the pure logic --
+`LoadedAggregate`/`SyncSnapshot` parsing (including the real title/
+status/description fallback chains and null-handling) and
+`CommandEnvelopeFactory`'s exact envelope shape (id-as-byte-array
+fields, the real `authority_proof`/`deviceId` placeholders,
+optimistic-concurrency field threading). These required adding
+`org.json:json:20250517` (Maven Central's confirmed current release)
+as a `testImplementation` dependency -- `org.json.JSONObject` resolves
+to the Android SDK's throwing stub jar under plain `src/test/` JVM
+unit tests otherwise, a real, necessary fix, not an arbitrary
+dependency addition.
+
+A real, complete instrumented test file
+(`OnyxControllerInstrumentedTest`, `src/androidTest/`) was written to
+prove the three properties A4's own verification section calls out --
+create-then-refresh read-back, the real approve/reject status
+transition, and the single-refresh-per-cycle property (checked via a
+new `OnyxController.refreshCount` `StateFlow`, incremented once per
+real `refresh()` completion) -- but has **not been executed** in this
+sandbox, the same disclosed constraint as every prior mobile task this
+session (no `/dev/kvm`, no emulator, no physical device).
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean |
+| `./gradlew compileDebugKotlin` | clean, zero warnings |
+| `./gradlew assembleDebug` | `BUILD SUCCESSFUL`, real `app-debug.apk` produced |
+| `./gradlew testDebugUnitTest` | 14 passed, 0 failed (`LoadedAggregateTest`, `SyncSnapshotTest`, `CommandEnvelopeFactoryTest`, `UuidCodecTest`) |
+| `./gradlew compileDebugAndroidTestKotlin` | clean (proves the instrumented test file itself is real, compilable code) |
+| Real on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (disclosed above, not silently skipped) |
+
+### Not built in this task (explicitly out of scope per A4's own instructions)
+
+Files, Settings, Sync/Conflicts screens are A5. The bottom navigation
+shell exposes only the four destinations this task builds
+(Home/Missions/Tasks/Alerts); Dart's remaining three
+(Approvals/Files/Settings) are visible in `ui/app.dart` but
+intentionally not added to Kotlin's nav bar yet, not a silent parity
+gap. The shared-refresh architecture was not changed "for the better"
+-- no real, specific reason emerged to diverge from Dart's real
+behavior, so none was taken.

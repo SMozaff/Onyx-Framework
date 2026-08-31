@@ -19,4 +19,9 @@ object MobileCoreBridge {
     external fun nativeFree(handle: Long)
     external fun nativeExecuteCommand(handle: Long, commandJson: String): String?
     external fun nativeSetHierarchy(handle: Long, hierarchyJson: String): Int
+
+    // Added for A4 (core screens) -- the shared-refresh cycle's data calls.
+    external fun nativeListAggregates(handle: Long, aggregateType: String): String?
+    external fun nativeGetSyncStatus(handle: Long): String?
+    external fun nativeListConflicts(handle: Long): String?
 }
