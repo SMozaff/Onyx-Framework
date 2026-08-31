@@ -1,0 +1,15 @@
+# Rust-built native libraries (tool/build_rust_jni.sh's real output) --
+# built artifacts, not source, same reasoning as mobile/'s own jniLibs
+# handling for the frozen Flutter app.
+app/src/main/jniLibs/
+
+# Gradle/Android build outputs.
+build/
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml

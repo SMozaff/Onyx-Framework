@@ -5806,3 +5806,203 @@ task's own M0 commit as the base (not a hypothetical):
 touched or started -- those are A1 and P2 respectively, later,
 separate tasks. No `mobile/lib/` application code or behavior was
 changed.
+
+## H10.A1 (Kotlin skeleton + `mobile-android-jni` adapter)
+
+Android Work Package A1 (ONYX-MOB-01 §25), sequenced after M0. Builds
+the real, separate `mobile-android/` Kotlin project and
+`crates/mobile-android-jni` JNI adapter, and proves a genuine
+Kotlin/JVM -> JNI -> Rust round trip, per the task's own "prove the
+connection, don't build every wrapper" scope.
+
+### Architecture decision: a thin JNI adapter crate, not `mobile-core` calling itself JNI-native
+
+Two real options existed, both investigated against `mobile-core`'s
+actual exported signatures (`mobile-core.h`) rather than assumed:
+
+1. A dedicated `mobile-android-jni` crate wrapping the C ABI.
+2. Kotlin `external fun`s binding straight to `mobile-core`'s own
+   `#[no_mangle] extern "C"` functions -- the pattern
+   `mobile/android/.../WorkManagerService.kt`'s existing
+   `nativeAndroidDoWork()` already uses for
+   `mobile_core_android_do_work`.
+
+Option 2 does not generalize: `mobile_core_android_do_work` happens to
+take no string/JNI-object arguments at all, so a parameterless `Int`
+`external fun` coincidentally lines up with a JNI-callable native
+signature. Every other function that matters for the rewrite --
+`mobile_core_execute_command`/`_execute_query` (JSON string in/out),
+`mobile_core_new` (two strings in, pointer out) -- takes `*const
+c_char`/`*mut c_char`, which is not a JNI-native-method-compatible
+parameter type at all (JNI requires object types like `jstring` for
+Java-side strings, never a raw `char*`). Option 1 was built. The
+resulting crate has no business logic (per the manifesto's explicit
+prohibition) -- every wrapper converts JNI types to the C ABI's native
+types, calls straight into `mobile_core::*` (a normal Rust function
+call across the crate boundary, not `dlopen`/`dlsym`, since
+`mobile_core_new` etc. are `pub` items re-exported from `mobile_core`'s
+crate root), converts the result back.
+
+Per A1's own scope ("prove the connection, don't build every
+wrapper"), only handle lifecycle (`mobile_core_new`/`mobile_core_free`)
+and one representative string-round-trip function
+(`mobile_core_execute_command` -- the harder marshalling case, not just
+an opaque-pointer function) are wrapped. The remaining ~15 functions
+follow this exact same pattern and are deliberately left for A3/A4,
+whichever task actually needs each one first.
+
+### `jni` crate version and API -- a real correction mid-task, not assumed
+
+Context7 has no indexed documentation for the Rust `jni` crate under
+any of "jni", "jni-rs", or "jni crate rust" -- checked directly, not
+assumed unavailable. The version was instead confirmed against
+crates.io's own API response: `0.22.4`, current stable, MSRV 1.85.0
+(well under this project's 1.97.1 toolchain). The adapter was first
+drafted against the older, pre-0.22 single-`JNIEnv` API from memory,
+and **failed to compile** with a hard, real error naming the actual
+current shape: 0.22 split `JNIEnv` into an FFI-safe `EnvUnowned`
+(what a native method actually receives) and a full `Env` obtained via
+`EnvUnowned::with_env(|env| ...)` for the duration of one closure. The
+adapter was rewritten against that real API, read directly from
+`jni-0.22.4`'s own vendored source (`~/.cargo/registry/src/.../jni-0.22.4/src/env.rs`)
+rather than guessed a second time -- including using `JString::try_to_string(&env)`
+(the current, non-deprecated string accessor) after a first pass using
+the now-deprecated `Env::get_string` produced a compiler warning that
+was corrected rather than left in place.
+
+### Kotlin project versions -- confirmed live, not remembered, including two real compatibility corrections
+
+- Compose BOM/AGP/Kotlin versions checked via Context7
+  (developer.android.com/develop/ui/compose/*) before writing any
+  build script.
+- The Android Gradle Plugin version needed a real correction beyond
+  Context7's coverage: `dl.google.com`'s own `maven-metadata.xml` for
+  `com.android.tools.build:gradle` was fetched directly, showing 9.4.0
+  as latest stable -- but AGP 9.x requires Gradle 9.5+ per
+  developer.android.com's own compatibility table, while this
+  sandbox's available Gradle is 8.14.3 (upgrading would mean an
+  unverified network download this task doesn't need). 8.13.2 -- the
+  latest genuinely stable 8.x release, confirmed by enumerating every
+  "8."-prefixed version in the same metadata rather than assuming the
+  newest 8.x line -- was used instead, a real, verified-compatible
+  choice over an untested reach for the newest major version.
+- The first real `gradle assembleDebug` attempt failed twice, for two
+  different real reasons, both fixed by reading the actual error
+  rather than guessing again: (1) `kotlinOptions { jvmTarget = "17" }`
+  (the String-setter form) is a hard error under the resolved Kotlin
+  Gradle plugin version -- migrated to the `compilerOptions` DSL
+  (`kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }`);
+  (2) Compose BOM `2026.08.00` requires AGP 9.1+/compileSdk 37, which
+  this project's AGP 8.13.2 doesn't provide -- downgraded to Compose
+  BOM `2026.03.00` with `compileSdk`/`targetSdk` 36 (the maximum AGP
+  8.13.2 itself recommends), confirmed by the real error message
+  naming the exact requirement, not by pre-emptively picking an
+  arbitrary older version.
+
+### ReLinker: confirmed unnecessary, not silently omitted
+
+Current, real Android NDK guidance (developer.android.com/ndk/guides/
+jni-tips, queried via Context7) recommends ReLinker specifically "to
+address potential issues with native library installation and updates
+on older Android versions," and the NDK's own revision history notes
+it replaced `ndk-depends` "for handling native library loading issues
+on older Android versions." A separate passage is explicit about the
+actual affected range: "For apps targeting Android API levels below
+18, the shared library must be loaded before any dependencies," with
+ReLinker recommended there specifically. This project's real minimum
+is API 29 (ONYX-MOB-01 §3), well above that threshold -- ReLinker was
+therefore deliberately not added, with this reasoning recorded in both
+`app/build.gradle.kts`'s own dependency comment and here, rather than
+silently left out with no stated reason.
+
+### `OnyxApplication`: loads the native library from `Application`, per real, current NDK guidance
+
+Confirmed via the same NDK doc query: "For applications with multiple
+classes using native methods, loading the library from the Application
+class ensures it is initialized early and consistently." `OnyxApplication`'s
+companion `init` block calls `System.loadLibrary("mobile_android_jni")`
+before any other class in the app can reach it -- applied from day one,
+since A3/A4 will add exactly the multiple native-calling classes this
+guidance anticipates, not retrofitted once a second one exists.
+
+### Real proof of the Kotlin -> JNI -> Rust round trip
+
+Per ONYX-MOB-00 §25 step 5's actual gate for this task, verified two
+ways:
+
+1. **Real Android cross-compilation.** `cargo ndk -t arm64-v8a -t
+   armeabi-v7a -t x86_64 build -p mobile-android-jni --release`
+   (`mobile-android/tool/build_rust_jni.sh`, mirroring `mobile/tool/
+   build_rust_android.sh`'s existing pattern) produced real ARM64/ARMv7/
+   x86_64 Android `.so` files (`file` confirms `ELF ... ARM aarch64 ...
+   dynamically linked` etc.), and a full `./gradlew assembleDebug`
+   (Gradle 8.14.3, matching the wrapper's pinned version) produced a
+   real, installable `app-debug.apk` with all three ABIs' native
+   libraries packaged in (`packageDebug`/`stripDebugDebugSymbols` ran
+   over `libmobile_android_jni.so`, `libmobile_core.so`,
+   `libsync_transport_mobile.so` for each ABI).
+2. **Real host-JVM execution of the identical JNI entry points**, since
+   this sandbox has no way to execute the cross-compiled Android
+   binary (see disclosure below): a small Java harness
+   (`javac`/`java`, OpenJDK 21) declared the same three `native`
+   methods as `MobileCoreBridge`, loaded the *host* (linux-x86_64)
+   build of `libmobile_android_jni.so` via `System.load`, and called
+   them for real:
+   - `nativeNew(dbPath, configJson)` with a real SQLite path and a
+     real `MobileConfig` JSON body (confirming along the way that
+     `organization_id` serializes as a raw 16-byte JSON array under
+     this project's actual `ObjectId` derive, not a UUID string, by
+     reading `platform-kernel::identifiers` directly rather than
+     guessing) returned a real, non-zero handle -- meaning the full
+     Rust-side `mobile_core_new` path (opening the SQLite pool,
+     running migrations) executed successfully from a JVM-initiated
+     native call.
+   - `nativeExecuteCommand(handle, "{}")` returned `null`, exactly
+     matching `mobile_core_execute_command`'s documented behavior for
+     an envelope that doesn't parse as `CommandEnvelope<Value>` (a
+     malformed-FFI-call case, not a domain rejection) -- the success/
+     domain-rejection JSON-string path was not separately re-proven
+     here since `mobile-core`'s own existing test suite
+     (`crates/mobile-core/tests/ffi_integration.rs`) already exercises
+     `execute_command`'s success path directly in Rust, and duplicating
+     a full, valid `CommandEnvelope` by hand in Java would not prove
+     anything that suite doesn't already cover.
+   - `nativeFree(handle)` returned without crashing the JVM.
+
+### Disclosed limitation: no real Android-device/emulator verification
+
+This sandbox has no `/dev/kvm` and `egrep -c '(vmx|svm)' /proc/cpuinfo`
+reports `0` -- confirmed directly, not assumed -- so no Android
+emulator can boot here, and no physical device was available. The real
+ARM64/ARMv7/x86_64 `.so` files and the `app-debug.apk` described above
+were built and packaged successfully, and a real instrumented test
+(`MobileCoreRoundTripTest`, `app/src/androidTest/`) was written to
+prove the same round trip under `connectedAndroidTest` on a real
+emulator/device -- but it has not actually been executed on-device as
+part of this task. The host-JVM proof above is the disclosed
+substitute: it proves the JNI marshalling and Rust glue are correct,
+not that the specific cross-compiled Android binary loads and runs
+under ART on real hardware. This mirrors this session's own prior
+`flutter build ios` local-vs-CI disclosure pattern rather than silently
+claiming full verification.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo test -p mobile-android-jni` | 0 tests (no Rust-level unit tests -- the crate is pure JNI marshalling, verified instead by the real host-JVM round trip above and the real instrumented test file, per this task's own "prove the connection" gate) |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean (new crate registered in workspace `Cargo.toml`) |
+| `cargo ndk build -p mobile-android-jni --release` for arm64-v8a/armeabi-v7a/x86_64 | all three succeed, real ELF Android `.so` files confirmed via `file` |
+| `./gradlew assembleDebug` (Gradle 8.14.3, AGP 8.13.2) | `BUILD SUCCESSFUL`, real `app-debug.apk` produced with all three ABIs' native libraries packaged |
+| Host-JVM round trip (`javac`/`java`, OpenJDK 21) | `nativeNew` real non-zero handle, `nativeExecuteCommand("{}")` correctly `null`, `nativeFree` clean -- see transcript above |
+| Real, on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (no KVM/virtualization, no device) -- disclosed above, not silently skipped |
+
+### Not built in this task (explicitly out of scope per A1's own instructions)
+
+No real screens, navigation, or application logic beyond the minimal
+Compose skeleton (`OnyxSkeletonScreen`, a single static `Text`). No
+login/auth (A3). No business logic in `mobile-android-jni` itself. No
+changes to `mobile/` (frozen) or `mobile-pwa/` (not started).
