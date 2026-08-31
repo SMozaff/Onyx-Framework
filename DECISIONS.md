@@ -5555,3 +5555,123 @@ here and noted so they aren't lost:
   `rust-toolchain.toml`), and other docs still describing the pre-H4(a)
   `allow_origin(Any)` CORS behavior and the pre-H5 lockfile-regeneration
   pattern as if current.
+
+## Hardening H10 (mobile observer client-capability enforcement)
+
+Two governance documents (`ONYX-MOB-00_Mobile_Client_Strategy_Manifesto_v1.1`,
+`ONYX-MOB-01_Android_Kotlin_iOS_PWA_Technical_Blueprint_v1.1`, both now
+under `docs/governance/`) specify a closed `client_type` contract and a
+server-enforced `mobile_observer` capability ceiling
+(`effective_permissions(user, session) = user_permissions(user) ∩
+observer_capabilities(session.client_type)`) in normative, present-tense
+"MUST" language. Read against the actual codebase before writing anything,
+neither existed: `LoginRequest::client_type` (`routes/auth.rs`) was a
+loose `Option<String>`, and the only place it was ever read was one
+hardcoded comparison, `payload.client_type.as_deref() == Some("mobile")`,
+gating a single mobile-class-access check. No code path anywhere denied a
+mutation on the basis of *what kind of client* sent it, and no
+unrecognized `client_type` value was ever rejected. This task built the
+enforcement the documents describe, for the first time.
+
+### What was built
+
+`crates/bins/api-server/src/routes/client_type.rs`, new:
+
+- **`ClientType`** — a closed, `#[serde(rename_all = "snake_case")]` enum
+  (`Mobile`, `MobileObserver`, `Desktop`, `Admin`, `Web`). A plain
+  string-valued `Deserialize` enum already rejects any string outside
+  this set (`serde::de::Error::unknown_variant`, confirmed against
+  current serde docs, not assumed) — this alone satisfies "the backend
+  MUST reject unknown client types" with no hand-written validation.
+  Confirmed by direct inspection that every real client's login call site
+  already sends one of these five literal strings
+  (`mobile/lib/net/auth.dart`: `"mobile"`; `desktop-shell/src/session.rs`:
+  `"desktop"`; `admin-shell/ui/src/pages/Login.tsx`: `"admin"`;
+  `web-ui/src/hooks/useAuth.ts`: `"web"`) — no client-side change was
+  needed for this to be a pure tightening, not a breaking change.
+- **`ClientType::default_on_absence` → `Web`** — an *absent* `client_type`
+  is a distinct case from an unrecognized one. Grepping every real
+  internal caller (`crates/bins/api-server/tests/*.rs`, this project's
+  end-to-end/integration suites) found dozens of existing tests,
+  including the shared `test_harness.rs` used by every end-to-end
+  journey, that call `/api/auth/login` without ever sending `client_type`
+  at all. Requiring the field outright would have broken those real
+  callers, not a hypothetical one. `Web` (full capabilities) was chosen
+  as the fallback over inventing a sixth "unclassified" variant, because
+  it is the literal continuation of the pre-existing "absent client_type
+  is never gated" behavior, not a new policy, and keeps the enum matching
+  the five real client classes the governance documents define.
+- **`ClientCapabilities`** and **`capabilities_for`** — a static mapping
+  (`FULL_CAPABILITIES` for every class except `MobileObserver`;
+  `OBSERVER_CAPABILITIES` — every `can_read_*`/`can_download_files` true,
+  every mutation flag false — for it), matching ONYX-MOB-01 §8's field
+  list exactly and using the "enum/bitset/typed policy object" latitude
+  that section explicitly leaves open.
+- **`require_capability`** — denies with `403
+  CLIENT_CAPABILITY_DENIED` (this project's real `ApiError`/
+  `safe_details` envelope, not ONYX-MOB-01 §9's illustrative flat JSON
+  example verbatim, per that section's own "must align with ONYX error
+  conventions" caveat) unless the session's mapped capability permits the
+  action. Wired into every mutation-class endpoint ONYX-MOB-01 §9
+  enumerates: mission/task command endpoints, approval decisions,
+  lifecycle transitions, conflict resolution, file upload, and
+  organization/user/policy/administrative mutation
+  (`routes/{admin,auth,command,policy_admin,profiles/*,todo_admin}.rs`).
+  This check runs in addition to, never instead of, this project's
+  existing per-route authority checks (`require_admin`, ownership checks,
+  etc.) — a user who already fails their existing authority check is
+  still denied by that check first; the capability ceiling only ever
+  narrows further.
+
+### Deliberately out of scope
+
+This project has no pre-existing unified `user_permissions` object to
+literally intersect against — authority today is checked ad hoc per route
+(`require_admin`, verifier resolution, H2's revocation watermark, H7's
+relay ownership, etc.). Retroactively unifying all of that into one real
+permissions type, so that `effective_permissions` could be computed as a
+literal set intersection rather than "the mutation-class check runs after
+the route's own authority check," is a materially larger and riskier
+change than this task's scope (closing the `mobile_observer` boundary)
+calls for, and was not attempted. `can_read_evidence`/`can_download_files`
+are likewise flat bools, not a policy-object hook, per ONYX-MOB-01 §8's
+own "policy-controlled" caveat — no real per-file/per-evidence
+authorization policy engine exists in this codebase to hook into today.
+
+### Governance document corrections
+
+Both `ONYX-MOB-00` §4 and `ONYX-MOB-01` §26 P1 read, on a literal
+reading, as if this enforcement already existed and only needed
+documenting. Both now carry an explicit "Implementation note (H10)"
+pointing at this entry and at `client_type.rs`, and `ONYX-MOB-01`'s single
+P1 bullet list has been expanded into P1.1–P1.5, each naming the actual
+file/module/test that satisfies it, so a future reader cannot mistake the
+blueprint's aspirational phasing for a record of prior work.
+
+### Verification
+
+New test file
+`crates/bins/api-server/tests/mobile_observer_capability.rs`, against a
+real bound server and real authenticated sessions (same harness pattern
+as every other integration test in this crate):
+
+- `mobile_observer_reads_normally_but_every_mutation_endpoint_denies_it`
+  -- a session that declares `client_type = "mobile_observer"` at login
+  continues to succeed on read endpoints while every representative
+  mutation endpoint now returns `403 CLIENT_CAPABILITY_DENIED`.
+- `cross_tenant_command_still_rejected_independent_of_client_capability`
+  -- confirms the new capability check is additive: an existing,
+  unrelated authority check (cross-tenant access) still fires on its own
+  terms regardless of client class.
+- `observer_session_refresh_preserves_the_capability_ceiling` -- refreshing
+  a `mobile_observer` session's token does not silently reset it to full
+  capabilities.
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo test -p api-server` (full crate, all test files) | 46 passed, 0 failed |
+| `cargo clippy -p api-server --all-targets -- -D warnings` | clean |
+| `cargo clippy --workspace --exclude desktop-shell --exclude admin-shell --all-targets -- -D warnings` | clean |
+| `cargo test --workspace --exclude desktop-shell --exclude admin-shell` | all passing except the same 7 disclosed, Docker-dependent `crates/team8-e2e-tests` journeys as every prior task in this session (no Docker daemon in this sandbox) -- no new regressions |
+| `cargo fmt --all -- --check` | clean |

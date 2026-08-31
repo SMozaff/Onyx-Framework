@@ -341,6 +341,14 @@ pub async fn issue_ticket(
         username: actor.username,
         organization_id: actor.organization_id,
         token_type: RELAY_TICKET_TOKEN_TYPE.to_string(),
+        // Propagated from the caller's own authenticated session so a
+        // relay ticket cannot claim a different class than the session
+        // that minted it. Out of this task's scope to add a dedicated
+        // capability check on this endpoint (relay/sync participation
+        // isn't in ONYX-MOB-01 §9's enumerated mutation list -- see
+        // DECISIONS.md's H10 entry), but propagating the real value
+        // here is a one-line correctness fix, not new enforcement.
+        client_type: actor.client_type,
         scope: TokenScope {
             object_type: "relay".to_string(),
             object_id: Some(target_id.to_string()),

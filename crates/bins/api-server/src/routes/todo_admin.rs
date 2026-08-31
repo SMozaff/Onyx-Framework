@@ -83,6 +83,16 @@ pub async fn create_todo_list(
     Json(req): Json<CreateTodoListRequest>,
 ) -> Result<Json<CreatedTodoListDto>, ApiError> {
     let auth = authenticate_headers(&state, &headers).await?;
+    // H10/P1.4: TodoList/TargetList/StaffLoan creation is a real domain
+    // command submission (see this module's own doc comment on why
+    // these are `create()`-routed here rather than through
+    // `/api/command`'s `handle_command` dispatch) -- gated the same way
+    // as every other domain command, `command_route`'s included.
+    super::client_type::require_capability(
+        &auth,
+        |c| c.can_submit_domain_commands,
+        "submit_domain_command",
+    )?;
     let organization_id = uuid::Uuid::parse_str(&auth.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
     let ctx = decision_context_for_actor(&auth.user_id, organization_id)?;
@@ -169,6 +179,16 @@ pub async fn create_target_list(
     Json(req): Json<CreateTargetListRequest>,
 ) -> Result<Json<CreatedTargetListDto>, ApiError> {
     let auth = authenticate_headers(&state, &headers).await?;
+    // H10/P1.4: TodoList/TargetList/StaffLoan creation is a real domain
+    // command submission (see this module's own doc comment on why
+    // these are `create()`-routed here rather than through
+    // `/api/command`'s `handle_command` dispatch) -- gated the same way
+    // as every other domain command, `command_route`'s included.
+    super::client_type::require_capability(
+        &auth,
+        |c| c.can_submit_domain_commands,
+        "submit_domain_command",
+    )?;
     let organization_id = uuid::Uuid::parse_str(&auth.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
     let ctx = decision_context_for_actor(&auth.user_id, organization_id)?;
@@ -237,6 +257,16 @@ pub async fn request_staff_loan(
     Json(req): Json<RequestStaffLoanRequest>,
 ) -> Result<Json<CreatedStaffLoanDto>, ApiError> {
     let auth = authenticate_headers(&state, &headers).await?;
+    // H10/P1.4: TodoList/TargetList/StaffLoan creation is a real domain
+    // command submission (see this module's own doc comment on why
+    // these are `create()`-routed here rather than through
+    // `/api/command`'s `handle_command` dispatch) -- gated the same way
+    // as every other domain command, `command_route`'s included.
+    super::client_type::require_capability(
+        &auth,
+        |c| c.can_submit_domain_commands,
+        "submit_domain_command",
+    )?;
     let organization_id = uuid::Uuid::parse_str(&auth.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
     let ctx = decision_context_for_actor(&auth.user_id, organization_id)?;
