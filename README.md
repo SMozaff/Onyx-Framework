@@ -13,7 +13,7 @@ Mobile (Flutter with Rust FFI via mobile-core)
 P2P Transports: Supports Wi-Fi Direct, Bluetooth LE, QUIC, and Cloud Relay for device-to-device communication
 Authority-Aware: Implements hierarchical command structures with proper authorization controls
 Architecture
-The codebase follows Clean Architecture principles organized into 8 increments with 27 crates and 6 binaries:
+The codebase follows Clean Architecture principles organized into 8 increments with 41 crates and 6 binaries:
 Core Layers:
 Kernel (crates/kernel/): Platform primitives (IDs, versioning, causality, authority)
 Domains (crates/domains/): Business logic for missions, work, communications, files, policies, profiles, todos, notifications
@@ -23,7 +23,7 @@ Synchronization (crates/synchronization/): CRDT implementations and sync domain 
 Transports (crates/transports/): Sync transport protocols including mobile-specific implementations
 Binaries (crates/bins/): API server, worker, sync-agent, migration tool, desktop shell, admin shell
 Development Setup
-Development occurs in a devcontainer/GitHub Codespaces environment that provisions all required toolchains (Rust, Flutter, Android SDK, Node.js) matching CI configurations. The project uses a pinned Rust version (1.75) defined in rust-toolchain.toml.
+Development occurs in a devcontainer/GitHub Codespaces environment that provisions all required toolchains (Rust, Flutter, Android SDK, Node.js) matching CI configurations. The project uses a pinned Rust version (1.97.1) defined in rust-toolchain.toml.
 Testing Strategy
 Comprehensive test coverage including:
 Unit tests
