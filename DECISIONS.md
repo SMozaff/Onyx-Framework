@@ -5555,3 +5555,654 @@ here and noted so they aren't lost:
   `rust-toolchain.toml`), and other docs still describing the pre-H4(a)
   `allow_origin(Any)` CORS behavior and the pre-H5 lockfile-regeneration
   pattern as if current.
+
+## Hardening H10 (mobile observer client-capability enforcement)
+
+Two governance documents (`ONYX-MOB-00_Mobile_Client_Strategy_Manifesto_v1.1`,
+`ONYX-MOB-01_Android_Kotlin_iOS_PWA_Technical_Blueprint_v1.1`, both now
+under `docs/governance/`) specify a closed `client_type` contract and a
+server-enforced `mobile_observer` capability ceiling
+(`effective_permissions(user, session) = user_permissions(user) ∩
+observer_capabilities(session.client_type)`) in normative, present-tense
+"MUST" language. Read against the actual codebase before writing anything,
+neither existed: `LoginRequest::client_type` (`routes/auth.rs`) was a
+loose `Option<String>`, and the only place it was ever read was one
+hardcoded comparison, `payload.client_type.as_deref() == Some("mobile")`,
+gating a single mobile-class-access check. No code path anywhere denied a
+mutation on the basis of *what kind of client* sent it, and no
+unrecognized `client_type` value was ever rejected. This task built the
+enforcement the documents describe, for the first time.
+
+### What was built
+
+`crates/bins/api-server/src/routes/client_type.rs`, new:
+
+- **`ClientType`** — a closed, `#[serde(rename_all = "snake_case")]` enum
+  (`Mobile`, `MobileObserver`, `Desktop`, `Admin`, `Web`). A plain
+  string-valued `Deserialize` enum already rejects any string outside
+  this set (`serde::de::Error::unknown_variant`, confirmed against
+  current serde docs, not assumed) — this alone satisfies "the backend
+  MUST reject unknown client types" with no hand-written validation.
+  Confirmed by direct inspection that every real client's login call site
+  already sends one of these five literal strings
+  (`mobile/lib/net/auth.dart`: `"mobile"`; `desktop-shell/src/session.rs`:
+  `"desktop"`; `admin-shell/ui/src/pages/Login.tsx`: `"admin"`;
+  `web-ui/src/hooks/useAuth.ts`: `"web"`) — no client-side change was
+  needed for this to be a pure tightening, not a breaking change.
+- **`ClientType::default_on_absence` → `Web`** — an *absent* `client_type`
+  is a distinct case from an unrecognized one. Grepping every real
+  internal caller (`crates/bins/api-server/tests/*.rs`, this project's
+  end-to-end/integration suites) found dozens of existing tests,
+  including the shared `test_harness.rs` used by every end-to-end
+  journey, that call `/api/auth/login` without ever sending `client_type`
+  at all. Requiring the field outright would have broken those real
+  callers, not a hypothetical one. `Web` (full capabilities) was chosen
+  as the fallback over inventing a sixth "unclassified" variant, because
+  it is the literal continuation of the pre-existing "absent client_type
+  is never gated" behavior, not a new policy, and keeps the enum matching
+  the five real client classes the governance documents define.
+- **`ClientCapabilities`** and **`capabilities_for`** — a static mapping
+  (`FULL_CAPABILITIES` for every class except `MobileObserver`;
+  `OBSERVER_CAPABILITIES` — every `can_read_*`/`can_download_files` true,
+  every mutation flag false — for it), matching ONYX-MOB-01 §8's field
+  list exactly and using the "enum/bitset/typed policy object" latitude
+  that section explicitly leaves open.
+- **`require_capability`** — denies with `403
+  CLIENT_CAPABILITY_DENIED` (this project's real `ApiError`/
+  `safe_details` envelope, not ONYX-MOB-01 §9's illustrative flat JSON
+  example verbatim, per that section's own "must align with ONYX error
+  conventions" caveat) unless the session's mapped capability permits the
+  action. Wired into every mutation-class endpoint ONYX-MOB-01 §9
+  enumerates: mission/task command endpoints, approval decisions,
+  lifecycle transitions, conflict resolution, file upload, and
+  organization/user/policy/administrative mutation
+  (`routes/{admin,auth,command,policy_admin,profiles/*,todo_admin}.rs`).
+  This check runs in addition to, never instead of, this project's
+  existing per-route authority checks (`require_admin`, ownership checks,
+  etc.) — a user who already fails their existing authority check is
+  still denied by that check first; the capability ceiling only ever
+  narrows further.
+
+### Deliberately out of scope
+
+This project has no pre-existing unified `user_permissions` object to
+literally intersect against — authority today is checked ad hoc per route
+(`require_admin`, verifier resolution, H2's revocation watermark, H7's
+relay ownership, etc.). Retroactively unifying all of that into one real
+permissions type, so that `effective_permissions` could be computed as a
+literal set intersection rather than "the mutation-class check runs after
+the route's own authority check," is a materially larger and riskier
+change than this task's scope (closing the `mobile_observer` boundary)
+calls for, and was not attempted. `can_read_evidence`/`can_download_files`
+are likewise flat bools, not a policy-object hook, per ONYX-MOB-01 §8's
+own "policy-controlled" caveat — no real per-file/per-evidence
+authorization policy engine exists in this codebase to hook into today.
+
+### Governance document corrections
+
+Both `ONYX-MOB-00` §4 and `ONYX-MOB-01` §26 P1 read, on a literal
+reading, as if this enforcement already existed and only needed
+documenting. Both now carry an explicit "Implementation note (H10)"
+pointing at this entry and at `client_type.rs`, and `ONYX-MOB-01`'s single
+P1 bullet list has been expanded into P1.1–P1.5, each naming the actual
+file/module/test that satisfies it, so a future reader cannot mistake the
+blueprint's aspirational phasing for a record of prior work.
+
+### Verification
+
+New test file
+`crates/bins/api-server/tests/mobile_observer_capability.rs`, against a
+real bound server and real authenticated sessions (same harness pattern
+as every other integration test in this crate):
+
+- `mobile_observer_reads_normally_but_every_mutation_endpoint_denies_it`
+  -- a session that declares `client_type = "mobile_observer"` at login
+  continues to succeed on read endpoints while every representative
+  mutation endpoint now returns `403 CLIENT_CAPABILITY_DENIED`.
+- `cross_tenant_command_still_rejected_independent_of_client_capability`
+  -- confirms the new capability check is additive: an existing,
+  unrelated authority check (cross-tenant access) still fires on its own
+  terms regardless of client class.
+- `observer_session_refresh_preserves_the_capability_ceiling` -- refreshing
+  a `mobile_observer` session's token does not silently reset it to full
+  capabilities.
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo test -p api-server` (full crate, all test files) | 46 passed, 0 failed |
+| `cargo clippy -p api-server --all-targets -- -D warnings` | clean |
+| `cargo clippy --workspace --exclude desktop-shell --exclude admin-shell --all-targets -- -D warnings` | clean |
+| `cargo test --workspace --exclude desktop-shell --exclude admin-shell` | all passing except the same 7 disclosed, Docker-dependent `crates/team8-e2e-tests` journeys as every prior task in this session (no Docker daemon in this sandbox) -- no new regressions |
+| `cargo fmt --all -- --check` | clean |
+
+## H10.M0 (freeze the Flutter Android reference implementation)
+
+Migration Sequence step 1 (ONYX-MOB-00 §25) / Android Work Package A0
+(ONYX-MOB-01 §25), sequenced immediately after H10 per both governance
+documents' agreed order. This is a documentation-and-process task, not
+development: per ONYX-MOB-00 §8, the Flutter client becomes a Frozen
+Reference Implementation ("no ordinary new product development;
+security fixes MAY continue; critical defects MAY continue") while a
+native Kotlin Android rewrite and an iOS Observer PWA are built
+separately. No `mobile/lib/` application behavior was changed by this
+task -- the point is capturing exactly what exists today as the ground
+truth those rewrites must match, and making the freeze a real,
+enforced invariant rather than a written-only policy.
+
+### `docs/mobile-migration/parity-matrix.md` (new)
+
+Per ONYX-MOB-01 §5's repository layout, confirmed not to already exist.
+Documents, screen by screen (Dashboard, Missions list, Mission Detail,
+Tasks list, Task Detail, Approvals, Notifications, Files, Settings,
+both login screens, startup/error recovery, the shared-refresh
+controller architecture, and the full FFI contract surface): what each
+does today, which real backend endpoints/`mobile-core` FFI functions it
+calls, what state it reads/writes, and non-obvious behavior. This is
+written as real acceptance criteria for the Kotlin rewrite, not a
+high-level summary -- e.g. it pins down that Approvals is a filtered
+view over already-loaded Task/Mission state (not its own aggregate,
+and `controller.approvals` is loaded but never actually populated or
+read by any screen), that Mission's decision commands are
+`ActivateMission`/`RejectApproval` (not a direct `ApproveMission`
+mirror of Task's `ApproveTask`/`RejectTask` shape), the exact
+reason-required-before-Reject gating, and the literal `"mobile"`
+`client_type` value sent at login (`mobile/lib/net/auth.dart:46`).
+
+**A real discrepancy surfaced and resolved while building this
+document**, worth recording since it corrects this task's own starting
+assumption: the FFI contract is 18 functions declared in
+`mobile-core.h`, not "17 plus one Android-specific" as this task's own
+instructions assumed. Reading the header and every real call site
+(Dart's `lib/bridge/*.dart`, Kotlin's `WorkManagerService.kt`, Swift's
+`BackgroundService.swift`) directly: 15 functions are called from
+Dart, `mobile_core_android_do_work` is called from Kotlin (not Dart --
+an `external fun nativeAndroidDoWork()` bound via
+`System.loadLibrary`), `mobile_core_background_sync_registered` is
+called from Swift (via `dlsym`, not a static import), and
+`mobile_core_ios_background_sync` was not found called from any file
+this review reached in either Dart, Kotlin, or the one Swift file
+read -- left as a real, disclosed open question (possibly dead code,
+possibly called from a Swift file not read in this task) rather than
+silently assumed resolved.
+
+### Real, current test baseline (re-run fresh, not assumed from a prior session)
+
+Against this task's real tip (this branch, carrying H10):
+
+```
+flutter analyze  ->  No issues found! (ran in 16.7s)
+flutter test     ->  16 passed, 1 skipped, 0 failed
+```
+
+The one skip (`test/integration/p2p_sync_test.dart`) is real and
+disclosed, not silently dropped: `Skip: Requires two authorized
+iOS/Android devices and ONYX_MOBILE_DEVICE_TEST=1` -- gated behind an
+explicit opt-in environment variable because it genuinely cannot run
+without two real physical/authorized devices. This 16-passed/1-skipped/
+0-failed baseline, recorded per-test in the parity matrix's final
+section, is the parity floor the Kotlin rewrite's own (differently
+structured, not line-for-line ported) test suite must not regress
+below.
+
+### Freeze enforcement: a real CI gate, not a verbal policy
+
+This project has consistently preferred enforced invariants over
+written-only agreements (H1's production-mode bootstrap refusal, H10's
+`ClientType` rejection). Two options were weighed for making "no
+ordinary new product development in `mobile/`" real: a hard CI gate
+requiring an explicit override marker per change, versus a lighter
+`CODEOWNERS`/README-notice-only approach. The hard CI gate was chosen
+-- this project's own prior pattern (a *rejected* invalid state, not
+just a documented one) is the closer fit than a purely social
+convention, and the gate's cost is low: it only fires on diffs that
+actually touch `mobile/lib/`, which per this task's own scope should
+now be rare.
+
+**`scripts/verify/verify_mobile_freeze.sh`** (new), wired as the
+`mobile-freeze-guard` job in `ci.yml` (runs on every push/PR, ahead of
+`mobile-dart`): computes `git diff --name-only` between the merge-base
+of `origin/main` and `HEAD`; if any changed path starts with
+`mobile/lib/`, the diff must also touch `mobile/FROZEN_EXCEPTION.md`
+(new, a real exception log with instructions and an empty log section)
+or the job fails with a message explaining exactly why and what to do.
+Deliberately scoped to `mobile/lib/` only -- not `mobile/test/`,
+`mobile/android/`, `mobile/ios/`, or `mobile/tool/` -- since platform
+scaffold, CI, and test maintenance needed to keep the frozen app
+building on newer toolchains is not "new product development" and
+gating it would make the freeze actively harmful rather than useful.
+
+`mobile/README.md` also gained a prominent freeze notice pointing at
+both the parity matrix and the exception file, per the task's
+proportionality question -- both the process guard and the visible
+documentation were built, not one instead of the other, since the
+guard alone is invisible until someone's diff already fails it.
+
+### Verification
+
+Real test-then-revert proof the guard actually works, run against this
+task's own M0 commit as the base (not a hypothetical):
+
+1. Appended a trivial comment to `mobile/lib/main.dart`, committed
+   without touching `FROZEN_EXCEPTION.md`.
+   `verify_mobile_freeze.sh <M0-commit>` -> **exit 1, BLOCKED**, real
+   error message printed.
+2. Amended that commit to also touch `mobile/FROZEN_EXCEPTION.md`.
+   `verify_mobile_freeze.sh <M0-commit>` -> **exit 0, OK**.
+3. `git reset --hard` back to the real M0 commit -- the test commit
+   never reached the pushed branch.
+
+| Check | Result |
+|---|---|
+| `flutter analyze` (mobile/) | clean, 0 issues |
+| `flutter test` (mobile/) | 16 passed, 1 disclosed skip, 0 failed |
+| `verify_mobile_freeze.sh` block case | confirmed blocks (exit 1) |
+| `verify_mobile_freeze.sh` exception case | confirmed passes (exit 0) |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+### Not built in this task (explicitly out of scope per the task's own instructions)
+
+`mobile-android/` (the Kotlin project) and `mobile-pwa/` were not
+touched or started -- those are A1 and P2 respectively, later,
+separate tasks. No `mobile/lib/` application code or behavior was
+changed.
+
+## H10.A1 (Kotlin skeleton + `mobile-android-jni` adapter)
+
+Android Work Package A1 (ONYX-MOB-01 §25), sequenced after M0. Builds
+the real, separate `mobile-android/` Kotlin project and
+`crates/mobile-android-jni` JNI adapter, and proves a genuine
+Kotlin/JVM -> JNI -> Rust round trip, per the task's own "prove the
+connection, don't build every wrapper" scope.
+
+### Architecture decision: a thin JNI adapter crate, not `mobile-core` calling itself JNI-native
+
+Two real options existed, both investigated against `mobile-core`'s
+actual exported signatures (`mobile-core.h`) rather than assumed:
+
+1. A dedicated `mobile-android-jni` crate wrapping the C ABI.
+2. Kotlin `external fun`s binding straight to `mobile-core`'s own
+   `#[no_mangle] extern "C"` functions -- the pattern
+   `mobile/android/.../WorkManagerService.kt`'s existing
+   `nativeAndroidDoWork()` already uses for
+   `mobile_core_android_do_work`.
+
+Option 2 does not generalize: `mobile_core_android_do_work` happens to
+take no string/JNI-object arguments at all, so a parameterless `Int`
+`external fun` coincidentally lines up with a JNI-callable native
+signature. Every other function that matters for the rewrite --
+`mobile_core_execute_command`/`_execute_query` (JSON string in/out),
+`mobile_core_new` (two strings in, pointer out) -- takes `*const
+c_char`/`*mut c_char`, which is not a JNI-native-method-compatible
+parameter type at all (JNI requires object types like `jstring` for
+Java-side strings, never a raw `char*`). Option 1 was built. The
+resulting crate has no business logic (per the manifesto's explicit
+prohibition) -- every wrapper converts JNI types to the C ABI's native
+types, calls straight into `mobile_core::*` (a normal Rust function
+call across the crate boundary, not `dlopen`/`dlsym`, since
+`mobile_core_new` etc. are `pub` items re-exported from `mobile_core`'s
+crate root), converts the result back.
+
+Per A1's own scope ("prove the connection, don't build every
+wrapper"), only handle lifecycle (`mobile_core_new`/`mobile_core_free`)
+and one representative string-round-trip function
+(`mobile_core_execute_command` -- the harder marshalling case, not just
+an opaque-pointer function) are wrapped. The remaining ~15 functions
+follow this exact same pattern and are deliberately left for A3/A4,
+whichever task actually needs each one first.
+
+### `jni` crate version and API -- a real correction mid-task, not assumed
+
+Context7 has no indexed documentation for the Rust `jni` crate under
+any of "jni", "jni-rs", or "jni crate rust" -- checked directly, not
+assumed unavailable. The version was instead confirmed against
+crates.io's own API response: `0.22.4`, current stable, MSRV 1.85.0
+(well under this project's 1.97.1 toolchain). The adapter was first
+drafted against the older, pre-0.22 single-`JNIEnv` API from memory,
+and **failed to compile** with a hard, real error naming the actual
+current shape: 0.22 split `JNIEnv` into an FFI-safe `EnvUnowned`
+(what a native method actually receives) and a full `Env` obtained via
+`EnvUnowned::with_env(|env| ...)` for the duration of one closure. The
+adapter was rewritten against that real API, read directly from
+`jni-0.22.4`'s own vendored source (`~/.cargo/registry/src/.../jni-0.22.4/src/env.rs`)
+rather than guessed a second time -- including using `JString::try_to_string(&env)`
+(the current, non-deprecated string accessor) after a first pass using
+the now-deprecated `Env::get_string` produced a compiler warning that
+was corrected rather than left in place.
+
+### Kotlin project versions -- confirmed live, not remembered, including two real compatibility corrections
+
+- Compose BOM/AGP/Kotlin versions checked via Context7
+  (developer.android.com/develop/ui/compose/*) before writing any
+  build script.
+- The Android Gradle Plugin version needed a real correction beyond
+  Context7's coverage: `dl.google.com`'s own `maven-metadata.xml` for
+  `com.android.tools.build:gradle` was fetched directly, showing 9.4.0
+  as latest stable -- but AGP 9.x requires Gradle 9.5+ per
+  developer.android.com's own compatibility table, while this
+  sandbox's available Gradle is 8.14.3 (upgrading would mean an
+  unverified network download this task doesn't need). 8.13.2 -- the
+  latest genuinely stable 8.x release, confirmed by enumerating every
+  "8."-prefixed version in the same metadata rather than assuming the
+  newest 8.x line -- was used instead, a real, verified-compatible
+  choice over an untested reach for the newest major version.
+- The first real `gradle assembleDebug` attempt failed twice, for two
+  different real reasons, both fixed by reading the actual error
+  rather than guessing again: (1) `kotlinOptions { jvmTarget = "17" }`
+  (the String-setter form) is a hard error under the resolved Kotlin
+  Gradle plugin version -- migrated to the `compilerOptions` DSL
+  (`kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }`);
+  (2) Compose BOM `2026.08.00` requires AGP 9.1+/compileSdk 37, which
+  this project's AGP 8.13.2 doesn't provide -- downgraded to Compose
+  BOM `2026.03.00` with `compileSdk`/`targetSdk` 36 (the maximum AGP
+  8.13.2 itself recommends), confirmed by the real error message
+  naming the exact requirement, not by pre-emptively picking an
+  arbitrary older version.
+
+### ReLinker: confirmed unnecessary, not silently omitted
+
+Current, real Android NDK guidance (developer.android.com/ndk/guides/
+jni-tips, queried via Context7) recommends ReLinker specifically "to
+address potential issues with native library installation and updates
+on older Android versions," and the NDK's own revision history notes
+it replaced `ndk-depends` "for handling native library loading issues
+on older Android versions." A separate passage is explicit about the
+actual affected range: "For apps targeting Android API levels below
+18, the shared library must be loaded before any dependencies," with
+ReLinker recommended there specifically. This project's real minimum
+is API 29 (ONYX-MOB-01 §3), well above that threshold -- ReLinker was
+therefore deliberately not added, with this reasoning recorded in both
+`app/build.gradle.kts`'s own dependency comment and here, rather than
+silently left out with no stated reason.
+
+### `OnyxApplication`: loads the native library from `Application`, per real, current NDK guidance
+
+Confirmed via the same NDK doc query: "For applications with multiple
+classes using native methods, loading the library from the Application
+class ensures it is initialized early and consistently." `OnyxApplication`'s
+companion `init` block calls `System.loadLibrary("mobile_android_jni")`
+before any other class in the app can reach it -- applied from day one,
+since A3/A4 will add exactly the multiple native-calling classes this
+guidance anticipates, not retrofitted once a second one exists.
+
+### Real proof of the Kotlin -> JNI -> Rust round trip
+
+Per ONYX-MOB-00 §25 step 5's actual gate for this task, verified two
+ways:
+
+1. **Real Android cross-compilation.** `cargo ndk -t arm64-v8a -t
+   armeabi-v7a -t x86_64 build -p mobile-android-jni --release`
+   (`mobile-android/tool/build_rust_jni.sh`, mirroring `mobile/tool/
+   build_rust_android.sh`'s existing pattern) produced real ARM64/ARMv7/
+   x86_64 Android `.so` files (`file` confirms `ELF ... ARM aarch64 ...
+   dynamically linked` etc.), and a full `./gradlew assembleDebug`
+   (Gradle 8.14.3, matching the wrapper's pinned version) produced a
+   real, installable `app-debug.apk` with all three ABIs' native
+   libraries packaged in (`packageDebug`/`stripDebugDebugSymbols` ran
+   over `libmobile_android_jni.so`, `libmobile_core.so`,
+   `libsync_transport_mobile.so` for each ABI).
+2. **Real host-JVM execution of the identical JNI entry points**, since
+   this sandbox has no way to execute the cross-compiled Android
+   binary (see disclosure below): a small Java harness
+   (`javac`/`java`, OpenJDK 21) declared the same three `native`
+   methods as `MobileCoreBridge`, loaded the *host* (linux-x86_64)
+   build of `libmobile_android_jni.so` via `System.load`, and called
+   them for real:
+   - `nativeNew(dbPath, configJson)` with a real SQLite path and a
+     real `MobileConfig` JSON body (confirming along the way that
+     `organization_id` serializes as a raw 16-byte JSON array under
+     this project's actual `ObjectId` derive, not a UUID string, by
+     reading `platform-kernel::identifiers` directly rather than
+     guessing) returned a real, non-zero handle -- meaning the full
+     Rust-side `mobile_core_new` path (opening the SQLite pool,
+     running migrations) executed successfully from a JVM-initiated
+     native call.
+   - `nativeExecuteCommand(handle, "{}")` returned `null`, exactly
+     matching `mobile_core_execute_command`'s documented behavior for
+     an envelope that doesn't parse as `CommandEnvelope<Value>` (a
+     malformed-FFI-call case, not a domain rejection) -- the success/
+     domain-rejection JSON-string path was not separately re-proven
+     here since `mobile-core`'s own existing test suite
+     (`crates/mobile-core/tests/ffi_integration.rs`) already exercises
+     `execute_command`'s success path directly in Rust, and duplicating
+     a full, valid `CommandEnvelope` by hand in Java would not prove
+     anything that suite doesn't already cover.
+   - `nativeFree(handle)` returned without crashing the JVM.
+
+### Disclosed limitation: no real Android-device/emulator verification
+
+This sandbox has no `/dev/kvm` and `egrep -c '(vmx|svm)' /proc/cpuinfo`
+reports `0` -- confirmed directly, not assumed -- so no Android
+emulator can boot here, and no physical device was available. The real
+ARM64/ARMv7/x86_64 `.so` files and the `app-debug.apk` described above
+were built and packaged successfully, and a real instrumented test
+(`MobileCoreRoundTripTest`, `app/src/androidTest/`) was written to
+prove the same round trip under `connectedAndroidTest` on a real
+emulator/device -- but it has not actually been executed on-device as
+part of this task. The host-JVM proof above is the disclosed
+substitute: it proves the JNI marshalling and Rust glue are correct,
+not that the specific cross-compiled Android binary loads and runs
+under ART on real hardware. This mirrors this session's own prior
+`flutter build ios` local-vs-CI disclosure pattern rather than silently
+claiming full verification.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo test -p mobile-android-jni` | 0 tests (no Rust-level unit tests -- the crate is pure JNI marshalling, verified instead by the real host-JVM round trip above and the real instrumented test file, per this task's own "prove the connection" gate) |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean (new crate registered in workspace `Cargo.toml`) |
+| `cargo ndk build -p mobile-android-jni --release` for arm64-v8a/armeabi-v7a/x86_64 | all three succeed, real ELF Android `.so` files confirmed via `file` |
+| `./gradlew assembleDebug` (Gradle 8.14.3, AGP 8.13.2) | `BUILD SUCCESSFUL`, real `app-debug.apk` produced with all three ABIs' native libraries packaged |
+| Host-JVM round trip (`javac`/`java`, OpenJDK 21) | `nativeNew` real non-zero handle, `nativeExecuteCommand("{}")` correctly `null`, `nativeFree` clean -- see transcript above |
+| Real, on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (no KVM/virtualization, no device) -- disclosed above, not silently skipped |
+
+### Not built in this task (explicitly out of scope per A1's own instructions)
+
+No real screens, navigation, or application logic beyond the minimal
+Compose skeleton (`OnyxSkeletonScreen`, a single static `Text`). No
+login/auth (A3). No business logic in `mobile-android-jni` itself. No
+changes to `mobile/` (frozen) or `mobile-pwa/` (not started).
+
+## H10.A3 (Kotlin login/session state machine, secure token storage)
+
+Android Work Package A3 (ONYX-MOB-01 §25). Builds the real startup/
+login/error state machine and the secure session it protects, mirroring
+Dart's `main.dart`/`ffi_login_screen.dart`/`startup_error_screen.dart`/
+`net/auth.dart` precisely rather than inventing a different shape.
+
+### A1/A2 overlap status (checked, per this task's own note)
+
+A1 already delivered a real, proven JNI adapter with genuine test
+coverage (the host-JVM round trip, plus A1's own real cross-compile/
+Gradle-build proof) -- A2 ("JNI -- native registration, adapter tests")
+is fully subsumed by A1's actual delivered scope. The one real gap A1
+explicitly left open -- `mobile_core_set_hierarchy` unwrapped -- is
+this task's own prerequisite, not a leftover A2 item, and is closed
+below.
+
+### Architecture confirmed, not invented: HTTP-only login, no `mobile-core` FFI change
+
+`mobile-core`'s own source comment states plainly: "mobile has no
+login/auth" happening in Rust. `AuthApi` (new,
+`app/src/main/kotlin/com/onyx/net/AuthApi.kt`) is therefore a plain
+OkHttp client mirroring `net/auth.dart`'s `OnyxHttpAuthApi` field-for-
+field -- `POST /api/auth/login` with `client_type: "mobile"`,
+`GET /api/users/hierarchy`, `POST /api/auth/refresh`, `POST /api/auth/
+logout` -- confirmed against `api-server::routes::auth`'s real
+`LoginRequest`/`LoginResponse` structs directly, not assumed from
+Dart's comment alone. No new `mobile-core` FFI function was added for
+login; only the *result* of a successful HTTP login is later handed
+into `mobile-core` via `MobileCoreBridge.nativeNew`/
+`nativeSetHierarchy`, exactly Dart's own sequencing.
+
+`MobileAccessRestrictedException` is a direct Kotlin mirror of Dart's
+identically-named/reasoned exception: `auth.rs` deliberately returns
+the same `INVALID_CREDENTIALS` for every other credential failure mode
+(audit finding H-01), so only the mobile-access-restricted case gets a
+distinct UI message.
+
+### A real UUID-encoding gap found and closed: HTTP strings vs. FFI byte arrays
+
+`LoginResponse.organization_id` is a plain `String` (confirmed in
+`api-server::routes::auth`), but `mobile_core_new`'s `MobileConfig.
+organization_id: ObjectId` derives `Deserialize` on `struct
+ObjectId([u8; 16])` -- a JSON array of 16 bytes, not a string (the same
+distinction A1's own host-JVM proof surfaced). Dart's `bridge.dart` has
+its own `uuidToBytes`/`bytesToUuid` pair for exactly this conversion;
+`com.onyx.util.UuidCodec` (new) is a byte-for-byte Kotlin port (strip
+hyphens, parse each hex-byte-pair left to right, no reordering) rather
+than a reinvented scheme, so a value round-trips identically regardless
+of which client produced it.
+
+### `mobile_core_set_hierarchy` JNI wrapper (new, in `mobile-android-jni`)
+
+`Java_com_onyx_bridge_MobileCoreBridge_nativeSetHierarchy` follows the
+exact same pattern A1 established for `nativeExecuteCommand` (JSON
+string in, `mobile_core_set_hierarchy`'s own `i32` result pass-through
+unchanged: `0` success, `-1` invalid arguments or unparseable JSON --
+including this wrapper's own JNI-level string-conversion failure,
+folded into the same `-1` case rather than inventing a third status).
+
+**Real, necessary correction found while testing this wrapper**: the
+hierarchy wire DTO's `id` field
+(`client_composition::hierarchy_cache::HierarchyUserWire.id`) is a
+plain `String`, unlike `MobileConfig.organization_id` -- a real, direct
+host-JVM test using a 16-byte array for `id` (matching the *other*
+struct's shape) failed with `-1` until corrected to a UUID string,
+confirming `HierarchyUserWire`'s real shape by testing it rather than
+assuming both id-carrying structs in this codebase serialize
+identically. `AuthApi.fetchHierarchyJson` and `OnyxSessionViewModel`
+both pass the server's raw JSON straight through unmodified (matching
+`GET /api/users/hierarchy`'s own real response shape, string ids
+included) -- only `organization_id` needs `UuidCodec` before reaching
+`mobile_core_new`.
+
+### Secure token storage: a real correction from Dart's own approach, not a copy
+
+Dart's `FfiSessionStorage` uses `flutter_secure_storage`, which wraps
+Android's `EncryptedSharedPreferences`
+(`androidx.security:security-crypto`). Checked directly against that
+library's real, current release notes before writing
+`com.onyx.security.SecureTokenStore` (not assumed still current just
+because Dart's side uses it): as of version 1.1.0-beta01, **all APIs in
+that library -- including `EncryptedSharedPreferences` -- are
+deprecated "in favour of existing platform APIs and direct use of
+Android Keystore."** `SecureTokenStore` therefore does not mirror
+Dart's library choice; it implements the now-recommended pattern
+directly -- an AES-256-GCM key generated and held inside the Android
+Keystore (`KeyGenParameterSpec`, never exportable), used to encrypt
+token bytes, with only ciphertext + IV persisted in a plain
+`SharedPreferences` file. Same real requirement (a bearer token needs
+materially more protection than a placeholder UUID) as Dart's own doc
+comment states, met via the platform's currently-recommended mechanism
+rather than a now-deprecated wrapper.
+
+### Startup/login/error state machine (`OnyxSessionViewModel`, new)
+
+Mirrors `main.dart::restartApp()`'s branching precisely (this
+skeleton has no HTTP-mode equivalent to mirror, since A1/A3 never built
+one): no saved real session -> `NeedsLogin`; a saved session -> open
+`mobile-core` under the real, previously-logged-in identity and reach
+`Ready`; any failure along the way -> `StartupError`, never a silent
+crash. `login()` follows Dart's exact persistence order (tokens to
+secure storage, *then* the non-secret `hasRealSession` flag) so a crash
+between the two writes can never leave a flag set with nothing backing
+it.
+
+**No manual identity entry, ever -- carried forward deliberately, not
+independently rediscovered.** Dart's `startup_error_screen.dart` doc
+comment records a real, already-fixed security hole: a startup-failure
+recovery screen used to let anyone type in an arbitrary
+`organization_id`/`user_id` by hand, no authentication required. This
+class's only two recovery actions (`retry()`, `signOutAndRetry()`) --
+and `StartupErrorScreen`'s only two buttons -- have no code path that
+accepts a caller-supplied organization or user id. Explicitly named
+here, per this task's own instruction, so this reads as carried forward
+from Dart's fixed history, not something re-discovered independently.
+
+### Proactive token refresh
+
+`scheduleProactiveTokenRefresh` renews the access token at 80% of its
+real `expires_in` TTL (returned by the server, not hardcoded), looping
+for the life of a `Ready` session -- combines Dart's two separate
+mechanisms (`OnyxController.initialize`'s periodic timer +
+`refreshHierarchyBestEffort`'s reactive-refresh-on-expiry fallback)
+into one primarily-proactive path, since a session left open for the
+server's full 1-hour token TTL must not sit on a stale token until
+something else happens to fail first. A refresh-token failure (7-day
+expiry, or revocation) stops the loop rather than retrying in a tight
+loop -- a real password login is required at that point, same
+ceiling Dart's own doc comment states.
+
+### A real discrepancy from the frozen Flutter reference, disclosed not silently copied: cleartext LAN HTTP
+
+`AuthApi`'s login flow talks to a server address the user types in
+(e.g. `http://192.168.1.x:3000`, a LAN `api-server`, matching this
+project's local-first design) -- plain HTTP. Since API 28, Android
+blocks cleartext traffic by default unless an app opts in via a network
+security config. Checked directly: neither `mobile/android/app/src/
+main/AndroidManifest.xml` nor any `network_security_config.xml` exists
+anywhere under `mobile/android/` -- the frozen Flutter reference has no
+such opt-in, meaning its own real LAN HTTP login is very likely already
+blocked by the OS on a real API 28+ device. That is the frozen
+reference's own pre-existing, undisclosed gap; fixing it is out of
+scope under the M0 freeze (a "critical defect" fix there would need its
+own `FROZEN_EXCEPTION.md` entry, a call for whoever owns that decision,
+not this task). The Kotlin rewrite does not reproduce the gap silently:
+`network_security_config.xml` (new, debug-source-set only --
+`cleartextTrafficPermitted="true"` never applies to a release build)
+permits cleartext for real LAN development/testing, with an explicit
+release-variant counterpart keeping the platform default
+(`cleartextTrafficPermitted="false"`) for any real production build.
+
+### Verification
+
+Real host-JVM proof (`javac`/`java`, OpenJDK 21, same technique as A1's
+own round-trip proof, for the same "no KVM/emulator in this sandbox"
+reason -- disclosed there and unchanged here):
+
+```
+nativeNew OK handle=<non-zero>
+nativeSetHierarchy(valid, string id)  = 0   (success)
+nativeSetHierarchy(invalid JSON)      = -1  (documented failure code)
+```
+
+This is the real evidence behind the `HierarchyUserWire.id` correction
+above -- the first attempt (byte-array `id`, matching
+`MobileConfig.organization_id`'s shape) failed with `-1` until
+corrected to a UUID string.
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean |
+| `cargo ndk build -p mobile-android-jni --release` for arm64-v8a/armeabi-v7a/x86_64 | all three succeed |
+| `./gradlew assembleDebug` (Gradle 8.14.3, AGP 8.13.2) | `BUILD SUCCESSFUL`; real `app-debug.apk` confirmed (via `unzip -l`) to package all three ABIs' `libmobile_android_jni.so`/`libmobile_core.so`/`libsync_transport_mobile.so` |
+| Host-JVM `nativeSetHierarchy` round trip | valid string-id hierarchy -> `0`; malformed JSON -> `-1`; both match `mobile_core_set_hierarchy`'s documented contract |
+| Real on-device/emulator instrumented test | **not possible in this sandbox** (no KVM/virtualization, no device -- same disclosed constraint as A1) |
+
+Two real build-time errors were hit and fixed during this task, both
+worth recording since they are genuine mistakes this task made and
+corrected, not hypothetical risks: (1) `--` inside an XML comment
+(`network_security_config.xml`) is invalid per the XML spec and failed
+real resource parsing during `assembleDebug` -- fixed by using single
+hyphens; (2) a doc comment containing the literal substring
+`mobile/lib/bridge/*.dart` opened an unintended *nested* block comment
+(Kotlin, unlike Java, nests `/* */`), leaving the real doc comment
+unclosed until end-of-file and cascading into unrelated "unresolved
+reference" errors elsewhere in the same file -- fixed by removing the
+literal `*.dart` glob from the comment text.
+
+### Not built in this task (explicitly out of scope per A3's own instructions)
+
+No screens beyond login/startup/session management -- Dashboard,
+Missions, Tasks, etc. are A4/A5. No login/auth FFI function was added
+to `mobile-core` (confirmed unnecessary and architecturally wrong
+above). No changes to `mobile/` (frozen) or `mobile-pwa/` (not
+started).

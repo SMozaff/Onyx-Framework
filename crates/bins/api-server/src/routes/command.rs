@@ -17,7 +17,8 @@ use serde_json::{json, Value};
 use tracing::Instrument;
 
 use super::{
-    authenticate_headers, parse_object_id, web_device_object_id, ApiError, ApiState, CommandRequest,
+    authenticate_headers, client_type, parse_object_id, web_device_object_id, ApiError, ApiState,
+    CommandRequest,
 };
 
 pub use notification_domain::{
@@ -526,6 +527,19 @@ pub async fn command_route(
     Json(envelope): Json<CommandRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let auth = authenticate_headers(&state, &headers).await?;
+    // H10/P1.4: every command this endpoint dispatches (notification,
+    // approval, policy, legal-hold, todo-list, target-list, staff-loan)
+    // is a real domain command submission, so this single check --
+    // matching ONYX-MOB-01 §9's own illustrative denial example
+    // verbatim (`required_capability: "submit_domain_command"`) --
+    // closes the whole endpoint for `MobileObserver` in one place,
+    // rather than re-deriving a separate capability per command_type
+    // below for a denial that would be identical either way.
+    client_type::require_capability(
+        &auth,
+        |c| c.can_submit_domain_commands,
+        "submit_domain_command",
+    )?;
     if !auth
         .scope
         .command_types

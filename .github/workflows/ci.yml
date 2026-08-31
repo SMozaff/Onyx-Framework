@@ -332,6 +332,20 @@ jobs:
       - if: always()
         run: kill "$(cat api.pid)" || true
 
+  mobile-freeze-guard:
+    # M0 (DECISIONS.md H10.M0 / ONYX-MOB-00 §8): mobile/lib/ is a Frozen
+    # Reference Implementation while the Kotlin Android rewrite is
+    # underway. Fails if this diff touches mobile/lib/ without also
+    # touching mobile/FROZEN_EXCEPTION.md to justify a real security fix
+    # or critical defect -- see scripts/verify/verify_mobile_freeze.sh.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch origin main --depth=1000
+      - run: bash scripts/verify/verify_mobile_freeze.sh origin/main
+
   mobile-dart:
     runs-on: ubuntu-latest
     defaults:
@@ -417,3 +431,37 @@ jobs:
         with:
           name: onyx-mobile-ios-simulator-debug
           path: mobile/build/ios/iphonesimulator/*.app
+
+  # A1 (ONYX-MOB-01 §25): the native Kotlin Android rewrite, distinct
+  # from the `mobile-android` job above (which builds the *frozen
+  # Flutter* app's own Android APK via `flutter build apk`). This job
+  # builds `mobile-android/`, the new, separate project.
+  mobile-android-kotlin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r28b
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Build native libraries for every target ABI
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: bash mobile-android/tool/build_rust_jni.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Gradle assembleDebug
+        working-directory: mobile-android
+        run: ./gradlew assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onyx-mobile-android-kotlin-debug
+          path: mobile-android/app/build/outputs/apk/debug/app-debug.apk

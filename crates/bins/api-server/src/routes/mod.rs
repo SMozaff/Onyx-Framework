@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod auth;
+pub mod client_type;
 pub mod command;
 pub mod events;
 pub mod policy_admin;
@@ -773,6 +774,21 @@ pub struct TokenClaims {
     pub organization_id: String,
     pub token_type: String,
     pub scope: TokenScope,
+    /// Server-owned client classification (H10/P1.1), bound once at
+    /// login and carried forward unchanged by every subsequent
+    /// `refresh` for this session's lifetime -- see `auth::refresh`,
+    /// which reads this field from the presented refresh token's own
+    /// claims rather than re-deriving it, so an observer session cannot
+    /// be "upgraded" to unrestricted merely by rotating its token.
+    ///
+    /// `#[serde(default = ...)]`: a token encoded before this field
+    /// existed still decodes, resolving to
+    /// [`client_type::ClientType::default_on_absence`] -- the same
+    /// back-compat default a login request that omits `client_type`
+    /// resolves to, so an in-flight session isn't retroactively
+    /// misclassified by a field it predates.
+    #[serde(default = "client_type::ClientType::default_on_absence")]
+    pub client_type: client_type::ClientType,
     pub iat: u64,
     pub exp: u64,
     pub jti: String,
@@ -785,6 +801,7 @@ pub struct AuthenticatedUser {
     pub organization_id: String,
     pub token: String,
     pub scope: TokenScope,
+    pub client_type: client_type::ClientType,
 }
 
 pub fn unix_seconds() -> u64 {
@@ -814,6 +831,7 @@ pub async fn issue_token(
     user: &security_application::UserRecord,
     token_type: &str,
     ttl_seconds: u64,
+    client_type: client_type::ClientType,
 ) -> anyhow::Result<String> {
     let now = unix_seconds();
     let claims = TokenClaims {
@@ -821,6 +839,7 @@ pub async fn issue_token(
         username: user.username.clone(),
         organization_id: user.organization_id.clone(),
         token_type: token_type.to_string(),
+        client_type,
         scope: TokenScope {
             object_type: "*".to_string(),
             object_id: None,
@@ -978,6 +997,7 @@ pub async fn authenticate_headers(
         organization_id: claims.organization_id,
         token: token.to_string(),
         scope: claims.scope,
+        client_type: claims.client_type,
     })
 }
 

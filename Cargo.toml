@@ -33,6 +33,7 @@ members = [
     "crates/bins/desktop-shell",
     "crates/bins/admin-shell",
     "crates/mobile-core",
+    "crates/mobile-android-jni",
     "crates/kernel/platform-contracts-ext",
     "crates/synchronization/crdt",
     "crates/synchronization/synchronization-domain",

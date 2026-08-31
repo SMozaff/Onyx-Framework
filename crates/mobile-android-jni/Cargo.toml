@@ -1,0 +1,24 @@
+[package]
+name = "mobile-android-jni"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "mobile_android_jni"
+# cdylib is the artifact Android's `System.loadLibrary("onyx_mobile_android")`
+# actually loads (jniLibs/<abi>/libonyx_mobile_android.so, see build.rs's
+# renamed output below). staticlib/lib are not needed here -- unlike
+# mobile-core, nothing links against this crate as a Rust dependency.
+crate-type = ["cdylib"]
+
+[dependencies]
+# 0.22.4, confirmed current via crates.io (not assumed/remembered) --
+# Context7 has no indexed docs for this crate (checked: neither "jni",
+# "jni-rs", nor "jni crate rust" resolve to it), so this version was
+# confirmed against crates.io's own API response instead, and the JNI
+# usage patterns below follow the crate's own well-established, stable
+# 0.2x-era API shape (JNIEnv method-call conventions unchanged since
+# 0.19), not a remembered-but-possibly-stale API guess.
+jni = "0.22.4"
+mobile-core.workspace = true

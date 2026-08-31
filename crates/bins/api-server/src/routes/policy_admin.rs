@@ -14,7 +14,7 @@ use platform_contracts::AggregateRoot;
 use policy_domain::{value::PolicyScope, LegalHold, LegalHoldCommand, Policy, PolicyCommand};
 use serde::{Deserialize, Serialize};
 
-use super::admin::require_admin;
+use super::admin::require_admin_mutation;
 use super::profiles::{decision_context_for_actor, domain_error, infrastructure_error};
 use super::ApiState;
 use crate::routes::ApiError;
@@ -40,7 +40,7 @@ pub async fn create_policy(
     headers: HeaderMap,
     Json(req): Json<CreatePolicyRequest>,
 ) -> Result<Json<CreatedPolicyDto>, ApiError> {
-    let admin = require_admin(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     let organization_id = uuid::Uuid::parse_str(&admin.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
     let ctx = decision_context_for_actor(&admin.user_id, organization_id)?;
@@ -99,7 +99,7 @@ pub async fn apply_legal_hold(
     headers: HeaderMap,
     Json(req): Json<ApplyLegalHoldRequest>,
 ) -> Result<Json<CreatedLegalHoldDto>, ApiError> {
-    let admin = require_admin(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     let organization_id = uuid::Uuid::parse_str(&admin.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
     let ctx = decision_context_for_actor(&admin.user_id, organization_id)?;
