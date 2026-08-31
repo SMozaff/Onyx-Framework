@@ -6006,3 +6006,203 @@ No real screens, navigation, or application logic beyond the minimal
 Compose skeleton (`OnyxSkeletonScreen`, a single static `Text`). No
 login/auth (A3). No business logic in `mobile-android-jni` itself. No
 changes to `mobile/` (frozen) or `mobile-pwa/` (not started).
+
+## H10.A3 (Kotlin login/session state machine, secure token storage)
+
+Android Work Package A3 (ONYX-MOB-01 §25). Builds the real startup/
+login/error state machine and the secure session it protects, mirroring
+Dart's `main.dart`/`ffi_login_screen.dart`/`startup_error_screen.dart`/
+`net/auth.dart` precisely rather than inventing a different shape.
+
+### A1/A2 overlap status (checked, per this task's own note)
+
+A1 already delivered a real, proven JNI adapter with genuine test
+coverage (the host-JVM round trip, plus A1's own real cross-compile/
+Gradle-build proof) -- A2 ("JNI -- native registration, adapter tests")
+is fully subsumed by A1's actual delivered scope. The one real gap A1
+explicitly left open -- `mobile_core_set_hierarchy` unwrapped -- is
+this task's own prerequisite, not a leftover A2 item, and is closed
+below.
+
+### Architecture confirmed, not invented: HTTP-only login, no `mobile-core` FFI change
+
+`mobile-core`'s own source comment states plainly: "mobile has no
+login/auth" happening in Rust. `AuthApi` (new,
+`app/src/main/kotlin/com/onyx/net/AuthApi.kt`) is therefore a plain
+OkHttp client mirroring `net/auth.dart`'s `OnyxHttpAuthApi` field-for-
+field -- `POST /api/auth/login` with `client_type: "mobile"`,
+`GET /api/users/hierarchy`, `POST /api/auth/refresh`, `POST /api/auth/
+logout` -- confirmed against `api-server::routes::auth`'s real
+`LoginRequest`/`LoginResponse` structs directly, not assumed from
+Dart's comment alone. No new `mobile-core` FFI function was added for
+login; only the *result* of a successful HTTP login is later handed
+into `mobile-core` via `MobileCoreBridge.nativeNew`/
+`nativeSetHierarchy`, exactly Dart's own sequencing.
+
+`MobileAccessRestrictedException` is a direct Kotlin mirror of Dart's
+identically-named/reasoned exception: `auth.rs` deliberately returns
+the same `INVALID_CREDENTIALS` for every other credential failure mode
+(audit finding H-01), so only the mobile-access-restricted case gets a
+distinct UI message.
+
+### A real UUID-encoding gap found and closed: HTTP strings vs. FFI byte arrays
+
+`LoginResponse.organization_id` is a plain `String` (confirmed in
+`api-server::routes::auth`), but `mobile_core_new`'s `MobileConfig.
+organization_id: ObjectId` derives `Deserialize` on `struct
+ObjectId([u8; 16])` -- a JSON array of 16 bytes, not a string (the same
+distinction A1's own host-JVM proof surfaced). Dart's `bridge.dart` has
+its own `uuidToBytes`/`bytesToUuid` pair for exactly this conversion;
+`com.onyx.util.UuidCodec` (new) is a byte-for-byte Kotlin port (strip
+hyphens, parse each hex-byte-pair left to right, no reordering) rather
+than a reinvented scheme, so a value round-trips identically regardless
+of which client produced it.
+
+### `mobile_core_set_hierarchy` JNI wrapper (new, in `mobile-android-jni`)
+
+`Java_com_onyx_bridge_MobileCoreBridge_nativeSetHierarchy` follows the
+exact same pattern A1 established for `nativeExecuteCommand` (JSON
+string in, `mobile_core_set_hierarchy`'s own `i32` result pass-through
+unchanged: `0` success, `-1` invalid arguments or unparseable JSON --
+including this wrapper's own JNI-level string-conversion failure,
+folded into the same `-1` case rather than inventing a third status).
+
+**Real, necessary correction found while testing this wrapper**: the
+hierarchy wire DTO's `id` field
+(`client_composition::hierarchy_cache::HierarchyUserWire.id`) is a
+plain `String`, unlike `MobileConfig.organization_id` -- a real, direct
+host-JVM test using a 16-byte array for `id` (matching the *other*
+struct's shape) failed with `-1` until corrected to a UUID string,
+confirming `HierarchyUserWire`'s real shape by testing it rather than
+assuming both id-carrying structs in this codebase serialize
+identically. `AuthApi.fetchHierarchyJson` and `OnyxSessionViewModel`
+both pass the server's raw JSON straight through unmodified (matching
+`GET /api/users/hierarchy`'s own real response shape, string ids
+included) -- only `organization_id` needs `UuidCodec` before reaching
+`mobile_core_new`.
+
+### Secure token storage: a real correction from Dart's own approach, not a copy
+
+Dart's `FfiSessionStorage` uses `flutter_secure_storage`, which wraps
+Android's `EncryptedSharedPreferences`
+(`androidx.security:security-crypto`). Checked directly against that
+library's real, current release notes before writing
+`com.onyx.security.SecureTokenStore` (not assumed still current just
+because Dart's side uses it): as of version 1.1.0-beta01, **all APIs in
+that library -- including `EncryptedSharedPreferences` -- are
+deprecated "in favour of existing platform APIs and direct use of
+Android Keystore."** `SecureTokenStore` therefore does not mirror
+Dart's library choice; it implements the now-recommended pattern
+directly -- an AES-256-GCM key generated and held inside the Android
+Keystore (`KeyGenParameterSpec`, never exportable), used to encrypt
+token bytes, with only ciphertext + IV persisted in a plain
+`SharedPreferences` file. Same real requirement (a bearer token needs
+materially more protection than a placeholder UUID) as Dart's own doc
+comment states, met via the platform's currently-recommended mechanism
+rather than a now-deprecated wrapper.
+
+### Startup/login/error state machine (`OnyxSessionViewModel`, new)
+
+Mirrors `main.dart::restartApp()`'s branching precisely (this
+skeleton has no HTTP-mode equivalent to mirror, since A1/A3 never built
+one): no saved real session -> `NeedsLogin`; a saved session -> open
+`mobile-core` under the real, previously-logged-in identity and reach
+`Ready`; any failure along the way -> `StartupError`, never a silent
+crash. `login()` follows Dart's exact persistence order (tokens to
+secure storage, *then* the non-secret `hasRealSession` flag) so a crash
+between the two writes can never leave a flag set with nothing backing
+it.
+
+**No manual identity entry, ever -- carried forward deliberately, not
+independently rediscovered.** Dart's `startup_error_screen.dart` doc
+comment records a real, already-fixed security hole: a startup-failure
+recovery screen used to let anyone type in an arbitrary
+`organization_id`/`user_id` by hand, no authentication required. This
+class's only two recovery actions (`retry()`, `signOutAndRetry()`) --
+and `StartupErrorScreen`'s only two buttons -- have no code path that
+accepts a caller-supplied organization or user id. Explicitly named
+here, per this task's own instruction, so this reads as carried forward
+from Dart's fixed history, not something re-discovered independently.
+
+### Proactive token refresh
+
+`scheduleProactiveTokenRefresh` renews the access token at 80% of its
+real `expires_in` TTL (returned by the server, not hardcoded), looping
+for the life of a `Ready` session -- combines Dart's two separate
+mechanisms (`OnyxController.initialize`'s periodic timer +
+`refreshHierarchyBestEffort`'s reactive-refresh-on-expiry fallback)
+into one primarily-proactive path, since a session left open for the
+server's full 1-hour token TTL must not sit on a stale token until
+something else happens to fail first. A refresh-token failure (7-day
+expiry, or revocation) stops the loop rather than retrying in a tight
+loop -- a real password login is required at that point, same
+ceiling Dart's own doc comment states.
+
+### A real discrepancy from the frozen Flutter reference, disclosed not silently copied: cleartext LAN HTTP
+
+`AuthApi`'s login flow talks to a server address the user types in
+(e.g. `http://192.168.1.x:3000`, a LAN `api-server`, matching this
+project's local-first design) -- plain HTTP. Since API 28, Android
+blocks cleartext traffic by default unless an app opts in via a network
+security config. Checked directly: neither `mobile/android/app/src/
+main/AndroidManifest.xml` nor any `network_security_config.xml` exists
+anywhere under `mobile/android/` -- the frozen Flutter reference has no
+such opt-in, meaning its own real LAN HTTP login is very likely already
+blocked by the OS on a real API 28+ device. That is the frozen
+reference's own pre-existing, undisclosed gap; fixing it is out of
+scope under the M0 freeze (a "critical defect" fix there would need its
+own `FROZEN_EXCEPTION.md` entry, a call for whoever owns that decision,
+not this task). The Kotlin rewrite does not reproduce the gap silently:
+`network_security_config.xml` (new, debug-source-set only --
+`cleartextTrafficPermitted="true"` never applies to a release build)
+permits cleartext for real LAN development/testing, with an explicit
+release-variant counterpart keeping the platform default
+(`cleartextTrafficPermitted="false"`) for any real production build.
+
+### Verification
+
+Real host-JVM proof (`javac`/`java`, OpenJDK 21, same technique as A1's
+own round-trip proof, for the same "no KVM/emulator in this sandbox"
+reason -- disclosed there and unchanged here):
+
+```
+nativeNew OK handle=<non-zero>
+nativeSetHierarchy(valid, string id)  = 0   (success)
+nativeSetHierarchy(invalid JSON)      = -1  (documented failure code)
+```
+
+This is the real evidence behind the `HierarchyUserWire.id` correction
+above -- the first attempt (byte-array `id`, matching
+`MobileConfig.organization_id`'s shape) failed with `-1` until
+corrected to a UUID string.
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean |
+| `cargo ndk build -p mobile-android-jni --release` for arm64-v8a/armeabi-v7a/x86_64 | all three succeed |
+| `./gradlew assembleDebug` (Gradle 8.14.3, AGP 8.13.2) | `BUILD SUCCESSFUL`; real `app-debug.apk` confirmed (via `unzip -l`) to package all three ABIs' `libmobile_android_jni.so`/`libmobile_core.so`/`libsync_transport_mobile.so` |
+| Host-JVM `nativeSetHierarchy` round trip | valid string-id hierarchy -> `0`; malformed JSON -> `-1`; both match `mobile_core_set_hierarchy`'s documented contract |
+| Real on-device/emulator instrumented test | **not possible in this sandbox** (no KVM/virtualization, no device -- same disclosed constraint as A1) |
+
+Two real build-time errors were hit and fixed during this task, both
+worth recording since they are genuine mistakes this task made and
+corrected, not hypothetical risks: (1) `--` inside an XML comment
+(`network_security_config.xml`) is invalid per the XML spec and failed
+real resource parsing during `assembleDebug` -- fixed by using single
+hyphens; (2) a doc comment containing the literal substring
+`mobile/lib/bridge/*.dart` opened an unintended *nested* block comment
+(Kotlin, unlike Java, nests `/* */`), leaving the real doc comment
+unclosed until end-of-file and cascading into unrelated "unresolved
+reference" errors elsewhere in the same file -- fixed by removing the
+literal `*.dart` glob from the comment text.
+
+### Not built in this task (explicitly out of scope per A3's own instructions)
+
+No screens beyond login/startup/session management -- Dashboard,
+Missions, Tasks, etc. are A4/A5. No login/auth FFI function was added
+to `mobile-core` (confirmed unnecessary and architecturally wrong
+above). No changes to `mobile/` (frozen) or `mobile-pwa/` (not
+started).

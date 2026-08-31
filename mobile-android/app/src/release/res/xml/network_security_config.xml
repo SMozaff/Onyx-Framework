@@ -2,10 +2,10 @@
 <!--
   Release counterpart to src/debug/res/xml/network_security_config.xml
   (see that file's doc comment for the full reasoning). Explicit,
-  platform-default-equivalent config -- cleartext traffic is NOT
+  platform-default-equivalent config: cleartext traffic is NOT
   permitted in release builds. A real production deployment talking to
   a LAN-only api-server over plain HTTP is a real, separate decision
-  (TLS termination, or a scoped <domain-config> naming the actual
+  (TLS termination, or a scoped domain-config naming the actual
   server) that this skeleton does not make on its own.
 -->
 <network-security-config>

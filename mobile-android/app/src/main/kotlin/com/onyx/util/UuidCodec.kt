@@ -8,7 +8,7 @@ import java.util.Locale
  * `platform-kernel::identifiers::ObjectId`'s real serde shape (a plain
  * derive on `struct ObjectId([u8; 16])`, confirmed by reading that file
  * directly) and Dart's identical `uuidToBytes`/`bytesToUuid`
- * (`mobile/lib/bridge/*.dart`) byte-for-byte: strip hyphens, parse each
+ * (`mobile/lib/bridge/bridge.dart`) byte-for-byte: strip hyphens, parse each
  * hex-byte-pair left to right into the array, no reordering. Every real
  * FFI call into `mobile-core` that carries an id (`mobile_core_new`'s
  * `organization_id`, future command envelopes) needs this -- the HTTP
