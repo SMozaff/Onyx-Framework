@@ -324,9 +324,8 @@ async fn relay_rejects_a_connection_that_declares_a_different_replica_than_the_t
     let impersonated_uuid = uuid::Uuid::from_bytes(impersonated.0);
 
     // But the WebSocket handshake declares a different, un-owned replica id.
-    let url = format!(
-        "ws://{addr}/api/relay/{target_uuid}?ticket={ticket}&self={impersonated_uuid}"
-    );
+    let url =
+        format!("ws://{addr}/api/relay/{target_uuid}?ticket={ticket}&self={impersonated_uuid}");
     let attempt = connect_async(&url).await;
     assert!(
         attempt.is_err(),
