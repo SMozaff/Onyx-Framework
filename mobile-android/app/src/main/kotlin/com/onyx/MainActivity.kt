@@ -7,30 +7,31 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.onyx.controller.OnyxController
 import com.onyx.session.OnyxSessionViewModel
 import com.onyx.session.OnyxUiState
 import com.onyx.session.SessionPreferences
+import com.onyx.ui.AppShell
 import com.onyx.ui.LoginScreen
 import com.onyx.ui.StartupErrorScreen
 import com.onyx.ui.defaultServerAddressFor
 
 /**
- * A3's real startup entry point: renders whichever screen
+ * The real startup entry point: renders whichever screen
  * [OnyxSessionViewModel.state] says is current (loading / needs-login /
  * ready / startup-error), mirroring `main.dart::restartApp()`'s
- * branching precisely rather than assuming a single static screen the
- * way A1's skeleton did.
+ * branching precisely. [OnyxUiState.Ready] now (A4) hands off to the
+ * real app shell ([AppShell]) instead of a placeholder screen.
  */
 class MainActivity : ComponentActivity() {
     private val viewModel: OnyxSessionViewModel by viewModels()
@@ -67,10 +68,20 @@ fun OnyxRoot(viewModel: OnyxSessionViewModel) {
                     onRetry = viewModel::retry,
                     onSignOutAndRetry = viewModel::signOutAndRetry,
                 )
-                is OnyxUiState.Ready -> ReadyScreen(
-                    username = current.username,
-                    onSignOut = viewModel::signOutAndRetry,
-                )
+                is OnyxUiState.Ready -> {
+                    // Keyed on the native handle so a sign-out (which
+                    // frees that handle) followed by a fresh login
+                    // (which mints a new one) gets a brand-new
+                    // OnyxController rather than one still holding a
+                    // freed/stale handle -- Compose's viewModel(key=...)
+                    // creates (and eventually discards) a distinct
+                    // ViewModel instance per key, exactly this case.
+                    val controller: OnyxController = viewModel(
+                        key = current.handle.toString(),
+                        factory = OnyxController.Factory(current.handle, current.organizationId, current.userId),
+                    )
+                    AppShell(controller = controller)
+                }
             }
         }
     }
@@ -84,25 +95,5 @@ private fun LoadingScreen() {
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
     ) {
         CircularProgressIndicator()
-    }
-}
-
-/**
- * Placeholder post-login content -- real screens (Dashboard, Missions,
- * Tasks, ...) are A4's scope, not this one. Shows enough to prove the
- * full login -> mobile-core -> session flow actually works end to end.
- */
-@Composable
-private fun ReadyScreen(username: String, onSignOut: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-    ) {
-        Text("Signed in as $username")
-        Text("ONYX Android (A3 skeleton -- real screens are A4)")
-        Button(onClick = onSignOut) {
-            Text("Sign out")
-        }
     }
 }

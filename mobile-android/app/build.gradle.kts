@@ -82,6 +82,10 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
+    // material-icons-extended: A4's bottom nav uses Dashboard/Flag/
+    // TaskAlt/Notifications, only some of which ship in the smaller
+    // material-icons-core set bundled with material3 by default.
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
@@ -105,6 +109,13 @@ dependencies {
     // here.
 
     testImplementation("junit:junit:4.13.2")
+    // A4's model classes (LoadedAggregate/CommandEnvelopeFactory) use
+    // org.json.JSONObject. Under `src/test/` (plain JVM unit tests, no
+    // Robolectric), that class resolves to the Android SDK's stub jar,
+    // where every method throws "Stub!" -- a real implementation must
+    // be on the unit-test classpath separately. 20250517 confirmed as
+    // Maven Central's current latest release, not an arbitrary pin.
+    testImplementation("org.json:json:20250517")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
