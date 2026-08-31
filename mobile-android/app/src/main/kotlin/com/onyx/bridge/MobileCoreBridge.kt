@@ -18,4 +18,5 @@ object MobileCoreBridge {
     external fun nativeNew(dbPath: String, configJson: String): Long
     external fun nativeFree(handle: Long)
     external fun nativeExecuteCommand(handle: Long, commandJson: String): String?
+    external fun nativeSetHierarchy(handle: Long, hierarchyJson: String): Int
 }

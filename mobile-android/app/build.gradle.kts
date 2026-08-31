@@ -83,6 +83,17 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+
+    // HTTP client for A3's login/hierarchy/refresh calls, mirroring
+    // Dart's `net/auth.dart` (which uses `dio` for the identical
+    // purpose). OkHttp 4.12.0 -- confirmed via Context7
+    // (square.github.io/okhttp) and Maven Central's own search API that
+    // this is the latest genuinely *stable* release; 5.x exists only as
+    // a long-running alpha series (5.0.0-alpha.16 at time of checking),
+    // not something to depend on for real app code.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // ReLinker deliberately NOT included -- see DECISIONS.md's A1 entry.
     // Confirmed via current Android NDK docs (developer.android.com/ndk/

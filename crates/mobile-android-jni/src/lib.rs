@@ -51,16 +51,18 @@
 //! arguments to the C ABI's native types, call straight into
 //! `mobile_core::*`, convert the result back, done.
 //!
-//! # Scope of this task (A1)
+//! # Scope
 //! Per A1's own "prove the connection, don't build every wrapper"
 //! framing, and A2's note that real JNI adapter test coverage may still
 //! be a gap A3+ needs to close: this crate wraps handle lifecycle
-//! (`mobile_core_new`/`mobile_core_free`) and one representative
+//! (`mobile_core_new`/`mobile_core_free`), one representative
 //! string-round-trip function (`mobile_core_execute_command`) -- the
 //! harder marshalling case (JSON string in, JSON string out, not just
 //! an opaque pointer), proving the pattern generalizes rather than
-//! proving only the trivial handle-only case. The remaining ~15
-//! functions follow this exact same pattern (see `execute_command`
+//! proving only the trivial handle-only case -- and, added in A3,
+//! `mobile_core_set_hierarchy` (needed for real login/session startup).
+//! The remaining ~14 functions follow this exact same pattern (see
+//! `execute_command`
 //! below as the template) and are deliberately left for the task that
 //! actually needs them, per A1's "do not build beyond the minimal
 //! skeleton" instruction.
@@ -140,6 +142,42 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeFree<'local>(
         // caller, which owns the handle's lifecycle.
         unsafe { mobile_core::mobile_core_free(handle as *mut MobileApp) };
         Ok(())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeSetHierarchy` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeSetHierarchy(handle: Long, hierarchyJson: String): Int`.
+///
+/// Added for A3 (startup/auth): populates the local approval-authority
+/// cache after a real login, mirroring Dart's `OnyxApi.setHierarchy`
+/// call in `ffi_login_screen.dart`/`main.dart::refreshHierarchyBestEffort`.
+/// Returns `mobile_core_set_hierarchy`'s own result unchanged (`0`
+/// success, `-1` invalid arguments or unparseable `hierarchyJson`) --
+/// `-1` is also this wrapper's own failure value for a JNI-level string
+/// conversion failure, matching `mobile_core_set_hierarchy`'s existing
+/// "invalid arguments" case rather than inventing a third status code.
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSetHierarchy<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    hierarchy_json: JString<'local>,
+) -> i32 {
+    env.with_env(|env| -> Result<i32, JniError> {
+        let Some(hierarchy_json) = jstring_to_cstring(env, &hierarchy_json) else {
+            return Ok(-1);
+        };
+        // Safety: `handle` is the Kotlin caller's responsibility (must
+        // be a live value from nativeNew); hierarchy_json is a freshly
+        // built, valid C string.
+        let result = unsafe {
+            mobile_core::mobile_core_set_hierarchy(
+                handle as *mut MobileApp,
+                hierarchy_json.as_ptr(),
+            )
+        };
+        Ok(result)
     })
     .resolve::<LogErrorAndDefault>()
 }
