@@ -332,6 +332,20 @@ jobs:
       - if: always()
         run: kill "$(cat api.pid)" || true
 
+  mobile-freeze-guard:
+    # M0 (DECISIONS.md H10.M0 / ONYX-MOB-00 §8): mobile/lib/ is a Frozen
+    # Reference Implementation while the Kotlin Android rewrite is
+    # underway. Fails if this diff touches mobile/lib/ without also
+    # touching mobile/FROZEN_EXCEPTION.md to justify a real security fix
+    # or critical defect -- see scripts/verify/verify_mobile_freeze.sh.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch origin main --depth=1000
+      - run: bash scripts/verify/verify_mobile_freeze.sh origin/main
+
   mobile-dart:
     runs-on: ubuntu-latest
     defaults:
