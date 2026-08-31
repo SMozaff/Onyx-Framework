@@ -25,8 +25,18 @@ import org.json.JSONObject
  * does not verify a real JWT (confirmed by reading `bridge.dart`
  * directly), reproduced as-is rather than tightened unilaterally.
  */
-class CommandEnvelopeFactory(private val organizationId: String, val userId: String) {
-    private val deviceId = "22222222-2222-4222-8222-222222222222"
+class CommandEnvelopeFactory(val organizationId: String, val userId: String) {
+    /**
+     * Public (not just used internally by [create]) since A5's Files
+     * screen needs it too: `mobile_core_upload_file` takes
+     * organization/user/device id as plain UUID strings (parsed via
+     * `OrganizationId`/`ObjectId`'s `FromStr`), unlike the raw-byte-array
+     * shape every command-envelope id field above uses -- confirmed by
+     * reading `ffi_files.rs` directly, matching Dart's own
+     * `uploadFile`, which passes `envelopeFactory.organizationId`/
+     * `userId`/`deviceId` straight through as UTF-8 strings.
+     */
+    val deviceId = "22222222-2222-4222-8222-222222222222"
 
     fun create(
         commandType: String,

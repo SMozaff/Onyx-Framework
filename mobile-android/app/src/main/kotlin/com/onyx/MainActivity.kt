@@ -15,8 +15,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.onyx.background.scheduleBackgroundSync
 import com.onyx.controller.OnyxController
 import com.onyx.session.OnyxSessionViewModel
 import com.onyx.session.OnyxUiState
@@ -69,6 +71,7 @@ fun OnyxRoot(viewModel: OnyxSessionViewModel) {
                     onSignOutAndRetry = viewModel::signOutAndRetry,
                 )
                 is OnyxUiState.Ready -> {
+                    LaunchedEffect(current.handle) { scheduleBackgroundSync(context.applicationContext) }
                     // Keyed on the native handle so a sign-out (which
                     // frees that handle) followed by a fresh login
                     // (which mints a new one) gets a brand-new
@@ -78,9 +81,9 @@ fun OnyxRoot(viewModel: OnyxSessionViewModel) {
                     // ViewModel instance per key, exactly this case.
                     val controller: OnyxController = viewModel(
                         key = current.handle.toString(),
-                        factory = OnyxController.Factory(current.handle, current.organizationId, current.userId),
+                        factory = OnyxController.Factory(current.handle, current.organizationId, current.userId, context.applicationContext),
                     )
-                    AppShell(controller = controller)
+                    AppShell(controller = controller, onSignOut = viewModel::signOutAndRetry)
                 }
             }
         }

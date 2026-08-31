@@ -38,6 +38,18 @@ class SessionPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_HAS_REAL_SESSION, value).apply()
 
     /**
+     * The cloud relay endpoint `mobile_core_new`'s config JSON is opened
+     * with -- Kotlin's equivalent of Dart's `preferences`-backed
+     * `relay_endpoint` key (`ui/app.dart::saveRelayEndpoint`). Added for
+     * A5's Settings screen: the *only* identity-adjacent field this app
+     * ever lets a person edit directly (see [Settings screen's own doc
+     * comment] for why organization/user are never editable here).
+     */
+    var relayEndpoint: String
+        get() = prefs.getString(KEY_RELAY_ENDPOINT, DEFAULT_RELAY_ENDPOINT) ?: DEFAULT_RELAY_ENDPOINT
+        set(value) = prefs.edit().putString(KEY_RELAY_ENDPOINT, value).apply()
+
+    /**
      * Clears every field this class owns. Called only from the
      * sign-out/recovery path -- never leaves a partial identity behind
      * that a later `hasRealSession` check could misread as valid, per
@@ -61,6 +73,8 @@ class SessionPreferences(context: Context) {
         private const val KEY_USERNAME = "username"
         private const val KEY_SERVER_ADDRESS = "server_address"
         private const val KEY_HAS_REAL_SESSION = "has_real_session"
+        private const val KEY_RELAY_ENDPOINT = "relay_endpoint"
         const val DEFAULT_SERVER_ADDRESS = "http://192.168.1.1:3000"
+        const val DEFAULT_RELAY_ENDPOINT = "wss://relay.onyx.invalid/v1"
     }
 }

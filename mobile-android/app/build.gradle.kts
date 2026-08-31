@@ -88,6 +88,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    // A5's background sync (WorkManagerService/BackgroundSync.kt). Same
+    // 2.9.1 already used and proven working by the frozen Flutter app's
+    // own Android embedding (mobile/android/app/build.gradle), not an
+    // independently chosen version.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // HTTP client for A3's login/hierarchy/refresh calls, mirroring
     // Dart's `net/auth.dart` (which uses `dio` for the identical

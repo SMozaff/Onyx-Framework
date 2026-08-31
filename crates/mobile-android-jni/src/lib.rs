@@ -289,6 +289,150 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeListConflicts
     .resolve::<LogErrorAndDefault>()
 }
 
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeUploadFile` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeUploadFile(handle: Long, path: String, organizationId: String, userId: String, deviceId: String): String?`.
+///
+/// Added for A5 (Files screen): wraps `mobile_core_upload_file`
+/// unchanged, including its real, current "collapse every failure (I/O
+/// error, oversized file, coordinator error) into a null return" contract
+/// -- confirmed by reading that function's own source directly, not
+/// assumed richer than it is. Dart's own `FilesScreen` gets exactly the
+/// same generic signal (`_decodeOwnedJson` throws `StateError('mobile-core
+/// returned null')` on a null pointer, with no further detail), so Kotlin
+/// matching that same generic failure is real parity, not a regression.
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeUploadFile<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    path: JString<'local>,
+    organization_id: JString<'local>,
+    user_id: JString<'local>,
+    device_id: JString<'local>,
+) -> jstring {
+    env.with_env(|env| -> Result<jstring, JniError> {
+        let Some(path) = jstring_to_cstring(env, &path) else {
+            return Ok(std::ptr::null_mut());
+        };
+        let Some(organization_id) = jstring_to_cstring(env, &organization_id) else {
+            return Ok(std::ptr::null_mut());
+        };
+        let Some(user_id) = jstring_to_cstring(env, &user_id) else {
+            return Ok(std::ptr::null_mut());
+        };
+        let Some(device_id) = jstring_to_cstring(env, &device_id) else {
+            return Ok(std::ptr::null_mut());
+        };
+        // Safety: same contract as nativeExecuteCommand above; every
+        // string argument is a freshly built, valid C string.
+        let result_ptr = unsafe {
+            mobile_core::mobile_core_upload_file(
+                handle as *mut MobileApp,
+                path.as_ptr(),
+                organization_id.as_ptr(),
+                user_id.as_ptr(),
+                device_id.as_ptr(),
+            )
+        };
+        copy_and_free_c_string(env, result_ptr)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeDownloadFile` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeDownloadFile(handle: Long, contentHash: String, destinationPath: String): Long`.
+///
+/// Added for A5. Returns `mobile_core_download_file`'s own `i64` result
+/// unchanged: bytes written on success, `-1` on any failure (invalid
+/// arguments, no stored content for that hash, or a write error) --
+/// same generic sentinel Dart's own `downloadFile` surfaces as
+/// `StateError('mobile_core_download_file failed')`.
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeDownloadFile<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    content_hash: JString<'local>,
+    destination_path: JString<'local>,
+) -> jlong {
+    env.with_env(|env| -> Result<jlong, JniError> {
+        let Some(content_hash) = jstring_to_cstring(env, &content_hash) else {
+            return Ok(-1);
+        };
+        let Some(destination_path) = jstring_to_cstring(env, &destination_path) else {
+            return Ok(-1);
+        };
+        // Safety: same contract as nativeExecuteCommand above.
+        let bytes_written = unsafe {
+            mobile_core::mobile_core_download_file(
+                handle as *mut MobileApp,
+                content_hash.as_ptr(),
+                destination_path.as_ptr(),
+            )
+        };
+        Ok(bytes_written as jlong)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeTriggerSync` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeTriggerSync(handle: Long): Int`.
+///
+/// Added for A5 (sync status widget's manual "tap to synchronize now"
+/// action). Returns `mobile_core_trigger_sync`'s own result unchanged
+/// (`0` success, `-1` failure).
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeTriggerSync<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> i32 {
+    env.with_env(|_env| -> Result<i32, JniError> {
+        // Safety: same contract as nativeExecuteCommand above.
+        let result = unsafe { mobile_core::mobile_core_trigger_sync(handle as *mut MobileApp) };
+        Ok(result)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeResolveConflict` --
+/// `com.onyx.bridge.MobileCoreBridge.nativeResolveConflict(handle: Long, conflictJson: String, resolution: String): Int`.
+///
+/// Added for A5 (conflict resolution dialog). `resolution` must be one
+/// of `"local"`/`"remote"`/`"escalate"`, exactly matching Dart's
+/// `ConflictChoice.name` values and `mobile_core_resolve_conflict`'s own
+/// real, current string match -- confirmed by reading that function
+/// directly rather than assumed. Returns `0` on success, non-zero
+/// otherwise (invalid arguments, unknown resolution string, or the
+/// conflict itself failing to resolve).
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeResolveConflict<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    conflict_json: JString<'local>,
+    resolution: JString<'local>,
+) -> i32 {
+    env.with_env(|env| -> Result<i32, JniError> {
+        let Some(conflict_json) = jstring_to_cstring(env, &conflict_json) else {
+            return Ok(-1);
+        };
+        let Some(resolution) = jstring_to_cstring(env, &resolution) else {
+            return Ok(-1);
+        };
+        // Safety: same contract as nativeExecuteCommand above.
+        let result = unsafe {
+            mobile_core::mobile_core_resolve_conflict(
+                handle as *mut MobileApp,
+                conflict_json.as_ptr(),
+                resolution.as_ptr(),
+            )
+        };
+        Ok(result)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
 /// Shared tail end of every `*mut c_char`-returning wrapper above: copy
 /// the C string into a JVM-owned string *before* freeing it via
 /// `mobile_core_free_string` (`new_string` allocates its own copy, so

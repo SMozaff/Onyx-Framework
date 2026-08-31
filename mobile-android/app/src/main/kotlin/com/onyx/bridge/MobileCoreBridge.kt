@@ -24,4 +24,10 @@ object MobileCoreBridge {
     external fun nativeListAggregates(handle: Long, aggregateType: String): String?
     external fun nativeGetSyncStatus(handle: Long): String?
     external fun nativeListConflicts(handle: Long): String?
+
+    // Added for A5 (Files, sync status, conflict resolution).
+    external fun nativeUploadFile(handle: Long, path: String, organizationId: String, userId: String, deviceId: String): String?
+    external fun nativeDownloadFile(handle: Long, contentHash: String, destinationPath: String): Long
+    external fun nativeTriggerSync(handle: Long): Int
+    external fun nativeResolveConflict(handle: Long, conflictJson: String, resolution: String): Int
 }
