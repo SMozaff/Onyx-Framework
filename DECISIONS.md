@@ -5675,3 +5675,134 @@ as every other integration test in this crate):
 | `cargo clippy --workspace --exclude desktop-shell --exclude admin-shell --all-targets -- -D warnings` | clean |
 | `cargo test --workspace --exclude desktop-shell --exclude admin-shell` | all passing except the same 7 disclosed, Docker-dependent `crates/team8-e2e-tests` journeys as every prior task in this session (no Docker daemon in this sandbox) -- no new regressions |
 | `cargo fmt --all -- --check` | clean |
+
+## H10.M0 (freeze the Flutter Android reference implementation)
+
+Migration Sequence step 1 (ONYX-MOB-00 §25) / Android Work Package A0
+(ONYX-MOB-01 §25), sequenced immediately after H10 per both governance
+documents' agreed order. This is a documentation-and-process task, not
+development: per ONYX-MOB-00 §8, the Flutter client becomes a Frozen
+Reference Implementation ("no ordinary new product development;
+security fixes MAY continue; critical defects MAY continue") while a
+native Kotlin Android rewrite and an iOS Observer PWA are built
+separately. No `mobile/lib/` application behavior was changed by this
+task -- the point is capturing exactly what exists today as the ground
+truth those rewrites must match, and making the freeze a real,
+enforced invariant rather than a written-only policy.
+
+### `docs/mobile-migration/parity-matrix.md` (new)
+
+Per ONYX-MOB-01 §5's repository layout, confirmed not to already exist.
+Documents, screen by screen (Dashboard, Missions list, Mission Detail,
+Tasks list, Task Detail, Approvals, Notifications, Files, Settings,
+both login screens, startup/error recovery, the shared-refresh
+controller architecture, and the full FFI contract surface): what each
+does today, which real backend endpoints/`mobile-core` FFI functions it
+calls, what state it reads/writes, and non-obvious behavior. This is
+written as real acceptance criteria for the Kotlin rewrite, not a
+high-level summary -- e.g. it pins down that Approvals is a filtered
+view over already-loaded Task/Mission state (not its own aggregate,
+and `controller.approvals` is loaded but never actually populated or
+read by any screen), that Mission's decision commands are
+`ActivateMission`/`RejectApproval` (not a direct `ApproveMission`
+mirror of Task's `ApproveTask`/`RejectTask` shape), the exact
+reason-required-before-Reject gating, and the literal `"mobile"`
+`client_type` value sent at login (`mobile/lib/net/auth.dart:46`).
+
+**A real discrepancy surfaced and resolved while building this
+document**, worth recording since it corrects this task's own starting
+assumption: the FFI contract is 18 functions declared in
+`mobile-core.h`, not "17 plus one Android-specific" as this task's own
+instructions assumed. Reading the header and every real call site
+(Dart's `lib/bridge/*.dart`, Kotlin's `WorkManagerService.kt`, Swift's
+`BackgroundService.swift`) directly: 15 functions are called from
+Dart, `mobile_core_android_do_work` is called from Kotlin (not Dart --
+an `external fun nativeAndroidDoWork()` bound via
+`System.loadLibrary`), `mobile_core_background_sync_registered` is
+called from Swift (via `dlsym`, not a static import), and
+`mobile_core_ios_background_sync` was not found called from any file
+this review reached in either Dart, Kotlin, or the one Swift file
+read -- left as a real, disclosed open question (possibly dead code,
+possibly called from a Swift file not read in this task) rather than
+silently assumed resolved.
+
+### Real, current test baseline (re-run fresh, not assumed from a prior session)
+
+Against this task's real tip (this branch, carrying H10):
+
+```
+flutter analyze  ->  No issues found! (ran in 16.7s)
+flutter test     ->  16 passed, 1 skipped, 0 failed
+```
+
+The one skip (`test/integration/p2p_sync_test.dart`) is real and
+disclosed, not silently dropped: `Skip: Requires two authorized
+iOS/Android devices and ONYX_MOBILE_DEVICE_TEST=1` -- gated behind an
+explicit opt-in environment variable because it genuinely cannot run
+without two real physical/authorized devices. This 16-passed/1-skipped/
+0-failed baseline, recorded per-test in the parity matrix's final
+section, is the parity floor the Kotlin rewrite's own (differently
+structured, not line-for-line ported) test suite must not regress
+below.
+
+### Freeze enforcement: a real CI gate, not a verbal policy
+
+This project has consistently preferred enforced invariants over
+written-only agreements (H1's production-mode bootstrap refusal, H10's
+`ClientType` rejection). Two options were weighed for making "no
+ordinary new product development in `mobile/`" real: a hard CI gate
+requiring an explicit override marker per change, versus a lighter
+`CODEOWNERS`/README-notice-only approach. The hard CI gate was chosen
+-- this project's own prior pattern (a *rejected* invalid state, not
+just a documented one) is the closer fit than a purely social
+convention, and the gate's cost is low: it only fires on diffs that
+actually touch `mobile/lib/`, which per this task's own scope should
+now be rare.
+
+**`scripts/verify/verify_mobile_freeze.sh`** (new), wired as the
+`mobile-freeze-guard` job in `ci.yml` (runs on every push/PR, ahead of
+`mobile-dart`): computes `git diff --name-only` between the merge-base
+of `origin/main` and `HEAD`; if any changed path starts with
+`mobile/lib/`, the diff must also touch `mobile/FROZEN_EXCEPTION.md`
+(new, a real exception log with instructions and an empty log section)
+or the job fails with a message explaining exactly why and what to do.
+Deliberately scoped to `mobile/lib/` only -- not `mobile/test/`,
+`mobile/android/`, `mobile/ios/`, or `mobile/tool/` -- since platform
+scaffold, CI, and test maintenance needed to keep the frozen app
+building on newer toolchains is not "new product development" and
+gating it would make the freeze actively harmful rather than useful.
+
+`mobile/README.md` also gained a prominent freeze notice pointing at
+both the parity matrix and the exception file, per the task's
+proportionality question -- both the process guard and the visible
+documentation were built, not one instead of the other, since the
+guard alone is invisible until someone's diff already fails it.
+
+### Verification
+
+Real test-then-revert proof the guard actually works, run against this
+task's own M0 commit as the base (not a hypothetical):
+
+1. Appended a trivial comment to `mobile/lib/main.dart`, committed
+   without touching `FROZEN_EXCEPTION.md`.
+   `verify_mobile_freeze.sh <M0-commit>` -> **exit 1, BLOCKED**, real
+   error message printed.
+2. Amended that commit to also touch `mobile/FROZEN_EXCEPTION.md`.
+   `verify_mobile_freeze.sh <M0-commit>` -> **exit 0, OK**.
+3. `git reset --hard` back to the real M0 commit -- the test commit
+   never reached the pushed branch.
+
+| Check | Result |
+|---|---|
+| `flutter analyze` (mobile/) | clean, 0 issues |
+| `flutter test` (mobile/) | 16 passed, 1 disclosed skip, 0 failed |
+| `verify_mobile_freeze.sh` block case | confirmed blocks (exit 1) |
+| `verify_mobile_freeze.sh` exception case | confirmed passes (exit 0) |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+### Not built in this task (explicitly out of scope per the task's own instructions)
+
+`mobile-android/` (the Kotlin project) and `mobile-pwa/` were not
+touched or started -- those are A1 and P2 respectively, later,
+separate tasks. No `mobile/lib/` application code or behavior was
+changed.
