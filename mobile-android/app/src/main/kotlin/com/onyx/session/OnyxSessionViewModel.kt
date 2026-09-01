@@ -19,7 +19,6 @@ import org.json.JSONObject
 import java.io.File
 
 private const val TAG = "OnyxSessionViewModel"
-private const val DEFAULT_CLOUD_RELAY_ENDPOINT = "wss://relay.onyx.invalid/v1"
 
 /**
  * The real startup state machine for A3, mirroring `main.dart`'s
@@ -119,7 +118,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             val dbPath = File(getApplication<Application>().filesDir, "onyx.sqlite").absolutePath
             val configJson = JSONObject()
                 .put("organization_id", org.json.JSONArray(UuidCodec.uuidToBytes(organizationId)))
-                .put("cloud_relay_endpoint", DEFAULT_CLOUD_RELAY_ENDPOINT)
+                .put("cloud_relay_endpoint", sessionPrefs.relayEndpoint)
                 .toString()
             val handle = MobileCoreBridge.nativeNew(dbPath, configJson)
             if (handle == 0L) {

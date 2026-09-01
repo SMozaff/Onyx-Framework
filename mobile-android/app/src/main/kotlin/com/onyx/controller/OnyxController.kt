@@ -1,12 +1,17 @@
 package com.onyx.controller
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.onyx.bridge.MobileCoreBridge
 import com.onyx.model.CommandEnvelopeFactory
+import com.onyx.model.ConflictChoice
 import com.onyx.model.LoadedAggregate
+import com.onyx.model.SyncConflict
 import com.onyx.model.SyncSnapshot
 import com.onyx.util.UuidCodec
 import kotlinx.coroutines.Deferred
@@ -62,7 +67,12 @@ private const val TAG = "OnyxController"
 class OnyxController(
     private val handle: Long,
     private val envelopeFactory: CommandEnvelopeFactory,
+    private val applicationContext: Context,
 ) : ViewModel() {
+    /** Read-only for Settings' "Signed in" display -- see that screen's own doc comment on why this is never editable. */
+    val organizationId: String get() = envelopeFactory.organizationId
+    val userId: String get() = envelopeFactory.userId
+
     private val _missions = MutableStateFlow<List<LoadedAggregate>>(emptyList())
     val missions: StateFlow<List<LoadedAggregate>> = _missions.asStateFlow()
 
@@ -77,6 +87,25 @@ class OnyxController(
 
     private val _conflictCount = MutableStateFlow(0)
     val conflictCount: StateFlow<Int> = _conflictCount.asStateFlow()
+
+    /** Full conflict list -- added for A5's conflict resolution dialog (A4 only needed the count). */
+    private val _conflicts = MutableStateFlow<List<SyncConflict>>(emptyList())
+    val conflicts: StateFlow<List<SyncConflict>> = _conflicts.asStateFlow()
+
+    /** Mirrors `ui/app.dart`'s `OnyxController.isSyncing`: true only while a manual [triggerSync] call is in flight. */
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    /**
+     * Mirrors `ui/app.dart`'s `hasNetwork`, computed the same way each
+     * [refresh] cycle: real device-level connectivity (any active
+     * network with internet capability), not `sync.online` (which
+     * reflects whether `mobile-core`'s own sync agent found a reachable
+     * peer/relay -- a materially different, narrower question). Default
+     * `true`, exactly matching Dart's own initial value.
+     */
+    private val _hasNetwork = MutableStateFlow(true)
+    val hasNetwork: StateFlow<Boolean> = _hasNetwork.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -114,7 +143,7 @@ class OnyxController(
                     val approvalsDeferred: Deferred<List<LoadedAggregate>> = async { listAggregates("approval") }
                     val notificationsDeferred: Deferred<List<LoadedAggregate>> = async { listAggregates("notification") }
                     val syncDeferred: Deferred<SyncSnapshot> = async { getSyncStatus() }
-                    val conflictsDeferred: Deferred<Int> = async { listConflictCount() }
+                    val conflictsDeferred: Deferred<List<SyncConflict>> = async { listConflicts() }
                     listOf(missionsDeferred, tasksDeferred, approvalsDeferred, notificationsDeferred, syncDeferred, conflictsDeferred)
                         .awaitAll()
                 }
@@ -126,7 +155,11 @@ class OnyxController(
                 @Suppress("UNCHECKED_CAST")
                 _notifications.value = results[3] as List<LoadedAggregate>
                 _sync.value = results[4] as SyncSnapshot
-                _conflictCount.value = results[5] as Int
+                @Suppress("UNCHECKED_CAST")
+                val conflicts = results[5] as List<SyncConflict>
+                _conflicts.value = conflicts
+                _conflictCount.value = conflicts.size
+                _hasNetwork.value = deviceHasNetwork()
                 _error.value = null
             } catch (e: Exception) {
                 Log.w(TAG, "refresh() failed", e)
@@ -151,10 +184,25 @@ class OnyxController(
         return SyncSnapshot.fromJson(JSONObject(json))
     }
 
-    private fun listConflictCount(): Int {
+    private fun listConflicts(): List<SyncConflict> {
         val json = MobileCoreBridge.nativeListConflicts(handle)
             ?: throw IllegalStateException("nativeListConflicts returned null")
-        return JSONArray(json).length()
+        val array = JSONArray(json)
+        return (0 until array.length()).map { SyncConflict.fromJson(array.getJSONObject(it)) }
+    }
+
+    /**
+     * Real device-level connectivity, mirroring `ui/app.dart`'s own
+     * `connectivity_plus`-based check (`results.any((r) => r !=
+     * ConnectivityResult.none)`) via the platform API it wraps directly
+     * -- no extra dependency needed for this one query.
+     */
+    private fun deviceHasNetwork(): Boolean {
+        val manager = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return true
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     /** Mirrors `missions.dart`'s `createMission`: execute, then a full [refresh]. */
@@ -225,10 +273,74 @@ class OnyxController(
         refresh()
     }
 
-    class Factory(private val handle: Long, private val organizationId: String, private val userId: String) : ViewModelProvider.Factory {
+    /**
+     * Mirrors `files.dart`'s `_upload`: uploads the file at [path],
+     * returning the real `UploadOutcome` JSON (`content_hash`,
+     * `size_bytes`, ...) on success. Throws on any failure -- including
+     * the file exceeding `file_domain::value::MAX_FILE_SIZE_BYTES` (100
+     * MiB) -- with the same real, current *generic* signal Dart's own
+     * screen gets: `mobile_core_upload_file` collapses every failure
+     * mode (I/O error, oversized file, coordinator error) into a null
+     * return with no further detail (confirmed by reading
+     * `ffi_files.rs` directly), so this is honest parity with Dart's
+     * actual behavior, not a regression from some richer error Dart
+     * secretly has and this task forgot to wire up.
+     */
+    suspend fun uploadFile(path: String): JSONObject {
+        val json = withContext(Dispatchers.IO) {
+            MobileCoreBridge.nativeUploadFile(handle, path, envelopeFactory.organizationId, envelopeFactory.userId, envelopeFactory.deviceId)
+        } ?: throw IllegalStateException("Upload failed (unreadable file, over the 100 MiB size limit, or a storage error)")
+        return JSONObject(json)
+    }
+
+    /** Mirrors `files.dart`'s `_download`: same generic failure signal as [uploadFile] -- see its doc comment. */
+    suspend fun downloadFile(contentHash: String, destinationPath: String): Long {
+        val bytesWritten = withContext(Dispatchers.IO) {
+            MobileCoreBridge.nativeDownloadFile(handle, contentHash, destinationPath)
+        }
+        if (bytesWritten < 0) throw IllegalStateException("Download failed (no stored content for that hash, or a write error)")
+        return bytesWritten
+    }
+
+    /** Mirrors `background/sync_service.dart`'s `startSync`/the sync status widget's manual "tap to synchronize now" action. */
+    fun triggerSync() {
+        if (_isSyncing.value) return
+        viewModelScope.launch {
+            _isSyncing.value = true
+            try {
+                val code = withContext(Dispatchers.Default) { MobileCoreBridge.nativeTriggerSync(handle) }
+                if (code != 0) _error.value = "Sync failed with code $code"
+                refresh()
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
+
+    /**
+     * Mirrors `widgets/conflict_dialog.dart`'s `resolve`: sends
+     * [choice] for [conflict] and refreshes. All three real resolution
+     * choices (accept local, accept remote, escalate) go through this
+     * one path, matching `mobile_core_resolve_conflict`'s own
+     * `"local"`/`"remote"`/`"escalate"` string match.
+     */
+    suspend fun resolveConflict(conflict: SyncConflict, choice: ConflictChoice) {
+        val code = withContext(Dispatchers.Default) {
+            MobileCoreBridge.nativeResolveConflict(handle, conflict.raw.toString(), choice.wireValue)
+        }
+        if (code != 0) throw IllegalStateException("Conflict resolution failed with code $code")
+        refresh()
+    }
+
+    class Factory(
+        private val handle: Long,
+        private val organizationId: String,
+        private val userId: String,
+        private val applicationContext: Context,
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return OnyxController(handle, CommandEnvelopeFactory(organizationId, userId)) as T
+            return OnyxController(handle, CommandEnvelopeFactory(organizationId, userId), applicationContext) as T
         }
     }
 }

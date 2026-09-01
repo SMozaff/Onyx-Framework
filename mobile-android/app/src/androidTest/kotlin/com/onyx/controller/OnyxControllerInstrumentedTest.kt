@@ -52,7 +52,7 @@ class OnyxControllerInstrumentedTest {
             .toString()
         handle = MobileCoreBridge.nativeNew(dbPath, configJson)
         assertNotEquals("nativeNew must succeed for this test's own setup to be valid", 0L, handle)
-        controller = OnyxController(handle, CommandEnvelopeFactory(organizationId, userId))
+        controller = OnyxController(handle, CommandEnvelopeFactory(organizationId, userId), context.applicationContext)
     }
 
     @After
