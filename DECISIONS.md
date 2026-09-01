@@ -6616,3 +6616,112 @@ sandbox to the fullest extent the sandbox allows:
   This is the one real, honest limit on this project's Android Kotlin
   parity claim as of A5's completion -- not a gap in what was built, but
   in what this sandbox could verify on real Android hardware.
+
+## H10.A5.1 (Approvals screen -- correction to a real scoping error in A5, not new/discovered-late work)
+
+**This is not new scope. It is a correction.** The task that produced
+A5 incorrectly stated Approvals was already covered by A4 and told
+that session to skip it. On rechecking the real blueprint text and the
+actual merged code, that was wrong: `AppShell.kt`'s own doc comment
+(pre-A5.1) said outright "Approvals ... remains deliberately out of
+scope," and `OnyxController.kt`'s doc comment already named the fix by
+its exact intended class name, `ApprovalsFilter`, anticipating this
+exact gap. Both facts confirmed directly against `main` at `b9b3864`
+(A5 merged) before this task started, not assumed from the task
+document alone.
+
+### Real, current Dart reference behavior -- re-verified fresh
+
+Read `mobile/lib/ui/screens/approvals.dart` directly (95 lines).
+Confirmed exactly, field-for-field, not assumed from this task's own
+paraphrase:
+
+- `pendingTasks = controller.tasks.where(status == 'Submitted')`;
+  `pendingMissions = controller.missions.where(status ==
+  'AwaitingApproval')` -- filtered from the *already-loaded* Task/
+  Mission projections, not a separate query.
+- Tasks rendered before missions.
+- Tapping a task pushes the existing `TaskDetailScreen`; tapping a
+  mission pushes the existing `MissionDetailScreen`. No Approve/Reject
+  action anywhere on this screen -- it is a queue/discovery surface
+  only; those actions already live on the detail screens (A4).
+- **Empty-state string confirmed byte-for-byte, not paraphrased:**
+  `"No tasks or missions are currently awaiting approval."` -- matches
+  this task's own document exactly; `ApprovalsScreenTest`'s first case
+  asserts this literal string, not an approximation.
+- Dart's own doc comment (added when this screen was fixed from a
+  stale placeholder) explains *why* `listAggregates('approval')` is
+  never used here: no `Approval` aggregate is ever registered in
+  `client-composition::app_state`'s `AppStateConfig` -- confirmed
+  directly, mission/task/conversation/message/file_asset/
+  upload_session/policy/legal_hold/connection_request/notification are
+  the real registered types, never "approval". A separate, unrelated
+  server-side `ApprovalAggregate` does exist (`api-server::routes::
+  command`), with no owner-authority gate and never wired into
+  `client-composition`, so never reachable from mobile's local command
+  path -- irrelevant to what actually gates Task/Mission approval
+  (`ApproveTask`/`RejectTask`/`RejectApproval`/`ActivateMission`, which
+  operate on the Task/Mission aggregates this screen reads).
+
+### What was built
+
+- `ApprovalsFilter` (`model/`, matching this project's existing
+  convention -- `LoadedAggregate`/`SyncSnapshot`/`SyncConflict`/
+  `CommandEnvelopeFactory` all live there): a pure, dependency-free
+  object with `pendingTasks`/`pendingMissions`/`pending` (tasks-then-
+  missions combined), operating only on already-loaded
+  `List<LoadedAggregate>` -- no FFI call, no new JNI wrapper, nothing
+  Rust-side.
+- `ApprovalsScreen.kt`: renders `ApprovalsFilter`'s output via a real
+  Material3 `PullToRefreshBox` (`androidx.compose.material3.
+  pulltorefresh` -- the current package for this component under the
+  resolved Compose BOM; it is not under the top-level `material3`
+  package as first assumed, a real, checked correction made before this
+  compiled), calling the existing `controller.refresh()` unchanged on
+  the pull gesture (no new refresh mechanism), and routing taps to the
+  existing `openTask`/`openMission` overlay state `AppShell` already
+  manages for Task/Mission Detail -- the exact same navigation path
+  Missions/Tasks/Dashboard already use, not a new one.
+- `AppShell.kt`: Approvals inserted at destination index 4 (between
+  Alerts and Files); Files moved 4->5, Settings moved 5->6. Final order
+  matches Dart's real seven `NavigationDestination`s exactly: Home,
+  Missions, Tasks, Alerts, Approvals, Files, Settings -- this project's
+  Android Kotlin nav now has full destination parity with the frozen
+  Flutter reference for the first time.
+- **`controller.listApprovals()` was deliberately NOT added, and the
+  discarded `listAggregates('approval')` result remains discarded.**
+  `OnyxController.refresh()` still fetches it every cycle (preserving
+  Dart's real six-call parallel-`Future.wait` shape, per A4's own
+  documented reasoning) but never stores or exposes it -- exactly
+  matching Dart's own real, current design, where `ApprovalsScreen`
+  never reads `controller.approvals` either. Adding a path that
+  surfaces it would have been a real, incorrect divergence from the
+  frozen reference, not an improvement, and was not done.
+
+### Zero Rust/JNI changes -- confirmed, not assumed
+
+This task's own scope check ("if anything in Rust needed changing,
+that's a sign this task's scope assumption was wrong, stop and
+report") was verified explicitly: `git diff` against `crates/` after
+this task's changes is empty, and `cargo check --workspace` was run
+and passed clean with the tree in that state, confirming no Rust
+change was needed at any point -- not merely that none was made.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean, zero Rust changes present in the diff |
+| `./gradlew compileDebugKotlin` | clean |
+| `./gradlew assembleDebug` | `BUILD SUCCESSFUL`, real APK |
+| `./gradlew testDebugUnitTest` | 27 passed, 0 failed (22 from A4+A5 + 5 new `ApprovalsFilterTest`, covering every case in this task's own Tests section: Submitted-task inclusion/exclusion, AwaitingApproval-mission inclusion/exclusion, tasks-before-missions ordering, empty-result case, and a multi-item ordering case) |
+| `./gradlew compileDebugAndroidTestKotlin` | clean (`ApprovalsScreenTest`, new -- empty-state exact string, task/mission tap-to-navigate, no-Approve/Reject-affordance, pull-to-refresh-calls-onRefresh) |
+| Real on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (no `/dev/kvm`, zero `vmx`/`svm` CPU flags, no physical device) -- same disclosed, honest limitation as every prior Android task this session; stated plainly again per this task's own instruction not to let it go unmentioned |
+
+### Navigation index verification
+
+Confirmed directly in `AppShell.kt`'s `when (selectedTab)` block and
+its matching `NavigationBarItem` list: index 4 = `ApprovalsScreen`
+(label "Approvals"), index 5 = `FilesScreen` (label "Files"), index 6
+= `SettingsScreen` (label "Settings") -- exactly the order this task
+specifies.

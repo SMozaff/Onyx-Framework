@@ -1,6 +1,7 @@
 package com.onyx.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Approval
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Folder
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.onyx.controller.OnyxController
 import com.onyx.model.LoadedAggregate
 import com.onyx.session.SessionPreferences
+import com.onyx.ui.screens.ApprovalsScreen
 import com.onyx.ui.screens.DashboardScreen
 import com.onyx.ui.screens.FilesScreen
 import com.onyx.ui.screens.MissionDetailScreen
@@ -45,13 +47,13 @@ import com.onyx.ui.widgets.SyncStatusIndicator
 /**
  * The real post-login app shell, Kotlin's port of `ui/app.dart`'s
  * `_MobileShell`. A4 built the first four tabs (Home/Missions/Tasks/
- * Alerts); A5 adds Files and Settings, plus the top app bar's sync
- * status indicator and the conflict-review banner/dialog -- the same
- * six of Dart's seven real `NavigationDestination`s this project has
- * built so far. Approvals (Dart's 5th destination) remains
- * deliberately out of scope, not a silent gap -- a later task, per A5's
- * own "do not build beyond Files/Settings/sync/conflict/background
- * sync" instruction.
+ * Alerts); A5 added Files and Settings, plus the top app bar's sync
+ * status indicator and the conflict-review banner/dialog; A5.1 adds
+ * Approvals (Dart's real 5th destination) -- a correction to a real
+ * scoping error in A5's own task ("Approvals is already covered by
+ * A4"), not new/discovered-late work. All seven of Dart's real
+ * `NavigationDestination`s are now built, in the same order Dart uses:
+ * Home, Missions, Tasks, Alerts, Approvals, Files, Settings.
  *
  * Mission/Task Detail are pushed as a full-screen overlay on top of the
  * shell (mirroring `Navigator.push`), taking a [LoadedAggregate]
@@ -115,8 +117,9 @@ fun AppShell(controller: OnyxController, onSignOut: () -> Unit) {
                 NavigationBarItem(selected = selectedTab == 1, onClick = { selectedTab = 1 }, icon = { Icon(Icons.Filled.Flag, contentDescription = null) }, label = { Text("Missions") })
                 NavigationBarItem(selected = selectedTab == 2, onClick = { selectedTab = 2 }, icon = { Icon(Icons.Filled.TaskAlt, contentDescription = null) }, label = { Text("Tasks") })
                 NavigationBarItem(selected = selectedTab == 3, onClick = { selectedTab = 3 }, icon = { Icon(Icons.Filled.Notifications, contentDescription = null) }, label = { Text("Alerts") })
-                NavigationBarItem(selected = selectedTab == 4, onClick = { selectedTab = 4 }, icon = { Icon(Icons.Filled.Folder, contentDescription = null) }, label = { Text("Files") })
-                NavigationBarItem(selected = selectedTab == 5, onClick = { selectedTab = 5 }, icon = { Icon(Icons.Filled.Settings, contentDescription = null) }, label = { Text("Settings") })
+                NavigationBarItem(selected = selectedTab == 4, onClick = { selectedTab = 4 }, icon = { Icon(Icons.Filled.Approval, contentDescription = null) }, label = { Text("Approvals") })
+                NavigationBarItem(selected = selectedTab == 5, onClick = { selectedTab = 5 }, icon = { Icon(Icons.Filled.Folder, contentDescription = null) }, label = { Text("Files") })
+                NavigationBarItem(selected = selectedTab == 6, onClick = { selectedTab = 6 }, icon = { Icon(Icons.Filled.Settings, contentDescription = null) }, label = { Text("Settings") })
             }
         },
     ) { padding ->
@@ -158,11 +161,18 @@ fun AppShell(controller: OnyxController, onSignOut: () -> Unit) {
                         onOpenTask = { task -> openTask = task },
                     )
                     3 -> NotificationsScreen(notifications = notifications)
-                    4 -> FilesScreen(
+                    4 -> ApprovalsScreen(
+                        tasks = tasks,
+                        missions = missions,
+                        onRefresh = { controller.refresh() },
+                        onOpenTask = { task -> openTask = task },
+                        onOpenMission = { mission -> openMission = mission },
+                    )
+                    5 -> FilesScreen(
                         onUpload = { path -> controller.uploadFile(path) },
                         onDownload = { hash, dest -> controller.downloadFile(hash, dest) },
                     )
-                    5 -> {
+                    6 -> {
                         val sessionPrefs = remember { SessionPreferences(context) }
                         SettingsScreen(
                             organizationId = controller.organizationId,
