@@ -9,7 +9,7 @@ Offline-First Architecture: Uses CRDTs (Conflict-free Replicated Data Types) for
 Multi-Platform Support:
 Web UI (React/TypeScript with Vite)
 Desktop (Tauri-based)
-Mobile (Flutter with Rust FFI via mobile-core)
+Mobile (Kotlin Android via mobile-android-jni; legacy Flutter retired)
 P2P Transports: Supports Wi-Fi Direct, Bluetooth LE, QUIC, and Cloud Relay for device-to-device communication
 Authority-Aware: Implements hierarchical command structures with proper authorization controls
 Architecture
@@ -23,7 +23,7 @@ Synchronization (crates/synchronization/): CRDT implementations and sync domain 
 Transports (crates/transports/): Sync transport protocols including mobile-specific implementations
 Binaries (crates/bins/): API server, worker, sync-agent, migration tool, desktop shell, admin shell
 Development Setup
-Development occurs in a devcontainer/GitHub Codespaces environment that provisions all required toolchains (Rust, Flutter, Android SDK, Node.js) matching CI configurations. The project uses a pinned Rust version (1.97.1) defined in rust-toolchain.toml.
+Development occurs in a devcontainer/GitHub Codespaces environment that provisions all required toolchains (Rust, Android SDK, Node.js) matching CI configurations. The project uses a pinned Rust version (1.97.1) defined in rust-toolchain.toml.
 Testing Strategy
 Comprehensive test coverage including:
 Unit tests

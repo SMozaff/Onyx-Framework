@@ -30,4 +30,10 @@ object MobileCoreBridge {
     external fun nativeDownloadFile(handle: Long, contentHash: String, destinationPath: String): Long
     external fun nativeTriggerSync(handle: Long): Int
     external fun nativeResolveConflict(handle: Long, conflictJson: String, resolution: String): Int
+
+    // Added for KOTLIN_IMPLEMENTATION_PLAN.md (Layers 2-5).
+    external fun nativeExecuteQuery(handle: Long, queryJson: String): String?
+    external fun nativeSubscribeEvents(handle: Long, filterJson: String): Long
+    external fun nativeUnsubscribe(handle: Long)
+    external fun nativeSecureStorage(handle: Long, action: String, key: String, value: String): String?
 }

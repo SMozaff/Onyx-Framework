@@ -2201,3 +2201,112 @@ lacks committed web and Flutter lockfiles and carries a stale Cargo lock warning
 repair. Capture `npm audit --json`, review direct/transitive exposure, regenerate all
 three dependency locks, and commit them before production signing.
 
+### FLT-1 — Flutter retirement: gate was NOT met, owner overrode it and proceeded with deletion
+
+**Date:** 2026-09-24
+
+#### The Flutter retirement gate was NOT met
+
+Per ONYX_Mobile_Client_Strategy_Manifesto v1.1 and ONYX_Android_Kotlin_iOS_PWA_Technical_Blueprint
+v1.1, the Flutter retirement gate required Kotlin/JNI to have been run on a real
+device, P2P transport to be implemented (not stubbed), and background/offline
+behavior to be verified on Android. None of these conditions were satisfied at the
+time of this decision. Evidence: `docs/MOBILE_V11_VERIFICATION.md` records the
+following unmet conditions explicitly:
+
+- **JNI never run on a real device.** All runtime gates for the Flutter app
+  (Android build, iOS build, FFI bridge, widget rendering, background sync)
+  are listed as "Pending" — the environment had no Flutter/Dart SDK, Android
+  NDK, Xcode, or physical device lab. `docs/MOBILE_V11_VERIFICATION.md` states:
+  "This environment does not provide Flutter/Dart, Android SDK/NDK, Rust mobile
+  targets, Xcode, CocoaPods, or a physical mobile device lab."
+- **P2P transport stubbed with `ConnectionLost` placeholders.** The Wi-Fi Direct
+  and BLE Rust transport byte-stream implementations returned `ConnectionLost`.
+  `docs/MOBILE_V11_VERIFICATION.md` states: "Wi-Fi Direct/BLE P2P: Routed through
+  Rust — **Blocked by delivered placeholder transport streams and physical-device
+  requirement**" and "That gate must remain blocked until the Wi-Fi Direct/BLE
+  Rust `Connection` implementations no longer return `ConnectionLost` and two
+  authorized devices are available." `mobile/test/integration/p2p_sync_test.dart`
+  contained `ConnectionLost` assertions guarded by `ONYX_MOBILE_DEVICE_TEST`.
+- **Background/offline behavior unverified on Android.** Android WorkManager
+  integration and iOS BGAppRefreshTask were present in source but never executed
+  on real hardware. `docs/MOBILE_V11_VERIFICATION.md` lists "Android background
+  sync: Yes [source] / Pending emulator/device integration" and
+  "iOS background sync: Yes [source] / Pending simulator/device integration."
+- **No rollback artifact existed.** No APK, IPA, `pubspec.lock`, or runtime test
+  report was ever fabricated or committed (`docs/MOBILE_V11_VERIFICATION.md`
+  integrity statement: "They do not contain fabricated build outputs, lockfiles,
+  signed store packages, or claims that unavailable runtime gates passed.").
+  There was therefore no shipped Flutter binary to roll back from — the Flutter
+  client was never released.
+
+#### Explicit owner decision to override the gate and proceed
+
+The project owner made an explicit, informed decision to proceed with Flutter
+retirement anyway, accepting the risk of having no fully-proven mobile client
+until the Kotlin rewrite catches up. This is an **overridden gate, not a passed
+one**. The owner's rationale: the Flutter client was never shipped (no rollback
+artifact, no runtime certification), the Kotlin rewrite (`mobile-android/`) was
+already underway with real source and CI, and the cost of continuing to maintain
+the frozen Flutter reference while awaiting device-lab access exceeded the risk
+of shipping Kotlin without full P2P/background verification. Flutter's frozen
+state meant no new features were being added to it anyway (M0 freeze,
+`verify_mobile_freeze.sh` enforced this).
+
+#### Paths/files deleted
+
+- `mobile/` (entire directory — 111 files): the Flutter application, its Android
+  and iOS platform wrappers, all Dart source (`mobile/lib/`), all tests
+  (`mobile/test/`), build tooling (`mobile/tool/`), `pubspec.yaml`,
+  `analysis_options.yaml`, `FROZEN_EXCEPTION.md`, `README.md`, and `.gitignore`.
+- `.github/workflows/ci.yml` — four Flutter-specific jobs removed:
+  `mobile-freeze-guard`, `mobile-dart`, `mobile-android` (the Flutter APK build,
+  distinct from `mobile-android-kotlin`), `mobile-ios`.
+- `scripts/verify/verify_mobile.sh` — deleted (sole purpose: verify Flutter
+  structural contract).
+- `scripts/verify/verify_mobile_freeze.sh` — deleted (sole purpose: enforce the
+  M0 freeze on `mobile/lib/`; the freeze is superseded by this deletion).
+- `scripts/verify/verify_mobile_static.py` — deleted (sole purpose: offline
+  static verification of the Flutter v1.1 deliverable).
+
+#### Files edited
+
+- `.github/workflows/ci.yml`: removed the four mobile Flutter jobs listed above;
+  updated the `mobile-android-kotlin` job comment to remove the now-stale
+  reference to "the `mobile-android` job above (which builds the *frozen Flutter*
+  app's own Android APK via `flutter build apk`)". The `mobile-android-kotlin`
+  job (which builds the Kotlin rewrite in `mobile-android/`) is preserved
+  unchanged.
+- `README.md`: changed `Mobile (Flutter with Rust FFI via mobile-core)` to
+  `Mobile (Kotlin Android via mobile-android-jni; legacy Flutter retired)`;
+  removed `Flutter` from the devcontainer toolchain list in the Development Setup
+  section (`Rust, Flutter, Android SDK, Node.js` → `Rust, Android SDK, Node.js`).
+
+#### Untouched by Part 1
+
+The following paths were explicitly **not** touched:
+- `mobile-android/` — the native Kotlin Android rewrite (54 files), preserved.
+- `mobile-android-jni/` — the JNI adapter crate (`crates/mobile-android-jni/`,
+  1 source file), preserved.
+- `mobile-core/` — the Rust C-ABI crate (`crates/mobile-core/`, 13 source files),
+  preserved. The `mobile_core_*` FFI functions are the same ABI Kotlin binds to.
+- `mobile-pwa/` — does not exist in this repository (confirmed via `ls`); no
+  action taken.
+- `docs/MOBILE_V11_VERIFICATION.md`, `docs/MOBILE_V11_STATIC_REPORT.json`,
+  `docs/MOBILE_V11_CHANGED_FILES.txt`, `docs/mobile-migration/parity-matrix.md` —
+  historical records; left intact as the audit trail per DECISIONS.md policy.
+- Historical DECISIONS.md entries describing past Flutter-era decisions
+  (M11-D1 through M11-D11, FS-R2 through FS-R5) — left intact.
+
+#### CI jobs, scheduled workflows, or scripts disabled/removed
+
+- `mobile-freeze-guard` job (`.github/workflows/ci.yml`) — removed.
+- `mobile-dart` job (`.github/workflows/ci.yml`) — removed.
+- `mobile-android` job (`.github/workflows/ci.yml`) — removed.
+- `mobile-ios` job (`.github/workflows/ci.yml`) — removed.
+- `scripts/verify/verify_mobile.sh` — deleted.
+- `scripts/verify/verify_mobile_freeze.sh` — deleted.
+- `scripts/verify/verify_mobile_static.py` — deleted.
+
+The `mobile-android-kotlin` job remains active and unchanged.
+

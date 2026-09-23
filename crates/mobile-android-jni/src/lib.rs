@@ -476,3 +476,132 @@ fn jstring_to_cstring(env: &jni::Env<'_>, value: &JString) -> Option<CString> {
     let s = value.try_to_string(env).ok()?;
     CString::new(s).ok()
 }
+
+// ============================================================================
+// STUB WRAPPERS — added for KOTLIN_IMPLEMENTATION_PLAN.md Part 4 scaffolding.
+// These are compile-verified skeletons with TODO markers; they are NOT
+// production-ready implementations. See docs/mobile-migration/KOTLIN_IMPLEMENTATION_PLAN.md
+// ============================================================================
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery` —
+/// `com.onyx.bridge.MobileCoreBridge.nativeExecuteQuery(handle: Long, queryJson: String): String?`.
+///
+/// Wraps `mobile_core_execute_query` (from `crates/mobile-core/src/ffi_queries.rs`).
+/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 2/4.
+/// TODO: verify query JSON schema against `QueryEnvelope` type; wire into
+/// Kotlin query screen data loading (see plan Layer 4).
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    query_json: JString<'local>,
+) -> jstring {
+    env.with_env(|env| -> Result<jstring, JniError> {
+        let Some(query_json) = jstring_to_cstring(env, &query_json) else {
+            return Ok(std::ptr::null_mut());
+        };
+        // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): verify
+        // `mobile_core_execute_query` signature and error handling
+        // against actual `ffi_queries.rs` before enabling.
+        let result_ptr = unsafe {
+            mobile_core::mobile_core_execute_query(
+                handle as *mut mobile_core::MobileApp,
+                query_json.as_ptr(),
+            )
+        };
+        copy_and_free_c_string(env, result_ptr)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeSubscribeEvents` —
+/// `com.onyx.bridge.MobileCoreBridge.nativeSubscribeEvents(handle: Long, filterJson: String): Long`.
+///
+/// Wraps `mobile_core_subscribe_events` (from `crates/mobile-core/src/ffi_events.rs`).
+/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 2/5 (real-time event stream).
+///
+/// # Open design question (TODO)
+/// `mobile_core_subscribe_events` takes an `extern "C" fn(*const c_char)`
+/// callback — a raw C function pointer. JNI does not directly support
+/// passing C function pointers from Kotlin. The callback mechanism must
+/// be resolved: options are (a) a `jobject` Kotlin lambda/interface
+/// marshalled through `JNIEnv::CallVoidMethod`, (b) a `Long` token
+/// referencing a Java-side callback registry, or (c) a separate
+/// Java-side event loop thread. See KOTLIN_IMPLEMENTATION_PLAN.md
+/// Layer 2 next concrete task for the decision. This stub returns
+/// `0` as a placeholder subscription handle.
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSubscribeEvents<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    _filter_json: JString<'local>,
+) -> jlong {
+    env.with_env(|env| -> Result<jlong, JniError> {
+        let _ = env; // TODO: implement real callback marshalling
+        // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): resolve
+        // the C-callback-in-JNI design question and implement the
+        // real subscription using mobile_core_subscribe_events.
+        Ok(0) // placeholder subscription handle
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeUnsubscribe` —
+/// `com.onyx.bridge.MobileCoreBridge.nativeUnsubscribe(handle: Long)`.
+///
+/// Wraps `mobile_core_unsubscribe` (from `crates/mobile-core/src/ffi_events.rs`).
+/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 2/5.
+/// TODO: map the `Long` subscription handle back to `*mut EventSubscription`
+/// (requires a handle-to-pointer registry, similar to how `MobileApp`
+/// handles are managed — see nativeNew/nativeFree pattern).
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeUnsubscribe<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    _handle: jlong,
+) {
+    env.with_env(|_env| -> Result<(), JniError> {
+        // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): implement
+        // real unsubscription. mobile_core_unsubscribe takes a raw
+        // `*mut EventSubscription` pointer; a handle-to-pointer
+        // registry is needed to map `handle` back to that pointer.
+        // Currently a no-op stub.
+        let _ = handle;
+        Ok(())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeSecureStorage` —
+/// `com.onyx.bridge.MobileCoreBridge.nativeSecureStorage(action: String, key: String, value: String): String?`.
+///
+/// Stubs the `ffi_secure_storage.rs` interface (`mobile_core` secure storage).
+/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 3.
+///
+/// # OPEN GAP — no real implementation exists
+/// `crates/mobile-core/src/ffi_secure_storage.rs` explicitly states:
+/// "Not implemented (flagged, not silently assumed complete). A real
+/// implementation requires calling into Android's Keystore (via JNI)
+/// or iOS's Keychain." This stub exists to document the interface
+/// surface that Kotlin needs. A real implementation requires:
+/// - A Rust-side `ffi_secure_storage.rs` that calls JNI to Android Keystore
+///   (or a Kotlin-side `SecureTokenStore` that bypasses this entirely,
+///   which is the current approach in `session/SecureTokenStore.kt`)
+/// - Resolution of the chicken-and-egg problem: how does Rust call
+///   back into Java/Kotlin JNI from inside a `#[no_mangle] extern "C"`
+///   function? See KOTLIN_IMPLEMENTATION_PLAN.md Layer 3 next concrete task.
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSecureStorage<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    _action: JString<'local>,
+    _key: JString<'local>,
+    _value: JString<'local>,
+) -> jstring {
+    // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 3): implement real
+    // secure storage or confirm that SecureTokenStore.kt's Android
+    // Keystore approach is the intended path (bypassing this FFI).
+    std::ptr::null_mut()
+}
