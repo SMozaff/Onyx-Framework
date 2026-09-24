@@ -66,7 +66,7 @@ Phase 0 produces these frozen starting points:
 1. Audit every mutation route against `observer-enforcement-inventory.md`; do not assume `require_admin` alone is sufficient.
 2. Rule on relay participation: **decided — observers cannot mint relay tickets**. `POST /api/relay-ticket` now requires `submit_domain_command`; see `docs/DECISIONS.md` entry `P2P-2`.
 3. Rule on bootstrap’s unauthenticated, token-gated, one-time path as a special client-class case: **decided — bootstrap remains intentionally unauthenticated and is excluded from capability checks**. It is the only unauthenticated write endpoint, is token-gated, and self-closes once any user exists. See `docs/DECISIONS.md` entry `P2P-3`.
-4. Extend the existing observer test file to cover any newly ruled mutation path and the full §28 negative matrix.
+4. Extend the existing observer test file to cover any newly ruled mutation path and the full §28 negative matrix. **DONE (2026-09-24).** `tests/mobile_observer_capability.rs` now asserts `CLIENT_CAPABILITY_DENIED` for every admin mutation route — user activation, password reset, manager/class/parent assignment, and batch profile import were added to the existing create/deactivate/mobile-access/profiles/policies/legal-holds coverage — plus relay-ticket (`P2P-2`), refresh preservation, and independent `TENANT_MISMATCH` isolation.
 
 ### Phase 1.2 — Add read endpoints for ObserverClient
 

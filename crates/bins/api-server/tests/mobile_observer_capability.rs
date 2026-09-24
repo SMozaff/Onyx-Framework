@@ -330,6 +330,106 @@ async fn mobile_observer_reads_normally_but_every_mutation_endpoint_denies_it() 
         &legal_hold_response.json().await.expect("legal hold body"),
         "administer",
     );
+
+    // --- Remaining §28 admin mutations (ONYX-MOB-01 §28, G001's
+    // UserMutation/AdminCommand rows): activation, password reset,
+    // manager/class/parent assignment, and batch profile import. Each is
+    // a separate `require_admin_mutation` route, so each needs its own
+    // denial assertion rather than being implied by one of the above.
+    let activate_response = http
+        .post(format!(
+            "{base}/api/admin/users/{}/activate",
+            uuid::Uuid::new_v4()
+        ))
+        .bearer_auth(&observer_token)
+        .send()
+        .await
+        .expect("activate request");
+    assert_eq!(activate_response.status(), 403);
+    assert_capability_denied(
+        &activate_response.json().await.expect("activate body"),
+        "administer",
+    );
+
+    let password_response = http
+        .post(format!(
+            "{base}/api/admin/users/{}/password",
+            uuid::Uuid::new_v4()
+        ))
+        .bearer_auth(&observer_token)
+        .json(&serde_json::json!({"password": "irrelevant-1"}))
+        .send()
+        .await
+        .expect("password reset request");
+    assert_eq!(password_response.status(), 403);
+    assert_capability_denied(
+        &password_response.json().await.expect("password reset body"),
+        "administer",
+    );
+
+    let manager_response = http
+        .post(format!(
+            "{base}/api/admin/users/{}/manager",
+            uuid::Uuid::new_v4()
+        ))
+        .bearer_auth(&observer_token)
+        .json(&serde_json::json!({"is_manager": false}))
+        .send()
+        .await
+        .expect("manager assignment request");
+    assert_eq!(manager_response.status(), 403);
+    assert_capability_denied(
+        &manager_response.json().await.expect("manager assignment body"),
+        "administer",
+    );
+
+    let class_response = http
+        .post(format!(
+            "{base}/api/admin/users/{}/class",
+            uuid::Uuid::new_v4()
+        ))
+        .bearer_auth(&observer_token)
+        .json(&serde_json::json!({"class": "team_leader"}))
+        .send()
+        .await
+        .expect("class assignment request");
+    assert_eq!(class_response.status(), 403);
+    assert_capability_denied(
+        &class_response.json().await.expect("class assignment body"),
+        "administer",
+    );
+
+    let parent_response = http
+        .post(format!(
+            "{base}/api/admin/users/{}/parent",
+            uuid::Uuid::new_v4()
+        ))
+        .bearer_auth(&observer_token)
+        .json(&serde_json::json!({"parent_user_id": uuid::Uuid::new_v4().to_string()}))
+        .send()
+        .await
+        .expect("parent assignment request");
+    assert_eq!(parent_response.status(), 403);
+    assert_capability_denied(
+        &parent_response.json().await.expect("parent assignment body"),
+        "administer",
+    );
+
+    let import_response = http
+        .post(format!("{base}/api/admin/profiles/import"))
+        .bearer_auth(&observer_token)
+        .multipart(
+            reqwest::multipart::Form::new()
+                .part("file", reqwest::multipart::Part::text("irrelevant").file_name("denied.csv")),
+        )
+        .send()
+        .await
+        .expect("profile import request");
+    assert_eq!(import_response.status(), 403);
+    assert_capability_denied(
+        &import_response.json().await.expect("profile import body"),
+        "administer",
+    );
 }
 
 /// H10/P1.5 / ONYX-MOB-00 §24, MBP-012: refreshing an observer session

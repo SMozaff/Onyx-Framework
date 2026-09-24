@@ -52,8 +52,9 @@ Source: `crates/bins/api-server/src/routes/admin.rs`, `profiles/mod.rs`, `profil
 Existing coverage is in `crates/bins/api-server/tests/mobile_observer_capability.rs`:
 
 - Observer reads still succeed.
-- `/api/command`, todo/target/staff-loan creation, selected admin mutations, profile upsert, policy creation, and legal-hold application return 403 `CLIENT_CAPABILITY_DENIED`.
+- `/api/command`, relay-ticket minting, todo/target/staff-loan creation, and every admin mutation route return 403 `CLIENT_CAPABILITY_DENIED`. The admin-mutation sweep covers the full §28 matrix: user creation, activation/deactivation, password reset, manager/class/parent assignment, mobile-access replacement, profile upsert and batch import, policy creation, and legal-hold application.
 - A refreshed observer access token remains observer-class.
+- Tenant isolation (`TENANT_MISMATCH`) still applies independently of the client-class ceiling for a full-capability session.
 
 ## Reads that remain permitted with authentication
 
