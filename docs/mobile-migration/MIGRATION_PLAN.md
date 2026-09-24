@@ -37,7 +37,7 @@ Phase 0 produces these frozen starting points:
 
 ### Phase 0.2 — Implementation contracts
 
-- `android-jni-contract.md`: 14 JNI declarations (12 real — including the real event-subscription pair, added 2026-09-24 — plus the unwired `nativeExecuteQuery` pass-through; the abortive `nativeSecureStorage` stub is removed) with marshalling rules, the event-callback design, and remaining open items.
+- `android-jni-contract.md`: 14 JNI declarations (12 real — including the real event-subscription pair, added 2026-09-24, and `nativeExecuteQuery`, wired 2026-09-24; the abortive `nativeSecureStorage` stub is removed) with marshalling rules, the event-callback design, and remaining open items.
 - `pwa-observer-contract.md`: planned read-only ObserverClient/HTTP surface and missing backend prerequisites.
 - `pwa-capability-matrix.md`: PWA-facing rendering of the server ceiling.
 - `P2P-1`: locked Kotlin→JNI direction; update `KOTLIN_IMPLEMENTATION_PLAN.md` Layer 6 accordingly.
@@ -388,7 +388,7 @@ implemented and unit/integration-tested, not yet proven against FCM.
 **Code subset — done in sandbox (see additionally `DECISIONS.md` `P2P-11`):**
 
 - **Rust framing/encryption/handshake** implemented in `crates/mobile-android-jni/src/p2p.rs` and exposed via JNI class `com.onyx.p2p.P2pCodec` (`nativeSessionStart/Accept/ClientMessage/ServerMessage/Complete/Encode/Decode/Close`). Design: ephemeral P-256 ECDH, HKDF-SHA-256 key schedule bound to `PROLOGUE ‖ client_pub ‖ server_pub`, AES-256-GCM, per-direction keys, HMAC-derived nonces from monotonic counters, `u32-BE length ‖ version` 5-byte framing, strict desync-on-failure semantics. Verified on host: 6/6 unit tests pass, `clippy -D warnings` clean, `cargo fmt` clean.
-- **Kotlin drivers** in `mobile-android/app/src/main/kotlin/com/onyx/p2p/{WifiDirectDriver,BleDriver,P2pChannel,P2pStream,P2pCodec}.kt`; connectivity manifest permissions + optional `uses-feature` added.
+- **Kotlin drivers + controller** in `mobile-android/app/src/main/kotlin/com/onyx/p2p/{WifiDirectDriver,BleDriver,P2pChannel,P2pStream,P2pCodec,P2pController,P2pViewModel}.kt` + `ui/widgets/P2pCard.kt`; connectivity manifest permissions + optional `uses-feature` added. The controller (2026-09-24, `DECISIONS M11-D13`) routes BLE and Wi-Fi Direct sessions to the codec handshake and framed probe send; the Settings card is its surface.
 - **Placeholder C-ABI stubs deleted** (not extended, per P2P-1): `sync-transport-mobile`'s `android_wifi_direct`/`android_ble` modules and `mobile-core`'s corresponding re-export modules are gone; their crate doc comments record the removal.
 - **Still deferred (hardware gate):** on-device P2P tests under 4.6; drivers compile only in CI (no local Android SDK).
 
@@ -470,8 +470,38 @@ Kotlin callbacks.
   secret store; no Rust secure-storage interface exists to bind.
 
 **Still deferred (hardware gate):** delivery through a live `EventCallback`
-on a real device (JNI attach semantics on ART), and the unwired
-`nativeExecuteQuery` Kotlin query path.
+on a real device (JNI attach semantics on ART).
+
+### Phase 4.8 — Wire the last two unwired Kotlin rows (query path + P2P controller) — sandbox milestone 2026-09-24
+
+**Done in sandbox (see `DECISIONS.md` `M11-D13`):**
+
+- **Kotlin query path:** `QueryEnvelopeFactory.kt` builds the registry's
+  `QueryEnvelope` (`{"query_type": "GetMission"|"GetTask", "target_id":
+  <16 bytes>}`); `OnyxController.loadAggregateFromQuery`/`loadMission`/
+  `loadTask` drive `nativeExecuteQuery`, mapping the registry `null`
+  response to "not found" and re-injecting `target_id` as the row `id`
+  (`LoadedJson` omits it). Real call sites: Mission/Task Detail on-open
+  freshness pulls (`LaunchedEffect`), falling back to the navigation
+  snapshot.
+- **P2P controller + settings surface:** `P2pController` owns both media
+  drivers and a background executor, exposes `StateFlow` status/peers/
+  message log, and drives BLE (server=responder / client=initiator) and
+  Wi-Fi Direct (discover → connect → group-form poll → owner TCP stream)
+  into one `P2pChannel` handshake + framed `send`. `P2pChannel` gained a
+  backward-compatible `deferredHandshake` construction (`setRawReader`/
+  `startFraming`) so the 65-byte codec public points can cross a raw
+  stream (BLE). `P2pViewModel` hosts it; `P2pCard` (Settings) exposes the
+  transport toggle, role controls, runtime permission request, probe
+  composer, and transcript.
+- **Doc corrections:** the KOTLIN plan's "notification crates are not
+  present" note is superseded (`crates/domains/notification-domain/`
+  exists and is registered); the PWA push client and delivery worker were
+  confirmed built (no work left there).
+
+**Still deferred (hardware gate):** two-device P2P session, BLE MTU and
+Wi-Fi Direct callback cadence on real radios (Phase 4.1b/d), and the
+on-device `EventCallback`/R8-APK gates above.
 
 ---
 

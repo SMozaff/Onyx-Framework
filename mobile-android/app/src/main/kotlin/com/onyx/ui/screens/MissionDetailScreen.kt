@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,20 +49,29 @@ fun MissionDetailScreen(mission: LoadedAggregate, controller: OnyxController, on
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val canDecide = mission.status == "AwaitingApproval"
 
-    Scaffold(topBar = { TopAppBar(title = { Text(mission.title) }) }) { padding ->
+    // Targeted freshness pull over the query path (Layer 2): re-reads the
+    // single aggregate by id on open so a decision rendered here is never
+    // based on the navigation snapshot when a fresher state is available.
+    // Falls back to the snapshot if the query fails (device offline, etc.).
+    var fresh by remember(mission.id) { mutableStateOf(mission) }
+    LaunchedEffect(mission.id) {
+        runCatching { controller.loadMission(mission.id) }.getOrNull()?.let { fresh = it }
+    }
+    val canDecide = fresh.status == "AwaitingApproval"
+
+    Scaffold(topBar = { TopAppBar(title = { Text(fresh.title) }) }) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            mission.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            Text("Status: ${mission.status}", style = MaterialTheme.typography.bodySmall)
+            fresh.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            Text("Status: ${fresh.status}", style = MaterialTheme.typography.bodySmall)
 
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("Authority state", style = MaterialTheme.typography.titleSmall)
-                    Text("Version: ${mission.version}")
-                    Text("Lifecycle epoch: ${mission.lifecycleEpoch}")
-                    Text("Authority epoch: ${mission.authorityEpoch}")
-                    Text("ID: ${mission.id}")
+                    Text("Version: ${fresh.version}")
+                    Text("Lifecycle epoch: ${fresh.lifecycleEpoch}")
+                    Text("Authority epoch: ${fresh.authorityEpoch}")
+                    Text("ID: ${fresh.id}")
                 }
             }
 

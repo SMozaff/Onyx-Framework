@@ -18,6 +18,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.onyx.p2p.P2pViewModel
+import com.onyx.ui.widgets.P2pCard
 
 /**
  * Kotlin port of `ui/screens/settings.dart`, re-verified fresh against
@@ -51,6 +53,7 @@ fun SettingsScreen(
     pendingOutboxCount: Int,
     onSaveRelayEndpoint: (String) -> Unit,
     onSignOut: () -> Unit,
+    p2p: P2pViewModel? = null,
 ) {
     var relay by remember(relayEndpoint) { mutableStateOf(relayEndpoint) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
@@ -106,6 +109,15 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+
+        // Phase 4.1 P2P session surface. Null when no owning P2pViewModel
+        // is supplied (the section is opt-in so non-VM hosts and the
+        // source-level Settings test are unaffected). The card itself lives
+        // in its own file, keeping this screen's single-OutlinedTextField
+        // invariant (pinned by SettingsScreenSourceTest) untouched.
+        p2p?.let { p2pViewModel ->
+            item { P2pCard(p2pViewModel) }
         }
 
         item {

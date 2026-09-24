@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.onyx.controller.OnyxController
 import com.onyx.model.LoadedAggregate
+import com.onyx.p2p.P2pViewModel
 import com.onyx.session.SessionPreferences
 import com.onyx.ui.screens.ApprovalsScreen
 import com.onyx.ui.screens.DashboardScreen
@@ -63,7 +64,7 @@ import com.onyx.ui.widgets.SyncStatusIndicator
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppShell(controller: OnyxController, onSignOut: () -> Unit) {
+fun AppShell(controller: OnyxController, p2p: P2pViewModel, onSignOut: () -> Unit) {
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var openMission by remember { mutableStateOf<LoadedAggregate?>(null) }
     var openTask by remember { mutableStateOf<LoadedAggregate?>(null) }
@@ -183,6 +184,7 @@ fun AppShell(controller: OnyxController, onSignOut: () -> Unit) {
                             pendingOutboxCount = sync.pendingOutboxCount,
                             onSaveRelayEndpoint = { endpoint -> sessionPrefs.relayEndpoint = endpoint },
                             onSignOut = onSignOut,
+                            p2p = p2p,
                         )
                     }
                 }

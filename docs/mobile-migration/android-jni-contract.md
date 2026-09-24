@@ -32,7 +32,7 @@ The JNI layer must contain no business logic. Its only responsibilities are nati
 | `Java_com_onyx_bridge_MobileCoreBridge_nativeDownloadFile` | `nativeDownloadFile(handle: Long, contentHash: String, destinationPath: String): Long` | `mobile_core_download_file` | Implemented |
 | `Java_com_onyx_bridge_MobileCoreBridge_nativeTriggerSync` | `nativeTriggerSync(handle: Long): Int` | `mobile_core_trigger_sync` | Implemented |
 | `Java_com_onyx_bridge_MobileCoreBridge_nativeResolveConflict` | `nativeResolveConflict(handle: Long, conflictJson: String, resolution: String): Int` | `mobile_core_resolve_conflict` | Implemented |
-| `Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery` | `nativeExecuteQuery(handle: Long, queryJson: String): String?` | `mobile_core_execute_query` | Implemented pass-through, but unwired: no Kotlin runtime call site outside the bridge declaration |
+| `Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery` | `nativeExecuteQuery(handle: Long, queryJson: String): String?` | `mobile_core_execute_query` | Implemented + wired (2026-09-24, M11-D13): `QueryEnvelopeFactory` (`GetMission`/`GetTask` envelopes) → `OnyxController.loadAggregateFromQuery`, driven by Detail screens' on-open freshness pull |
 | `Java_com_onyx_bridge_MobileCoreBridge_nativeSubscribeEvents` | `nativeSubscribeEvents(handle: Long, filterJson: String, callback: EventCallback): Long` | `mobile_core_subscribe_events` | Implemented (real subscription; returns the `*mut EventSubscription` as the `Long` handle, `0` on failure) — but unwired beyond `OnyxController` |
 | `Java_com_onyx_bridge_MobileCoreBridge_nativeUnsubscribe` | `nativeUnsubscribe(subscription: Long)` | `mobile_core_unsubscribe` | Implemented (aborts the forwarding task and reclaims the forwarder's `GlobalRef`) |
 | ~~`Java_com_onyx_bridge_MobileCoreBridge_nativeSecureStorage`~~ | ~~`nativeSecureStorage(handle, action, key, value): String?`~~ | None | **Removed** (2026-09-24): `ffi_secure_storage.rs` exports no function and the C headers contain no secure-storage symbol; Android Keystore in `SecureTokenStore.kt` is the sanctioned secret store, per `DECISIONS M11-D12.4`. A JNI function will be added only alongside a real `mobile_core_*` export |
@@ -50,6 +50,16 @@ deleted placeholder C-ABI transports (`sync-transport-mobile`'s
 
 `J` = JNI adapter in `crates/mobile-android-jni/src/p2p.rs`.
 `K` = Kotlin declaration in `com.onyx.p2p.P2pCodec.kt`.
+
+The codec is not only declared — it is now **driven**: `P2pController`
+(2026-09-24, `DECISIONS M11-D13`) owns `WifiDirectDriver`/`BleDriver`,
+routes BLE and Wi-Fi Direct sessions (media negotiation → `P2pChannel`
+handshake → framed probe messages), and exposes status/peers/message
+flows to `P2pViewModel` → the Settings `P2pCard`. To cross the handshake
+public points over media whose inbound bytes would otherwise hit the
+frame buffer, `P2pChannel` gained a backward-compatible
+`deferredHandshake` mode (`setRawReader`/`startFraming`); the
+two-device session itself remains a Phase 4.1 on-device lab gate.
 
 | JNI native symbol | Kotlin `external fun` | Rust core | Status |
 |---|---|---|---|
@@ -112,7 +122,7 @@ stream-oriented transports scoped to the handshake's role/counter pair.
 
 1. ~~Decide the JNI event-callback design.~~ Resolved 2026-09-24 (M11-D12): context-carrying C ABI, static trampoline, per-event JVM attach, `EventCallback` fun interface.
 2. ~~Decide whether `nativeSubscribeEvents` should return an opaque subscription token or a polling/event-bus bridge.~~ Resolved: opaque `*mut EventSubscription` as `Long`; `nativeUnsubscribe(subscription)` frees it. No Kotlin-side registry needed.
-3. Wire `nativeExecuteQuery` to a real Kotlin query path and add its JSON schema/test coverage (still the one unwired "implemented" row).
+3. ~~Wire `nativeExecuteQuery` to a real Kotlin query path and add its JSON schema/test coverage.~~ Done 2026-09-24 (M11-D13): `QueryEnvelopeFactory` + `OnyxController.loadAggregateFromQuery`/`loadMission`/`loadTask`, call sites in Mission/Task Detail on-open freshness pulls.
 4. Wire the remaining `MobileCoreBridge` declarations to real runtime call sites (import, sync status, conflicts, upload/download) beyond what `OnyxController` already drives.
 5. Logcat plumbing for the async delivery path (see the event-subscription section).
 6. Device-gated: real JNI round-trip through a running `EventCallback` (currently proven only at the C-ABI boundary via `ffi_integration.rs`).

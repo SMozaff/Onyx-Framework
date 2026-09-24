@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,20 +46,30 @@ fun TaskDetailScreen(task: LoadedAggregate, controller: OnyxController, onBack: 
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val canDecide = task.status == "Submitted"
 
-    Scaffold(topBar = { TopAppBar(title = { Text(task.title) }) }) { padding ->
+    // Targeted freshness pull over the query path (Layer 2): the screen
+    // holds a frozen snapshot, but queries the single aggregate by id on
+    // open so decisions rendered while this screen is up are never built
+    // on data older than what a fresh read returns. Falls back to the
+    // navigation snapshot if the query fails.
+    var fresh by remember(task.id) { mutableStateOf(task) }
+    LaunchedEffect(task.id) {
+        runCatching { controller.loadTask(task.id) }.getOrNull()?.let { fresh = it }
+    }
+    val canDecide = fresh.status == "Submitted"
+
+    Scaffold(topBar = { TopAppBar(title = { Text(fresh.title) }) }) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            task.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            Text("Status: ${task.status}", style = MaterialTheme.typography.bodySmall)
+            fresh.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            Text("Status: ${fresh.status}", style = MaterialTheme.typography.bodySmall)
 
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("Execution state", style = MaterialTheme.typography.titleSmall)
-                    Text("Version: ${task.version}")
-                    Text("Lifecycle epoch: ${task.lifecycleEpoch}")
-                    Text("Authority epoch: ${task.authorityEpoch}")
-                    Text("ID: ${task.id}")
+                    Text("Version: ${fresh.version}")
+                    Text("Lifecycle epoch: ${fresh.lifecycleEpoch}")
+                    Text("Authority epoch: ${fresh.authorityEpoch}")
+                    Text("ID: ${fresh.id}")
                 }
             }
 

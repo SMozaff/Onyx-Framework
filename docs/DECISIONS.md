@@ -2774,3 +2774,75 @@ wiring; the `EventCallback` keep rule in `proguard-rules.pro`; the new
 real-delivery test in `mobile-core/tests/ffi_integration.rs`
 (a `MarkReady` decision → outbox pump → `EventBus` → callback with the
 exact `context` pointer, asserted over a 20s poll).
+
+### M11-D13 — The last two unwired Kotlin rows are wired (query path + P2P controller)
+
+**Date:** 2026-09-24
+
+With the event-subscription ABI (`M11-D12`) landed, exactly two mobile
+Kotlin rows remained "real but unwired": `nativeExecuteQuery` and the
+P2P driver/codec stack. This increment closes both and leaves no
+implemented FFI surface without a runtime call site.
+
+1. **The Kotlin query path is wired.** A new stateless
+   `QueryEnvelopeFactory` (`mobile-android/…/model/`) builds the
+   registry's exact envelope — `{"query_type": "GetMission"|"GetTask",
+   "target_id": <16 bytes>}` (`QueryEnvelope`), with no organization
+   field, since `mobile_core_new` already binds the registry to the
+   app's organization. `OnyxController.loadAggregateFromQuery`/
+   `loadMission`/`loadTask` call `nativeExecuteQuery`, treat the
+   registry's `null` response as "aggregate not found" (the FFI null
+   sentinel stays the malformed/error signal), and re-inject the
+   envelope's `target_id` as the row `id` because the registry's
+   `LoadedJson` genuinely omits it. The real call sites are the
+   Mission/Task Detail screens' on-open freshness pull: a `LaunchedEffect`
+   queries the single aggregate by id and renders it, falling back to the
+   navigation snapshot if the query fails. (The earlier "detail snapshots
+   go stale" concern was already mitigated by AppShell re-resolving from
+   the live list; the query path now gives the screen its own authoritative
+   read, the same path a list row came from.)
+2. **P2P got its missing controller + settings surface.** The Kotlin
+   `WifiDirectDriver`/`BleDriver`/`P2pStream`/`P2pCodec`/`P2pChannel` stack
+   compiled but nothing drove it. Now:
+   - `P2pController` owns both drivers, a single background executor, and
+     `StateFlow<P2pStatus>` / peers / message-log flows. It routes BLE
+     (server = advertiser/responder, client = scanner/initiator) end-to-end
+     (start → auto-connect → handshake → framed probe messages) and
+     Wi-Fi Direct through discovery, `connectTo`, group-formation polling,
+     and the group-owner TCP stream; both media converge on one
+     `runHandshake`/`send` path.
+   - `P2pChannel` gained a backward-compatible `deferredHandshake`
+     constructor + `setRawReader`/`startFraming` so the two 65-byte codec
+     public points can cross media whose inbound bytes would otherwise hit
+     the frame buffer (BLE's single GATT stream). Existing callers are
+     unaffected (default `false`).
+   - `P2pViewModel` (AndroidViewModel) hosts the controller;
+     `P2pCard` (Settings, via AppShell/MainActivity) exposes transport
+     toggle, role controls, permission request (Activity result contract),
+     probe composer, and message transcript. The card deliberately uses
+     `TextField`, not `OutlinedTextField`, to preserve
+     `SettingsScreenSourceTest`'s single-editable-field invariant.
+3. **Device truth remains deferred (unchanged, Phase 4.1b/d):** the
+   controller is hand-checked against driver code and compiles only via
+   CI (no local Android SDK); the two-device session, BLE MTU behavior,
+   and Wi-Fi Direct callback cadence remain on-device lab gates, tracked
+   in `MIGRATION_PLAN.md` Phase 4.1 and `KOTLIN_IMPLEMENTATION_PLAN.md`
+   Layer 6.
+
+**Correction folded in (supersedes M11-D8's premise):** the KOTLIN plan's
+"notification local domain crates are not present" note is outdated —
+`crates/domains/notification-domain/` exists, is registered, and is
+served by `ListNotificationsHandler` in `query_registry.rs`; the
+`NotificationsScreen` empty state is still honest because the !observer
+view model exposes no notifications list. Likewise the push stack
+(`mobile-pwa/src/push/push.ts`, the delivery worker, `routes/push.rs`)
+exists, so nothing is left to build there.
+
+**Evidence:**
+`mobile-android/…/model/QueryEnvelopeFactory.kt` (new);
+`OnyxController.kt` (`loadAggregateFromQuery`/`loadMission`/`loadTask`);
+`MissionDetailScreen.kt`/`TaskDetailScreen.kt` (`LaunchedEffect` query
+pull); `p2p/P2pChannel.kt` (deferred handshake);
+`p2p/P2pController.kt` + `p2p/P2pViewModel.kt` (new);
+`ui/widgets/P2pCard.kt` (new); `SettingsScreen.kt`/`AppShell.kt`/
+`MainActivity.kt` wiring.

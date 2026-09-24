@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.onyx.background.scheduleBackgroundSync
 import com.onyx.controller.OnyxController
+import com.onyx.p2p.P2pViewModel
 import com.onyx.session.OnyxSessionViewModel
 import com.onyx.session.OnyxUiState
 import com.onyx.session.SessionPreferences
@@ -83,7 +84,8 @@ fun OnyxRoot(viewModel: OnyxSessionViewModel) {
                         key = current.handle.toString(),
                         factory = OnyxController.Factory(current.handle, current.organizationId, current.userId, context.applicationContext),
                     )
-                    AppShell(controller = controller, onSignOut = viewModel::signOutAndRetry)
+                    val p2p: P2pViewModel = viewModel()
+                    AppShell(controller = controller, p2p = p2p, onSignOut = viewModel::signOutAndRetry)
                 }
             }
         }

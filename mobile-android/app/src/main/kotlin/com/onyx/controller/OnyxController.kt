@@ -12,6 +12,7 @@ import com.onyx.bridge.MobileCoreBridge
 import com.onyx.model.CommandEnvelopeFactory
 import com.onyx.model.ConflictChoice
 import com.onyx.model.LoadedAggregate
+import com.onyx.model.QueryEnvelopeFactory
 import com.onyx.model.SyncConflict
 import com.onyx.model.SyncSnapshot
 import com.onyx.util.UuidCodec
@@ -264,6 +265,44 @@ class OnyxController(
         val capabilities = manager.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
+
+    /**
+     * One-shot targeted aggregate query (KOTLIN_IMPLEMENTATION_PLAN
+     * Layer 2 / the contract's `nativeExecuteQuery` row). This is the
+     * single-aggregate counterpart to the batch [listAggregates] fan-out:
+     * the same real repository read path a list row comes from, but for
+     * one aggregate by id — used by Detail screens to pull the aggregate
+     * its snapshot froze at navigation time, freshly, on open.
+     *
+     * Returns `null` for "aggregate not found"; throws when the native
+     * layer itself failed (unknown `query_type`, dispatch or repo error —
+     * `mobile_core_execute_query` returns null for those, and that is
+     * indistinguishable from malformed input, matching the parent call's
+     * own documented contract). The response JSON is the registry's
+     * `LoadedJson` shape (`{aggregate, version, lifecycle_epoch,
+     * authority_epoch}`) — it carries no `id`, so the envelope's
+     * `target_id` is injected back in to satisfy
+     * [LoadedAggregate.fromJson]'s expected row shape.
+     */
+    suspend fun loadAggregateFromQuery(queryType: String, targetId: String): LoadedAggregate? {
+        val envelope = QueryEnvelopeFactory().create(queryType, targetId)
+        val json = withContext(Dispatchers.Default) {
+            MobileCoreBridge.nativeExecuteQuery(handle, envelope.toString())
+        } ?: throw IllegalStateException(
+            "nativeExecuteQuery returned null (unknown query type \"$queryType\" or a repository error)",
+        )
+        if (json.isBlank() || (json.trim() == "null")) return null
+        val loaded = JSONObject(json).put("id", JSONArray(UuidCodec.uuidToBytes(targetId)))
+        return LoadedAggregate.fromJson(loaded)
+    }
+
+    /** Targeted single-mission query; see [loadAggregateFromQuery]. */
+    suspend fun loadMission(targetId: String): LoadedAggregate? =
+        loadAggregateFromQuery("GetMission", targetId)
+
+    /** Targeted single-task query; see [loadAggregateFromQuery]. */
+    suspend fun loadTask(targetId: String): LoadedAggregate? =
+        loadAggregateFromQuery("GetTask", targetId)
 
     /** Mirrors `missions.dart`'s `createMission`: execute, then a full [refresh]. */
     fun createMission(name: String, description: String?) {

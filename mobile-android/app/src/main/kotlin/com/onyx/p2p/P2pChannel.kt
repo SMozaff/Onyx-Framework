@@ -32,8 +32,19 @@ import java.io.Closeable
  * Failure model mirrors the Rust codec: a tampered/wrong-key frame breaks
  * the session permanently ([isBroken]). The caller must rebuild the whole
  * channel — never retry on a broken one.
+ *
+ * One nuance the media drivers cannot abstract away: the two handshake
+ * public points cross the link as *plain* bytes, before framing. When a
+ * transport delivers inbound bytes straight into this channel's frame
+ * buffer, that is fine only if the handshake bytes travel out-of-band.
+ * Media where they cannot (BLE's single GATT stream) use
+ * `deferredHandshake = true` + [setRawReader], then [startFraming] once
+ * both public points are exchanged — see [P2pController].
  */
-class P2pChannel(private val stream: P2pStream) : Closeable {
+class P2pChannel(
+    private val stream: P2pStream,
+    deferredHandshake: Boolean = false,
+) : Closeable {
     @Volatile private var session: Long = 0L
     @Volatile private var ready: Boolean = false
     @Volatile private var closed: Boolean = false
@@ -43,12 +54,51 @@ class P2pChannel(private val stream: P2pStream) : Closeable {
     private val buffer = ByteArrayOutputStream()
 
     init {
-        stream.setOnBytes { chunk -> accumulate(chunk) }
+        // Framing is the default: bytes entering the stream are complete
+        // frames the moment this channel exists. The BLE/controller path
+        // (P2pController) needs to cross the handshake public points over
+        // the raw stream *before* any frame, so it sets deferredHandshake
+        // and hands the stream a raw reader, then calls [startFraming]
+        // once both public points have been exchanged. Existing callers
+        // are unaffected -- the flag defaults to false.
+        if (!deferredHandshake) stream.setOnBytes { chunk -> accumulate(chunk) }
     }
 
-    /** Install the plaintext-message consumer (called on the stream's read thread). */
+    /** Install a plaintext-message consumer (called on the stream's read thread). */
     fun setOnMessage(onMessage: (ByteArray) -> Unit) {
         this.onMessage = onMessage
+    }
+
+    /**
+     * Hand the pre-frame stream to a raw [onRaw] consumer instead of the
+     * frame buffer. Only valid before [startFraming] and only with
+     * `deferredHandshake` construction; used so the initiator's
+     * 65-byte public point and the responder's reply can cross the link
+     * as plain bytes (both are fixed-length, so [onRaw] typically checks
+     * for its expected size and delivers exactly once).
+     */
+    fun setRawReader(onRaw: (ByteArray) -> Unit) {
+        check(session == 0L) { "raw reader must be installed before the session begins" }
+        stream.setOnBytes(onRaw)
+    }
+
+    /**
+     * Atomic switch back to frame accumulation. Call after the
+     * responder's public point has been fully consumed (via a
+     * [setRawReader] consumer) and the local side's session is complete.
+     * Any bytes that arrived in the same chunk as the final handshake
+     * message are drained as frames if they are complete.
+     */
+    fun startFraming() {
+        check(session != 0L) { "handshake must be begun before framing starts" }
+        stream.setOnBytes { chunk -> accumulate(chunk) }
+        if (buffer.size() > 0) {
+            try {
+                extractFrames()
+            } catch (_: IllegalStateException) {
+                breakStream()
+            }
+        }
     }
 
     val isBroken: Boolean get() = broken
