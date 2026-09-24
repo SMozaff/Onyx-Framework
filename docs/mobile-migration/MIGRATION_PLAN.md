@@ -385,12 +385,24 @@ implemented and unit/integration-tested, not yet proven against FCM.
 - Replace the placeholder C-ABI symbol stubs rather than extending them as if they performed transport.
 - Run P2P coverage in instrumented Android tests on real hardware.
 
+**Code subset — done in sandbox (see additionally `DECISIONS.md` `P2P-11`):**
+
+- **Rust framing/encryption/handshake** implemented in `crates/mobile-android-jni/src/p2p.rs` and exposed via JNI class `com.onyx.p2p.P2pCodec` (`nativeSessionStart/Accept/ClientMessage/ServerMessage/Complete/Encode/Decode/Close`). Design: ephemeral P-256 ECDH, HKDF-SHA-256 key schedule bound to `PROLOGUE ‖ client_pub ‖ server_pub`, AES-256-GCM, per-direction keys, HMAC-derived nonces from monotonic counters, `u32-BE length ‖ version` 5-byte framing, strict desync-on-failure semantics. Verified on host: 6/6 unit tests pass, `clippy -D warnings` clean, `cargo fmt` clean.
+- **Kotlin drivers** in `mobile-android/app/src/main/kotlin/com/onyx/p2p/{WifiDirectDriver,BleDriver,P2pChannel,P2pStream,P2pCodec}.kt`; connectivity manifest permissions + optional `uses-feature` added.
+- **Placeholder C-ABI stubs deleted** (not extended, per P2P-1): `sync-transport-mobile`'s `android_wifi_direct`/`android_ble` modules and `mobile-core`'s corresponding re-export modules are gone; their crate doc comments record the removal.
+- **Still deferred (hardware gate):** on-device P2P tests under 4.6; drivers compile only in CI (no local Android SDK).
+
 ### Phase 4.2 — Background work verification
 
 - Verify WorkManager scheduling (`scheduleBackgroundSync`)
 - Test background sync execution under Doze mode, airplane mode
 - Ensure sync agent runs and persists state correctly
 - Verify `WorkManagerService` onReceive calls correct mobile-core functions
+
+**Code subset — done in sandbox (see additionally `DECISIONS.md` `P2P-11`):**
+
+- Scheduling contract is now asserted by instrumented test `BackgroundSyncInstrumentedTest` (`androidTest`): `UNIQUE_WORK_NAME` idempotency under `ExistingPeriodicWorkPolicy.KEEP`, periodic type, and `NetworkType.CONNECTED` constraint, via `WorkManagerTestInitHelper`. Runs under `connectedAndroidTest` (hardware gate), mirroring `MobileCoreRoundTripTest`'s disclosure comment.
+- Runtime behavior under Doze/airplane mode and the service → mobile-core function wiring remain hardware/lab gates; nothing here changes `WorkManagerService`'s existing forward path.
 
 ### Phase 4.3 — Offline behavior
 
@@ -410,6 +422,11 @@ implemented and unit/integration-tested, not yet proven against FCM.
 - Add ProGuard/R8 rules
 - Create release build variant
 - Upload to internal artifact repository
+
+**Code subset — done in sandbox:**
+
+- `app/proguard-rules.pro` (JNI name-mangling keeps, `WorkManagerService` worker keep) + `release` buildType with R8 minify + resource shrink + debug-keystore signing, and `assembleRelease` added to the `mobile-android-kotlin` CI job so R8 is exercised on every run. Artifact upload adds the R8 release APK alongside debug.
+- **Still deferred:** dedicated release signing/production-evidence pipeline (Phase 6) and on-device survival check of the R8 APK (lab gate).
 
 ### Phase 4.6 — CI verification
 

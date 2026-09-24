@@ -22,3 +22,7 @@ crate-type = ["cdylib"]
 # 0.19), not a remembered-but-possibly-stale API guess.
 jni = "0.22.4"
 mobile-core.workspace = true
+# P2P transport codec (Phase 4.1, DECISIONS P2P-1): ephemeral P-256 ECDH,
+# HKDF-SHA-256, HMAC-SHA-256 nonces, AES-256-GCM — all via BoringSSL-derived
+# `ring` (same dependency as the WebPush delivery worker).
+ring.workspace = true

@@ -9,17 +9,20 @@ import androidx.work.WorkManager
 import com.onyx.WorkManagerService
 import java.util.concurrent.TimeUnit
 
-private const val UNIQUE_WORK_NAME = "onyx-periodic-sync"
+internal const val UNIQUE_WORK_NAME = "onyx-periodic-sync"
 
 /**
- * Schedules [WorkManagerService] to run periodically, Kotlin's
+ * Schedules [WorkManagerService] to run periodically — Kotlin's
  * equivalent of `background/android/workmanager_service.dart`'s
- * `registerAndroidBackgroundSync()` -- same 15-minute period and
+ * `registerAndroidBackgroundSync()`: same 15-minute period and
  * network-required constraint, confirmed directly against that
  * function rather than assumed. [ExistingPeriodicWorkPolicy.KEEP] means
  * calling this on every app start (see `MainActivity`) is a safe no-op
  * once already scheduled, matching `Workmanager().registerPeriodicTask`'s
  * own idempotent registration.
+ *
+ * The scheduling contract itself ([UNIQUE_WORK_NAME], period, constraint,
+ * KEEP policy) is asserted by `BackgroundSyncInstrumentedTest`.
  */
 fun scheduleBackgroundSync(context: Context) {
     val request = PeriodicWorkRequestBuilder<WorkManagerService>(15, TimeUnit.MINUTES)

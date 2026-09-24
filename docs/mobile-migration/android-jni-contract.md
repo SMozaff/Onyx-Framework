@@ -39,6 +39,35 @@ The JNI layer must contain no business logic. Its only responsibilities are nati
 
 Outside the adapter crate, `WorkManagerService.nativeAndroidDoWork(): Int` calls `mobile-core` directly rather than through `mobile-android-jni`.
 
+## P2P transport codec (Phase 4.1, `DECISIONS P2P-1/P2P-11`)
+
+`P2pCodec.kt` ↔ `crates/mobile-android-jni/src/p2p.rs`. This is a second JNI
+surface, and unlike the `MobileCoreBridge` table it is a **real**
+implementation (session handle registry, handshake state machine, framing,
+AES-GCM encryption) — `Implemented` for all rows, not a stub. It replaces the
+deleted placeholder C-ABI transports (`sync-transport-mobile`'s
+`android_wifi_direct`/`android_ble`), as recorded in those crates' docs.
+
+`J` = JNI adapter in `crates/mobile-android-jni/src/p2p.rs`.
+`K` = Kotlin declaration in `com.onyx.p2p.P2pCodec.kt`.
+
+| JNI native symbol | Kotlin `external fun` | Rust core | Status |
+|---|---|---|---|
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionStart` | `nativeSessionStart(isServer: Boolean): Long` | New session, own ephemeral key | Implemented |
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionClientMessage` | `nativeSessionClientMessage(handle: Long): ByteArray` | client hello (65-byte pubkey) | Implemented |
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionAccept` | `nativeSessionAccept(clientMessage: ByteArray): Long` | server session from client hello | Implemented |
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionServerMessage` | `nativeSessionServerMessage(handle: Long): ByteArray` | server hello (65-byte pubkey) | Implemented |
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionComplete` | `nativeSessionComplete(handle: Long, serverMessage: ByteArray): Unit` | client derives keys | Implemented |
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionEncode` | `nativeSessionEncode(handle: Long, plaintext: ByteArray): ByteArray` | header + ciphertext + tag | Implemented |
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionDecode` | `nativeSessionDecode(handle: Long, frame: ByteArray): ByteArray` | strict-counter decrypt | Implemented |
+| `Java_com_onyx_p2p_P2pCodec_nativeSessionClose` | `nativeSessionClose(handle: Long): Unit` | drop session/keys | Implemented |
+
+Security notes applying to the P2P surface: session plaintext only ever
+exists inside Rust (`encode`/`decode` take and return byte arrays; Kotlin
+never holds key material); a failed `decode` permanently invalidates the
+session (desync, not sliding-window); sessions are single-direction
+stream-oriented transports scoped to the handshake's role/counter pair.
+
 ## Marshalling conventions
 
 - An opaque `*mut MobileApp` is represented in Kotlin as `Long`.

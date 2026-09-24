@@ -2642,3 +2642,72 @@ remains cloud/hardware-gated (Phase 5.2 / Phase 4).
 workspace + worker `Cargo.toml` (`ring`, `reqwest`, `url`, `base64`,
 `hmac`, `sha2`). Tests: 10 unit + 2 Postgres-gated integration; `cargo test
 -p worker` green.
+### P2P-11 — Phase 4 code-subset rulings (P2P codec, Kotlin drivers, background contract, release variant)
+
+**Date:** 2026-09-24
+
+Phase 4 Code Executors produced the sandbox-verifiable subset of the Android
+completion plan. Rulings:
+
+1. **P2P crypto/handshake went Rust-first, in the JNI crate, not Team 4's
+   `sync-transport-mobile`.** Firm-and-final design: ephemeral P-256 ECDH
+   (unauthenticated handshake — both public points are bound into the HKDF
+   schedule so MITM is detectable at decrypt time), HKDF-SHA-256 with salt
+   `PROLOGUE("onyx-p2p-v1") ‖ client_pub ‖ server_pub`, AES-256-GCM, strict
+   per-direction 32-byte encryption + nonce keys derived under distinct
+   labels (`r2i`/`i2r`), nonces from HMAC-SHA256 over a monotonic per-direction
+   counter (taken from the first 12 bytes), 5-byte header (`u32` BE length +
+   version byte `0x01`), and stream semantics — a failed `decrypt` permanently
+   desyncs the session rather than sliding. Implemented as
+   `crates/mobile-android-jni/src/p2p.rs`, exported through JNI class
+   `com.onyx.p2p.P2pCodec`, 6/6 unit tests green, clippy `-D warnings` + fmt
+   clean. Restricting all crypto/key-schedule logic to Rust keeps it testable
+   on a host without any Android toolchain.
+2. **Kotlin owns every platform primitive; Rust JNI owns every secret.**
+   `WifiDirectDriver` (WifiP2pManager, port 47015) and `BleDriver`
+   (BLE advertise/scan/GATT) produce `P2pStream`s; `P2pChannel` only
+   reassembles frames and orchestrates the 4-message handshake through
+   `P2pCodec`'s `nativeSession{Start,ClientMessage,Accept,ServerMessage,
+   Complete}`. Plaintext never leaves the Rust side — `encode`/`decode` take
+   and return byte arrays. Manifest permissions reflect current Android 13–15
+   guidance (`NEARBY_WIFI_DEVICES`/`BLUETOOTH_SCAN` `neverForLocation`,
+   legacy location only on ≤ 32, `maxSdkVersion="30"` on the classic
+   `BLUETOOTH` pair).
+3. **The placeholder C-ABI exports were deleted, not extended** (per P2P-1):
+   `sync-transport-mobile::android_wifi_direct`/`android_ble` and
+   `mobile-core`'s re-export modules are removed from the tree, with the crate
+   docs amended. Nothing else referenced them (audited by grep).
+4. **The WorkManager scheduling contract is asserted by an instrumented test**
+   (the "schedule" half of 4.2): `BackgroundSyncInstrumentedTest` uses
+   `WorkManagerTestInitHelper` and proves exactly one unique `ENQUEUED`
+   periodic work for `UNIQUE_WORK_NAME` after a double `scheduleBackgroundSync`
+   (`ExistingPeriodicWorkPolicy.KEEP` idempotency) with the
+   `NetworkType.CONNECTED` constraint, mirroring the frozen Flutter
+   `registerAndroidBackgroundSync()` contract. **Abandoned** a JVM unit-test
+   approach for this: `WorkManager` under Robolectric proves less about the
+   real scheduler than the sandbox's marginal disk would cost; and existing
+   precedent (`MobileCoreRoundTripTest`) already treats instrumented tests as
+   hardware-gated. Anything about *execution* (Doze/airplane-mode delivery,
+   service→`mobile_core_android_do_work` wiring) stays a Phase 4.2 lab gate.
+5. **Release variant is real R8, debug-signed, in CI.** `proguard-rules.pro`
+   keeps native-method names (JNI symbol mangling), the `WorkManagerService`
+   worker, and JNI carrier `object`s; `release { isMinifyEnabled;
+   isShrinkResources; proguardFiles(...); }` signs with the debug keystore and
+   `mobile-android-kotlin` now runs `assembleRelease`. Production keystore +
+   on-device survival of the shrunk APK remain Phase 6 / lab gates. This keeps
+   the sandbox free of signing secrets entirely.
+
+**Evidence:** `crates/mobile-android-jni/src/p2p.rs`; `…/com/onyx/p2p/` (five
+files); `AndroidManifest.xml`; `BackgroundSyncInstrumentedTest.kt`;
+`work-testing` dep; `app/proguard-rules.pro` + `build.gradle.kts` release
+block; `ci.yml` `assembleRelease` step; deleted placeholder modules (git
+diff). Gates are enforced on GitHub only, never on a local machine: the
+`ci.yml` `check` job runs `cargo fmt --check`, workspace clippy `-D
+warnings`, `cargo build --workspace --release` and `cargo test --workspace
+--release` (which runs the P2P codec's 6 unit tests); the
+`mobile-android-kotlin` job cross-compiles the JNI crate via cargo-ndk and
+builds both APKs.
+
+**Process note (2026-09-24):** no local build/test/compile — the sandbox has
+no room for a `target/` directory, so every `cargo`/`gradle` gate runs
+exclusively in GitHub Actions.

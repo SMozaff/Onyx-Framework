@@ -3387,6 +3387,7 @@ version = "1.0.0"
 dependencies = [
  "jni 0.22.4",
  "mobile-core",
+ "ring 0.17.14",
 ]
 
 [[package]]

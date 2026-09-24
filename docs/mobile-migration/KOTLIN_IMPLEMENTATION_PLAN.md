@@ -14,11 +14,11 @@
 |---|---|---|
 | **0 — Freeze/inventory** | ✅ Done (Flutter deleted) | `mobile/` removed; parity-matrix.md retained |
 | **1 — Kotlin project skeleton** | ✅ Mostly complete | `mobile-android/` has real Compose project, build config, CI |
-| **2 — JNI boundary** | ⚠️ Declared, partly implemented | `mobile-android-jni/` exposes 15 JNI entry points; 11 are real, 1 is an unwired pass-through, and 3 are nonfunctional stubs. See `android-jni-contract.md`. |
+| **2 — JNI boundary** | ⚠️ Declared, partly implemented | `mobile-android-jni/` exposes 15 `MobileCoreBridge` entry points (11 real, 1 unwired pass-through, 3 nonfunctional stubs) **plus the Phase 4.1 P2P codec** — 8 `com.onyx.p2p.P2pCodec` sessions functions, all implemented, 6/6 host tests green. See `android-jni-contract.md`. |
 | **3 — Startup/auth** | ⚠️ Partially implemented | `OnyxSessionViewModel.kt`, `AuthApi.kt`, `SecureTokenStore.kt` exist; `ffi_secure_storage` not yet bound |
 | **4 — Core read screens** | ⚠️ Partially implemented | Dashboard, Missions, Tasks, MissionDetail, Notifications screens exist; `OnyxController` refresh fan-out works |
-| **5 — Operational screens** | ⚠️ Partially implemented | Approvals, Files, Settings, ConflictDialog, SyncStatusIndicator, WorkManager exist; background sync scheduled but unverified |
-| **6 — Real-device acceptance** | ❌ Not started | P2P stubs (`ConnectionLost`), no device testing, background/offline unverified |
+| **5 — Operational screens** | ⚠️ Partially implemented | Approvals, Files, Settings, ConflictDialog, SyncStatusIndicator, WorkManager exist; background sync schedule asserted by instrumented test (`BackgroundSyncInstrumentedTest`, hardware-gated) but execution unverified |
+| **6 — Real-device acceptance** | ⚠️ Code subset done; device gate open | P2P codec + Kotlin drivers written (see MIGRATION_PLAN 4.1 status), placeholder C-ABI stubs deleted; no device testing yet, background/offline execution unverified |
 
 ---
 
@@ -44,7 +44,7 @@
 - `mobile-android/app/src/main/kotlin/com/onyx/MainActivity.kt` — real startup entry point rendering Loading/NeedsLogin/StartupError/Ready states; `LaunchedEffect(current.handle)` triggers `scheduleBackgroundSync`
 - `mobile-android/app/src/main/kotlin/com/onyx/OnyxApplication.kt`
 - `mobile-android/.gitignore`, `settings.gradle.kts`, `gradle.properties`, `gradlew`, `gradle/wrapper/`
-- CI: `mobile-android-kotlin` job in `.github/workflows/ci.yml` (cargo-ndk, ndk r28b, Gradle assembleDebug, uploads APK artifact)
+- CI: `mobile-android-kotlin` job in `.github/workflows/ci.yml` (cargo-ndk, ndk r28b, Gradle assembleDebug, uploads APK artifact; Phase 4.5 adds `assembleRelease` with R8 + debug signing)
 - `mobile-android/tool/build_rust_jni.sh` — builds native libraries via cargo-ndk
 
 **What's missing:**
@@ -194,15 +194,15 @@ The module doc’s older “remaining ~14 functions” note predates the current
 
 **What's missing:**
 - **Real hardware testing.** No Android device has ever run the JNI → mobile-core → Rust chain. All instrumented tests (`androidTest/`) are currently either JVM unit tests or emulator-only.
-- **P2P transport implementation.** `crates/transports/sync-transport-mobile/src/android_wifi_direct.rs` and `android_ble.rs` are placeholder C-ABI exports: they allocate opaque handles and return success without performing platform transport. `crates/mobile-core/src/android_wifi_direct.rs` and `android_ble.rs` re-export those placeholders on Android. The locked direction is Kotlin→JNI; see `docs/DECISIONS.md` entry `P2P-1`. The deleted Flutter `p2p_sync_test.dart` had used `ONYX_MOBILE_DEVICE_TEST=1` with `ConnectionLost` assertions, but the current Android-side placeholder behavior is handle allocation/success without transport, not a returned `ConnectionLost` from those files.
-- **Background/offline verification.** `BackgroundSync.kt` schedules `WorkManagerService` but has never been verified: does WorkManager execute under Doze? Does the sync actually complete when offline? Does it retry correctly? Is the `REGISTERED_BACKGROUND_APP` global correctly managed across process lifecycle?
+- **P2P transport on device.** The **code subset is implemented** (Phase 4.1 + `DECISIONS P2P-11`): the Rust framing/encryption/handshake codec lives in `mobile-android-jni/src/p2p.rs` behind `com.onyx.p2p.P2pCodec`, the Kotlin `WifiDirectDriver`/`BleDriver`/`P2pChannel`/`P2pStream` stack is written, and the former placeholder C-ABI exports (`sync-transport-mobile`'s `android_wifi_direct`/`android_ble` + `mobile-core`'s re-export modules) were **deleted, not extended**. What remains is running it on two devices.
+- **Background/offline execution.** `BackgroundSync.kt` schedules `WorkManagerService`; the scheduling contract is now asserted by `BackgroundSyncInstrumentedTest` (`androidTest`, hardware-gated) but has never been verified *running*: does WorkManager execute under Doze? Does the sync actually complete when offline? Does it retry correctly? Is the `REGISTERED_BACKGROUND_APP` global correctly managed across process lifecycle?
 - **Accessibility.** No accessibility testing (TalkBack, switch access, font scaling).
-- **Release artifact.** No signed APK, no ProGuard/R8 rules, no release build verification.
+- **Release artifact signing.** The Phase 4.5 code subset shipped the R8 setup (`proguard-rules.pro`, release buildType, CI `assembleRelease`) with debug-keystore signing; a production keystore and on-device survival check of the shrunk APK are outstanding.
 - **Rollback artifact.** Per FLT-1, no Flutter APK exists to roll back to — this is the risk being accepted.
 
 **Next concrete task:**
-1. Implement the Kotlin→JNI P2P direction from `docs/DECISIONS.md` entry `P2P-1`: add Kotlin `WifiP2pManager`/`BluetoothLeScanner` platform drivers and corresponding Rust JNI transport entry points, replacing the placeholder C-ABI symbol stubs rather than extending them.
-2. Run `ONYX_MOBILE_DEVICE_TEST=1` instrumented tests on two authorized Android devices
+1. **(done, code subset)** The Kotlin→JNI P2P direction from `DECISIONS P2P-1` is implemented per `P2P-11` (codec + drivers landed, stubs deleted). Remainder: run the drivers' instrumented tests on two authorized Android devices.
+2. Run `ONYX_MOBILE_DEVICE_TEST=1` instrumented tests on two authorized Android devices (including `BackgroundSyncInstrumentedTest` and a P2P session round-trip)
 3. Verify background sync under Doze mode, airplane mode, and network switching
 4. Verify `mobile_core_android_do_work` completes a real sync cycle on device
 5. Add accessibility testing
@@ -218,15 +218,15 @@ Layer 0 (done) ──→ Layer 1 (done) ──→ Layer 2 (mostly done) ──�
                                                                     │
                                                                     ▼
 Layer 4 (partially done) ◄────────────────────────────────────────┘
-                                                                    │
-                                                                    ▼
+                                                                     │
+                                                                     ▼
 Layer 5 (partially done) ◄────────────────────────────────────────┘
-                                                                    │
-                                                                    ▼
-Layer 6 (NOT STARTED) ────────────────────────────────────────────┘
+                                                                     │
+                                                                     ▼
+Layer 6 (code subset done; device gate OPEN) ───────────────────────┘
 ```
 
-**Cross-cutting dependency:** Layer 6 requires all of Layers 1–5 to have instrumented tests that pass on real hardware. The P2P transport implementation (Layer 6, item 1 above) is the single largest blocker and is in `crates/mobile-core/`, not in `mobile-android/`.
+**Cross-cutting dependency:** Layer 6 requires all of Layers 1–5 to have instrumented tests that pass on real hardware. The P2P transport (Layer 6, item 1 above) is implemented as a code subset — Rust codec in the `mobile-android-jni` crate, Kotlin drivers in `mobile-android/` — and only the real-device half of the gate remains open.
 
 ---
 

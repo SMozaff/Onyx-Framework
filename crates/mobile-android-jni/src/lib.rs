@@ -89,6 +89,11 @@ use jni::EnvUnowned;
 
 use mobile_core::MobileApp;
 
+/// P2P transport codec (Phase 4.1): framing/encryption/handshake in pure
+/// Rust plus the `com.onyx.p2p.P2pCodec` JNI surface Kotlin drives the
+/// platform sockets through.
+pub mod p2p;
+
 /// `Java_com_onyx_bridge_MobileCoreBridge_nativeNew` --
 /// `com.onyx.bridge.MobileCoreBridge.nativeNew(dbPath: String, configJson: String): Long`.
 ///

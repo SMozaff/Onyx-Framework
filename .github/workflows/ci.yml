@@ -363,3 +363,15 @@ jobs:
         with:
           name: onyx-mobile-android-kotlin-debug
           path: mobile-android/app/build/outputs/apk/debug/app-debug.apk
+      # Phase 4.5: the release variant exercises R8 minify + resource
+      # shrink from the committed proguard-rules.pro (debug keystore
+      # signing, so no private key is involved). A correct build here
+      # proves the JNI/WorkManager keep-rules hold under R8 -- the
+      # on-device runtime consequence is still a Phase 4.x lab gate.
+      - name: Gradle assembleRelease (R8 + debug signing)
+        working-directory: mobile-android
+        run: ./gradlew assembleRelease --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onyx-mobile-android-kotlin-release-r8
+          path: mobile-android/app/build/outputs/apk/release/app-release.apk

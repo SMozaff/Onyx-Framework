@@ -60,8 +60,21 @@ android {
     }
 
     buildTypes {
+        // Phase 4.5: real release build — R8 minify + resource shrink so the
+        // release variant is a genuine artifact, not just a debug APK with a
+        // different seed. Signed with the debug keystore for now (AGP always
+        // wires `signingConfigs.debug`); a dedicated release keystore/pipeline
+        // is part of the deferred Phase 6 production-evidence work, and
+        // `assembleRelease` runs in CI from this config so R8 keep-rules are
+        // exercised without a private key.
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -124,4 +137,8 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // Phase 4.2 (WorkManager scheduling): WorkManagerTestInitHelper for
+    // BackgroundSyncInstrumentedTest. Same 2.9.1 line already used by the
+    // app itself (work-runtime-ktx above), so no version skew.
+    androidTestImplementation("androidx.work:work-testing:2.9.1")
 }

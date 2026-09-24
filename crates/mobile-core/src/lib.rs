@@ -21,12 +21,20 @@
 //! since they operate directly on those shared types. Each FFI entry
 //! point beyond those is split into its own file by concern:
 //! `ffi_commands.rs`, `ffi_queries.rs`, `ffi_events.rs`,
-//! `ios_background.rs`, `android_workmanager.rs` — plus the four P2P
-//! transport stub modules (`ios_multipeer.rs`, `android_wifi_direct.rs`,
-//! `ios_ble.rs`, `android_ble.rs`). This was originally one flat
-//! `lib.rs`; split for the requested file structure with no behavior
-//! change (verified: the full `tests/ffi_integration.rs` suite re-passes
-//! unmodified after the split — see `DECISIONS.md`).
+//! `ios_background.rs`, `android_workmanager.rs` — plus the two remaining
+//! P2P transport modules for iOS (`ios_multipeer.rs`, `ios_ble.rs`). This
+//! was originally one flat `lib.rs`; split for the requested file structure
+//! with no behavior change (verified: the full `tests/ffi_integration.rs`
+//! suite re-passes unmodified after the split — see `DECISIONS.md`).
+//!
+//! # Android P2P placeholder removal (Phase 4.1, DECISIONS P2P-1)
+//! This crate used to re-export `sync-transport-mobile`'s placeholder
+//! `android_wifi_direct`/`android_ble` C-ABI stubs (phantom handles, no
+//! real transport). Those stubs were **deleted, not extended**: per P2P-1
+//! the Android transport is now Kotlin `WifiP2pManager`/`BluetoothLeScanner`
+//! drivers (`mobile-android/.../com/onyx/p2p/`) running framing/encryption/
+//! handshake from `mobile-android-jni`'s `p2p` module, which lives in the
+//! Android JNI crate rather than this C-ABI surface.
 
 use std::ffi::{c_char, CStr, CString};
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -37,8 +45,6 @@ use platform_kernel::{OrganizationId, ReplicaId};
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::runtime::Runtime;
 
-pub mod android_ble;
-pub mod android_wifi_direct;
 pub mod android_workmanager;
 pub mod ffi_commands;
 pub mod ffi_events;
