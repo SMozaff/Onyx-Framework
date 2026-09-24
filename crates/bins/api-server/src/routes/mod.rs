@@ -6,8 +6,10 @@ pub mod auth;
 pub mod client_type;
 pub mod command;
 pub mod events;
+pub mod files;
 pub mod policy_admin;
 pub mod profiles;
+pub mod push;
 pub mod query;
 pub mod relay;
 pub mod todo_admin;
@@ -26,14 +28,17 @@ use axum::{
     http::{HeaderMap, HeaderValue, Method, StatusCode},
     middleware,
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
+use local_blob_storage::LocalBlobStore;
 use observability_adapter::{HashChainAuditWriter, Metrics};
 use persistence_postgres::{PostgresRepository, PostgresUnitOfWorkFactory};
 use persistence_sqlite::{SqliteRepository, SqliteUnitOfWorkFactory};
 use platform_kernel::{ObjectId, OrganizationId};
-use query_application::{IdempotencyError, IdempotencyStore, Repository, UnitOfWorkFactory};
+use query_application::{
+    BlobStore, IdempotencyError, IdempotencyStore, Repository, UnitOfWorkFactory,
+};
 use security_adapter::{
     Ed25519JwtCodec, EnvironmentSecretProvider, InMemorySlidingWindowRateLimiter,
     InMemoryTokenRevocationStore, PasswordHasher, PostgresSlidingWindowRateLimiter,
@@ -113,6 +118,11 @@ pub struct ApiState {
     /// dials `/api/relay/:target`; see `routes::relay` for why presence is
     /// per-instance and what that means for horizontal scaling.
     pub relay_registry: relay::RelayRegistry,
+    /// Content-addressed file storage backing `GET /api/files/:content_hash`
+    /// (MIGRATION_PLAN Phase 1.2). Rooted at `ONYX_BLOB_STORE_ROOT` when set,
+    /// else a per-host temp directory — the same `BlobStore` port
+    /// desktop-shell's `FileUploadCoordinator` writes through.
+    pub blob_store: Arc<dyn BlobStore>,
     /// Explicit CORS origin allow-list (audit finding H-03 / hardening
     /// track H4(a)), parsed once at startup from
     /// `ONYX_CORS_ALLOWED_ORIGINS`. `None` means "reflect any origin"
@@ -438,6 +448,20 @@ impl ApiState {
             );
         }
 
+        let blob_store_root = std::env::var("ONYX_BLOB_STORE_ROOT").unwrap_or_else(|_| {
+            std::env::temp_dir()
+                .join("onyx-api-server-blobs")
+                .to_string_lossy()
+                .into_owned()
+        });
+        let blob_store: Arc<dyn BlobStore> = Arc::new(
+            LocalBlobStore::open(&blob_store_root)
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!("opening blob store at {blob_store_root}: {error}")
+                })?,
+        );
+
         Ok(Self {
             projection_pool,
             notification_repo,
@@ -459,6 +483,7 @@ impl ApiState {
             user_store,
             password_hasher,
             relay_registry: relay::RelayRegistry::new(),
+            blob_store,
             cors_allowed_origins,
         })
     }
@@ -494,9 +519,16 @@ pub fn router(state: ApiState) -> Router {
     // are both real, currently-registered PUT routes (see below); neither
     // was in the previous allow-list, so a browser-based caller failed
     // CORS preflight on either. Audited every other `.route(...)` call in
-    // this router for its actual registered methods: everything else here
-    // is GET or POST only, so no further methods are needed.
-    let cors_methods = [Method::GET, Method::POST, Method::PUT, Method::OPTIONS];
+    // this router for its actual registered methods: GET/POST cover the
+    // remaining routes except DELETE (`/api/push/subscriptions/:id`,
+    // MIGRATION_PLAN Phase 1.2), which is why DELETE is included here.
+    let cors_methods = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ];
     let cors_layer = match state.cors_allowed_origins.clone() {
         Some(origins) => CorsLayer::new()
             .allow_origin(origins)
@@ -603,6 +635,17 @@ pub fn router(state: ApiState) -> Router {
         // Deployment's `/api/relay` Ingress prefix rule cannot also catch
         // this route; see routes::relay::issue_ticket's doc comment.
         .route("/api/relay-ticket", post(relay::issue_ticket))
+        // Content-addressed file download for the PWA ObserverClient and
+        // other HTTP clients (MIGRATION_PLAN Phase 1.2) -- see
+        // routes::files for the capability gate and scoping notes.
+        .route("/api/files/:content_hash", get(files::download_file))
+        // Web Push subscription registration/unregistration for the PWA
+        // ObserverClient (MIGRATION_PLAN Phase 1.2) -- see routes::push.
+        .route("/api/push/subscriptions", post(push::register_subscription))
+        .route(
+            "/api/push/subscriptions/:subscription_id",
+            delete(push::unregister_subscription),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::rate_limit::observe_request,

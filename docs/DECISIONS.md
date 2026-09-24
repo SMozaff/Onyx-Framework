@@ -2352,3 +2352,17 @@ no P2P implementation is included here.
 
 **Evidence:** `crates/bins/api-server/src/routes/admin.rs:379-436` — `bootstrap` performs only: (1) fail-closed token-environment check, (2) constant-time token comparison, (3) empty-store refusal. `create_user` at `admin.rs:439` is the capability-checked (`require_admin_mutation`) equivalent for authenticated admin account creation.
 
+### P2P-4 — File download and push-subscription registration are read-class observer routes (MIGRATION_PLAN Phase 1.2)
+
+**Date:** 2026-09-24
+
+**Ruling:** `GET /api/files/:content_hash` is gated by `can_download_files` and `POST/DELETE /api/push/subscriptions...` are gated by `can_read_notifications`. Both flags are true for `mobile_observer`, so observers may use every one of these routes; the checks still exist so a future client class that must not download or receive notifications is refused without a new route.
+
+**Rationale:** Downloading stored file bytes changes no state and registers/unregisters a notification channel for the caller — both are read-class from the observer-ceiling perspective (ONYX-MOB-01 §8 grants observers every `can_read_*` and `can_download_files`). Push registration is deliberately gated by the read flag rather than a mutation flag: it is how a read-only observer opts into receiving notifications, not a domain mutation. The routes add no new capability fields.
+
+**Framing of the two disclosed limitations as explicit, planned scope:** (1) A hash-based download is not tenant-scoped to a `FileAsset` because api-server has no `FileAsset` listing/query path yet; per the MIGRATION_PLAN Phase 3.1 note, that lookup is the declared follow-up when the PWA `FileList` view lands (see `routes/files.rs` module doc). (2) Push registration only *stores* the browser's endpoint + VAPID keys; there is no push delivery backend yet (MIGRATION_PLAN Phase 3.2 — the `push_subscriptions` table is what a future delivery worker reads).
+
+**Enforcement:** `files::download_file` calls `require_capability(&actor, |c| c.can_download_files, "download_files")`; `push::register_subscription`/`unregister_subscription` call `require_capability(&actor, |c| c.can_read_notifications, "read_notifications")`. `ApiState` gained a `blob_store: Arc<dyn BlobStore>` field; `ApiState::new` opens `LocalBlobStore::open(ONYX_BLOB_STORE_ROOT)` (host temp dir when unset). Routes are registered in `routes/mod.rs` (files download, push register/unregister); CORS allow-list gained `DELETE` (added after the H4(a) audit, which had already verified GET/POST solely masked `PUT`).
+
+**Evidence:** `crates/bins/api-server/src/routes/files.rs` and `routes/push.rs`; registrations at `routes/mod.rs` (files ~line 576, push ~lines 634-644); migrations `migrations/{sqlite,postgres}/20260111000000_add_push_subscriptions.{up,down}.sql`; positive-path proof in `crates/bins/api-server/tests/observer_read_routes.rs` (an observer registers/upserts/unregisters its own subscription, cannot remove another user's, and downloads stored bytes). `ApiState::new` reads `ONYX_BLOB_STORE_ROOT` (host temp dir when unset) — documented on the `ApiState::blob_store` field in `routes/mod.rs`. Cross-backend UUID bytes↔`Uuid` conversion mirrors the existing repo convention in `routes/relay.rs`.
+

@@ -70,7 +70,18 @@ Phase 0 produces these frozen starting points:
 
 ### Phase 1.2 — Add read endpoints for ObserverClient
 
-If not already present, add:
+**Status: DONE (2026-09-24).** File download and push-subscription
+register/unregister routes exist in `crates/bins/api-server/src/routes/`
+(`files.rs`, `push.rs`), registered in `routes/mod.rs`, backed by the
+`push_subscriptions` table migration
+(`migrations/{sqlite,postgres}/20260111000000_add_push_subscriptions`),
+with positive E2E coverage in `tests/observer_read_routes.rs`. Capability
+gates, the blob-store root, and the two disclosed follow-ups (FileAsset
+tenant scoping → Phase 3.1; push delivery worker → Phase 3.2) are recorded
+in `docs/DECISIONS.md` entry `P2P-4` and the route module docs.
+
+What Phase 1.2 delivered:
+
 - File download (`GET /api/files/:content_hash`)
 - Push subscription register (`POST /api/push/subscriptions`)
 - Push subscription unregister (`DELETE /api/push/subscriptions/:subscriptionId`)

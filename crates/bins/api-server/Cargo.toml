@@ -18,6 +18,7 @@ platform-contracts.workspace = true
 mission-domain.workspace = true
 work-domain.workspace = true
 query-application.workspace = true
+local-blob-storage.workspace = true
 worker-application.workspace = true
 persistence-postgres.workspace = true
 messaging-adapter.workspace = true

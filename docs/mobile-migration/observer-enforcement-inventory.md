@@ -73,8 +73,11 @@ These routes perform authentication and their own tenant/role checks. They do no
 - `POST /api/relay-ticket` propagates the caller’s authenticated `client_type` into the ticket. **Relay ticket minting requires `submit_domain_command`; observers are excluded.** The code comment previously said relay/sync participation is outside ONYX-MOB-01 §9’s enumerated mutation list; Phase 1 has now ruled that observer participation is denied per the existing `can_submit_domain_commands` ceiling.
 - WebSocket `/api/events` validates the caller’s access token and tenant boundary but does not apply a separate capability capability gate to the subscription itself. Message delivery remains tenant-scoped.
 
-## Confirmed backend gaps for Phase 1
+## Phase 1.2 additions (previously-confirmed gaps, now closed)
 
-1. No HTTP file-download route exists in `api-server`. `BlobStore` exists as an application port, but there is no `/api/files/...` route to expose authorized downloads.
-2. No Web Push subscription endpoints exist in `api-server`.
-3. The PWA therefore cannot yet implement authorized file download or push registration against the current backend.
+These were the Phase 1 read-route gaps; MIGRATION_PLAN Phase 1.2 closed them:
+
+- `GET /api/files/:content_hash` — gated by `require_capability(..., can_download_files, "download_files")`. Errors: `400 INVALID_CONTENT_HASH`, `404 FILE_NOT_FOUND`, `500 BLOB_STORE_UNAVAILABLE`. Source: `crates/bins/api-server/src/routes/files.rs`. Blobs are served from `ApiState::blob_store` (`LocalBlobStore`). Per-hash downloads are **not** tenant-scoped to a `FileAsset` yet (no `FileAsset` query path exists in api-server); that lookup is the declared Phase 3.1 follow-up — see `docs/mobile-migration/MIGRATION_PLAN.md` and the route's module doc.
+- `POST /api/push/subscriptions` / `DELETE /api/push/subscriptions/:subscription_id` — both gated by `require_capability(..., can_read_notifications, "read_notifications")`. Register is idempotent per `(user_id, organization_id, endpoint)`; unregister is scoped to the owning user. Errors: `400 INVALID_SUBSCRIPTION_ENDPOINT` / `INVALID_SUBSCRIPTION_KEY` / `INVALID_SUBSCRIPTION_ID`, `404 SUBSCRIPTION_NOT_FOUND`. Source: `crates/bins/api-server/src/routes/push.rs`. No push delivery worker exists yet (MIGRATION_PLAN Phase 3.2); these routes only store registrations.
+
+Both were confirmed by `crates/bins/api-server/tests/observer_read_routes.rs`, which exercises them through a real `mobile_observer` session (the ceiling applies even to a highly privileged account).

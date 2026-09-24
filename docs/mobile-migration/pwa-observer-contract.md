@@ -77,9 +77,10 @@ The gateway must be read-oriented by construction:
   - `GET /api/profiles`
   - `GET /api/profiles/:owner_id`
   - `GET /api/events`
-- Proposed Phase 1 reads:
-  - Authorized file download endpoint
-  - Push-subscription register/unregister endpoints
+- Delivered Phase 1 reads (MIGRATION_PLAN Phase 1.2):
+  - `GET /api/files/:content_hash` — content-addressed download, gated by `can_download_files`.
+  - `POST /api/push/subscriptions` — Web Push register/upsert, gated by `can_read_notifications`.
+  - `DELETE /api/push/subscriptions/:subscription_id` — unregister own subscription only.
 
 The gateway must not contain a generic mutation helper unless that helper is structurally restricted to approved client-control routes.
 
@@ -113,10 +114,22 @@ Unknown query types return an empty result rather than a domain object. The PWA 
 
 Source: `crates/bins/api-server/src/query_handler.rs`.
 
-## Missing backend prerequisites
+## Delivered backend prerequisites (Phase 1.2)
 
-These Phase 1 additions are required before the planned PWA surface is implementable:
+These were missing from `api-server` when this contract was written; Phase 1.2
+has since delivered them:
 
-1. An HTTP blob/file-download route with per-download authorization. There is presently no `/api/files/...` route. A `BlobStore` port exists, but it is not exposed over HTTP.
-2. Push-subscription register/unregister routes. There are presently no `/api/push/...` routes.
-3. A decision on whether observer sessions may obtain relay tickets or participate in sync transport.
+- `GET /api/files/:content_hash` — `crates/bins/api-server/src/routes/files.rs`.
+  Reads through the `ApiState::blob_store` port (`LocalBlobStore` rooted at
+  `ONYX_BLOB_STORE_ROOT`, else a host temp dir). Per-hash downloads are not yet
+  scoped to a tenant because api-server has no `FileAsset` listing/query path
+  (see the route's module doc); that lookup is the declared Phase 3.1 follow-up
+  when the PWA `FileList` view lands.
+- `POST/DELETE /api/push/subscriptions...` — `crates/bins/api-server/src/routes/push.rs`.
+  Registration only stores the browser's endpoint + VAPID keys under the
+  session's own `(user_id, organization_id)` key; there is **no push delivery
+  worker yet** (MIGRATION_PLAN Phase 3.2). Unregistration is scoped to the
+  owning user, so one user cannot remove another's subscription.
+- Relay tickets (`POST /api/relay-ticket`) require `submit_domain_command`;
+  observer sessions are therefore excluded from Cloud Relay / sync transport.
+  See DECISIONS P2P-2.

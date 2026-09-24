@@ -155,6 +155,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac",
+ "local-blob-storage",
  "messaging-adapter",
  "mission-domain",
  "notification-domain",
