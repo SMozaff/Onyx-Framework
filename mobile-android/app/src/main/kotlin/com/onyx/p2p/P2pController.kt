@@ -238,9 +238,9 @@ class P2pController(context: Context) {
     private fun runHandshake(stream: P2pStream, initiator: Boolean, peer: String) {
         val ch = P2pChannel(stream, deferredHandshake = true)
         val publicPoint = LatchHolder()
-        ch.setRawReader { bytes ->
-            if (publicPoint.bytes == null && bytes.size >= HANDSHAKE_POINT_SIZE) {
-                publicPoint.bytes = bytes.copyOf(HANDSHAKE_POINT_SIZE)
+        ch.setRawReader(HANDSHAKE_POINT_SIZE) { bytes ->
+            if (publicPoint.bytes == null) {
+                publicPoint.bytes = bytes
                 publicPoint.latch.countDown()
             }
         }

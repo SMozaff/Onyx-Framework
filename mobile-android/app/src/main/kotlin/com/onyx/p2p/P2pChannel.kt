@@ -52,6 +52,9 @@ class P2pChannel(
     @Volatile private var onMessage: (ByteArray) -> Unit = {}
 
     private val buffer = ByteArrayOutputStream()
+    private val rawBuffer = ByteArrayOutputStream()
+    private var rawTargetLen = 0
+    @Volatile private var rawConsumer: ((ByteArray) -> Unit)? = null
 
     init {
         // Framing is the default: bytes entering the stream are complete
@@ -70,28 +73,41 @@ class P2pChannel(
     }
 
     /**
-     * Hand the pre-frame stream to a raw [onRaw] consumer instead of the
-     * frame buffer. Only valid before [startFraming] and only with
-     * `deferredHandshake` construction; used so the initiator's
-     * 65-byte public point and the responder's reply can cross the link
-     * as plain bytes (both are fixed-length, so [onRaw] typically checks
-     * for its expected size and delivers exactly once).
+     * Hand the pre-frame stream to [onRaw] for whole record-size [targetLength]
+     * messages instead of the frame buffer. Only valid before [startFraming]
+     * and only with `deferredHandshake` construction; used so the
+     * initiator's 65-byte public point and the responder's reply can
+     * cross the link as plain bytes.
+     *
+     * Inbound is buffered **inside the channel** and [onRaw] fires only
+     * when a full [targetLength] record has arrived — the media drivers
+     * deliver arbitrary chunks (BLE especially: 20-byte MTU slices), so
+     * a caller-level raw reader expecting the whole record in one
+     * callback could never work. Excess bytes past one record stay
+     * buffered and flow into the frame buffer at [startFraming].
      */
-    fun setRawReader(onRaw: (ByteArray) -> Unit) {
+    fun setRawReader(targetLength: Int, onRaw: (ByteArray) -> Unit) {
         check(session == 0L) { "raw reader must be installed before the session begins" }
-        stream.setOnBytes(onRaw)
+        rawTargetLen = targetLength
+        rawConsumer = onRaw
+        stream.setOnBytes { chunk -> accumulateRaw(chunk) }
     }
 
     /**
      * Atomic switch back to frame accumulation. Call after the
      * responder's public point has been fully consumed (via a
      * [setRawReader] consumer) and the local side's session is complete.
-     * Any bytes that arrived in the same chunk as the final handshake
-     * message are drained as frames if they are complete.
+     * Any bytes left over from the raw phase are drained as frames if
+     * they are complete.
      */
     fun startFraming() {
         check(session != 0L) { "handshake must be begun before framing starts" }
+        rawConsumer = null
         stream.setOnBytes { chunk -> accumulate(chunk) }
+        if (rawBuffer.size() > 0) {
+            buffer.write(rawBuffer.toByteArray())
+            rawBuffer.reset()
+        }
         if (buffer.size() > 0) {
             try {
                 extractFrames()
@@ -166,6 +182,26 @@ class P2pChannel(
         } catch (_: IllegalStateException) {
             breakStream()
         }
+    }
+
+    /**
+     * Pre-frame accumulation: gather exactly [rawTargetLen] bytes, then
+     * hand them to the raw consumer. Called from the stream's read thread
+     * (same as [accumulate]); consumers run synchronously so a handshake
+     * awaiter that is blocked on a latch is released from the reader
+     * thread.
+     */
+    private fun accumulateRaw(chunk: ByteArray) {
+        if (broken || closed) return
+        if (rawTargetLen <= 0) return
+        rawBuffer.write(chunk)
+        if (rawBuffer.size() < rawTargetLen) return
+        val data = rawBuffer.toByteArray()
+        val record = data.copyOf(rawTargetLen)
+        val leftover = data.copyOfRange(rawTargetLen, data.size)
+        rawBuffer.reset()
+        rawBuffer.write(leftover)
+        rawConsumer?.invoke(record)
     }
 
     /** Pull as many complete frames out of the buffer as are available. */

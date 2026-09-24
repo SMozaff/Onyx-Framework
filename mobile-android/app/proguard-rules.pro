@@ -33,3 +33,8 @@
 # keeping by name avoids surprises while R8 rules stabilize.
 -keep class com.onyx.p2p.WifiDirectDriver { *; }
 -keep class com.onyx.p2p.BleDriver { *; }
+
+# P2pViewModel is instantiated reflectively by the default
+# AndroidViewModelFactory via its (Application) constructor; keep the
+# class so the constructor (and thus the whole P2P wiring) survives R8.
+-keep class com.onyx.p2p.P2pViewModel { *; }
