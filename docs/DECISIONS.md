@@ -2310,3 +2310,45 @@ The following paths were explicitly **not** touched:
 
 The `mobile-android-kotlin` job remains active and unchanged.
 
+### P2P-1 — P2P transport direction is Kotlin→JNI; current Rust P2P exports remain placeholders
+
+**Date:** 2026-09-23
+
+**Ruling:** Android P2P work will use Kotlin→JNI direction. Kotlin will own
+`WifiP2pManager`/`BluetoothLeScanner` platform integration. Rust will expose
+JNI entry points for transport framing/encryption/handshake behavior. The
+existing plain C-ABI placeholder exports are not the final P2P direction and
+must be replaced rather than extended as if they already performed transport.
+
+**Evidence:** `crates/transports/sync-transport-mobile/src/android_wifi_direct.rs`
+and `android_ble.rs` allocate opaque handles and return success without
+performing platform transport. Their module comments explicitly reserve
+`WifiP2pManager` and Bluetooth GATT integration as Team 5 work through `jni`.
+`crates/mobile-core/src/android_wifi_direct.rs` and `android_ble.rs` re-export
+those placeholder symbols on Android. This is Phase 0 contract direction only;
+no P2P implementation is included here.
+
+### P2P-2 — Relay ticket minting requires `submit_domain_command`; observers are excluded
+
+**Date:** 2026-09-23
+
+**Ruling:** `POST /api/relay-ticket` requires the caller's session to have `can_submit_domain_commands = true`. This excludes `mobile_observer` sessions from minting relay tickets.
+
+**Rationale:** Relay ticket issuance enables participation in the sync transport fabric (peer-to-peer data propagation). Sync participation is a mutation-class action because it propagates operational state between replicas. The `mobile_observer` ceiling sets every mutation-capable flag to `false`. Relay participation is therefore denied to observers by the existing capability ceiling, with no new capability field needed.
+
+**Enforcement:** `require_capability(&actor, |c| c.can_submit_domain_commands, "submit_domain_command")` is now called in `relay::issue_ticket` before ticket minting. The existing `relay_ticket` token type continues to propagate the caller's `client_type` into the ticket claims.
+
+**Evidence:** `crates/bins/api-server/src/routes/relay.rs:290` — `issue_ticket` now calls the capability check after `authenticate_headers`.
+
+### P2P-3 — Bootstrap's unauthenticated, token-gated, one-time path is a special client-class case exempt from capability checks
+
+**Date:** 2026-09-24
+
+**Ruling:** `POST /api/admin/bootstrap` remains intentionally unauthenticated and is excluded from capability checks. It is the only unauthenticated write endpoint in the server, is gated by a one-time token, and permanently self-closes once any user exists.
+
+**Rationale:** Capability checks (including the `mobile_observer` ceiling) authenticate a session before applying the caller's capability flags. Bootstrap cannot do this — it exists precisely for the case where no user exists yet, so there is no principal to authenticate or to hold capabilities. Treating it as a capability-checked endpoint would make the first-admin bootstrap unreachable on an empty store. Its safety comes from its token gate and self-closing design, not from capabilities: it is disabled unless `ONYX_BOOTSTRAP_TOKEN` is set (fail closed), the token is compared in constant time, and the endpoint refuses with `BOOTSTRAP_ALREADY_COMPLETED` once the user count is non-zero, so a second call can never succeed even with the correct token.
+
+**Enforcement:** No `authenticate_headers` or `require_capability` call was added to `admin::bootstrap`. The endpoint is registered at `crates/bins/api-server/src/routes/mod.rs:530` and unchanged. The seeded dev/test admin fallback (`routes/mod.rs:420`) already excludes production and remains separate from the bootstrap path.
+
+**Evidence:** `crates/bins/api-server/src/routes/admin.rs:379-436` — `bootstrap` performs only: (1) fail-closed token-environment check, (2) constant-time token comparison, (3) empty-store refusal. `create_user` at `admin.rs:439` is the capability-checked (`require_admin_mutation`) equivalent for authenticated admin account creation.
+

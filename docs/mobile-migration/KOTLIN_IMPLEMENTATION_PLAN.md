@@ -14,7 +14,7 @@
 |---|---|---|
 | **0 — Freeze/inventory** | ✅ Done (Flutter deleted) | `mobile/` removed; parity-matrix.md retained |
 | **1 — Kotlin project skeleton** | ✅ Mostly complete | `mobile-android/` has real Compose project, build config, CI |
-| **2 — JNI boundary** | ✅ Mostly complete | `mobile-android-jni/` has 11 JNI wrappers; `MobileCoreBridge.kt` declares all |
+| **2 — JNI boundary** | ⚠️ Declared, partly implemented | `mobile-android-jni/` exposes 15 JNI entry points; 11 are real, 1 is an unwired pass-through, and 3 are nonfunctional stubs. See `android-jni-contract.md`. |
 | **3 — Startup/auth** | ⚠️ Partially implemented | `OnyxSessionViewModel.kt`, `AuthApi.kt`, `SecureTokenStore.kt` exist; `ffi_secure_storage` not yet bound |
 | **4 — Core read screens** | ⚠️ Partially implemented | Dashboard, Missions, Tasks, MissionDetail, Notifications screens exist; `OnyxController` refresh fan-out works |
 | **5 — Operational screens** | ⚠️ Partially implemented | Approvals, Files, Settings, ConflictDialog, SyncStatusIndicator, WorkManager exist; background sync scheduled but unverified |
@@ -61,7 +61,9 @@
 
 **What already exists (with path evidence):**
 
-`crates/mobile-android-jni/src/lib.rs` (478 lines) exposes 11 `#[no_mangle] pub extern "system"` JNI entry points under `Java_com_onyx_bridge_MobileCoreBridge_*`:
+`crates/mobile-android-jni/src/lib.rs` exposes 15 `#[no_mangle] pub extern "system"` JNI entry points under `Java_com_onyx_bridge_MobileCoreBridge_*`. Eleven are real wrappers. `nativeExecuteQuery` is a real pass-through to `mobile_core_execute_query`, but it has no Kotlin runtime call site outside the bridge declaration. `nativeSubscribeEvents`, `nativeUnsubscribe`, and `nativeSecureStorage` are declared scaffolds/stubs, not usable implementations; see `docs/mobile-migration/android-jni-contract.md` for the exact frozen contract and open items.
+
+`MobileCoreBridge.kt` (`mobile-android/app/.../bridge/MobileCoreBridge.kt`) declares the same 15 functions.
 
 | JNI function | Kotlin declaration | mobile-core C function wrapped | Purpose |
 |---|---|---|---|
@@ -80,15 +82,13 @@
 `MobileCoreBridge.kt` (`mobile-android/app/.../bridge/MobileCoreBridge.kt`) declares all 11 as `external fun` matching the JNI name-mangling.
 
 **Gaps in `mobile-android-jni`:**
-The module doc states: "The remaining ~14 functions follow this exact same pattern... and are deliberately left for the task that actually needs them." The remaining mobile-core C functions NOT yet wrapped by JNI:
-- `mobile_core_execute_query` — query path (A4)
-- `mobile_core_subscribe_events` — event stream (A5 sync status)
-- `mobile_core_unsubscribe` — event stream teardown (A5)
-- `mobile_core_ios_background_sync` — iOS only, not needed for Android
-- `mobile_core_android_do_work` — already called directly from Kotlin via `external fun nativeAndroidDoWork()` in `WorkManagerService.kt`, NOT through this JNI crate (by design per the architecture decision — it's all-primitive)
-- `mobile_core_list_aggregates` variants for specific aggregate types — already handled via `nativeListAggregates(handle, aggregateType)` parameter
-- `mobile_core_get_sync_status`, `mobile_core_list_conflicts` — already wrapped
-- `mobile_core_free_string` — internal helper, not a JNI entry point
+The module doc’s older “remaining ~14 functions” note predates the current scaffold and is no longer accurate as a count. The actual remaining JNI gaps are:
+- `mobile_core_execute_query` is wrapped but unwired — add a real Kotlin query path, JSON schema, and tests.
+- `mobile_core_subscribe_events` / `mobile_core_unsubscribe` have no usable JNI callback design yet — the stub ignores filters/callbacks and unsubscription is a no-op.
+- `mobile_core_secure_storage_*` does not exist: `mobile-core/src/ffi_secure_storage.rs` explicitly remains unimplemented. Either retain platform-side `SecureTokenStore.kt` and remove/deprecate `nativeSecureStorage`, or define a real Rust-backed interface first.
+- `mobile_core_ios_background_sync` is iOS-only and not needed for Android.
+- `mobile_core_android_do_work` is already called directly from Kotlin’s `WorkManagerService.kt`, not through this JNI crate.
+- `mobile_core_free_string` is an internal ownership helper, not a separate JNI entry point.
 
 **Missing `mobile-core` FFI functions not yet exposed via JNI:**
 - `mobile_core_execute_query` (from `ffi_queries.rs`)
@@ -96,10 +96,10 @@ The module doc states: "The remaining ~14 functions follow this exact same patte
 - `mobile_core_secure_storage_*` (from `ffi_secure_storage.rs`) — needed for A3 secure session persistence
 
 **Next concrete task:**
-1. Add JNI wrappers for `mobile_core_execute_query` (query screen data)
-2. Add JNI wrappers for `mobile_core_subscribe_events` / `mobile_core_unsubscribe` (real-time event stream for sync status)
-3. Add JNI wrappers for `ffi_secure_storage` functions if A3 needs them for secure session persistence
-4. Add adapter tests in `mobile-android/app/src/androidTest/` exercising each JNI entry point end-to-end
+1. Wire `nativeExecuteQuery` to a real Kotlin query path with its JSON schema and tests.
+2. Decide the JNI event-callback design, then implement usable `nativeSubscribeEvents` / `nativeUnsubscribe` with a subscription-handle registry.
+3. Decide secure-storage direction: retain `SecureTokenStore.kt`’s Android Keystore path and remove/deprecate `nativeSecureStorage`, or define and implement a real Rust-backed interface first.
+4. Add adapter/instrumented coverage for each newly completed JNI path on real Android hardware.
 
 ---
 
@@ -194,14 +194,14 @@ The module doc states: "The remaining ~14 functions follow this exact same patte
 
 **What's missing:**
 - **Real hardware testing.** No Android device has ever run the JNI → mobile-core → Rust chain. All instrumented tests (`androidTest/`) are currently either JVM unit tests or emulator-only.
-- **P2P transport implementation.** `crates/mobile-core/src/android_wifi_direct.rs` and `crates/mobile-core/src/android_ble.rs` contain `ConnectionLost` placeholder returns. `mobile_core_android_do_work` (in `android_workmanager.rs`) calls into these stubs. The `p2p_sync_test.dart` in the deleted `mobile/test/integration/` was the only P2P test and used `ONYX_MOBILE_DEVICE_TEST=1` with `ConnectionLost` assertions.
+- **P2P transport implementation.** `crates/transports/sync-transport-mobile/src/android_wifi_direct.rs` and `android_ble.rs` are placeholder C-ABI exports: they allocate opaque handles and return success without performing platform transport. `crates/mobile-core/src/android_wifi_direct.rs` and `android_ble.rs` re-export those placeholders on Android. The locked direction is Kotlin→JNI; see `docs/DECISIONS.md` entry `P2P-1`. The deleted Flutter `p2p_sync_test.dart` had used `ONYX_MOBILE_DEVICE_TEST=1` with `ConnectionLost` assertions, but the current Android-side placeholder behavior is handle allocation/success without transport, not a returned `ConnectionLost` from those files.
 - **Background/offline verification.** `BackgroundSync.kt` schedules `WorkManagerService` but has never been verified: does WorkManager execute under Doze? Does the sync actually complete when offline? Does it retry correctly? Is the `REGISTERED_BACKGROUND_APP` global correctly managed across process lifecycle?
 - **Accessibility.** No accessibility testing (TalkBack, switch access, font scaling).
 - **Release artifact.** No signed APK, no ProGuard/R8 rules, no release build verification.
 - **Rollback artifact.** Per FLT-1, no Flutter APK exists to roll back to — this is the risk being accepted.
 
 **Next concrete task:**
-1. Implement real Wi-Fi Direct and BLE transport byte-stream adapters in `crates/mobile-core/src/android_wifi_direct.rs` and `crates/mobile-core/src/android_ble.rs`, replacing `ConnectionLost` placeholders
+1. Implement the Kotlin→JNI P2P direction from `docs/DECISIONS.md` entry `P2P-1`: add Kotlin `WifiP2pManager`/`BluetoothLeScanner` platform drivers and corresponding Rust JNI transport entry points, replacing the placeholder C-ABI symbol stubs rather than extending them.
 2. Run `ONYX_MOBILE_DEVICE_TEST=1` instrumented tests on two authorized Android devices
 3. Verify background sync under Doze mode, airplane mode, and network switching
 4. Verify `mobile_core_android_do_work` completes a real sync cycle on device

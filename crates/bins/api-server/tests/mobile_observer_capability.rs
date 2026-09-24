@@ -151,6 +151,27 @@ async fn mobile_observer_reads_normally_but_every_mutation_endpoint_denies_it() 
         "submit_domain_command",
     );
 
+    // --- /api/relay-ticket (P2P-2): minting requires `submit_domain_command`,
+    // which the observer ceiling sets to false. ---
+    let relay_ticket_response = http
+        .post(format!("{base}/api/relay-ticket"))
+        .bearer_auth(&observer_token)
+        .json(&serde_json::json!({
+            "target_id": uuid::Uuid::new_v4().to_string(),
+            "self_replica": uuid::Uuid::new_v4().to_string(),
+        }))
+        .send()
+        .await
+        .expect("relay ticket request");
+    assert_eq!(relay_ticket_response.status(), 403);
+    assert_capability_denied(
+        &relay_ticket_response
+            .json()
+            .await
+            .expect("relay ticket body"),
+        "submit_domain_command",
+    );
+
     // --- /api/todo/lists, /api/todo/targets, /api/todo/staff-loans:
     // create()-routed domain commands with their own REST entry points
     // (see routes::todo_admin's module doc comment for why). ---

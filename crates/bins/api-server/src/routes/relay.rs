@@ -294,6 +294,11 @@ pub async fn issue_ticket(
 ) -> Result<Json<IssueTicketResponse>, ApiError> {
     let correlation_id = uuid::Uuid::new_v4().to_string();
     let actor = authenticate_headers(&state, &headers).await?;
+    super::client_type::require_capability(
+        &actor,
+        |c| c.can_submit_domain_commands,
+        "submit_domain_command",
+    )?;
     let target_id = uuid::Uuid::parse_str(&payload.target_id).map_err(|_| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -343,11 +348,12 @@ pub async fn issue_ticket(
         token_type: RELAY_TICKET_TOKEN_TYPE.to_string(),
         // Propagated from the caller's own authenticated session so a
         // relay ticket cannot claim a different class than the session
-        // that minted it. Out of this task's scope to add a dedicated
-        // capability check on this endpoint (relay/sync participation
-        // isn't in ONYX-MOB-01 §9's enumerated mutation list -- see
-        // DECISIONS.md's H10 entry), but propagating the real value
-        // here is a one-line correctness fix, not new enforcement.
+        // that minted it. The ability to *mint* a ticket at all is
+        // gated above by `require_capability(..., can_submit_domain_commands,
+        // ...)` — sync participation is a mutation-class action per
+        // DECISIONS.md entry P2P-2 — even though relay/sync
+        // participation isn't in ONYX-MOB-01 §9's enumerated mutation
+        // list itself.
         client_type: actor.client_type,
         scope: TokenScope {
             object_type: "relay".to_string(),
