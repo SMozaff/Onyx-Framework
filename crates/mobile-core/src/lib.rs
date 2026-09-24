@@ -99,6 +99,44 @@ pub struct EventSubscription {
     pub(crate) task: tokio::task::JoinHandle<()>,
 }
 
+/// Opaque caller-owned context routed verbatim to every event callback.
+///
+/// Wraps a raw C pointer in a type that is (`Send` + `Sync`) so the
+/// subscription's forwarding task can carry it across the async
+/// `recv().await` boundary. This is the standard C "user data" idiom
+/// (libuv, zlib, SDL, ...): the *referent*'s `Send`/`Sync`-ness is the
+/// caller's contract — the callback must be safe to invoke from whatever
+/// runtime thread the forwarding task runs on — and `mobile-core` never
+/// dereferences it.
+///
+/// The JNI adapter (see `mobile-android-jni`) leans on exactly this: the
+/// context it passes is an owned `Box<JavaEventForwarder>` (a JNI
+/// `GlobalRef` to the Kotlin `EventCallback` + the `JavaVM`), so the
+/// pointer being `Send` is what makes delivering into the JVM from a
+/// tokio worker thread well-defined.
+///
+/// `pub(crate)` deliberately: the C surface never mentions this type —
+/// `mobile_core_subscribe_events` receives `void *context` directly — so
+/// it must not leak into the exported C header.
+#[derive(Clone, Copy)]
+pub(crate) struct CallbackContext(*mut ::std::os::raw::c_void);
+
+impl CallbackContext {
+    pub(crate) fn get(&self) -> *mut ::std::os::raw::c_void {
+        self.0
+    }
+}
+
+// SAFETY: `mobile_core_subscribe_events` (and the task it spawns) only
+// ever passes the pointer through to the registered callback, never into
+// a context that requires dereferencing it. Whether the referent itself
+// is `Send`/`Sync` (here: a JNI `GlobalRef`-owning forwarder) is
+// established by the caller, who chose the referent's type. This mirrors
+// the interoperability contract every C library making callback-based
+// user-data calls upholds.
+unsafe impl Send for CallbackContext {}
+unsafe impl Sync for CallbackContext {}
+
 /// The Flutter application owns one mobile core instance per process. Native
 /// background schedulers cannot carry a Dart pointer after suspension, so the
 /// active instance is registered here for the platform wrappers. The app must

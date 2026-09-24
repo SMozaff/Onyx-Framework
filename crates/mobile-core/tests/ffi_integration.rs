@@ -12,6 +12,7 @@ use mobile_core::{
 };
 use platform_kernel::{ObjectId, OrganizationId};
 use std::ffi::{CStr, CString};
+use std::sync::{Arc, Mutex};
 
 fn test_db_path() -> String {
     // A literal "/tmp/..." only resolves for a native Windows binary if
@@ -561,6 +562,140 @@ fn execute_command_owner_authoritys_real_manager_approves_via_ffi() {
         "the task owner's real, cache-resolved direct manager must be authorized \
          to approve via the real FFI path; got {approved:?}"
     );
+
+    unsafe { mobile_core_free(handle) };
+}
+
+#[test]
+fn subscribe_events_delivers_committed_decision_events_to_callback_context() {
+    use mobile_core::{mobile_core_subscribe_events, mobile_core_unsubscribe};
+
+    let organization_id = OrganizationId::new_random();
+    let db_path = CString::new(test_db_path()).unwrap();
+    let config = CString::new(config_json(organization_id)).unwrap();
+    let handle = unsafe { mobile_core_new(db_path.as_ptr(), config.as_ptr()) };
+    assert!(!handle.is_null());
+
+    // The context each delivered callback is routed through: proves the
+    // userdata pointer from mobile_core_subscribe_events arrives back in
+    // the callback untouched (a JNI adapter depends on exactly this to
+    // keep its own forwarder alive).
+    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let context = Arc::into_raw(captured.clone()) as *mut std::os::raw::c_void;
+
+    extern "C" fn push_to_context(context: *mut std::os::raw::c_void, json: *const std::ffi::c_char) {
+        if json.is_null() {
+            return;
+        }
+        // Reclaim the transferred buffer exactly as the C-ABI contract
+        // requires (free once, via mobile_core_free_string).
+        let json_cstr = unsafe { CStr::from_ptr(json) };
+        let owned = json_cstr.to_string_lossy().into_owned();
+        unsafe { mobile_core_free_string(json as *mut std::ffi::c_char) };
+        // SAFETY: context was leaked from an Arc::into_raw of the same
+        // type, still alive for the subscription's lifetime.
+        let captured = unsafe { &*(context as *const Arc<Mutex<Vec<String>>>) };
+        if let Ok(mut list) = captured.lock() {
+            list.push(owned);
+        }
+    }
+
+    let filter_json = serde_json::json!({
+        "organization_id": organization_id,
+        "event_types": null,
+    })
+    .to_string();
+    let filter_json_c = CString::new(filter_json).unwrap();
+
+    let sub = unsafe {
+        mobile_core_subscribe_events(handle, filter_json_c.as_ptr(), push_to_context, context)
+    };
+    assert!(
+        !sub.is_null(),
+        "a well-formed filter with a valid callback must produce a non-null subscription"
+    );
+
+    // CreateTask is a creation handler (no outbox registration yet --
+    // flagged in creation_handler.rs). The *decision* command that
+    // follows registers outbox messages via api_server::handle_command
+    // Step 8, so MarkReady's "task.event.0" envelope is what the bus --
+    // and this subscription -- receives.
+    let owner = ObjectId::new_random();
+    let create_result = call_execute_command(
+        handle,
+        &decision_command_json(
+            "CreateTask",
+            "task",
+            ObjectId::new_random(),
+            organization_id,
+            0,
+            0,
+            owner,
+            serde_json::json!({
+                "CreateTask": {
+                    "mission_id": ObjectId::new_random(),
+                    "title": "event-subscription test task",
+                    "description": null,
+                    "owner_id": owner,
+                }
+            }),
+        ),
+    );
+    assert_eq!(create_result["success"], serde_json::json!(true));
+    let task_id: ObjectId = serde_json::from_value(create_result["task_id"].clone()).unwrap();
+
+    // MarkReady is a decision command; its committed event is picked up
+    // by the client outbox pump (poll interval 2s) and republished to the
+    // bus, so wait on the captured stream rather than assuming timing.
+    let marked = call_execute_command(
+        handle,
+        &decision_command_json(
+            "MarkReady",
+            "task",
+            task_id,
+            organization_id,
+            0,
+            0,
+            owner,
+            serde_json::json!({"MarkReady": {"reason": "ready"}}),
+        ),
+    );
+    assert_eq!(marked["success"], serde_json::json!(true));
+
+    let mut found = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        let candidates: Vec<String> = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.contains("\"task.event.0\""))
+            .cloned()
+            .collect();
+        if !candidates.is_empty() {
+            let event: serde_json::Value = serde_json::from_str(&candidates[0]).unwrap();
+            assert_eq!(event["event_type"], serde_json::json!("task.event.0"));
+            assert_eq!(
+                event["audit_metadata"]["tenant_isolation_key"],
+                serde_json::to_value(organization_id).unwrap(),
+                "the delivered envelope must carry the organization we subscribed for"
+            );
+            assert!(
+                event.get("aggregate_ref").is_some(),
+                "delivered envelope must be a full DomainEventEnvelope with aggregate_ref"
+            );
+            found = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    assert!(found, "no task.event.0 envelope was delivered to the callback within 20s");
+
+    unsafe { mobile_core_unsubscribe(sub) };
+    // Let the aborted task drain before reclaiming `context` (the task
+    // may be mid-callback; abort does not join).
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    drop(unsafe { Arc::from_raw(context as *const Arc<Mutex<Vec<String>>>) });
 
     unsafe { mobile_core_free(handle) };
 }

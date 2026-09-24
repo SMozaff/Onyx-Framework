@@ -17,6 +17,12 @@
 -keep class com.onyx.bridge.MobileCoreBridge { *; }
 -keep class com.onyx.p2p.P2pCodec { *; }
 
+# Event delivery: the JNI forwarder resolves com/onyx/bridge/EventCallback
+# and its onEvent(String) method by name from native code, so R8 must not
+# rename either (the callback instance itself is a lambdafied fun interface,
+# which is what the native side holds a GlobalRef to).
+-keep class com.onyx.bridge.EventCallback { *; }
+
 # WorkManager instantiates the worker by class name (CoroutineWorker
 # reflection); keep it and the app/activity shells intact.
 -keep class com.onyx.WorkManagerService { *; }

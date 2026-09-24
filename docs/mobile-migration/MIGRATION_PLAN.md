@@ -37,7 +37,7 @@ Phase 0 produces these frozen starting points:
 
 ### Phase 0.2 — Implementation contracts
 
-- `android-jni-contract.md`: 15 JNI declarations with implementation status, marshalling rules, and open callback/secure-storage items.
+- `android-jni-contract.md`: 14 JNI declarations (12 real — including the real event-subscription pair, added 2026-09-24 — plus the unwired `nativeExecuteQuery` pass-through; the abortive `nativeSecureStorage` stub is removed) with marshalling rules, the event-callback design, and remaining open items.
 - `pwa-observer-contract.md`: planned read-only ObserverClient/HTTP surface and missing backend prerequisites.
 - `pwa-capability-matrix.md`: PWA-facing rendering of the server ceiling.
 - `P2P-1`: locked Kotlin→JNI direction; update `KOTLIN_IMPLEMENTATION_PLAN.md` Layer 6 accordingly.
@@ -434,6 +434,44 @@ implemented and unit/integration-tested, not yet proven against FCM.
 - Instrumented tests: `connectedAndroidTest`
 - Verify JNI round-trip test passes on device
 - Run load tests if possible
+
+### Phase 4.7 — Real-time event subscription (JNI + Kotlin) — sandbox milestone 2026-09-24
+
+A milestone outside the P2P hardware gates but inside the "prove the JNI
+connection" scope: real, end-to-end event delivery from `mobile-core` to
+Kotlin callbacks.
+
+**Done in sandbox (see `DECISIONS.md` `M11-D12`):**
+
+- **ABI change:** `mobile_core_subscribe_events` gained the standard C
+  userdata parameter — `callback(context, json)` + explicit `context` —
+  with `CallbackContext` carrying it across the tokio task boundary.
+  `mobile-core.h`/`expected_ffi.h` updated by hand to the predicted
+  cbindgen emission, per the `verify_ffi_signatures.sh` baseline-update
+  procedure.
+- **JNI:** `nativeSubscribeEvents`/`nativeUnsubscribe` are real. A
+  `JavaEventForwarder` (`Arc<JavaVM>` + `GlobalRef` to the Kotlin
+  `EventCallback`) travels as the C-ABI context; each delivery attaches
+  the tokio thread per event and detaches on drop; failures are skipped,
+  never fatal; `nativeUnsubscribe` aborts the forwarding task and
+  reclaims the forwarder's `GlobalRef`.
+- **Kotlin:** `EventCallback.kt` (fun interface), real bridge declarations,
+  `OnyxController` owns an org-wide subscription (live refresh on
+  `mission.event.`/`task.event.`/`notification.event.`) and unsubscribes
+  in `onCleared()`; R8 keep rule added so the native-resolved callback
+  class/method cannot be renamed.
+- **Host proof:** a new `ffi_integration.rs` test drives a real
+  `CreateTask` → `MarkReady` decision through the FFI and asserts the
+  resulting `task.event.0` envelope (with the correct org isolation key)
+  reaches the callback with the exact `context` pointer, via the outbox
+  pump → `EventBus` path.
+- **Secure storage resolved:** the abortive `nativeSecureStorage` stub is
+  removed; Android Keystore (`SecureTokenStore.kt`) is the sanctioned
+  secret store; no Rust secure-storage interface exists to bind.
+
+**Still deferred (hardware gate):** delivery through a live `EventCallback`
+on a real device (JNI attach semantics on ART), and the unwired
+`nativeExecuteQuery` Kotlin query path.
 
 ---
 

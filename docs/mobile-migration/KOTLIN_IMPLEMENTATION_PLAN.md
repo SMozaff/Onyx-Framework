@@ -14,7 +14,7 @@
 |---|---|---|
 | **0 — Freeze/inventory** | ✅ Done (Flutter deleted) | `mobile/` removed; parity-matrix.md retained |
 | **1 — Kotlin project skeleton** | ✅ Mostly complete | `mobile-android/` has real Compose project, build config, CI |
-| **2 — JNI boundary** | ⚠️ Declared, partly implemented | `mobile-android-jni/` exposes 15 `MobileCoreBridge` entry points (11 real, 1 unwired pass-through, 3 nonfunctional stubs) **plus the Phase 4.1 P2P codec** — 8 `com.onyx.p2p.P2pCodec` sessions functions, all implemented, 6/6 host tests green. See `android-jni-contract.md`. |
+| **2 — JNI boundary** | ⚠️ Declared, mostly implemented | `mobile-android-jni/` exposes 14 `MobileCoreBridge` entry points (12 real — incl. the real `nativeSubscribeEvents`/`nativeUnsubscribe` pair, added 2026-09-24; `nativeExecuteQuery` real but unwired; `nativeSecureStorage` stub removed) **plus the Phase 4.1 P2P codec** — 8 `com.onyx.p2p.P2pCodec` sessions functions, all implemented, 6/6 host tests green. See `android-jni-contract.md`. |
 | **3 — Startup/auth** | ⚠️ Partially implemented | `OnyxSessionViewModel.kt`, `AuthApi.kt`, `SecureTokenStore.kt` exist; `ffi_secure_storage` not yet bound |
 | **4 — Core read screens** | ⚠️ Partially implemented | Dashboard, Missions, Tasks, MissionDetail, Notifications screens exist; `OnyxController` refresh fan-out works |
 | **5 — Operational screens** | ⚠️ Partially implemented | Approvals, Files, Settings, ConflictDialog, SyncStatusIndicator, WorkManager exist; background sync schedule asserted by instrumented test (`BackgroundSyncInstrumentedTest`, hardware-gated) but execution unverified |
@@ -61,9 +61,9 @@
 
 **What already exists (with path evidence):**
 
-`crates/mobile-android-jni/src/lib.rs` exposes 15 `#[no_mangle] pub extern "system"` JNI entry points under `Java_com_onyx_bridge_MobileCoreBridge_*`. Eleven are real wrappers. `nativeExecuteQuery` is a real pass-through to `mobile_core_execute_query`, but it has no Kotlin runtime call site outside the bridge declaration. `nativeSubscribeEvents`, `nativeUnsubscribe`, and `nativeSecureStorage` are declared scaffolds/stubs, not usable implementations; see `docs/mobile-migration/android-jni-contract.md` for the exact frozen contract and open items.
+`crates/mobile-android-jni/src/lib.rs` exposes `#[no_mangle] pub extern "system"` JNI entry points under `Java_com_onyx_bridge_MobileCoreBridge_*`. The `MobileCoreBridge` surface is 14 functions: 12 are real wrappers (including `nativeExecuteQuery`, still unwired at the Kotlin call-site level), and the event pair `nativeSubscribeEvents` / `nativeUnsubscribe` are now **real** as of 2026-09-24 (context-carrying C ABI + per-event JVM attach — `DECISIONS M11-D12`; design in `android-jni-contract.md`). The former `nativeSecureStorage` scaffold is **removed** (Keystore in `SecureTokenStore.kt` is the sanctioned secret store). See `docs/mobile-migration/android-jni-contract.md` for the exact frozen contract and open items.
 
-`MobileCoreBridge.kt` (`mobile-android/app/.../bridge/MobileCoreBridge.kt`) declares the same 15 functions.
+`MobileCoreBridge.kt` (`mobile-android/app/.../bridge/MobileCoreBridge.kt`) declares the same set; the subscription pair is declared with the real `EventCallback` fun-interface parameter. `EventCallback.kt` (new) is the Kotlin-side callback interface the native forwarder invokes.
 
 | JNI function | Kotlin declaration | mobile-core C function wrapped | Purpose |
 |---|---|---|---|
@@ -78,27 +78,30 @@
 | `nativeDownloadFile` | `MobileCoreBridge.nativeDownloadFile(handle, contentHash, destPath): Long` | `mobile_core_download_file` | A5 Files |
 | `nativeTriggerSync` | `MobileCoreBridge.nativeTriggerSync(handle): Int` | `mobile_core_trigger_sync` | A5 sync |
 | `nativeResolveConflict` | `MobileCoreBridge.nativeResolveConflict(handle, conflictJson, resolution): Int` | `mobile_core_resolve_conflict` | A5 conflicts |
+| `nativeExecuteQuery` | `MobileCoreBridge.nativeExecuteQuery(handle, queryJson): String?` | `mobile_core_execute_query` | A4/A5 reads — wrapped, unwired |
+| `nativeSubscribeEvents` | `MobileCoreBridge.nativeSubscribeEvents(handle, filterJson, callback: EventCallback): Long` | `mobile_core_subscribe_events` | Real-time push — implemented, consumed by `OnyxController` |
+| `nativeUnsubscribe` | `MobileCoreBridge.nativeUnsubscribe(subscription: Long)` | `mobile_core_unsubscribe` | Real-time push — implemented |
 
-`MobileCoreBridge.kt` (`mobile-android/app/.../bridge/MobileCoreBridge.kt`) declares all 11 as `external fun` matching the JNI name-mangling.
+`MobileCoreBridge.kt` (`mobile-android/app/.../bridge/MobileCoreBridge.kt`) declares all of the above as `external fun` matching the JNI name-mangling (JNI names depend only on method names, not signatures, so the subscription pair's richer Kotlin signature adds no ABI risk).
 
 **Gaps in `mobile-android-jni`:**
 The module doc’s older “remaining ~14 functions” note predates the current scaffold and is no longer accurate as a count. The actual remaining JNI gaps are:
-- `mobile_core_execute_query` is wrapped but unwired — add a real Kotlin query path, JSON schema, and tests.
-- `mobile_core_subscribe_events` / `mobile_core_unsubscribe` have no usable JNI callback design yet — the stub ignores filters/callbacks and unsubscription is a no-op.
-- `mobile_core_secure_storage_*` does not exist: `mobile-core/src/ffi_secure_storage.rs` explicitly remains unimplemented. Either retain platform-side `SecureTokenStore.kt` and remove/deprecate `nativeSecureStorage`, or define a real Rust-backed interface first.
+- `mobile_core_execute_query` is wrapped but unwired — add a real Kotlin query path (`QueryEnvelope` builder + detail-screen call site), JSON schema, and tests.
+- Event subscription is implemented end-to-end but only consumed by `OnyxController`; a direct Mission/Task-detail live-refresh call site beyond the org-wide filter is future polish. Real-device delivery through a live `EventCallback` is a lab gate (proven at the C-ABI boundary via `ffi_integration.rs`).
+- `mobile_core_secure_storage_*` does not exist: `mobile-core/src/ffi_secure_storage.rs` explicitly remains unimplemented. Resolved 2026-09-24 (M11-D12.4): `SecureTokenStore.kt`'s Android Keystore path is the sanctioned secret store; the `nativeSecureStorage` stub is deleted and no JNI function will exist until a real `mobile_core_*` export does.
 - `mobile_core_ios_background_sync` is iOS-only and not needed for Android.
 - `mobile_core_android_do_work` is already called directly from Kotlin’s `WorkManagerService.kt`, not through this JNI crate.
 - `mobile_core_free_string` is an internal ownership helper, not a separate JNI entry point.
 
 **Missing `mobile-core` FFI functions not yet exposed via JNI:**
-- `mobile_core_execute_query` (from `ffi_queries.rs`)
-- `mobile_core_subscribe_events` / `mobile_core_unsubscribe` (from `ffi_events.rs`)
-- `mobile_core_secure_storage_*` (from `ffi_secure_storage.rs`) — needed for A3 secure session persistence
+- `mobile_core_execute_query` (`ffi_queries.rs`) — JNI wrapper exists (`nativeExecuteQuery`); the Kotlin query path is unwired.
+- `mobile_core_subscribe_events` / `mobile_core_unsubscribe` (`ffi_events.rs`) — **wrapped** (2026-09-24).
+- `mobile_core_secure_storage_*` — deliberately not wrapped; no such export exists (see above).
 
 **Next concrete task:**
 1. Wire `nativeExecuteQuery` to a real Kotlin query path with its JSON schema and tests.
-2. Decide the JNI event-callback design, then implement usable `nativeSubscribeEvents` / `nativeUnsubscribe` with a subscription-handle registry.
-3. Decide secure-storage direction: retain `SecureTokenStore.kt`’s Android Keystore path and remove/deprecate `nativeSecureStorage`, or define and implement a real Rust-backed interface first.
+2. ~~Decide the JNI event-callback design, then implement usable `nativeSubscribeEvents` / `nativeUnsubscribe` with a subscription-handle registry.~~ Done 2026-09-24 (M11-D12): context-carrying C ABI, static trampoline, opaque `Long` handle, no Kotlin registry.
+3. ~~Decide secure-storage direction.~~ Done 2026-09-24: keep Keystore in `SecureTokenStore.kt`; remove `nativeSecureStorage`.
 4. Add adapter/instrumented coverage for each newly completed JNI path on real Android hardware.
 
 ---
@@ -116,15 +119,15 @@ The module doc’s older “remaining ~14 functions” note predates the current
 - `mobile-android/app/src/main/kotlin/com/onyx/bridge/MobileCoreBridge.kt` — `nativeSetHierarchy` declared and wired
 
 **Gaps:**
-- `SecureTokenStore` implementation needs verification that `ffi_secure_storage` FFI functions exist and are accessible (currently `SecureTokenStore` uses Android Keystore directly — need to confirm if it should call `mobile_core_secure_storage_*` instead)
-- `mobile_core_execute_query` not yet exposed via JNI (needed for query-type auth checks)
+- `SecureTokenStore` uses Android Keystore directly — confirmed as the sanctioned path 2026-09-24 (M11-D12.4); `ffi_secure_storage.rs` exports no functions, so no Rust binding is needed.
+- `mobile_core_execute_query` JNI wrapper exists but the Kotlin query path is unwired (needed for query-type auth checks and detail-screen reads).
 - No instrumented test verifying the full login flow through JNI → mobile-core → server on real hardware
 
 **Next concrete task:**
-1. Verify `SecureTokenStore` correctly calls `mobile_core` secure storage (or confirm Android Keystore is the intended path per `ffi_secure_storage.rs` doc comments)
-2. Add `mobile_core_execute_query` JNI wrapper
+1. ~~Verify `SecureTokenStore` correctly calls `mobile_core` secure storage~~ Resolved 2026-09-24: Keystore is the intended path; no Rust secure-storage export exists.
+2. Wire the Kotlin query path over the existing `nativeExecuteQuery` JNI wrapper.
 3. Write instrumented test: full login → hierarchy load → `OnyxController` initialization on real device
-4. Add `mobile_core_subscribe_events` JNI wrapper for real-time auth events
+4. ~~Add `mobile_core_subscribe_events` JNI wrapper for real-time auth events~~ Done 2026-09-24; `OnyxController` owns the org-wide subscription.
 
 ---
 
@@ -146,13 +149,13 @@ The module doc’s older “remaining ~14 functions” note predates the current
 - `mobile-android/app/src/main/kotlin/com/onyx/ui/AppShell.kt` — bottom-nav scaffold with 7 tabs
 
 **Gaps:**
-- `mobile_core_execute_query` not wrapped by JNI (needed for some query screens)
-- `mobile_core_subscribe_events` not wrapped (real-time push for live screen updates)
+- `mobile_core_execute_query` JNI wrapper unwired at the Kotlin level (needed for detail-screen queries)
+- `OnyxController`'s org-wide event subscription refreshes dashboards on `mission.event.`/`task.event.`/`notification.event.`; per-aggregate live-refresh call sites past that fan-out are future polish
 - Screen-specific empty states need verification against `parity-matrix.md` § entries for each screen
 - `NotificationsScreen` likely renders a bounded-context empty state (per DECISIONS.md M11-D8: "Notification local domain crates are not present")
 
 **Next concrete task:**
-1. Add `mobile_core_execute_query` and `mobile_core_subscribe_events` JNI wrappers (Layer 2 task 1–2)
+1. Wire the real Kotlin query path over `nativeExecuteQuery` (Layer 2 task 1)
 2. Verify each screen's empty/loading/error states match `parity-matrix.md` exactly
 3. Add instrumented tests for Dashboard, Missions, TaskDetail screens on real device
 4. Verify `OnyxController.refresh()` parallel fan-out produces correct results under concurrent load
@@ -173,15 +176,15 @@ The module doc’s older “remaining ~14 functions” note predates the current
 - `mobile-android/app/src/main/kotlin/com/onyx/background/BackgroundSync.kt` — `scheduleBackgroundSync()` called from `MainActivity.OnyxRoot`'s `LaunchedEffect`
 
 **Gaps:**
-- `mobile_core_subscribe_events` / `mobile_core_unsubscribe` not wrapped (needed for real-time conflict resolution updates)
+- Event subscription is implemented and `OnyxController` refreshes with it; real-time conflict-resolution updates keyed off it are wired to the same fan-out, but conflict-specific live UI is hardware-verification pending
 - Background sync behavior unverified on real Android (WorkManager constraints, Doze mode, battery optimization)
 - File upload/download through `nativeUploadFile`/`nativeDownloadFile` unverified on real device (file permissions, storage access)
 - Conflict resolution end-to-end (`nativeResolveConflict`) unverified on real device
-- `ffi_secure_storage` functions not yet bound for secure session persistence
+- Secure session persistence uses Android Keystore (`SecureTokenStore.kt`) — the sanctioned path; no Rust binding exists or is planned (M11-D12.4)
 
 **Next concrete task:**
-1. Add `mobile_core_subscribe_events` / `mobile_core_unsubscribe` JNI wrappers
-2. Add `mobile_core_secure_storage` JNI wrappers if needed for session persistence
+1. ~~Add `mobile_core_subscribe_events` / `mobile_core_unsubscribe` JNI wrappers~~ Done 2026-09-24; `OnyxController.onCleared()` unsubscribes.
+2. ~~Add `mobile_core_secure_storage` JNI wrappers if needed for session persistence~~ Resolved: not needed — Keystore.
 3. Instrumented test: background sync scheduling → WorkManager execution → sync status update on real device
 4. Instrumented test: file upload/download through JNI → mobile-core on real device
 5. Instrumented test: conflict creation → resolution via `nativeResolveConflict` on real device

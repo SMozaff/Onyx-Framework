@@ -143,7 +143,14 @@ int mobile_core_trigger_sync(struct MobileApp *handle);
 
 /**
  * Subscribes to events. Returns a subscription handle; the callback is
- * invoked for each matching event (JSON string). Team Prompt 5 §3.3.
+ * invoked for each matching event (`json`), together with the exact
+ * `context` pointer the caller supplied (the C "user data" idiom — a
+ * JNI adapter, for example, passes a `Box`ed forwarder here so it can
+ * route events back into a JVM). Team Prompt 5 §3.3.
+ *
+ * Callers constructing a callback that must run in the JVM should
+ * consider whether the *referent* of `context` is safe to route through
+ * `CallbackContext` — see `crate::CallbackContext`'s doc comment.
  *
  * # Safety
  * `handle` must be valid. `filter_json` must be a valid NUL-terminated
@@ -151,11 +158,14 @@ int mobile_core_trigger_sync(struct MobileApp *handle);
  * valid for as long as the returned subscription is alive (i.e. until
  * `mobile_core_unsubscribe` is called) — this is inherently unsafe
  * FFI-callback lifetime management the C/Swift/Kotlin caller is
- * responsible for upholding; Rust cannot enforce it.
+ * responsible for upholding; Rust cannot enforce it. `context` must
+ * remain valid (or the caller must otherwise guarantee it is not
+ * dereferenced) for the same lifetime.
  */
 struct EventSubscription *mobile_core_subscribe_events(struct MobileApp *handle,
                                                        const char *filter_json,
-                                                       void (*callback)(const char*));
+                                                       void (*callback)(void*, const char*),
+                                                       void *context);
 
 /**
  * Unsubscribes and frees the subscription. Team Prompt 5 §3.3.

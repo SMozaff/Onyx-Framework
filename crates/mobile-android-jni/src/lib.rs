@@ -80,12 +80,14 @@
 //! `jni-0.22.4`'s own source and doc examples, not a remembered older
 //! shape).
 use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use jni::errors::{Error as JniError, LogErrorAndDefault};
-use jni::objects::{JClass, JString};
+use jni::objects::{GlobalRef, JClass, JObject, JString};
 use jni::sys::{jlong, jstring};
-use jni::EnvUnowned;
+use jni::{Env, EnvUnowned, JavaVM};
 
 use mobile_core::MobileApp;
 
@@ -483,18 +485,25 @@ fn jstring_to_cstring(env: &jni::Env<'_>, value: &JString) -> Option<CString> {
 }
 
 // ============================================================================
-// STUB WRAPPERS — added for KOTLIN_IMPLEMENTATION_PLAN.md Part 4 scaffolding.
-// These are compile-verified skeletons with TODO markers; they are NOT
-// production-ready implementations. See docs/mobile-migration/KOTLIN_IMPLEMENTATION_PLAN.md
+// QUERY + EVENT SURFACE — completed for KOTLIN_IMPLEMENTATION_PLAN.md Layers
+// 2/4 (executeQuery) and 2/5 (real-time event stream). `nativeExecuteQuery`
+// is a straight wrapper of `mobile_core_execute_query`; the subscribe/
+// unsubscribe pair route `mobile-core`'s C callbacks into a Kotlin
+// `EventCallback` via a JVM-attaching forwarder (see `JavaEventForwarder`).
 // ============================================================================
 
 /// `Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery` —
 /// `com.onyx.bridge.MobileCoreBridge.nativeExecuteQuery(handle: Long, queryJson: String): String?`.
 ///
 /// Wraps `mobile_core_execute_query` (from `crates/mobile-core/src/ffi_queries.rs`).
-/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 2/4.
-/// TODO: verify query JSON schema against `QueryEnvelope` type; wire into
-/// Kotlin query screen data loading (see plan Layer 4).
+/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 2/4. `queryJson` is a
+/// `QueryEnvelope` — `{"query_type": "GetMission", "target_id":
+/// <uuid bytes as JSON array>}` (see `client_composition::query_registry`
+/// for the full envelope shape). Returns the serialized query result (the
+/// aggregate's `Loaded` JSON) or `null` when `mobile_core_execute_query`
+/// itself returns null (unknown `query_type`, missing aggregate,
+/// malformed FFI call) — the exact same convention every other wrapper in
+/// this file preserves.
 #[no_mangle]
 pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery<'local>(
     mut env: EnvUnowned<'local>,
@@ -506,9 +515,6 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery<
         let Some(query_json) = jstring_to_cstring(env, &query_json) else {
             return Ok(std::ptr::null_mut());
         };
-        // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): verify
-        // `mobile_core_execute_query` signature and error handling
-        // against actual `ffi_queries.rs` before enabling.
         let result_ptr = unsafe {
             mobile_core::mobile_core_execute_query(
                 handle as *mut mobile_core::MobileApp,
@@ -521,92 +527,238 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery<
 }
 
 /// `Java_com_onyx_bridge_MobileCoreBridge_nativeSubscribeEvents` —
-/// `com.onyx.bridge.MobileCoreBridge.nativeSubscribeEvents(handle: Long, filterJson: String): Long`.
+/// `com.onyx.bridge.MobileCoreBridge.nativeSubscribeEvents(handle: Long, filterJson: String, callback: EventCallback): Long`.
 ///
-/// Wraps `mobile_core_subscribe_events` (from `crates/mobile-core/src/ffi_events.rs`).
-/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 2/5 (real-time event stream).
+/// Real subscription, wrapping `mobile_core_subscribe_events` (from
+/// `crates/mobile-core/src/ffi_events.rs`) with the JNI problem that
+/// function's 2025-era stub declared unsolvable ("JNI does not directly
+/// support passing C function pointers from Kotlin"). It is solved the
+/// way every C library with callback + userdata solves it:
 ///
-/// # Open design question (TODO)
-/// `mobile_core_subscribe_events` takes an `extern "C" fn(*const c_char)`
-/// callback — a raw C function pointer. JNI does not directly support
-/// passing C function pointers from Kotlin. The callback mechanism must
-/// be resolved: options are (a) a `jobject` Kotlin lambda/interface
-/// marshalled through `JNIEnv::CallVoidMethod`, (b) a `Long` token
-/// referencing a Java-side callback registry, or (c) a separate
-/// Java-side event loop thread. See KOTLIN_IMPLEMENTATION_PLAN.md
-/// Layer 2 next concrete task for the decision. This stub returns
-/// `0` as a placeholder subscription handle.
+/// * `mobile_core_subscribe_events`'s `context` pointer (added for this
+///   client; see DECISIONS entry) carries a `Box<JavaEventForwarder>`
+///   that owns the JVM handle (an `Arc<JavaVM>`) and a JNI `GlobalRef`
+///   to the caller's Kotlin `EventCallback` instance.
+/// * The C function pointer is a single `extern "C" fn` defined here —
+///   `deliver_to_kotlin` — closing over nothing; everything it needs
+///   lives in the forwarded `context`.
+/// * On each matched event (delivered from a tokio worker thread, never
+///   a JNI-attached thread), `deliver_to_kotlin` calls
+///   `JavaVM::attach_current_thread` (jni-rs 0.22's current API; a
+///   Rust-runtime thread normally has no JVM attachment), invokes
+///   `EventCallback.onEvent(json)` via `CallObjectMethod`, then lets the
+///   `AttachGuard` detach on drop. Attach/exit is tied to a single
+///   delivery so no thread holds a spurious JVM attachment between
+///   events, and a delivery that fails (crash, GC'd callback) is logged
+///   and skipped, not fatal.
+/// * The `GlobalRef` is released by dropping the forwarder on
+///   `nativeUnsubscribe` (or when `mobile_core` aborts the forwarding
+///   task).
+///
+/// Returns the `*mut EventSubscription` as the `Long` handle (same
+/// pointer-as-jlong convention `nativeNew` uses for `*mut MobileApp`), or
+/// `0` on failure (null/unknown handle, malformed `filterJson`, or a
+/// JNI-level failure building the forwarder) — matching
+/// `mobile_core_subscribe_events`'s own null-on-invalid-input contract.
 #[no_mangle]
 pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSubscribeEvents<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
-    _handle: jlong,
-    _filter_json: JString<'local>,
+    handle: jlong,
+    filter_json: JString<'local>,
+    callback: JObject<'local>,
 ) -> jlong {
+    if handle == 0 {
+        return 0;
+    }
     env.with_env(|env| -> Result<jlong, JniError> {
-        let _ = env; // TODO: implement real callback marshalling
-                     // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): resolve
-                     // the C-callback-in-JNI design question and implement the
-                     // real subscription using mobile_core_subscribe_events.
-        Ok(0) // placeholder subscription handle
+        let Some(filter_json) = jstring_to_cstring(env, &filter_json) else {
+            return Ok(0);
+        };
+        let Some(forwarder) = JavaEventForwarder::new(env, callback) else {
+            return Ok(0);
+        };
+        let forwarder_ptr = Box::into_raw(Box::new(forwarder)) as *mut c_void;
+
+        // Safety: `handle` is the Kotlin caller's responsibility (must
+        // be a live value from nativeNew); filter_json is freshly built
+        // and NUL-terminated; `forwarder_ptr` is leaked into context,
+        // owned by the C-ABI subscription until nativeUnsubscribe
+        // reclaims it (plus the early-reclaim below if subscription
+        // setup fails); `deliver_to_kotlin` is a static fn valid for the
+        // lifetime of the returned subscription.
+        let sub_ptr = unsafe {
+            mobile_core::mobile_core_subscribe_events(
+                handle as *mut MobileApp,
+                filter_json.as_ptr(),
+                deliver_to_kotlin,
+                forwarder_ptr,
+            )
+        };
+        if sub_ptr.is_null() {
+            // mobile_core rejected the subscription; reclaim the
+            // forwarder we leaked above so the GlobalRef is not orphaned.
+            drop(unsafe { Box::from_raw(forwarder_ptr as *mut JavaEventForwarder) });
+            Ok(0)
+        } else {
+            Ok(sub_ptr as jlong)
+        }
     })
     .resolve::<LogErrorAndDefault>()
 }
 
 /// `Java_com_onyx_bridge_MobileCoreBridge_nativeUnsubscribe` —
-/// `com.onyx.bridge.MobileCoreBridge.nativeUnsubscribe(handle: Long)`.
+/// `com.onyx.bridge.MobileCoreBridge.nativeUnsubscribe(subscription: Long)`.
 ///
-/// Wraps `mobile_core_unsubscribe` (from `crates/mobile-core/src/ffi_events.rs`).
-/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 2/5.
-/// TODO: map the `Long` subscription handle back to `*mut EventSubscription`
-/// (requires a handle-to-pointer registry, similar to how `MobileApp`
-/// handles are managed — see nativeNew/nativeFree pattern).
+/// Aborts the forwarding task (`mobile_core_unsubscribe`) and reclaims
+/// the `JavaEventForwarder`'s `GlobalRef`/JVM handle that was leaked as
+/// the subscription's context pointer. Safe to call once only, exactly
+/// like `mobile_core_unsubscribe` itself.
 #[no_mangle]
 pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeUnsubscribe<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
-    _handle: jlong,
+    subscription: jlong,
 ) {
+    if subscription == 0 {
+        return;
+    }
     env.with_env(|_env| -> Result<(), JniError> {
-        // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): implement
-        // real unsubscription. mobile_core_unsubscribe takes a raw
-        // `*mut EventSubscription` pointer; a handle-to-pointer
-        // registry is needed to map `handle` back to that pointer.
-        // Currently a no-op stub.
-        let _ = _handle;
+        let sub_ptr = subscription as *mut mobile_core::EventSubscription;
+        // Safety: subscription must be a live value previously returned
+        // by nativeSubscribeEvents, not yet freed — the subscription
+        // pointer is only ever reclaimed here, same single-owner
+        // contract mobile_core_unsubscribe itself documents.
+        unsafe {
+            mobile_core::mobile_core_unsubscribe(sub_ptr);
+        }
         Ok(())
     })
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Java_com_onyx_bridge_MobileCoreBridge_nativeSecureStorage` —
-/// `com.onyx.bridge.MobileCoreBridge.nativeSecureStorage(action: String, key: String, value: String): String?`.
+/// C-ABI event callback trampoline — the function pointer handed to
+/// `mobile_core_subscribe_events` as its `callback` argument.
 ///
-/// Stubs the `ffi_secure_storage.rs` interface (`mobile_core` secure storage).
-/// Added for KOTLIN_IMPLEMENTATION_PLAN.md Layer 3.
+/// `context` is the `Box<JavaEventForwarder>` the matching
+/// `nativeSubscribeEvents` call leaked into the subscription; `json` is
+/// the owned, NUL-terminated envelope buffer the C-ABI contract requires
+/// freeing via `mobile_core_free_string` exactly once — and which every
+/// path in this function, success or failure, satisfies.
 ///
-/// # OPEN GAP — no real implementation exists
-/// `crates/mobile-core/src/ffi_secure_storage.rs` explicitly states:
-/// "Not implemented (flagged, not silently assumed complete). A real
-/// implementation requires calling into Android's Keystore (via JNI)
-/// or iOS's Keychain." This stub exists to document the interface
-/// surface that Kotlin needs. A real implementation requires:
-/// - A Rust-side `ffi_secure_storage.rs` that calls JNI to Android Keystore
-///   (or a Kotlin-side `SecureTokenStore` that bypasses this entirely,
-///   which is the current approach in `session/SecureTokenStore.kt`)
-/// - Resolution of the chicken-and-egg problem: how does Rust call
-///   back into Java/Kotlin JNI from inside a `#[no_mangle] extern "C"`
-///   function? See KOTLIN_IMPLEMENTATION_PLAN.md Layer 3 next concrete task.
-#[no_mangle]
-pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSecureStorage<'local>(
-    _env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    _action: JString<'local>,
-    _key: JString<'local>,
-    _value: JString<'local>,
-) -> jstring {
-    // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 3): implement real
-    // secure storage or confirm that SecureTokenStore.kt's Android
-    // Keystore approach is the intended path (bypassing this FFI).
-    std::ptr::null_mut()
+/// Runs on a tokio worker thread, so it performs its own JVM attach for
+/// the duration of the one delivery and detaches when the guard drops.
+/// Must be `extern "C" fn` with no `Send` capture — matching the C ABI
+/// `mobile_core` declares.
+extern "C" fn deliver_to_kotlin(context: *mut c_void, json: *const c_char) {
+    if json.is_null() {
+        return;
+    }
+    // The C-ABI contract transfers ownership of `json` to the callback;
+    // reclaim it up front so every return path below frees it exactly
+    // once, whether or not the delivery reaches the JVM.
+    let json = unsafe { CString::from_raw(json as *mut c_char) };
+    // SAFETY: `context` is a live `JavaEventForwarder` box for as long as
+    // the subscription is alive (owned by the C-ABI and reclaimed only by
+    // `nativeUnsubscribe`, which aborts the delivery task first).
+    let forwarder = unsafe { &*(context as *const JavaEventForwarder) };
+    // A failed delivery must not take the subscription down (that would
+    // stop the whole stream); skip the event and keep going. This crate
+    // has no logger wired (JNI entry points use jni's LogErrorAndDefault);
+    // logcat plumbing for the async callback path is future work.
+    let _ = forwarder.deliver(&json);
+}
+
+/// Owns everything a tokio-thread event delivery needs to reach a Kotlin
+/// `EventCallback`: the JVM to attach to and the strong reference to the
+/// callback object. Lives in a `Box`, transported as the C-ABI
+/// subscription's `context` pointer, and is reclaimed (dropped) by
+/// `nativeUnsubscribe`.
+struct JavaEventForwarder {
+    vm: Arc<JavaVM>,
+    callback: GlobalRef,
+    /// Re-entrancy guard: `mobile_core` invokes the callback serially
+    /// from one forwarding task, but this makes that assumption visible
+    /// and cheap to uphold rather than silently relying on it. Cleared
+    /// on `Drop` so an in-flight failure can never wedge deliveries.
+    active: AtomicBool,
+}
+
+const KOTLIN_EVENT_CALLBACK_CLASS: &str = "com/onyx/bridge/EventCallback";
+const KOTLIN_EVENT_CALLBACK_METHOD: &str = "onEvent";
+const KOTLIN_EVENT_CALLBACK_SIGNATURE: &str = "(Ljava/lang/String;)V";
+
+impl JavaEventForwarder {
+    /// Captures the JVM and builds a `GlobalRef` for the caller's
+    /// `EventCallback` instance. Returns `None` on any JNI-level failure
+    /// (no VM, null object, or the callback class/method not resolving).
+    fn new(env: &mut Env<'_>, callback: JObject<'_>) -> Option<Self> {
+        if callback.is_null() {
+            return None;
+        }
+        let vm = env.get_java_vm().ok()?;
+        let class = env.find_class(KOTLIN_EVENT_CALLBACK_CLASS).ok()?;
+        // Resolve the method now so delivery (on another thread) never
+        // needs to re-resolve it — fail fast on a typo'd name/signature.
+        if env
+            .get_method_id(&class, KOTLIN_EVENT_CALLBACK_METHOD, KOTLIN_EVENT_CALLBACK_SIGNATURE)
+            .is_err()
+        {
+            return None;
+        }
+        let callback = env.new_global_ref(callback).ok()?;
+        Some(Self {
+            vm,
+            callback,
+            active: AtomicBool::new(false),
+        })
+    }
+
+    /// Attaches the current (tokio) thread to the JVM for the duration of
+    /// one delivery, reads the NUL-terminated envelope `json`, and calls
+    /// `EventCallback.onEvent(String)` on the global `callback` ref.
+    ///
+    /// # Safety contract
+    /// * `self` must be a live `JavaEventForwarder` (guard: the caller
+    ///   holds the boxed address while a subscription is alive, and
+    ///   `nativeUnsubscribe` aborts the delivery task before reclaiming
+    ///   the box; this crate is the only owner of the pointer).
+    /// * `json` must be a valid NUL-terminated C string — guaranteed by
+    ///   `deliver_to_kotlin`, which hands over a freshly built `CString`.
+    fn deliver(&self, json: &CStr) -> Result<(), String> {
+        use jni::objects::JValue;
+
+        if self.active.swap(true, Ordering::AcqRel) {
+            return Err(
+                "re-entrant event delivery (mobile_core invokes the callback serially)".into(),
+            );
+        }
+        struct ClearOnDrop<'a>(&'a AtomicBool);
+        impl Drop for ClearOnDrop<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        let _clear = ClearOnDrop(&self.active);
+
+        // attach_current_thread returns an AttachGuard whose Drop
+        // detaches; binding it here keeps this one worker thread attached
+        // only for the duration of the delivery.
+        let mut guard = self
+            .vm
+            .attach_current_thread()
+            .map_err(|e| e.to_string())?;
+        let env = &mut *guard;
+        let json_string = env
+            .new_string(json.to_string_lossy().as_ref())
+            .map_err(|e| e.to_string())?;
+        env.call_method(
+            self.callback.as_obj(),
+            KOTLIN_EVENT_CALLBACK_METHOD,
+            KOTLIN_EVENT_CALLBACK_SIGNATURE,
+            &[JValue::Object(&json_string)],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }

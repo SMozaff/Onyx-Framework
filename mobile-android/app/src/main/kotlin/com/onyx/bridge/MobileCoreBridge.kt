@@ -33,7 +33,18 @@ object MobileCoreBridge {
 
     // Added for KOTLIN_IMPLEMENTATION_PLAN.md (Layers 2-5).
     external fun nativeExecuteQuery(handle: Long, queryJson: String): String?
-    external fun nativeSubscribeEvents(handle: Long, filterJson: String): Long
-    external fun nativeUnsubscribe(handle: Long)
-    external fun nativeSecureStorage(handle: Long, action: String, key: String, value: String): String?
+
+    /**
+     * Subscribes to the local event bus. [callback] is invoked (on a
+     * native forwarding thread, via [EventCallback.onEvent]) for every
+     * committed event matching [filterJson] — an `EventFilter` JSON
+     * (`{"organization_id": <16 bytes>, "event_types": ...}`). Returns a
+     * non-zero subscription handle, or `0` on failure; the returned
+     * handle must be freed exactly once via [nativeUnsubscribe]. See the
+     * `mobile-android-jni` module doc comment for the full design.
+     */
+    external fun nativeSubscribeEvents(handle: Long, filterJson: String, callback: EventCallback): Long
+
+    /** Frees a subscription previously returned by [nativeSubscribeEvents]. */
+    external fun nativeUnsubscribe(subscription: Long)
 }

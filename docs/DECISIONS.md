@@ -2711,3 +2711,66 @@ builds both APKs.
 **Process note (2026-09-24):** no local build/test/compile — the sandbox has
 no room for a `target/` directory, so every `cargo`/`gradle` gate runs
 exclusively in GitHub Actions.
+
+### M11-D12 — The event-subscription C ABI gained an explicit userdata parameter
+
+**Date:** 2026-09-24
+
+`mobile_core_subscribe_events` is the only C ABI function that passes a
+callback; its original signature shadowed *all* the project's existing
+FFI conventions (`Dart NativeCallable.listener` / `WorkManager` / the
+`mobile_core_*` ownership docs: callbacks own transferred buffers, freed
+via `mobile_core_free_string`) by having no way to carry caller state.
+The prototype JNI adapter that announced real subscription (this
+increment) resolved that with a deliberate, documented ABI change:
+
+1. **Signature:** `mobile_core_subscribe_events(handle, filter_json,
+   callback, context)` where `callback` is
+   `extern "C" fn(context: *mut c_void, json: *const c_char)` and
+   `context *mut c_void` is passed back verbatim — the standard C
+   "user data" idiom. `CallbackContext` (a `pub(crate)`
+   `Send`/`Sync` newtype over the pointer) carries `context` across the
+   tokio task boundary; its `unsafe impl`s are justified in `lib.rs` by
+   the caller-owned lifetime contract in the function's own `# Safety`
+   doc. No other ABI function changed.
+2. **Baselines were updated by hand, under the
+   `verify_ffi_signatures.sh` procedure.** Both `mobile-core.h` and
+   `expected_ffi.h` carry the predicted cbindgen 0.27 emission for the
+   new signature (48-space continuation indent preserved; the fn-pointer
+   inner type renders name-less as `void (*callback)(void*, const char*)`).
+   The schift of authority remains CI's `build.rs` regeneration: if the
+   next real build wraps differently, re-`cp mobile-core.h
+   expected_ffi.h` after review. `verify_ffi_signatures.sh` is a manual
+   gate, not a CI step.
+3. **Ownership is unchanged for everything else:** the transferred JSON
+   buffer is still owned by the callback and freed via
+   `mobile_core_free_string` (or a `CString::from_raw` reclaim on the
+   Rust side of a JNI trampoline), per M11-D10.
+4. **Secure storage shipped with Android Keystore, not a stub.**
+   `SecureTokenStore.kt` stays the real `on-device secret storage`; the
+   abortive `nativeSecureStorage` JNI/Kotlin stub pair is deleted —
+   `ffi_secure_storage.rs` is a doc-only module that exports no
+   functions and the C headers contain no secure-storage symbols, so the
+   stub referenced a nonexistent surface. A new JNI function will be
+   added only when a real `mobile_core_*` secure-storage export exists.
+5. **Event delivery into the JVM is attach-per-event, skip-on-failure.**
+   The JNI forwarder holds `Arc<JavaVM>` + `GlobalRef` to the Kotlin
+   `EventCallback`; each delivery calls `JavaVM::attach_current_thread`
+   (the `AttachGuard` detaches on drop, so a tokio worker thread never
+   holds a spurious JVM attachment between events). A failing delivery
+   is skipped, never fatal, and the crate has no logger wired — JNI
+   entry points use jni's own `LogErrorAndDefault`; logcat plumbing for
+   the async callback path is future work (a re-entrancy
+   `AtomicBool` guard makes the serial-callback assumption explicit).
+
+**Evidence:** `crates/mobile-core/src/{ffi_events.rs,lib.rs}`; the
+hand-updated `crates/mobile-core/{mobile-core.h,expected_ffi.h}`;
+`crates/mobile-android-jni/src/lib.rs` (real `nativeSubscribeEvents`/
+`nativeUnsubscribe`, `JavaEventForwarder`, `deliver_to_kotlin`; the
+nativeSecureStorage stub removed);
+`mobile-android/…/com/onyx/bridge/{MobileCoreBridge.kt,EventCallback.kt}`
+(`EventCallback.kt` is new); `OnyxController.kt` subscribe/`onCleared`
+wiring; the `EventCallback` keep rule in `proguard-rules.pro`; the new
+real-delivery test in `mobile-core/tests/ffi_integration.rs`
+(a `MarkReady` decision → outbox pump → `EventBus` → callback with the
+exact `context` pointer, asserted over a 20s poll).

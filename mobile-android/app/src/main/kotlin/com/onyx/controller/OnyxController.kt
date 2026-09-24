@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.onyx.bridge.EventCallback
 import com.onyx.bridge.MobileCoreBridge
 import com.onyx.model.CommandEnvelopeFactory
 import com.onyx.model.ConflictChoice
@@ -119,8 +120,67 @@ class OnyxController(
     private val _refreshCount = MutableStateFlow(0)
     val refreshCount: StateFlow<Int> = _refreshCount.asStateFlow()
 
+    /**
+     * Live event-subscription handle, if the native subscription is up.
+     * `0` means "not subscribed" (either never established or already
+     * freed); non-zero means a [MobileCoreBridge.nativeUnsubscribe] call
+     * is owed in [onCleared].
+     */
+    private var eventSubscription = 0L
+
     init {
         refresh()
+        subscribeToEvents()
+    }
+
+    /**
+     * Subscribes to the local event bus (a `mobile-core` subscription
+     * bridged through JDK trampoline) so list screens live-update when a
+     * domain event is committed — the Android counterpart of
+     * `desktop-shell`'s `emit_all("onyx:event")`/`OnyxController`'s
+     * event listener. The filter is org-wide (all event types for this
+     * organization), mirroring the bus's tenant-isolation contract; which
+     * event types are worth a re-fetch is decided per-delivery below, not
+     * by the native filter.
+     *
+     * Deliveries arrive on a native forwarding thread; each one is
+     * hopped onto [viewModelScope] (main) before any state mutation.
+     * A `0` handle (subscription rejected) is non-fatal: the app remains
+     * fully functional on pull-to-refresh/manual sync, matching
+     * `desktop-shell`'s own tolerance of a failed event listener.
+     */
+    private fun subscribeToEvents() {
+        if (eventSubscription != 0L) return
+        val filterJson = JSONObject()
+            .put("organization_id", JSONArray(UuidCodec.uuidToBytes(envelopeFactory.organizationId)))
+            .put("event_types", JSONObject.NULL)
+            .toString()
+        val callback = EventCallback { json ->
+            viewModelScope.launch {
+                val eventType = runCatching { JSONObject(json).optString("event_type") }
+                    .getOrNull().orEmpty()
+                // Rendered screens read missions/tasks/notifications; skip
+                // events for aggregates the UI does not display.
+                if (eventType.startsWith("mission.event.") ||
+                    eventType.startsWith("task.event.") ||
+                    eventType.startsWith("notification.event.")
+                ) {
+                    refresh()
+                }
+            }
+        }
+        eventSubscription = MobileCoreBridge.nativeSubscribeEvents(handle, filterJson, callback)
+        if (eventSubscription == 0L) {
+            Log.w(TAG, "nativeSubscribeEvents returned 0; live updates disabled for this session")
+        }
+    }
+
+    override fun onCleared() {
+        if (eventSubscription != 0L) {
+            MobileCoreBridge.nativeUnsubscribe(eventSubscription)
+            eventSubscription = 0L
+        }
+        super.onCleared()
     }
 
     /**
