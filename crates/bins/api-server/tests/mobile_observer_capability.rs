@@ -379,7 +379,10 @@ async fn mobile_observer_reads_normally_but_every_mutation_endpoint_denies_it() 
         .expect("manager assignment request");
     assert_eq!(manager_response.status(), 403);
     assert_capability_denied(
-        &manager_response.json().await.expect("manager assignment body"),
+        &manager_response
+            .json()
+            .await
+            .expect("manager assignment body"),
         "administer",
     );
 
@@ -411,17 +414,20 @@ async fn mobile_observer_reads_normally_but_every_mutation_endpoint_denies_it() 
         .expect("parent assignment request");
     assert_eq!(parent_response.status(), 403);
     assert_capability_denied(
-        &parent_response.json().await.expect("parent assignment body"),
+        &parent_response
+            .json()
+            .await
+            .expect("parent assignment body"),
         "administer",
     );
 
     let import_response = http
         .post(format!("{base}/api/admin/profiles/import"))
         .bearer_auth(&observer_token)
-        .multipart(
-            reqwest::multipart::Form::new()
-                .part("file", reqwest::multipart::Part::text("irrelevant").file_name("denied.csv")),
-        )
+        .multipart(reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::text("irrelevant").file_name("denied.csv"),
+        ))
         .send()
         .await
         .expect("profile import request");

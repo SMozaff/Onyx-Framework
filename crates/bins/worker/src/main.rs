@@ -1,6 +1,6 @@
 //! ONYX production background worker: outbox relay, durable job runner,
-//! five-second timeline scheduler, hourly snapshotter, and Prometheus/OTLP
-//! observability.
+//! five-second timeline scheduler, hourly snapshotter, WebPush delivery, and
+//! Prometheus/OTLP observability.
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -10,6 +10,8 @@ use observability_adapter::{init_observability, serve_metrics, Metrics, Observab
 use persistence_postgres::{PostgresDeadLetterStore, PostgresOutboxStore};
 use sqlx::postgres::PgPoolOptions;
 use worker::job_runner::JobRunnerConfig;
+use worker::push_delivery::HttpPushSender;
+use worker::webpush::VapidSigner;
 use worker_application::{JobQueue, OutboxStore};
 
 #[tokio::main]
@@ -64,6 +66,30 @@ async fn main() -> anyhow::Result<()> {
         ));
     let snapshot_task = tokio::spawn(worker::snapshot_loop::run_snapshotter(pool.clone()));
 
+    // WebPush delivery (PWA ObserverClient notifications). VAPID config is
+    // read from the environment; the public key must match the `k` value the
+    // PWA stub-verifies against (mobile-pwa `tests/browser/push.spec.ts`).
+    let vapid_private_pkcs8_b64 = std::env::var("ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64")
+        .expect("ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64 must be set for the push delivery worker");
+    let vapid_pkcs8 = worker::webpush::b64url_decode(&vapid_private_pkcs8_b64)
+        .expect("ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64 must be valid base64url");
+    let vapid_signer = VapidSigner::from_pkcs8_der(&vapid_pkcs8)
+        .expect("ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64 must be a P-256 PKCS#8 DER key");
+    let push_delivery_config = worker::push_delivery::PushDeliveryConfig::from_env();
+    let push_sender =
+        Arc::new(HttpPushSender::new(push_delivery_config.http_timeout).expect("push HTTP client"));
+    tracing::info!(
+        vapid_public_key = %vapid_signer.public_key_base64url(),
+        push_delivery_config = "loaded",
+        "WebPush delivery configured"
+    );
+    let push_delivery_task = tokio::spawn(worker::push_delivery::run_push_delivery(
+        pool.clone(),
+        push_delivery_config.clone(),
+        Arc::new(vapid_signer),
+        push_sender,
+    ));
+
     let outbox_metrics = {
         let metrics = metrics.clone();
         let outbox_store = Arc::clone(&outbox_store);
@@ -94,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
     scheduler_task.abort();
     staff_loan_scheduler_task.abort();
     snapshot_task.abort();
+    push_delivery_task.abort();
     outbox_metrics.abort();
     observability_adapter::shutdown_observability();
     Ok(())

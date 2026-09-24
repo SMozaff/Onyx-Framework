@@ -2589,3 +2589,56 @@ decisions:
 `package.json` (audit-clean lockfile + test scripts). Gates: `type-check`,
 `lint`, `build` (writes `dist/sw.js`), 38 Vitest, 4 a11y, 7 Playwright dev
 suite, 1 Playwright offline (prod) suite — all pass.
+
+### P2P-10 — Push delivery worker (VAPID keys, RFC 8291, ledger, pruning)
+
+**Date:** 2026-09-24
+
+The backend that actually sends PWA push notifications, completing Phase 3.2
+end-to-end (delivery). `crates/bins/worker/src/push_delivery.rs` +
+`webpush.rs` run as an in-process worker loop in `crates/bins/worker/src/
+main.rs`. Rulings:
+
+1. **Trigger = poll, not a queue.** Notifications are `aggregates` rows
+   (`aggregate_type='notification'`) that can be written by any worker path
+   (e.g. `staff_loan_scheduler`); there is no enqueue point we own. The
+   worker therefore scans every tick for `status='unacknowledged'`
+   notifications and relies on the `push_deliveries` ledger (PK
+   `(subscription_id, notification_id)`, migration
+   `20260112000000_add_push_deliveries`) to make delivery exactly-once. The
+   ledger row is written **only after** the endpoint returns 2xx, so a crash
+   between send and commit re-tries once — acceptable and simple.
+2. **Crypto is `ring`, and the VAPID key arrives as PKCS#8 DER base64url.**
+   RFC 8291 uses ECDH P-256 + HKDF + AES-128-GCM and RFC 8292 uses ES256;
+   BoringSSL-derived `ring` covers all of it (no `p256`/`aes-gcm`/`hkdf`
+   crates needed). `ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64` is exactly what
+   `npx web-push generate-vapid-keys` prints, so ops can generate a pair and
+   feed the public half into `VITE_VAPID_PUBLIC_KEY` (what the PWA's
+   `applicationServerKey` validates against).
+3. **Delivery is per-endpoint and self-healing.** Each POST carries
+   `Authorization: vapid t=..., k=...`, `TTL`, `Urgency: normal` and
+   `Content-Encoding: aes128gcm`. `404`/`410` mean the endpoint is dead
+   (stale registration) → the subscription row and its ledger rows are
+   pruned; everything else non-2xx and all transport errors are left pending
+   for the next tick. A `push_subscriptions` row that fails to decrypt-level
+   validation (e.g. an invalid `p256dh` point) is logged and skipped, never
+   deleted — it may just be a corrupt subscription, and retrying is cheaper
+   than discarding a working opt-in.
+4. **Test boundary keeps crypto pure and DB live.** `webpush.rs` has no
+   HTTP/DB and its unit tests prove JWT signing + RFC 5869 + an
+   encrypt→decrypt round-trip against subscription keys. `push_delivery.rs`
+   injects a `PushSender` trait (`HttpPushSender` = reqwest; stubs in tests)
+   and its integration tests run against real Postgres when `DATABASE_URL`
+   is set, mirroring `staff_loan_scheduler`.
+
+**Still gated:** delivering through a real push service (FCM/etc.) to a
+physical device, and the PWA-side `push.spec.ts` proving that round trip in
+CI — delivery is implemented and unit/integration-tested, device acceptance
+remains cloud/hardware-gated (Phase 5.2 / Phase 4).
+
+**Evidence:** `crates/bins/worker/src/webpush.rs`,
+`crates/bins/worker/src/push_delivery.rs`, `crates/bins/worker/src/main.rs`
+(spawn + env), `migrations/postgres/20260112000000_add_push_deliveries.*`,
+workspace + worker `Cargo.toml` (`ring`, `reqwest`, `url`, `base64`,
+`hmac`, `sha2`). Tests: 10 unit + 2 Postgres-gated integration; `cargo test
+-p worker` green.

@@ -535,14 +535,14 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteQuery<
 pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSubscribeEvents<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
-    handle: jlong,
+    _handle: jlong,
     _filter_json: JString<'local>,
 ) -> jlong {
     env.with_env(|env| -> Result<jlong, JniError> {
         let _ = env; // TODO: implement real callback marshalling
-        // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): resolve
-        // the C-callback-in-JNI design question and implement the
-        // real subscription using mobile_core_subscribe_events.
+                     // TODO(KOTLIN_IMPLEMENTATION_PLAN.md Layer 2): resolve
+                     // the C-callback-in-JNI design question and implement the
+                     // real subscription using mobile_core_subscribe_events.
         Ok(0) // placeholder subscription handle
     })
     .resolve::<LogErrorAndDefault>()
@@ -568,7 +568,7 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeUnsubscribe<'
         // `*mut EventSubscription` pointer; a handle-to-pointer
         // registry is needed to map `handle` back to that pointer.
         // Currently a no-op stub.
-        let _ = handle;
+        let _ = _handle;
         Ok(())
     })
     .resolve::<LogErrorAndDefault>()

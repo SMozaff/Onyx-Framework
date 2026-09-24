@@ -158,19 +158,20 @@ has since delivered them:
   (see the route's module doc); that lookup is the declared Phase 3.1 follow-up
   when the PWA `FileList` view lands.
 - `POST/DELETE /api/push/subscriptions...` — `crates/bins/api-server/src/routes/push.rs`.
-  Registration only stores the browser's endpoint + VAPID keys under the
-  session's own `(user_id, organization_id)` key; there is **no push delivery
-  worker yet** (the rows these routes write are what a future worker reads).
-  Unregistration is scoped to the owning user, so one user cannot remove
-  another's subscription. PHASE 3.2 (below) consumes these routes from the
-  PWA; delivery remains future backend work.
+  Registration stores the browser's endpoint + VAPID keys under the session's
+  own `(user_id, organization_id)` key. Unregistration is scoped to the owning
+  user, so one user cannot remove another's subscription. The rows these
+  routes write are what the delivery worker (below) reads; the *backend* side
+  of delivery is no longer future work — see **Delivered push delivery worker**
+  under Phase 3.2.
 - Relay tickets (`POST /api/relay-ticket`) require `submit_domain_command`;
   observer sessions are therefore excluded from Cloud Relay / sync transport.
   See DECISIONS P2P-2.
 
 ## Delivered observer PWA push (Phase 3.2)
 
-The PWA-side of Web Push is delivered (2026-09-24, DECISIONS P2P-8):
+The PWA-side of Web Push is delivered (2026-09-24, DECISIONS P2P-8); the
+server-side **delivery worker** is delivered too (DECISIONS P2P-10):
 
 - `mobile-pwa/src/push/push.ts` — permission request, browser
   `PushSubscription` creation (VAPID `applicationServerKey` from
@@ -184,9 +185,34 @@ The PWA-side of Web Push is delivered (2026-09-24, DECISIONS P2P-8):
   state survives reloads and can be reconciled on boot.
 - `mobile-pwa/src/components/PushNotificationsCard.tsx` — opt-in/opt-out card
   rendered on the Notifications view.
-- `public/sw.js` (generated from `scripts/sw.template.js`) already displayed
-  `push` events and routed `notificationclick` to the payload's `url`;
+- `public/sw.js` (generated from `scripts/sw.template.js`) displays `push`
+  events and routes `notificationclick` to the payload's `url`;
   "Simulated alert"-style E2E proves both (Phase 3.3).
+
+## Delivered push delivery worker (Phase 3.2 backend)
+
+The worker that sends the notifications (2026-09-24, DECISIONS P2P-10):
+
+- `crates/bins/worker/src/webpush.rs` — pure RFC 8291/8292 primitives on
+  `ring`: HKDF-SHA-256 (RFC 5869), the ES256 VAPID JWT signer (PKCS#8 P-256
+  import), and `aes128gcm` payload encryption (ECDH P-256 → HKDF keys →
+  AES-128-GCM single record). Unit-tested including an encrypt→decrypt
+  round-trip and an RFC 5869 vector.
+- `crates/bins/worker/src/push_delivery.rs` — poll loop that reads
+  `push_subscriptions`, targets `notification` aggregates with
+  `state.recipient_id` = the subscription's `user_id` and
+  `state.status = 'unacknowledged'`, encrypts the `{title, message, url}`
+  payload, POSTs with VAPID `Authorization` + `TTL` +
+  `Content-Encoding: aes128gcm` headers, writes the `push_deliveries` ledger
+  row *only* on success (dedup key = `(subscription_id, notification_id)`),
+  and prunes subscriptions that answer `404/410`.
+- `migrations/postgres/20260112000000_add_push_deliveries` — the delivery
+  ledger.
+- Spawned from `crates/bins/worker/src/main.rs` via
+  `push_delivery::run_push_delivery`; needs
+  `ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64` (PKCS#8 DER base64url,
+  e.g. `npx web-push generate-vapid-keys`), optional `ONYX_VAPID_SUBJECT`
+  and `ONYX_PUSH_*` overrides.
 
 ## Delivered PWA acceptance assets (Phase 5.1/5.2/5.3)
 

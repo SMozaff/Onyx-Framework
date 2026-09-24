@@ -32,3 +32,11 @@ background-jobs.workspace = true
 observability-adapter.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+
+# WebPush delivery (RFC 8291/8292) — see worker::webpush and worker::push_delivery.
+base64.workspace = true
+hmac.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+sha2.workspace = true
+url.workspace = true

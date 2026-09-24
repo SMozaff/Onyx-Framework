@@ -8,13 +8,17 @@ Read-only ObserverClient for the `mobile_observer` client class, per
 > stack, `ObserverHttpGateway` (`src/api/onyx.ts`), the Phase 2.3 observer
 > views (Dashboard, Missions, Tasks, Notifications, Approvals, Reports,
 > FileDetail), the Phase 2.6 test suite, Phase 3.2 Web Push (opt-in/opt-out
-> card, `pushStore`, SW show-and-route), and Phase 5 PWA acceptance
+> card, `pushStore`, SW show-and-route, and the backend **delivery worker**
+> in `crates/bins/worker` that VAPID-signs and RFC 8291-encrypts
+> notifications to registered endpoints), and Phase 5 PWA acceptance
 > (build-time shell precache, offline-served app shell + stale snapshot,
 > `OfflineBanner`, launch screen/iOS meta, 0 npm audit findings) are in place
 > and green on every gate — 38 Vitest + 4 a11y + 7 Playwright dev-suite + 1
-> offline prod-suite test. A push **delivery worker**, a FileList index
-> (needs a backend FileAsset listing), real-iphone Home Screen acceptance,
-> and the Phase 5.4 hosting decision remain future/pending.
+> offline prod-suite test, plus `cargo test -p worker` (10 unit + 2
+> Postgres-gated delivery tests). A FileList index (needs a backend FileAsset
+> listing), a device-level push round trip through a real push service,
+> real-iphone Home Screen acceptance, and the Phase 5.4 hosting decision
+> remain future/pending.
 
 ## What this client is
 
@@ -43,8 +47,10 @@ VITE_VAPID_PUBLIC_KEY=<base64url p-256 public key>
 `VITE_API_BASE` lets an iPhone on the LAN override to
 `http://<machine-LAN-IP>:3000`. `VITE_VAPID_PUBLIC_KEY` must be the VAPID
 *public* key published by the deployment (the private key lives only on the
-future delivery worker). When it is unset the push card reports
-`unconfigured` and never offers to subscribe. The service worker registration
+delivery worker: `ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64` in `crates/bins/
+worker`, i.e. the PKCS#8 DER base64url from `npx web-push
+generate-vapid-keys`). When it is unset the push card reports `unconfigured`
+and never offers to subscribe. The service worker registration
 remains gated in dev unless `VITE_ENABLE_SW_DEV=true`; Playwright's
 `webServer` sets that plus a generated test key (see `playwright.config.ts`).
 `ONYX_BLOB_STORE_ROOT` is read by api-server only, not the PWA.

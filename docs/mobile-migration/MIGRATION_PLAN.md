@@ -309,7 +309,8 @@ listing is the pre-requisite for a real FileList view.
 
 ### Phase 3.2 — Web Push
 
-**Status: DONE.** The PWA side of Web Push is delivered (DECISIONS P2P-8).
+**Status: DONE.** The PWA side of Web Push is delivered (DECISIONS P2P-8);
+the server-side **delivery worker** landed here too (DECISIONS P2P-10).
 
 - Register Service Worker (SW) with Push notification permission — SW
   registered app-wide (`src/lib/pwa.ts`); the Notifications view's
@@ -324,8 +325,34 @@ listing is the pre-requisite for a real FileList view.
   `POST /api/push/subscriptions` (returns stored id), `unsubscribeFromPush`
   → `DELETE /api/push/subscriptions/:subscription_id` plus a local
   unsubscribe. The enabled state persists under `onyx_observer_push`.
-  Delivery (a worker that reads `push_subscriptions` rows and sends messages)
-  is future backend work — `push.rs` only registers subscriptions.
+
+**Push delivery worker — DELIVERED (2026-09-24).** `crates/bins/worker`
+now fans unacknowledged `notification` aggregates out to registered push
+endpoints (`crates/bins/worker/src/push_delivery.rs` + `webpush.rs`,
+migration `20260112000000_add_push_deliveries`):
+
+- Every poll tick loads `push_subscriptions`, targets the notification
+  aggregates whose `state.recipient_id` matches the subscription `user_id`
+  and `status = 'unacknowledged'`, and skips anything already recorded in the
+  `push_deliveries` ledger (idempotent per `(subscription_id,
+  notification_id)`; a row is written *only* on success).
+- Payloads are VAPID-signed (ES256 JWT per RFC 8292) and encrypted per RFC
+  8291 (`aes128gcm`, ECDH P-256 + HKDF + AES-128-GCM) with `ring`; the
+  `Authorization`, `TTL`, `Content-Encoding`, `Urgency` headers are built
+  per RFC 8292/8030. `404/410` responses prune the stale subscription.
+- Config comes from the environment: `ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64`
+  (the PKCS#8 DER base64url `npx web-push generate-vapid-keys` prints, whose
+  matching public key the PWA verifies via `VITE_VAPID_PUBLIC_KEY`),
+  `ONYX_VAPID_SUBJECT`, and `ONYX_PUSH_*` tuning knobs.
+- Tests: 8 unit tests cover the VAPID JWT, RFC 5869 HKDF, and an
+  encrypt→decrypt round-trip proved against the subscription keys; 2 live
+  Postgres-gated tests cover ledger dedup and stale-subscription pruning
+  (they run when `DATABASE_URL` is a Postgres URL, mirroring
+  `staff_loan_scheduler`).
+
+Remaining gate for *device-level* acceptance is a real push service round
+trip (Firebase/Cloud Messaging) on a physical device — delivery is
+implemented and unit/integration-tested, not yet proven against FCM.
 
 ### Phase 3.3 — Tests
 
@@ -435,7 +462,10 @@ builds with `VITE_API_BASE=http://localhost:5175`) prove: after install the
 shell renders offline, the offline banner shows, and the seeded last snapshot
 (`mission.list` envelope) is served from the SW cache. **Still hardware-gated
 on real iPhone:** Home Screen launch behavior, `notificationclick` focus
-semantics on iOS, and end-to-end push delivery (no delivery worker yet).
+semantics on iOS, and the final device-level proof of end-to-end push
+delivery: the delivery worker now exists (Phase 3.2, DECISIONS P2P-10) but
+pushing through a real push service (FCM/etc.) to a physical device remains
+cloud/hardware-gated.
 
 ### Phase 5.3 — Security & CI
 
