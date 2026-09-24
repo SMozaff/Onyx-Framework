@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
+import { OfflineBanner } from './OfflineBanner';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -54,6 +55,7 @@ export function ObserverLayout() {
           </ul>
         </nav>
       </header>
+      <OfflineBanner />
       <main className="mx-auto max-w-3xl px-4 py-6">
         <Outlet />
       </main>

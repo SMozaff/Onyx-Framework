@@ -256,15 +256,33 @@ Ensure ObserverClient can read all projections the backend offers with `mobile_o
 
 ### Phase 2.6 — Observer PWA tests
 
-**Status: IN PROGRESS.** Unit tests for the read-only gateways landed with
-Phase 2.3 (`tests/unit/validation.test.ts`, `envelope.test.ts`,
-`errorHandler.test.ts` — 15 tests, `npm run test` green). Component/hook
-tests, axe-core a11y runs, and Playwright E2E (login, read projections,
-mutation denials, file download) remain.
+**Status: DONE.** The observer test suite is complete and green on every gate
+(`npm run type-check`, `npm run lint`, `npm run build`, `npm run test`,
+`npm run test:a11y`, `npm run test:browser` — 27 Vitest + 5 Playwright tests).
 
-- Unit tests: Vitest component tests, hook tests
-- a11y tests: Playwright + axe-core; ensure focus order, screenreader support
-- E2E: Playwright browser tests cover login, read projections, mutation denials, file download
+- Unit tests: `tests/unit/validation.test.ts`, `envelope.test.ts`,
+  `errorHandler.test.ts` (15 tests)
+- Component tests (`tests/component/`): Login posts `client_type:
+  mobile_observer` and only authenticates on success, protected shell
+  redirects unauthenticated visits and signs out, and the Missions /
+  Notifications / Approvals views assert the decision-free surface by
+  absence of Acknowledge/Approve/Reject buttons. The onyx gateway is mocked
+  per-file with `vi.mock` + `vi.importActual` (only `query` is replaced).
+- a11y tests (`tests/accessibility/`): axe-core checks for StatusBadge,
+  Freshness, Login, and a populated Notifications list; asserts
+  `results.violations` toHaveLength(0) (the `toHaveNoViolations` matcher in
+  vitest-axe 0.1.0 ships as an empty `extend-expect` build, see P2P-7).
+- E2E (`tests/browser/observer.spec.ts`, fixtures in
+  `tests/browser/fixtures/onyx.ts`): routes `/api/*` in-browser, keyed on the
+  base64url `envelope` query_type; covers observer login (asserts the
+  `mobile_observer` client class in the POST body), seeded-session projection
+  reads, mutation denial across notifications and approvals, file download
+  with `Authorization: Bearer` verification, and the not-found fallback.
+  Playwright runs against the system Chrome via `channel: 'chrome'` because
+  `npx playwright install chromium` fails to download browsers in this
+  environment (see P2P-7). Sessions are seeded with the observer keys
+  (`onyx_observer_access_token` / `onyx_observer_refresh_token` /
+  `onyx_observer_user`), distinct from web-ui's keys.
 
 ---
 
@@ -272,20 +290,58 @@ mutation denials, file download) remain.
 
 ### Phase 3.1 — File download
 
-- Add `downloadFile` to ObserverHttpGateway (see Phase 2.4)
+**Status: DONE.** `downloadFile` landed in `ObserverHttpGateway` with Phase
+2.4 (`src/api/onyx.ts`) and `GET /api/files/:content_hash` is exercised by
+the FileDetail view (`/files/:contentHash`), which saves the blob with the
+hash as its filename. Phase 2.6's E2E (`file download carries the bearer
+token and reports bytes`) proves the full path, asserting the
+`Authorization: Bearer` header.
+
+The plan's *FileList → click download* surface stays deferred: api-server
+has no FileAsset listing route (DECISIONS P2P-6 §4), so there is no
+first-party way to enumerate a user's files to build a `/files` index. That
+listing is the pre-requisite for a real FileList view.
+
+- Add `downloadFile` to ObserverHttpGateway (see Phase 2.4) — **delivered**
 - Frontend: FileList → click download triggers `downloadFile` → blob → save
+  — delivered as `/files/:contentHash` (FileDetail); FileList index defers on
+  a backend FileAsset listing route
 
 ### Phase 3.2 — Web Push
 
-- Register Service Worker (SW) with Push notification permission
-- SW receives push events and displays native notification
-- Notification click opens ObserverClient to target view (e.g., `/notifications`)
-- Subscribe/unsubscribe via API calls from frontend.
+**Status: DONE.** The PWA side of Web Push is delivered (DECISIONS P2P-8).
+
+- Register Service Worker (SW) with Push notification permission — SW
+  registered app-wide (`src/lib/pwa.ts`); the Notifications view's
+  `PushNotificationsCard` requests permission and creates the browser
+  `PushSubscription` (`src/push/push.ts`).
+- SW receives push events and displays native notification — `public/sw.js`
+  `push` handler shows `{title, message, url}` payloads; E2E simulates a
+  frame dispatched into the live SW.
+- Notification click opens ObserverClient to target view — `notificationclick`
+  navigates/focuses the controlling window client to `data.url`.
+- Subscribe/unsubscribe via API calls from frontend — `subscribeToPush` →
+  `POST /api/push/subscriptions` (returns stored id), `unsubscribeFromPush`
+  → `DELETE /api/push/subscriptions/:subscription_id` plus a local
+  unsubscribe. The enabled state persists under `onyx_observer_push`.
+  Delivery (a worker that reads `push_subscriptions` rows and sends messages)
+  is future backend work — `push.rs` only registers subscriptions.
 
 ### Phase 3.3 — Tests
 
-- Push integration: Playwright EMmitter API; simulate push events via SW test.
+**Status: DONE.**
+
+- Push integration: Playwright EMmitter API; simulate push events via SW
+  test — `tests/browser/push.spec.ts` dispatches a real `PushEvent` into the
+  controlling service worker and asserts the shown notification, then
+  dispatches `NotificationEvent('notificationclick')` and asserts navigation
+  to the payload target. Opt-in/opt-out is covered with a deterministic
+  `PushManager` stub and asserted POST/DELETE bodies on
+  `/api/push/subscriptions`.
 - File download: E2E download test (verify file saved with correct name/content)
+  — the Phase 2.6 browser test asserts the authenticated download and the
+  reported byte count; the FileDetail page saves the blob under the
+  content-hash filename.
 
 ---
 
@@ -350,11 +406,36 @@ mutation denials, file download) remain.
 
 - Vite PWA plugin (or manual generation) to produce `sw.js` and pre-cache the shell.
 
+**Status: 5.1 DELIVERED** — `manifest.webmanifest`, `icons/icon.svg` and the
+dev SW were already in place from Phase 2.2. This pass closes the rest:
+`public/screen.html` (standalone launch screen, links onward to `/`), the iOS
+standalone meta tags in `index.html` (`mobile-web-app-capable`,
+`apple-mobile-web-app-*`), and **build-time shell pre-caching**:
+`vite.config.ts` now emits a build manifest (`build.manifest:true`) and
+`scripts/render-sw.mjs` (chained after `vite build`) stamps the hashed asset
+list + `/` + icon + manifest into `dist/sw.js` via the `__PRECACHE_URLS__`
+template slot, so the worker is install-time offline-first. Dev keeps
+`public/sw.js` (from `scripts/postinstall.mjs`) with an empty precache list.
+
 ### Phase 5.2 — Standalone behavior
 
 - Test PWA launch from Home Screen (iPhone, not Safari WebView)
 - Verify offline shell works (SW cache serves `index.html`)
 - Verify push notifications arrive (use Firebase/Cloud messaging test)
+
+**Status: 5.2 DELIVERED (automated subset)** — the app now surfaces offline
+state (`src/hooks/useOnline.ts` + `src/components/OfflineBanner.tsx`, mounted
+in `ObserverLayout`), and the SW serves the shell offline: navigations are
+network-first with fallback to the precached `/`; `/api` stays network-first
+falling back to the last cached snapshot; cached responses are sanitized
+(strip `Vary`/CORS headers) so Cache Storage matching cannot be broken by a
+host that stamps `Vary: Origin` (vite preview does). `playwright.offline
+.config.ts` + `tests/offline/offline.spec.ts` (`npm run test:browser:offline`,
+builds with `VITE_API_BASE=http://localhost:5175`) prove: after install the
+shell renders offline, the offline banner shows, and the seeded last snapshot
+(`mission.list` envelope) is served from the SW cache. **Still hardware-gated
+on real iPhone:** Home Screen launch behavior, `notificationclick` focus
+semantics on iOS, and end-to-end push delivery (no delivery worker yet).
 
 ### Phase 5.3 — Security & CI
 
@@ -362,6 +443,17 @@ mutation denials, file download) remain.
 - Run lint/type/unit tests
 - Run Playwright E2E including PWA (headful or headless)
 - Accessibility tests (`axe-core`)
+
+**Status: 5.3 DELIVERED** — `npm audit` went from 6 findings to **0
+vulnerabilities**: dev toolchain upgraded `vite` 5→7, `vitest` 1→4 (plus
+`@vitejs/plugin-react` and explicit `@types/node` for the dropped ambient
+Buffer globals), and `react-router-dom` 6.30→7.18 (v6 has no patched release
+for GHSA-wrjc / GHSA-337j; the client renders client-side only, neither CVE
+is exploitable here, but 7.x closes both). All gates green:
+`type-check`, `lint`, `build` (which also renders `dist/sw.js`), `npm run
+test` (38 Vitest), `npm run test:a11y` (axe-core), `npm run test:browser`
+(7 Playwright dev-suite), `npm run test:browser:offline` (1 Playwright
+prod-suite offline test).
 
 ### Phase 5.4 — Hosting decision & deployment
 

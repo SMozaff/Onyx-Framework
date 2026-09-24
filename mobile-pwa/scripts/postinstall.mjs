@@ -21,7 +21,9 @@ const root = () => path.resolve(__dirname, '..');
 async function main() {
   const pkg = JSON.parse(await readFile(path.join(root(), 'package.json'), 'utf8'));
   const template = await readFile(path.join(__dirname, 'sw.template.js'), 'utf8');
-  const rendered = template.replace('__CACHE_VERSION__', pkg.version);
+  const rendered = template
+    .replace('__CACHE_VERSION__', pkg.version)
+    .replace('__PRECACHE_URLS__', '');
   await writeFile(path.join(root(), 'public', 'sw.js'), rendered, 'utf8');
   console.log(`[postinstall] wrote public/sw.js (cache v${pkg.version})`);
 }

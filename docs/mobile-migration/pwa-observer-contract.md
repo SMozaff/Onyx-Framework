@@ -2,7 +2,7 @@
 
 **Document:** `docs/mobile-migration/pwa-observer-contract.md`
 **Date:** 2026-09-23
-**Status:** ACTIVE CONTRACT — PHASE 2 SCAFFOLD DELIVERED (2026-09-24); PHASE 2.3 VIEWS PENDING
+**Status:** ACTIVE CONTRACT — PHASE 2 SCAFFOLD DELIVERED (2026-09-24); PHASE 2.3 VIEWS DELIVERED; PHASE 2.6 TEST SUITE DELIVERED; PHASE 3.2 WEB PUSH DELIVERED; PHASE 5.1/5.2/5.3 DELIVERED
 **Normative basis:** ONYX-MOB-00 v1.1 §§3.2, 4–5, 13–22; ONYX-MOB-01 v1.1 §§6–9, 14–22
 
 `mobile-pwa/` landed as a Phase 2.1/2.2 scaffold on 2026-09-24. This
@@ -160,8 +160,66 @@ has since delivered them:
 - `POST/DELETE /api/push/subscriptions...` — `crates/bins/api-server/src/routes/push.rs`.
   Registration only stores the browser's endpoint + VAPID keys under the
   session's own `(user_id, organization_id)` key; there is **no push delivery
-  worker yet** (MIGRATION_PLAN Phase 3.2). Unregistration is scoped to the
-  owning user, so one user cannot remove another's subscription.
+  worker yet** (the rows these routes write are what a future worker reads).
+  Unregistration is scoped to the owning user, so one user cannot remove
+  another's subscription. PHASE 3.2 (below) consumes these routes from the
+  PWA; delivery remains future backend work.
 - Relay tickets (`POST /api/relay-ticket`) require `submit_domain_command`;
   observer sessions are therefore excluded from Cloud Relay / sync transport.
   See DECISIONS P2P-2.
+
+## Delivered observer PWA push (Phase 3.2)
+
+The PWA-side of Web Push is delivered (2026-09-24, DECISIONS P2P-8):
+
+- `mobile-pwa/src/push/push.ts` — permission request, browser
+  `PushSubscription` creation (VAPID `applicationServerKey` from
+  `VITE_VAPID_PUBLIC_KEY`), server registration via the Phase 1.2 routes, and
+  opt-out (server row DELETE by stored subscription id + local unsubscribe).
+  Read-only by construction: registering a subscription is how an observer
+  *receives* notifications; nothing here sends one.
+- `mobile-pwa/src/stores/pushStore.ts` — status machine
+  (`idle/unsupported/unconfigured/denied/subscribed/error`); the last
+  `sub-*` id + endpoint persist under `onyx_observer_push` so the enabled
+  state survives reloads and can be reconciled on boot.
+- `mobile-pwa/src/components/PushNotificationsCard.tsx` — opt-in/opt-out card
+  rendered on the Notifications view.
+- `public/sw.js` (generated from `scripts/sw.template.js`) already displayed
+  `push` events and routed `notificationclick` to the payload's `url`;
+  "Simulated alert"-style E2E proves both (Phase 3.3).
+
+## Delivered PWA acceptance assets (Phase 5.1/5.2/5.3)
+
+Offline-first shell and security/CI hardening (2026-09-24, DECISIONS P2P-9):
+
+- **Install-time shell precache.** `vite.config.ts` sets `build.manifest:true`;
+  `scripts/render-sw.mjs` (chained as the last step of `npm run build`) reads
+  `dist/.vite/manifest.json` and stamps the hashed asset URLs plus `/`,
+  `/manifest.webmanifest` and `/icons/icon.svg` into `dist/sw.js`'s
+  `PRECACHE_URLS`. On the first visit the worker `cache.add()`s the shell, so
+  a later offline launch works without a prior online visit. Dev keeps
+  `public/sw.js` (empty precache list) rendered by `scripts/postinstall.mjs`.
+- **Offline navigation fallback.** `networkThenShell`: navigations are
+  network-first toward fresh `index.html`, falling back to the cached `/`
+  (or `/index.html`) when offline. `/api/*` unchanged: network-first, serving
+  the last cached snapshot only when the fetch fails. All cached responses
+  are sanitized before `cache.put` — `Vary` and `access-control-allow-origin`
+  headers are stripped, because Cache Storage matching honors `Vary` and a
+  host stamping `Vary: Origin` (e.g. vite preview) would otherwise make every
+  offline hit miss.
+- **Offline UX.** `src/hooks/useOnline.ts` + `src/components/OfflineBanner
+  .tsx` (mounted in `ObserverLayout`) show "You're offline — showing the last
+  snapshot." whenever the browser is offline.
+- **Home Screen / standalone polish.** `public/screen.html` launch screen and
+  iOS `apple-mobile-web-app-*` + `mobile-web-app-capable` meta in
+  `index.html`. Real-iphone Home Screen behavior remains hardware-gated.
+- **Security baseline.** `npm audit` reports 0 vulnerabilities: `vite` 5→7,
+  `vitest` 1→4 (`@types/node` added for the dropped ambient `Buffer`
+  globals), `react-router-dom` 6.30→7.18 (v6 has no patched release for
+  GHSA-wrjc-x8rr-h8h6 / GHSA-337j-9hxr-rhxg; the client is client-rendered
+  only, so neither CVE is exploitable here, but 7.x closes both).
+- **Automated acceptance.** `npm run test:browser:offline`
+  (`playwright.offline.config.ts`, preview server on `:5175`, dist built
+  with `VITE_API_BASE=http://localhost:5175` for a same-origin gateway)
+  proves post-install offline navigation renders the shell, the offline
+  banner, and a seeded `mission.list` snapshot served from the SW cache.

@@ -2446,3 +2446,146 @@ exist yet, and the contract surface is mapped to real endpoints (Phase 2.5):
 MIGRATION_PLAN Phase 2.3/2.5 status blocks. Gates: `type-check`, `lint`,
 `build`, and `npm run test` (15 unit tests) all pass.
 
+### P2P-7 — Phase 2.6 observer test-suite rulings (mock strategy, axia matcher, browser channel)
+
+**Date:** 2026-09-24
+
+**Ruling:** The observer component, a11y, and E2E suites follow web-ui's test
+shapes but diverge intentionally in three places:
+
+1. **No msw dependency; the gateway is mocked at the module boundary.**
+   Component tests replace only `observerApi.query` via
+   `vi.mock` + `vi.importActual<typeof import('../../src/api/onyx')>` and
+   `vi.mocked(...).mockResolvedValue(...)`. Login/network behavior is asserted
+   against `apiClient` with spies. Browser tests need no backend at all:
+   `/api/*` routes are intercepted in-page, dispatch parsed from the
+   base64url `envelope` query parameter by `query_type`.
+2. **Observer sessions are seeded with observer-scoped keys.** Playwright
+   fixtures write `onyx_observer_access_token`, `onyx_observer_refresh_token`,
+   and `onyx_observer_user` — NOT the web-ui `onyx_access_token` family. This
+   matches the separate `client_type: mobile_observer` session namespace and
+   keeps web-ui and observer fixtures from cross-pollinating.
+3. **`toHaveNoViolations` is unusable in vitest-axe 0.1.0; a11y asserts on
+   the raw result.** vitest-axe 0.1.0 ships an empty `dist/extend-expect.js`
+   (the root file just re-exports it), so `import 'vitest-axe/extend-expect'`
+   registers nothing and axe calls throw "Invalid Chai property". The a11y
+   suite follows web-ui: `const results = await axe(container); expect
+   (results.violations).toHaveLength(0);`. A jsdom `HTMLCanvasElement
+   .getContext` stub silences axe-core's icon-ligature probe noise.
+4. **Playwright uses the system Chrome channel.** `npx playwright install
+   chromium` fails to download a browser in this environment (Download
+   failure code=1), so `playwright.config.ts` sets `channel: 'chrome'` and
+   runs against `/usr/bin/google-chrome`, with the Vite dev server on port
+   5174 started by Playwright's `webServer`.
+
+**Evidence:** `mobile-pwa/tests/{test-utils.tsx,setup.ts,component/,
+accessibility/,browser/{fixtures/onyx.ts,observer.spec.ts}}`,
+`mobile-pwa/playwright.config.ts`, `node_modules/vitest-axe/dist/
+extend-expect.js` (empty build). Gates: `type-check`, `lint`, `build`, `npm
+run test` (27 Vitest), `npm run test:a11y`, and `npm run test:browser` (5
+Playwright) all pass.
+
+### P2P-8 — Phase 3.2 Web Push rulings (VAPID config, opt-in lifecycle, E2E simulation)
+
+**Date:** 2026-09-24
+
+**Ruling:** The observer PWA's Web Push delivery-client is delivered. The
+backend still only *registers* subscriptions (`push.rs`); delivery remains a
+future worker. Decisions:
+
+1. **The VAPID *public* key is deployment config, not code.** The browser
+   needs the public key to create a subscription; the PWA reads
+   `VITE_VAPID_PUBLIC_KEY` (env). When unset, the Push notifications card
+   reports `unconfigured` and offers no subscribe button — the UI never
+   fabricates a key. The private key belongs to whatever will deliver
+   (future worker); the PWA never needs it, so it is never configured in
+   `mobile-pwa`.
+2. **Opt-in is a per-view, server-row lifecycle, persisted locally.** The
+   card lives on the Notifications view. `enable` asks permission, creates
+   the browser subscription, `POST`s it, and stores the server's
+   subscription id + endpoint under `onyx_observer_push` (localStorage) so a
+   reload reconciles to `subscribed` without re-POSTing. `disable` DELETE's
+   the stored row (best-effort server, always local unsubscribe) and clears
+   the local record. Because the server-scoped `DELETE` requires the caller's
+   own id, a stale local id from a previous session/user cannot touch another
+   row.
+3. **The service worker already owns show-and-route; the PWA only feeds it.**
+   `public/sw.js` displays `push` payloads `{title, message, url}` and
+   routes `notificationclick` to `url` via the controlling window client.
+   The page-side module (`src/push/push.ts`) never constructs notifications.
+4. **E2E uses a deterministic `PushManager` stub and in-worker event
+   dispatch, not the real FCM endpoint.** `push.spec.ts` stubs
+   `PushManager.subscribe/getSubscription` to return fixed VAPID keys and an
+   endpoint, so the flaky/network-independent opt-in is assertable; the
+   delivery path is proven by dispatching a genuine `PushEvent` into the
+   live controlling service worker and asserting the shown notification then
+   the `notificationclick` navigation. Enabling the SW under Vite dev
+   requires `VITE_ENABLE_SW_DEV=true`, which Playwright's `webServer` env
+   sets (together with a generated P-256 test public key). This keeps
+   service-worker-free dev defaulting unchanged.
+
+**Evidence:** `mobile-pwa/src/push/push.ts`, `mobile-pwa/src/stores/
+pushStore.ts`, `mobile-pwa/src/components/PushNotificationsCard.tsx`,
+`mobile-pwa/src/pages/Notifications/index.tsx`, `scripts/sw.template.js`,
+`mobile-pwa/playwright.config.ts` (webServer env), `mobile-pwa/tests/browser/
+push.spec.ts`, `crates/bins/api-server/src/routes/push.rs` (registration-only,
+no delivery worker). Gates: `type-check`, `lint`, `build`, `npm run test`
+(38 Vitest), `npm run test:a11y`, `npm run test:browser` (7 Playwright) pass.
+### P2P-9 — Phase 5 PWA acceptance rulings (offline-first shell, test env, security baseline)
+
+**Date:** 2026-09-24
+
+PWA-acceptance work for the observer PWA (Phase 5.1/5.2/5.3). The resulting
+decisions:
+
+1. **The shell is pre-cached at build time, not install time.** Hashed asset
+   names are unknowable to a static worker, so `scripts/render-sw.mjs` reads
+   `dist/.vite/manifest.json` (from `build.manifest:true`) and stamps the URL
+   list into `dist/sw.js` via the `__PRECACHE_URLS__` template slot. Dev's
+   `public/sw.js` (rendered by `postinstall`) keeps an empty list — runtime
+   caching covers the dev flow, and `VITE_ENABLE_SW_DEV=true` still gates it.
+2. **Navigations get `networkThenShell`; `/api` stays `networkFirst`; cached
+   responses are sanitized.** A SPA cannot render a deep link offline unless
+   the navigation falls back to the cached `/`, so the fetch handler routes
+   `request.mode === 'navigate'` to network-first-then-shell. Live projections
+   under `/api` keep network-first-with-stale-fallback (offline data must
+   never beat fresh data). All cache stores strip `Vary` and
+   `access-control-allow-origin` because Cache Storage matching honors
+   `Vary` — a host stamping `Vary: Origin` (vite preview does) would
+   otherwise silently break every offline hit. The `activity`/Freshness UIX
+   treat stale snapshots as read-only-as-before.
+3. **The offline acceptance build is same-origin.** The PWA gateway default
+   (`VITE_API_BASE` unset) is `http://127.0.0.1:3000`; the SW's fetch handler
+   only serves same-origin requests, so an offline hit on the API never
+   matches a cached entry unless the test build points at the same origin. The
+   offline suite therefore bakes `VITE_API_BASE=http://localhost:5175` into
+   its build (`pretest:browser:offline`) and runs a `vite preview` webServer on
+   `:5175` (`playwright.offline.config.ts`). The seeded `mission.list`
+   envelope is deterministic because the init script fixes
+   `crypto.randomUUID`, making the SW cache key match the app's request URL.
+4. **Offline shell acceptance is automated against the PRODUCTION build.**
+   `tests/offline/offline.spec.ts` installs the real `dist/sw.js`
+   (precache present), verifies `/` is cached, goes `context.setOffline(true)`,
+   reloads, and asserts the shell, the offline banner, and the cached snapshot
+   render — proving "SW cache serves index.html" in CI without a real iPhone.
+   Real-iphone Home Screen launch, `notificationclick` focus on iOS, and
+   end-to-end push delivery remain hardware/backend-gated.
+5. **Security baseline: 0 npm audit findings.** `react-router-dom` jumped
+   6.30→7.18 because v6 has *no* patched release for GHSA-wrjc-x8rr-h8h6
+   (open redirect via backslash) and GHSA-337j-9hxr-rhxg (SSR
+   `deserializeErrors` constructor injection); the PWA renders client-side
+   only, so neither is exploitable here, but clearing the audit beats arguing
+   about it. `vite` 5→7 and `vitest` 1→4 cleared the esbuild/vite-node chain
+   (high esbuild, critical vitest advisories) and required an explicit
+   `@types/node` devDependency (Vitest 4 no longer brings ambient `Buffer`
+   globals) plus the `tests/offline/**` vitest exclude (Playwright specs live
+   under `tests/` and jsdom must not collect them).
+
+**Evidence:** `mobile-pwa/scripts/render-sw.mjs`, `scripts/sw.template.js`
+(precache + `networkThenShell` + `sanitizeForCache`),
+`mobile-pwa/vite.config.ts`, `mobile-pwa/playwright.offline.config.ts`,
+`mobile-pwa/tests/offline/offline.spec.ts`, `src/hooks/useOnline.ts`,
+`src/components/OfflineBanner.tsx`, `public/screen.html`, `index.html`,
+`package.json` (audit-clean lockfile + test scripts). Gates: `type-check`,
+`lint`, `build` (writes `dist/sw.js`), 38 Vitest, 4 a11y, 7 Playwright dev
+suite, 1 Playwright offline (prod) suite — all pass.

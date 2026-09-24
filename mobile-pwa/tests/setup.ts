@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 afterEach(() => {
   sessionStorage.clear();
@@ -24,3 +24,5 @@ if (!globalThis.crypto?.randomUUID) {
     value: { randomUUID: () => '00000000-0000-4000-8000-000000000001' },
   });
 }
+
+HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as unknown as typeof HTMLCanvasElement.prototype.getContext;

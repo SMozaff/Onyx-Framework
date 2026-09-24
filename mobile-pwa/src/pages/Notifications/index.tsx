@@ -1,6 +1,7 @@
 import { StatusBadge } from '../../components/StatusBadge';
 import { Freshness } from '../../components/Freshness';
 import { ProjectionStatePanel } from '../../components/ProjectionStatePanel';
+import { PushNotificationsCard } from '../../components/PushNotificationsCard';
 import { deriveProjectionState } from '../../components/ProjectionState';
 import { useObserverQuery } from '../../hooks/useQuery';
 import type { NotificationProjection } from '../../types/query';
@@ -35,6 +36,8 @@ export function NotificationsPage() {
       {state.kind === 'stale' && (
         <ProjectionStatePanel resource="Notifications" state={state} compact />
       )}
+
+      <PushNotificationsCard />
 
       {notifications.length > 0 && (
         <>

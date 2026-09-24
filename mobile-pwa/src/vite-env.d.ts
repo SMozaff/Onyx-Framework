@@ -3,6 +3,7 @@
 interface ImportMetaEnv {
   readonly VITE_API_BASE?: string;
   readonly VITE_ENABLE_SW_DEV?: string;
+  readonly VITE_VAPID_PUBLIC_KEY?: string;
 }
 
 interface ImportMeta {

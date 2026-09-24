@@ -13,6 +13,7 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -26,6 +27,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: './tests/setup.ts',
+    exclude: ['tests/browser/**', 'tests/offline/**', 'node_modules/**', 'dist/**'],
     css: true,
     passWithNoTests: true,
     coverage: { provider: 'v8', reporter: ['text', 'json-summary'] },
