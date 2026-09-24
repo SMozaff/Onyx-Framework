@@ -105,6 +105,16 @@ The gateway must not contain a generic mutation helper unless that helper is str
 - `query_type` values are the dotted backend names (`dashboard.summary`,
   `mission.list`, `approval.list`, …) — see the inventory below; unknown types
   return empty results, never errors.
+- **Phase 2.3/2.5 observer shell (2026-09-24):** views at `/dashboard`,
+  `/missions`, `/mission/:id`, `/tasks`, `/task/:id`, `/notifications`,
+  `/approvals`, `/reports` and `/files/:contentHash`. Read-only by absence:
+  no acknowledge/approve/reject/transition surface exists. The `getEvidence`
+  method is realized by the Reports page (`report.detail` attachment
+  references); `getAuditView` by the timeline on Mission detail
+  (`timeline.list {subject_id}`); `getHierarchyView` is available via
+  `GET /api/users/hierarchy` (authenticated, not admin-gated) with no page
+  yet; `getFileMetadata` and the file *listing* wait on Phase 3.1 (see the
+  Phase 1.2 deliverables note below). See DECISIONS P2P-6.
 
 ## Supported read-query inventory
 

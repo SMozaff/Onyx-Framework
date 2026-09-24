@@ -2408,3 +2408,41 @@ type-check`, `npm run lint`, `npm run build`, `npm run test` all pass in
 `mobile-pwa/`; a `vite preview` smoke test served `/`, `/manifest.webmanifest`
 and `/sw.js` with HTTP 200.
 
+### P2P-6 — Phase 2.3/2.5 observer shell rulings (view-only by absence, evidence/audit maps)
+
+**Date:** 2026-09-24
+
+**Ruling:** The Phase 2.3 observer shell ships every plan-listed view that has
+live backend data; two plan views are deferred because their backend does not
+exist yet, and the contract surface is mapped to real endpoints (Phase 2.5):
+
+1. **View-only is held by absence, not by disabling.** The observer PWA contains
+   no acknowledge/approve/reject/transition mutations at all — there are no
+   `useCommand`-style hooks and no mutation helpers in the gateway. The
+   Notifications view cannot acknowledge and the Approvals view renders
+   decisions as read-only status, even when `web_action_permitted` is true.
+2. **`getEvidence` is folded into the Reports page.** There is no
+   id-addressable evidence record or `evidence.detail` query; evidence exists
+   only as `{label, file_name}` attachment references on `report.detail`
+   projections. `/reports` surfaces those references view-only (web-ui parity),
+   and a dedicated `EvidenceView` waits on a backend evidence query.
+3. **`getAuditView` is backed by the timeline projection.** `timeline.list
+   {subject_id}` is the state-transition timeline; the Mission detail renders
+   it. There is no full audit-log query in `query_handler.rs`.
+4. **`FileList` deferred to Phase 3.1.** The content-addressed `downloadFile`
+   route works (Phase 1.2) and `/files/:contentHash` renders a working
+   download — but there is no FileAsset listing, so there is no `/files` index
+   view. `/reports` evidence references are `file_name`s, not `content_hash`es,
+   so reports cannot yet hyperlink into the file view.
+5. **`getHierarchyView` is live but unpaged.** `GET /api/users/hierarchy`
+   (`admin.rs::list_hierarchy_users`) is authenticated, same-organization, and
+   deliberately not admin-gated, so observers may read the reporting tree — but
+   no Phase 2.3 view consumes it (none of the plan views need it).
+
+**Evidence:** `mobile-pwa/src/pages/{Notifications,Approvals,Reports,Missions/MissionDetail,Files/FileDetail}`,
+`mobile-pwa/src/routes/index.tsx`, `crates/bins/api-server/src/routes/admin.rs:704-715`
+(hierarchy route doc: authenticated, not admin-gated), `query_handler.rs`
+(`report.detail` maps to the `report` aggregate; `timeline.list` to `timeline`),
+MIGRATION_PLAN Phase 2.3/2.5 status blocks. Gates: `type-check`, `lint`,
+`build`, and `npm run test` (15 unit tests) all pass.
+

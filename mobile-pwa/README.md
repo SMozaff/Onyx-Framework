@@ -4,10 +4,11 @@ Read-only ObserverClient for the `mobile_observer` client class, per
 `docs/mobile-migration/MIGRATION_PLAN.md` Phase 2 and the frozen
 `docs/mobile-migration/pwa-observer-contract.md`.
 
-> **Status: Phase 2 scaffold.** Project structure, build stack and the
-> `ObserverHttpGateway` (`src/api/onyx.ts`) are in place. The Phase 2.3
-> view components, Phase 2.5 read-endpoint alignment and Phase 2.6 tests
-> land in later passes.
+> **Status: Phase 2 foundation + observer shell.** Project structure, build
+> stack, `ObserverHttpGateway` (`src/api/onyx.ts`) and the Phase 2.3 observer
+> views (Dashboard, Missions, Tasks, Notifications, Approvals, Reports,
+> FileDetail) are in place. Phase 2.6 (component/a11y/E2E tests), Phase 3
+> (files listing + Web Push delivery) and Phase 4/5 land in later passes.
 
 ## What this client is
 
@@ -43,13 +44,14 @@ npm run test:browser # playwright test
 ```text
 src/
   api/       axio client + ObserverHttpGateway (onyx.ts)
-  components/ shared widgets (per-view components land in Phase 2.3)
-  hooks/     useAuth, useOnyxQuery
+  components/ StatusBadge, Freshness, ProjectionState(+Panel), Layout
+  hooks/     useAuth, useObserverQuery
   lib/       pwa.ts (manifest/service-worker registration)
-  pages/     Login + Dashboard scaffold; remaining views in Phase 2.3
+  pages/     Dashboard, Missions(+detail), Tasks(+detail), Notifications,
+             Approvals, Reports, Files/FileDetail, Login, NotFound
   routes/    ObserverClient route table (paths frozen here)
   stores/    Zustand auth store (session tokens, sessionStorage only)
-  utils/     auth, error mapping, push-key validation
+  utils/     auth, error mapping, push-key/hash validation
   types/     query projections, push payloads, API envelope types
 public/
   manifest.webmanifest

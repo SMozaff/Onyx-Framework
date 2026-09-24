@@ -1,13 +1,14 @@
-import { Outlet, Link } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
 
-const NAV_ITEMS: Array<{ to: string; label: string; ready: boolean }> = [
-  { to: '/', label: 'Dashboard', ready: true },
-  { to: '/missions', label: 'Missions', ready: false },
-  { to: '/tasks', label: 'Tasks', ready: false },
-  { to: '/notifications', label: 'Notifications', ready: false },
-  { to: '/approvals', label: 'Approvals', ready: false },
+const NAV_ITEMS = [
+  { to: '/dashboard', label: 'Dashboard' },
+  { to: '/missions', label: 'Missions' },
+  { to: '/tasks', label: 'Tasks' },
+  { to: '/notifications', label: 'Notifications' },
+  { to: '/approvals', label: 'Approvals' },
+  { to: '/reports', label: 'Reports' },
 ];
 
 export function ObserverLayout() {
@@ -34,21 +35,22 @@ export function ObserverLayout() {
             </button>
           </div>
         </div>
-        <nav className="mx-auto max-w-3xl overflow-x-auto px-4 pb-2">
+        <nav className="mx-auto max-w-3xl overflow-x-auto px-4 pb-2" aria-label="Primary">
           <ul className="flex gap-4 text-sm">
-            {NAV_ITEMS.map((item) =>
-              item.ready ? (
-                <li key={item.to}>
-                  <Link className="text-white underline-offset-4 hover:underline" to={item.to}>
-                    {item.label}
-                  </Link>
-                </li>
-              ) : (
-                <li key={item.to} className="cursor-not-allowed text-slate-500" title="Phase 2.3">
+            {NAV_ITEMS.map((item) => (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `whitespace-nowrap underline-offset-4 hover:underline ${
+                      isActive ? 'font-semibold text-white' : 'text-slate-300'
+                    }`
+                  }
+                >
                   {item.label}
-                </li>
-              ),
-            )}
+                </NavLink>
+              </li>
+            ))}
           </ul>
         </nav>
       </header>

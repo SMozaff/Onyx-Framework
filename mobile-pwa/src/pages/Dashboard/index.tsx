@@ -1,5 +1,4 @@
-import { observerApi } from '../../api/onyx';
-import { observerQueryKeys, useObserverQuery } from '../../hooks/useQuery';
+import { useObserverQuery } from '../../hooks/useQuery';
 import type {
   DashboardProjection,
   MissionSummary,
@@ -16,51 +15,44 @@ function StatCard({ label, value }: { label: string; value: number }) {
 }
 
 export function DashboardPage() {
-  const dashboardQuery = useObserverQuery<DashboardProjection>(
-    observerQueryKeys.dashboard(),
-    async () => observerApi.query<DashboardProjection>('dashboard.summary'),
-  );
+  const dashboard = useObserverQuery<DashboardProjection>('dashboard.summary');
+  const missions = useObserverQuery<MissionSummary>('mission.list', {}, { select(data) { return { ...data, data: data.data.slice(0, 5) }; } });
+  const approvals = useObserverQuery<ApprovalProjection>('approval.list', { status: 'pending' }, { select(data) { return { ...data, data: data.data.slice(0, 3) }; } });
 
-  const missionsQuery = useObserverQuery<MissionSummary>(
-    observerQueryKeys.missions(),
-    async () => observerApi.query<MissionSummary>('mission.list', {}, { limit: 5 }),
-  );
-
-  const approvalsQuery = useObserverQuery<ApprovalProjection>(
-    observerQueryKeys.approvals(),
-    async () =>
-      observerApi.query<ApprovalProjection>('approval.list', { status: 'pending' }, { limit: 3 }),
-  );
-
-  const dashboard = dashboardQuery.data?.data?.[0];
-  const missions = missionsQuery.data?.data ?? [];
-  const approvals = approvalsQuery.data?.data ?? [];
+  const summary = dashboard.data?.data?.[0];
+  const missionList = missions.data?.data ?? [];
+  const approvalList = approvals.data?.data ?? [];
+  const activity = summary?.activity ?? [];
 
   return (
     <div className="space-y-6">
-      <section>
-        <h2 className="mb-3 text-lg font-semibold text-slate-900">Overview</h2>
+      <header>
+        <p className="text-xs uppercase tracking-wide text-slate-500">Read-only projection</p>
+        <h2 className="text-lg font-semibold text-slate-900">Dashboard</h2>
+      </header>
+
+      <section aria-label="Overview">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Missions" value={dashboard?.missions ?? missions.length} />
-          <StatCard label="Active" value={dashboard?.active_missions ?? 0} />
-          <StatCard label="Unread" value={dashboard?.unread_notifications ?? 0} />
-          <StatCard label="Approvals" value={dashboard?.pending_approvals ?? approvals.length} />
+          <StatCard label="Missions" value={summary?.missions ?? missionList.length} />
+          <StatCard label="Active" value={summary?.active_missions ?? 0} />
+          <StatCard label="Unread" value={summary?.unread_notifications ?? 0} />
+          <StatCard label="Approvals" value={summary?.pending_approvals ?? approvalList.length} />
         </div>
       </section>
 
-      <section>
-        <h2 className="mb-3 text-lg font-semibold text-slate-900">Recent missions</h2>
-        {missionsQuery.isPending ? (
+      <section aria-label="Recent missions">
+        <h3 className="mb-3 text-base font-semibold text-slate-900">Recent missions</h3>
+        {missions.isPending ? (
           <p className="text-sm text-slate-500">Loading…</p>
-        ) : missions.length === 0 ? (
+        ) : missionList.length === 0 ? (
           <p className="text-sm text-slate-500">No missions visible to your account.</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-            {missions.map((mission) => (
+            {missionList.map((mission) => (
               <li key={mission.id} className="flex items-center justify-between px-4 py-3">
                 <div>
                   <p className="font-medium text-slate-900">{mission.name}</p>
-                  <p className="text-xs text-slate-500">{mission.status}</p>
+                  <p className="text-xs text-slate-500">{mission.owner}</p>
                 </div>
                 <span className="text-xs text-slate-500">{mission.progress}%</span>
               </li>
@@ -69,28 +61,40 @@ export function DashboardPage() {
         )}
       </section>
 
-      <section>
-        <h2 className="mb-3 text-lg font-semibold text-slate-900">Pending approvals</h2>
-        {approvalsQuery.isPending ? (
-          <p className="text-sm text-slate-500">Loading…</p>
-        ) : approvals.length === 0 ? (
-          <p className="text-sm text-slate-500">No pending approvals.</p>
+      <section aria-label="Recent activity">
+        <h3 className="mb-3 text-base font-semibold text-slate-900">Recent activity</h3>
+        {activity.length === 0 ? (
+          <p className="text-sm text-slate-500">No activity recorded yet.</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-            {approvals.map((approval) => (
-              <li key={approval.id} className="flex items-center justify-between px-4 py-3">
+            {activity.map((item) => (
+              <li key={`${item.type}-${item.id}`} className="flex items-center justify-between px-4 py-3">
                 <div>
-                  <p className="font-medium text-slate-900">{approval.title}</p>
-                  <p className="text-xs text-slate-500">Requested by {approval.requested_by}</p>
+                  <p className="font-medium text-slate-900">{item.title}</p>
+                  <p className="text-xs text-slate-500">{item.type}</p>
                 </div>
                 <span className="text-xs text-slate-500">
-                  {approval.web_action_permitted ? 'decisionable' : 'read-only'}
+                  {new Date(item.updated_at).toLocaleString()}
                 </span>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {approvalList.length > 0 ? (
+        <section aria-label="Pending approvals">
+          <h3 className="mb-3 text-base font-semibold text-slate-900">Pending approvals</h3>
+          <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+            {approvalList.map((approval) => (
+              <li key={approval.id} className="px-4 py-3">
+                <p className="font-medium text-slate-900">{approval.title}</p>
+                <p className="text-xs text-slate-500">Requested by {approval.requested_by}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

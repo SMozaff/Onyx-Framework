@@ -146,12 +146,29 @@ serve-check all pass.
 
 ### Phase 2.3 — PWA shell architecture
 
-**Status: SCAFFOLDED — views pending.** So far: `LoginScreen` (functional,
-`client_type: "mobile_observer"`), `ObserverLayout` (header + top nav with
-disabled placeholders), `DashboardView` (WIP using `GetDashboard`/
-`ListMissions`/`ListNotifications`/`ListPendingApprovals` queries), 404
-page, and the route table in `src/routes/index.tsx`. The full view list
-below is the remaining work of this phase.
+**Status: DONE (2026-09-24), with two explicitly deferred views.** Delivered:
+`LoginScreen` (`/login`, always `client_type: "mobile_observer"`),
+`ObserverLayout` (`/`, header + top nav to all six live views),
+`DashboardView` (`/dashboard`, `dashboard.summary` + summary cards + recent
+mission list + recent activity), `MissionsList` (`/missions`, `mission.list`),
+`MissionDetail` (`/mission/:id`, `mission.detail {id}` + `timeline.list
+{subject_id}`), `TasksList` (`/tasks`, `task.list`), `TaskDetail` (`/task/:id`,
+`task.detail {id}`), `ApprovalView` (`/approvals`, `approval.list` — view-only;
+no approve/reject path exists in the gateway), `NotificationsView`
+(`/notifications`, `notification.list` — read-only; no acknowledge surface),
+and `FileDetail` (`/files/:contentHash`, `downloadFile`). Deferred by
+declared backend gaps:
+- `EvidenceView` (`/evidence/:evidenceId`) — folded into the `Reports` page
+  (`/reports`, `report.detail`), mirroring web-ui: evidence is surfaced as
+  attachment references, not id-addressable records. A dedicated evidence view
+  needs an `evidence.detail` query the backend does not offer.
+- `FileList` (`/files`) — no FileAsset index exists (P2P-4 declares the
+  Phase 3.1 follow-up); a hash-addressed file is still reachable at
+  `/files/:contentHash`.
+
+All views consume `QueryEnvelope` responses via TanStack Query
+(`useObserverQuery(queryType, filters)`; web-ui-equivalent). Read-only is held
+by absence: there are no mutation buttons and no acknowledge/approve helpers.
 
 **ObserverClient surface (React components):**
 - `LoginScreen` (`/login`) — Same as Flutter `http_login_screen.dart`? Mirror.
@@ -198,7 +215,38 @@ export const onyxApi = {
 
 ### Phase 2.5 — Read endpoint alignment
 
-Compare with `mobile-core`’s read operations:
+**Status: DONE (2026-09-24).** Every contract ObserverClient method is mapped
+to a live backend surface (details below). The PWA can read every projection
+the backend offers to `mobile_observer`.
+
+Contract surface → backend (query types per `query_handler.rs`):
+
+| Contract method                                    | Backend                                                               | Status |
+| -------------------------------------------------- | --------------------------------------------------------------------- | ------ |
+| `authenticate` / `refreshSession` / `logout`        | `POST /api/auth/login` (`client_type: mobile_observer`) / `refresh` / `logout` | live |
+| `getDashboard`                                     | `dashboard.summary`                                                   | live |
+| `listMissions` / `getMission`                       | `mission.list` / `mission.detail {id}`                                | live |
+| `listTasks` / `getTask`                             | `task.list` / `task.detail {id}`                                      | live |
+| `listApprovalRequirements` / `getApprovalRequirement` | `approval.list` / `approval.list {id}` (no `approval.detail`)         | live |
+| `listNotifications`                                | `notification.list`                                                   | live |
+| `getEvidence`                                      | evidence refs inside `report.detail` (label + `file_name`)            | partial → Reports page |
+| `getAuditView`                                     | `timeline.list {subject_id}` (state-transition timeline)              | partial → MissionDetail |
+| `getHierarchyView`                                 | `GET /api/users/hierarchy` (authenticated, same-org, not admin-gated) | live; no page yet |
+| `getFileMetadata`                                  | none (hash download returns bytes only)                               | Phase 3.1 |
+| `downloadFile`                                     | `GET /api/files/:content_hash` (`can_download_files`)                 | live |
+| `registerPushSubscription` / `unregisterPushSubscription` | `POST/DELETE /api/push/subscriptions...` (`can_read_notifications`)   | live (UI = Phase 3.2) |
+
+Notable maps and gaps: `getEvidence` is not id-addressable — evidence exists
+only as attachment references on report projections, so the PWA surfaces them
+on `/reports` as view-only references (web-ui parity). `getAuditView` is backed
+by the timeline projection; there is no full audit-log query. `getFileMetadata`
+has no server-side source (a hash resolves to bytes, nothing more) — declared
+Phase 3.1 with the FileAsset index. Profile reads (`/api/profiles`,
+`/api/profiles/:owner_id`) are available to the observer but not yet wired into
+a page. Unknown query types return empty results, never errors (contract §read
+inventory).
+
+Compare with `mobile-core`'s read operations:
 - `mobile_core_list_aggregates` → Dashboard, Missions, Tasks, Notifications, Approvals? (Approval may need custom query)
 - `mobile_core_execute_query` → custom query for missing projection (maybe used for approval requirements?)
 - `mobile_core_get_sync_status` → sync status widget
@@ -207,6 +255,12 @@ Compare with `mobile-core`’s read operations:
 Ensure ObserverClient can read all projections the backend offers with `mobile_observer` capability.
 
 ### Phase 2.6 — Observer PWA tests
+
+**Status: IN PROGRESS.** Unit tests for the read-only gateways landed with
+Phase 2.3 (`tests/unit/validation.test.ts`, `envelope.test.ts`,
+`errorHandler.test.ts` — 15 tests, `npm run test` green). Component/hook
+tests, axe-core a11y runs, and Playwright E2E (login, read projections,
+mutation denials, file download) remain.
 
 - Unit tests: Vitest component tests, hook tests
 - a11y tests: Playwright + axe-core; ensure focus order, screenreader support
