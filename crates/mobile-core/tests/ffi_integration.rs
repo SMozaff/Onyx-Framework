@@ -583,7 +583,10 @@ fn subscribe_events_delivers_committed_decision_events_to_callback_context() {
     let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let context = Arc::into_raw(captured.clone()) as *mut std::os::raw::c_void;
 
-    extern "C" fn push_to_context(context: *mut std::os::raw::c_void, json: *const std::ffi::c_char) {
+    extern "C" fn push_to_context(
+        context: *mut std::os::raw::c_void,
+        json: *const std::ffi::c_char,
+    ) {
         if json.is_null() {
             return;
         }
@@ -689,7 +692,10 @@ fn subscribe_events_delivers_committed_decision_events_to_callback_context() {
         }
         std::thread::sleep(std::time::Duration::from_millis(150));
     }
-    assert!(found, "no task.event.0 envelope was delivered to the callback within 20s");
+    assert!(
+        found,
+        "no task.event.0 envelope was delivered to the callback within 20s"
+    );
 
     unsafe { mobile_core_unsubscribe(sub) };
     // Let the aborted task drain before reclaiming `context` (the task
