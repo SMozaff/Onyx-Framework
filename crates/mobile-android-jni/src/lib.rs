@@ -683,10 +683,6 @@ struct JavaEventForwarder {
     active: AtomicBool,
 }
 
-const KOTLIN_EVENT_CALLBACK_CLASS: &str = "com/onyx/bridge/EventCallback";
-const KOTLIN_EVENT_CALLBACK_METHOD: &str = "onEvent";
-const KOTLIN_EVENT_CALLBACK_SIGNATURE: &str = "(Ljava/lang/String;)V";
-
 impl JavaEventForwarder {
     /// Captures the JVM and builds a `GlobalRef` for the caller's
     /// `EventCallback` instance. Returns `None` on any JNI-level failure
@@ -696,7 +692,7 @@ impl JavaEventForwarder {
             return None;
         }
         let vm = env.get_java_vm().ok()?;
-        let class = env.find_class(KOTLIN_EVENT_CALLBACK_CLASS).ok()?;
+        let class = env.find_class(jni_str!("com/onyx/bridge/EventCallback")).ok()?;
         // Resolve the method now so delivery (on another thread) never
         // needs to re-resolve it — fail fast on a typo'd name/signature.
         if env
