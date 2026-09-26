@@ -692,7 +692,9 @@ impl JavaEventForwarder {
             return None;
         }
         let vm = env.get_java_vm().ok()?;
-        let class = env.find_class(jni_str!("com/onyx/bridge/EventCallback")).ok()?;
+        let class = env
+            .find_class(jni_str!("com/onyx/bridge/EventCallback"))
+            .ok()?;
         // Resolve the method now so delivery (on another thread) never
         // needs to re-resolve it — fail fast on a typo'd name/signature.
         if env
