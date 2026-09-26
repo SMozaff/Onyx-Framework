@@ -83,7 +83,6 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-
 use jni::errors::{Error as JniError, LogErrorAndDefault};
 use jni::objects::{Global, JClass, JObject, JString};
 use jni::sys::{jlong, jstring};
