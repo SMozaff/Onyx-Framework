@@ -12,7 +12,7 @@ use mobile_core::{
 };
 use platform_kernel::{ObjectId, OrganizationId};
 use std::ffi::{CStr, CString};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 fn test_db_path() -> String {
     // A literal "/tmp/..." only resolves for a native Windows binary if
@@ -580,8 +580,11 @@ fn subscribe_events_delivers_committed_decision_events_to_callback_context() {
     // userdata pointer from mobile_core_subscribe_events arrives back in
     // the callback untouched (a JNI adapter depends on exactly this to
     // keep its own forwarder alive).
-    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let context = Arc::into_raw(captured.clone()) as *mut std::os::raw::c_void;
+    // `mobile_core_unsubscribe` aborts the async forwarding task but does
+    // not synchronously join it. Keep the callback context process-live so
+    // a callback already in flight cannot dereference freed memory.
+    let captured: &'static Mutex<Vec<String>> = Box::leak(Box::new(Mutex::new(Vec::new())));
+    let context = captured as *const Mutex<Vec<String>> as *mut std::os::raw::c_void;
 
     extern "C" fn push_to_context(
         context: *mut std::os::raw::c_void,
@@ -595,9 +598,9 @@ fn subscribe_events_delivers_committed_decision_events_to_callback_context() {
         let json_cstr = unsafe { CStr::from_ptr(json) };
         let owned = json_cstr.to_string_lossy().into_owned();
         unsafe { mobile_core_free_string(json as *mut std::ffi::c_char) };
-        // SAFETY: context was leaked from an Arc::into_raw of the same
-        // type, still alive for the subscription's lifetime.
-        let captured = unsafe { &*(context as *const Arc<Mutex<Vec<String>>>) };
+        // SAFETY: the test deliberately keeps this context process-live,
+        // so it remains valid until the forwarding task has terminated.
+        let captured = unsafe { &*(context as *const Mutex<Vec<String>>) };
         if let Ok(mut list) = captured.lock() {
             list.push(owned);
         }
@@ -698,10 +701,8 @@ fn subscribe_events_delivers_committed_decision_events_to_callback_context() {
     );
 
     unsafe { mobile_core_unsubscribe(sub) };
-    // Let the aborted task drain before reclaiming `context` (the task
-    // may be mid-callback; abort does not join).
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    drop(unsafe { Arc::from_raw(context as *const Arc<Mutex<Vec<String>>>) });
+    // The callback context is intentionally leaked for the process lifetime
+    // because unsubscribe schedules task cancellation rather than joining it.
 
     unsafe { mobile_core_free(handle) };
 }
