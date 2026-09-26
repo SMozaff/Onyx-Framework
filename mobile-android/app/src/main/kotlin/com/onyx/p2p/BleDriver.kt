@@ -129,7 +129,7 @@ class BleDriver(private val context: Context) {
             addCharacteristic(txCharacteristic)
         }
         gatt.addService(server)
-        advertiser.advertise(
+        advertiser.startAdvertising(
             AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
