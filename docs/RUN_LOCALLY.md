@@ -159,13 +159,22 @@ it eliminates the credential entirely.
 
 ## 7. Known-broken things NOT addressed yet
 
-These are still open audit findings, deliberately untouched so far:
+Updated status of these audit findings — most have since been resolved by the
+H1-H7 hardening pass documented in `DECISIONS.md`; only H-04 is still open:
 
-* **Callers still using `operator`/`onyx`** — `tests/end-to-end/approval_workflow.rs`,
-  `tests/integration/log_redaction_tests.rs`, `web-ui/tests/e2e/real-server.test.ts`,
-  `web-ui/tests/mocks/server.ts`, and the login page's prefilled username. These
-  need updating to bootstrap a user first.
-* **H-02** token revocation is still an in-memory `HashSet` — logout does not work
-  across replicas.
-* **H-03** CORS is still `allow_origin(Any)`.
-* **H-04** `sqlx 0.7.4`, `rustls 0.21` etc. still need upgrading.
+* ~~**Callers still using `operator`/`onyx`**~~ — resolved (audit fix H-01):
+  `tests/end-to-end/approval_workflow.rs`, `web-ui/tests/mocks/server.ts`,
+  and the Login page's prefilled username all bootstrap a real user instead.
+  `tests/integration/log_redaction_tests.rs`'s `"operator"` string was never a
+  login call in the first place -- it's an arbitrary field value in a
+  log-redaction unit test.
+* ~~**H-02** token revocation was an in-memory `HashSet`~~ -- resolved.
+  Replaced with a shared, durable `TokenRevocationStore` (Postgres-backed,
+  in-memory only as a pure-SQLite single-instance dev fallback); a revocation
+  on one replica is now visible to every other replica reading the same
+  store.
+* ~~**H-03** CORS was `allow_origin(Any)`~~ -- resolved. Replaced with an
+  explicit, env-driven allow-list (`ONYX_CORS_ALLOWED_ORIGINS`), required in
+  production.
+* **H-04** `sqlx 0.7.4` and two coexisting `rustls` versions (`0.21.12` and
+  `0.23.43`, per `Cargo.lock`) still need upgrading -- not yet addressed.

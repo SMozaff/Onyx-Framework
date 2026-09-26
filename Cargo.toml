@@ -33,6 +33,7 @@ members = [
     "crates/bins/desktop-shell",
     "crates/bins/admin-shell",
     "crates/mobile-core",
+    "crates/mobile-android-jni",
     "crates/kernel/platform-contracts-ext",
     "crates/synchronization/crdt",
     "crates/synchronization/synchronization-domain",
@@ -131,6 +132,10 @@ anyhow = "1"
 quinn = "0.10"
 rustls = "0.21"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json", "multipart"] }
+url = "2"
+# WebPush delivery (RFC 8291/8292): ECDH P-256, AES-128-GCM, ES256 VAPID JWT,
+# and RFC 6090 key import — supplied by BoringSSL-derived `ring`.
+ring = "0.17"
 tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots"] }
 libc = "0.2"
 objc = "0.2"

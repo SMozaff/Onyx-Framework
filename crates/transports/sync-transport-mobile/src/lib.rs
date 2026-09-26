@@ -16,18 +16,21 @@
 //! structure and non-platform-specific logic is checked), while still
 //! compiling for real on `aarch64-apple-ios` / `aarch64-linux-android` per
 //! the Quick Start cross-compile commands in §12. See DECISIONS.md §17.
+//!
+//! **Android P2P rectified (Phase 4.1, DECISIONS P2P-1):** this crate's
+//! former `android_wifi_direct` / `android_ble` modules allocated phantom
+//! transport handles and performed no real radio work. Per P2P-1 the
+//! Android transport moved to Kotlin-owned `WifiP2pManager` /
+//! `BluetoothLeScanner` drivers plus Rust-owned framing/encryption/
+//! handshake in `mobile-android-jni`'s `p2p` module — so those placeholder
+//! exports were **deleted, not extended**. This crate now carries only the
+//! iOS native modules and the host stand-in below.
 
 #[cfg(target_os = "ios")]
 pub mod ios_multipeer;
 
 #[cfg(target_os = "ios")]
 pub mod ios_ble;
-
-#[cfg(target_os = "android")]
-pub mod android_wifi_direct;
-
-#[cfg(target_os = "android")]
-pub mod android_ble;
 
 /// Non-platform-specific stand-ins compiled everywhere (including Linux
 /// CI), so the crate has *something* to build/test on any host. These are

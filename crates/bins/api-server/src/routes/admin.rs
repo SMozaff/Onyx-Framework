@@ -31,7 +31,7 @@ use security_application::{NewUser, UserClass, UserRecord, UserStoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{authenticate_headers, ApiError, ApiState, ORGANIZATION_ID};
+use super::{authenticate_headers, ApiError, ApiState, AuthenticatedUser, ORGANIZATION_ID};
 
 /// Header carrying the one-time bootstrap token.
 pub const BOOTSTRAP_TOKEN_HEADER: &str = "x-onyx-bootstrap-token";
@@ -176,6 +176,24 @@ fn store_error(error: UserStoreError) -> ApiError {
     }
 }
 
+/// H-02: `deactivate_user` and `set_user_password` both need to
+/// invalidate every session a user currently has, not just stop future
+/// logins — a store failure here must be a real 500, not silently
+/// swallowed, since a caller relying on "deactivated means logged out
+/// everywhere" needs to know if that guarantee didn't actually take
+/// effect.
+fn revocation_error(error: security_application::TokenRevocationError) -> ApiError {
+    tracing::error!(error = %error, "token revocation store failure");
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "TOKEN_REVOCATION_STORE_UNAVAILABLE",
+        "INFRASTRUCTURE",
+        "TRANSIENT",
+        correlation(),
+        json!({}),
+    )
+}
+
 fn password_error(error: security_adapter::PasswordError) -> ApiError {
     match error {
         security_adapter::PasswordError::Policy(message) => ApiError::new(
@@ -258,10 +276,40 @@ pub(super) async fn require_class(
 /// profile requirement, 2026-08-13 — "access for modifications for
 /// admin"). Kept as one implementation rather than a second copy in
 /// `profiles.rs`.
+///
+/// Shared with [`require_admin_mutation`] below via
+/// [`authenticated_admin_candidate`] so both authenticate exactly once
+/// per request rather than duplicating `authenticate_headers` +
+/// `find_by_id`.
 pub(super) async fn require_admin(
     state: &ApiState,
     headers: &HeaderMap,
 ) -> Result<UserRecord, ApiError> {
+    let (_auth, user) = authenticated_admin_candidate(state, headers).await?;
+    require_active_admin(user)
+}
+
+/// Same as [`require_admin`], additionally enforcing H10/P1.4's
+/// `can_administer` client-capability ceiling. Used by the *mutation*
+/// admin routes only (user/mobile-access/profile/policy/legal-hold
+/// mutation) — deliberately not by `require_admin`'s existing read
+/// call sites (`list_users`, `get_mobile_access`), which stay untouched
+/// per this task's mutation-only scope (see `DECISIONS.md`'s H10
+/// entry's endpoint audit).
+pub(super) async fn require_admin_mutation(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<UserRecord, ApiError> {
+    let (auth, user) = authenticated_admin_candidate(state, headers).await?;
+    let user = require_active_admin(user)?;
+    super::client_type::require_capability(&auth, |c| c.can_administer, "administer")?;
+    Ok(user)
+}
+
+async fn authenticated_admin_candidate(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<(AuthenticatedUser, UserRecord), ApiError> {
     let auth = authenticate_headers(state, headers).await?;
     let user = state
         .user_store
@@ -269,6 +317,10 @@ pub(super) async fn require_admin(
         .await
         .map_err(store_error)?
         .ok_or_else(|| ApiError::unauthorized(correlation()))?;
+    Ok((auth, user))
+}
+
+fn require_active_admin(user: UserRecord) -> Result<UserRecord, ApiError> {
     if !user.is_active || !user.is_admin {
         // 403, not 404: the caller is authenticated, just not permitted.
         return Err(ApiError::new(
@@ -389,7 +441,7 @@ pub async fn create_user(
     headers: HeaderMap,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserDto>), ApiError> {
-    require_admin(&state, &headers).await?;
+    require_admin_mutation(&state, &headers).await?;
     let is_admin = payload.is_admin;
     let created = create_user_record(&state, payload, is_admin).await?;
     Ok((StatusCode::CREATED, Json(created)))
@@ -483,7 +535,7 @@ pub async fn set_manager(
     Path(user_id): Path<String>,
     Json(payload): Json<SetManagerRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin(&state, &headers).await?;
+    require_admin_mutation(&state, &headers).await?;
     state
         .user_store
         .set_manager(&user_id, payload.is_manager)
@@ -502,7 +554,7 @@ pub async fn set_class(
     Path(user_id): Path<String>,
     Json(payload): Json<SetClassRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin(&state, &headers).await?;
+    require_admin_mutation(&state, &headers).await?;
     let class = parse_class_field(payload.class.as_deref())?;
     state
         .user_store
@@ -554,7 +606,7 @@ pub async fn set_mobile_access(
     headers: HeaderMap,
     Json(payload): Json<SetMobileAccessRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let admin = require_admin(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     for class in &payload.allowed_classes {
         parse_class_field(Some(class.as_str()))?;
     }
@@ -577,7 +629,7 @@ pub async fn set_parent(
     Path(user_id): Path<String>,
     Json(payload): Json<SetParentRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin(&state, &headers).await?;
+    require_admin_mutation(&state, &headers).await?;
     state
         .user_store
         .set_parent(&user_id, payload.parent_user_id.as_deref())
@@ -689,7 +741,7 @@ pub async fn deactivate_user(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let admin = require_admin(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     // Guard against an admin locking the system out of itself.
     if admin.user_id == user_id {
         return Err(ApiError::new(
@@ -706,6 +758,18 @@ pub async fn deactivate_user(
         .set_active(&user_id, false)
         .await
         .map_err(store_error)?;
+    // H-02: deactivation must invalidate every session this user
+    // currently holds, not just block future logins — otherwise an
+    // already-issued access/refresh token pair keeps working for up to
+    // its full TTL after the account is deactivated. The server never
+    // tracked which individual tokens this user has outstanding, so a
+    // per-user watermark (any token issued before now) is how this is
+    // expressed — see security_application::ports::token_revocation.
+    state
+        .token_revocation_store
+        .revoke_all_for_user(&user_id, super::unix_seconds())
+        .await
+        .map_err(revocation_error)?;
     Ok(Json(json!({"success": true})))
 }
 
@@ -715,7 +779,7 @@ pub async fn activate_user(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin(&state, &headers).await?;
+    require_admin_mutation(&state, &headers).await?;
     state
         .user_store
         .set_active(&user_id, true)
@@ -731,7 +795,7 @@ pub async fn set_user_password(
     Path(user_id): Path<String>,
     Json(payload): Json<SetPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin(&state, &headers).await?;
+    require_admin_mutation(&state, &headers).await?;
     let hash = state
         .password_hasher
         .hash(&payload.password)
@@ -741,9 +805,15 @@ pub async fn set_user_password(
         .set_password_hash(&user_id, &hash)
         .await
         .map_err(store_error)?;
-    // NOTE: existing tokens for this user remain valid until they expire.
-    // Durable, cross-replica revocation is audit finding H-02 and is tracked
-    // separately; the in-memory revocation set cannot express "revoke all
-    // tokens for a user" across pods.
+    // H-02, closed: a password reset must invalidate every session this
+    // user currently holds -- otherwise a token issued before the reset
+    // (e.g. one an attacker who prompted the reset already had) keeps
+    // working for up to its full TTL regardless of the new password. See
+    // deactivate_user's identical reasoning just above.
+    state
+        .token_revocation_store
+        .revoke_all_for_user(&user_id, super::unix_seconds())
+        .await
+        .map_err(revocation_error)?;
     Ok(Json(json!({"success": true})))
 }

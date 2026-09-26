@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
-import { getServerAddress } from '../utils/serverAddress';
+import { getServerAddress, isSecureEnoughForProduction } from '../utils/serverAddress';
 
 /**
  * No longer a fixed value read once at module load. The server
@@ -15,7 +15,22 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  config.baseURL = getServerAddress();
+  const address = getServerAddress();
+  // H4(b) backstop: both connection-settings forms (Login's
+  // ConnectionSettings and Settings' ServerConnectionSettings) already
+  // refuse to *save* an insecure address, but this also covers an address
+  // saved by an older build before this check existed, or a value edited
+  // directly in localStorage — nothing reaches the network with
+  // credentials over an insecure link regardless of how the address got
+  // stored.
+  if (!isSecureEnoughForProduction(address)) {
+    return Promise.reject(
+      new Error(
+        `Refusing to send a request to ${address}: only https:// (or http://127.0.0.1) is allowed. Update the server address in Settings.`,
+      ),
+    );
+  }
+  config.baseURL = address;
   const token = useAuthStore.getState().accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;

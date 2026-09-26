@@ -97,8 +97,16 @@ for dockerfile in sorted((ROOT / "deploy/docker").glob("*.Dockerfile")):
     body = dockerfile.read_text(encoding="utf-8")
     check("FROM rust:1.97-slim AS builder" in body, f"wrong builder base: {dockerfile}")
     check("FROM debian:bookworm-slim" in body, f"wrong runtime base: {dockerfile}")
-    check("cargo generate-lockfile && cargo build --locked --release" in body,
-          f"locked Docker build does not refresh inherited stale lockfile: {dockerfile}")
+    # H5: previously required "cargo generate-lockfile && cargo build
+    # --locked --release" -- that pattern is self-defeating (regenerating
+    # the lockfile immediately before a --locked build means --locked can
+    # never catch real drift, since the lockfile was just freshly written).
+    # Now requires the corrected pattern: build --locked directly against
+    # the committed Cargo.lock, with no regeneration in between.
+    check("cargo build --locked --release" in body
+          and "cargo generate-lockfile" not in body,
+          f"Docker build must use --locked against the committed Cargo.lock, "
+          f"without regenerating it first: {dockerfile}")
     check("USER 10001" in body, f"runtime is not non-root: {dockerfile}")
 
 # Helm/Argo rollout contract.
@@ -264,9 +272,31 @@ check("subject-digest: ${{ steps.build.outputs.digest }}" in release_workflow,
 check("sbom-path:" in release_workflow, "SBOM attestation missing")
 check("find \"release/${VERSION}\" -type f" in release_script,
       "release checksums do not safely enumerate files")
-check("cargo metadata --locked --no-deps" in release_workflow
-      and "cargo generate-lockfile" in release_script,
-      "release workflow lockfile validation or release-script regeneration missing")
+# H5: this check paired a legitimate-looking gate with a buggy one, and
+# testing the "legitimate" half for real (deliberately making a workspace
+# dependency requirement unsatisfiable by the committed Cargo.lock, then
+# running the exact command below) found it was ALSO broken:
+# `cargo metadata --locked --no-deps` exits 0 even against a genuinely
+# incompatible manifest, because `--no-deps` skips full dependency
+# resolution entirely -- there is nothing left for `--locked` to check
+# against. `cargo metadata --locked` (no `--no-deps`) does perform full
+# resolution and correctly fails in the same test. Both release.yml (all
+# three build jobs) and release.sh are fixed to drop `--no-deps`; so is
+# ci.yml's own equivalent step and the separate Debug.yml workflow, which
+# had the identical broken pattern in three more places. The
+# `release_script` half of this check previously required
+# `cargo generate-lockfile` -- the same self-defeating bug fixed in the
+# Dockerfiles above (release.sh called it immediately before its own
+# `cargo build --locked --release`, silently rewriting the lockfile the
+# locked build then trusted) -- replaced with the corrected gate too.
+check("cargo metadata --locked" in release_workflow
+      and "cargo metadata --locked --no-deps" not in release_workflow
+      and "cargo metadata --locked" in release_script
+      and "cargo metadata --locked --no-deps" not in release_script
+      and "cargo generate-lockfile" not in release_script,
+      "release workflow/script lockfile validation missing, still uses "
+      "the ineffective --no-deps flag, or release script still "
+      "regenerates the lockfile before a --locked build")
 
 # Runbook and formal signoff contracts.
 runbooks = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "docs/runbooks").glob("*.md"))

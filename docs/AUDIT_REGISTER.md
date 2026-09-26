@@ -421,3 +421,56 @@ installed (`rustc`/`cargo` not found). This should be verified with
 1.97.1 toolchain before being counted as closed. Flagging this explicitly
 rather than claiming verification I did not perform.
 **Status:** CLOSED (implementation) / VERIFICATION PENDING (toolchain unavailable in this session).
+
+### Resolution — H1-H7 hardening pass (subsequent session)
+
+A dedicated production-readiness hardening pass, tracked as tracks H1-H7 and
+fully detailed in the root `DECISIONS.md`, closed most of the findings above.
+Recorded here, against this register's own finding IDs, so this document
+stays the accurate index of what is still open:
+
+- **C-01, C-02** (compile/build failures) — resolved in earlier sessions,
+  prior to this pass; the workspace compiles and the E2E suite builds
+  (`cargo check --workspace`, `cargo test --workspace`, both clean of build
+  errors as of this pass).
+- **H-01** (demo-grade auth / hardcoded credentials) — resolved in an earlier
+  session (see the `operator`/`onyx` removal referenced throughout this repo
+  as "audit fix H-01"); this pass's H1 track additionally closed the adjacent
+  gap that the seeded dev/test admin account could still be created on a
+  fresh **production** boot (gated now on an explicit `ONYX_ENV != "production"`
+  check, not just "users table is empty").
+- **H-02** (in-memory, non-durable token revocation) — resolved by this
+  pass's H2 track: a shared, durable `TokenRevocationStore` (Postgres-backed,
+  in-memory only as a pure-SQLite single-instance fallback), covering both
+  individual-token revocation (logout) and a per-user revoked-before
+  watermark (deactivation/password reset), the latter of which the original
+  in-memory `HashSet` never covered at all. Verified with a real
+  cross-replica test.
+- **H-03** (fully permissive CORS) — resolved by this pass's H4(a) track:
+  `allow_origin(Any)` replaced with an explicit, env-driven allow-list
+  (`ONYX_CORS_ALLOWED_ORIGINS`), required in production; `PUT` also added to
+  the allowed-methods list after auditing every route (two PUT-using routes
+  were previously uncovered, not just the one originally flagged).
+- **H-04** (known-vulnerable/EOL dependency versions) — **still open**.
+  `sqlx 0.7.4` and two coexisting `rustls` versions (`0.21.12` and `0.23.43`,
+  per `Cargo.lock`) remain unaddressed; this pass did not touch dependency
+  versions. Still needs the staged upgrade + `cargo audit`/`cargo deny`
+  gating this finding originally called for.
+- **M-01** (bearer token in WebSocket query string) — resolved for the relay
+  path specifically by this pass's H4(b) and H7 tracks: the raw bearer token
+  in `/api/relay/:target_id`'s query string was replaced with a short-lived
+  (30s), single-use, target-scoped relay ticket minted via authenticated
+  `POST /api/relay-ticket`; H7 additionally closed a self-identity gap the
+  ticket itself didn't originally cover (see `DECISIONS.md`'s H7 entry for
+  the full vulnerability and fix). `routes/events.rs`'s original
+  `WebSocketAuth` token-in-query-string pattern this finding cites was not
+  itself touched by this pass and should be re-checked against the same
+  concern if it hasn't been separately addressed.
+- **M-02, M-03, M-04, M-05, M-06, L-01** — not addressed by this pass; still
+  open, out of this pass's scope (production bootstrap, session revocation,
+  relay isolation, CORS, transport security, deterministic builds, and CI
+  immutability, per the original H1-H6 plan this pass executed).
+
+**Status:** H-01, H-02, H-03 CLOSED; M-01 CLOSED for the relay transport
+specifically (WebSocket events endpoint unverified); H-04, M-02 through
+M-06, and L-01 remain OPEN.

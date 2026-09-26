@@ -5,7 +5,12 @@ import { useCommand } from "@/hooks/useCommand";
 import { useQuery } from "@/hooks/useQuery";
 import { describeError } from "@/utils/errorHandler";
 import { useAuthStore } from "@/stores/authStore";
-import { getServerAddress, setServerAddress, isPlausibleServerAddress } from "@/utils/serverAddress";
+import {
+  getServerAddress,
+  setServerAddress,
+  isPlausibleServerAddress,
+  isSecureEnoughForProduction,
+} from "@/utils/serverAddress";
 
 /**
  * Policy administration — ported from `desktop-shell`'s `Settings.tsx`
@@ -191,6 +196,13 @@ function ServerConnectionSettings() {
     if (!isPlausibleServerAddress(value)) {
       setStatus("error");
       setMessage("Enter a full address including http:// or https://, e.g. http://192.168.0.250:3000");
+      return;
+    }
+    if (!isSecureEnoughForProduction(value)) {
+      setStatus("error");
+      setMessage(
+        "For security, only https:// addresses (or http://127.0.0.1 on this computer) can be saved.",
+      );
       return;
     }
     setStatus("testing");

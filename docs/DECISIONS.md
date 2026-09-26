@@ -2201,3 +2201,648 @@ lacks committed web and Flutter lockfiles and carries a stale Cargo lock warning
 repair. Capture `npm audit --json`, review direct/transitive exposure, regenerate all
 three dependency locks, and commit them before production signing.
 
+### FLT-1 — Flutter retirement: gate was NOT met, owner overrode it and proceeded with deletion
+
+**Date:** 2026-09-24
+
+#### The Flutter retirement gate was NOT met
+
+Per ONYX_Mobile_Client_Strategy_Manifesto v1.1 and ONYX_Android_Kotlin_iOS_PWA_Technical_Blueprint
+v1.1, the Flutter retirement gate required Kotlin/JNI to have been run on a real
+device, P2P transport to be implemented (not stubbed), and background/offline
+behavior to be verified on Android. None of these conditions were satisfied at the
+time of this decision. Evidence: `docs/MOBILE_V11_VERIFICATION.md` records the
+following unmet conditions explicitly:
+
+- **JNI never run on a real device.** All runtime gates for the Flutter app
+  (Android build, iOS build, FFI bridge, widget rendering, background sync)
+  are listed as "Pending" — the environment had no Flutter/Dart SDK, Android
+  NDK, Xcode, or physical device lab. `docs/MOBILE_V11_VERIFICATION.md` states:
+  "This environment does not provide Flutter/Dart, Android SDK/NDK, Rust mobile
+  targets, Xcode, CocoaPods, or a physical mobile device lab."
+- **P2P transport stubbed with `ConnectionLost` placeholders.** The Wi-Fi Direct
+  and BLE Rust transport byte-stream implementations returned `ConnectionLost`.
+  `docs/MOBILE_V11_VERIFICATION.md` states: "Wi-Fi Direct/BLE P2P: Routed through
+  Rust — **Blocked by delivered placeholder transport streams and physical-device
+  requirement**" and "That gate must remain blocked until the Wi-Fi Direct/BLE
+  Rust `Connection` implementations no longer return `ConnectionLost` and two
+  authorized devices are available." `mobile/test/integration/p2p_sync_test.dart`
+  contained `ConnectionLost` assertions guarded by `ONYX_MOBILE_DEVICE_TEST`.
+- **Background/offline behavior unverified on Android.** Android WorkManager
+  integration and iOS BGAppRefreshTask were present in source but never executed
+  on real hardware. `docs/MOBILE_V11_VERIFICATION.md` lists "Android background
+  sync: Yes [source] / Pending emulator/device integration" and
+  "iOS background sync: Yes [source] / Pending simulator/device integration."
+- **No rollback artifact existed.** No APK, IPA, `pubspec.lock`, or runtime test
+  report was ever fabricated or committed (`docs/MOBILE_V11_VERIFICATION.md`
+  integrity statement: "They do not contain fabricated build outputs, lockfiles,
+  signed store packages, or claims that unavailable runtime gates passed.").
+  There was therefore no shipped Flutter binary to roll back from — the Flutter
+  client was never released.
+
+#### Explicit owner decision to override the gate and proceed
+
+The project owner made an explicit, informed decision to proceed with Flutter
+retirement anyway, accepting the risk of having no fully-proven mobile client
+until the Kotlin rewrite catches up. This is an **overridden gate, not a passed
+one**. The owner's rationale: the Flutter client was never shipped (no rollback
+artifact, no runtime certification), the Kotlin rewrite (`mobile-android/`) was
+already underway with real source and CI, and the cost of continuing to maintain
+the frozen Flutter reference while awaiting device-lab access exceeded the risk
+of shipping Kotlin without full P2P/background verification. Flutter's frozen
+state meant no new features were being added to it anyway (M0 freeze,
+`verify_mobile_freeze.sh` enforced this).
+
+#### Paths/files deleted
+
+- `mobile/` (entire directory — 111 files): the Flutter application, its Android
+  and iOS platform wrappers, all Dart source (`mobile/lib/`), all tests
+  (`mobile/test/`), build tooling (`mobile/tool/`), `pubspec.yaml`,
+  `analysis_options.yaml`, `FROZEN_EXCEPTION.md`, `README.md`, and `.gitignore`.
+- `.github/workflows/ci.yml` — four Flutter-specific jobs removed:
+  `mobile-freeze-guard`, `mobile-dart`, `mobile-android` (the Flutter APK build,
+  distinct from `mobile-android-kotlin`), `mobile-ios`.
+- `scripts/verify/verify_mobile.sh` — deleted (sole purpose: verify Flutter
+  structural contract).
+- `scripts/verify/verify_mobile_freeze.sh` — deleted (sole purpose: enforce the
+  M0 freeze on `mobile/lib/`; the freeze is superseded by this deletion).
+- `scripts/verify/verify_mobile_static.py` — deleted (sole purpose: offline
+  static verification of the Flutter v1.1 deliverable).
+
+#### Files edited
+
+- `.github/workflows/ci.yml`: removed the four mobile Flutter jobs listed above;
+  updated the `mobile-android-kotlin` job comment to remove the now-stale
+  reference to "the `mobile-android` job above (which builds the *frozen Flutter*
+  app's own Android APK via `flutter build apk`)". The `mobile-android-kotlin`
+  job (which builds the Kotlin rewrite in `mobile-android/`) is preserved
+  unchanged.
+- `README.md`: changed `Mobile (Flutter with Rust FFI via mobile-core)` to
+  `Mobile (Kotlin Android via mobile-android-jni; legacy Flutter retired)`;
+  removed `Flutter` from the devcontainer toolchain list in the Development Setup
+  section (`Rust, Flutter, Android SDK, Node.js` → `Rust, Android SDK, Node.js`).
+
+#### Untouched by Part 1
+
+The following paths were explicitly **not** touched:
+- `mobile-android/` — the native Kotlin Android rewrite (54 files), preserved.
+- `mobile-android-jni/` — the JNI adapter crate (`crates/mobile-android-jni/`,
+  1 source file), preserved.
+- `mobile-core/` — the Rust C-ABI crate (`crates/mobile-core/`, 13 source files),
+  preserved. The `mobile_core_*` FFI functions are the same ABI Kotlin binds to.
+- `mobile-pwa/` — does not exist in this repository (confirmed via `ls`); no
+  action taken.
+- `docs/MOBILE_V11_VERIFICATION.md`, `docs/MOBILE_V11_STATIC_REPORT.json`,
+  `docs/MOBILE_V11_CHANGED_FILES.txt`, `docs/mobile-migration/parity-matrix.md` —
+  historical records; left intact as the audit trail per DECISIONS.md policy.
+- Historical DECISIONS.md entries describing past Flutter-era decisions
+  (M11-D1 through M11-D11, FS-R2 through FS-R5) — left intact.
+
+#### CI jobs, scheduled workflows, or scripts disabled/removed
+
+- `mobile-freeze-guard` job (`.github/workflows/ci.yml`) — removed.
+- `mobile-dart` job (`.github/workflows/ci.yml`) — removed.
+- `mobile-android` job (`.github/workflows/ci.yml`) — removed.
+- `mobile-ios` job (`.github/workflows/ci.yml`) — removed.
+- `scripts/verify/verify_mobile.sh` — deleted.
+- `scripts/verify/verify_mobile_freeze.sh` — deleted.
+- `scripts/verify/verify_mobile_static.py` — deleted.
+
+The `mobile-android-kotlin` job remains active and unchanged.
+
+### P2P-1 — P2P transport direction is Kotlin→JNI; current Rust P2P exports remain placeholders
+
+**Date:** 2026-09-23
+
+**Ruling:** Android P2P work will use Kotlin→JNI direction. Kotlin will own
+`WifiP2pManager`/`BluetoothLeScanner` platform integration. Rust will expose
+JNI entry points for transport framing/encryption/handshake behavior. The
+existing plain C-ABI placeholder exports are not the final P2P direction and
+must be replaced rather than extended as if they already performed transport.
+
+**Evidence:** `crates/transports/sync-transport-mobile/src/android_wifi_direct.rs`
+and `android_ble.rs` allocate opaque handles and return success without
+performing platform transport. Their module comments explicitly reserve
+`WifiP2pManager` and Bluetooth GATT integration as Team 5 work through `jni`.
+`crates/mobile-core/src/android_wifi_direct.rs` and `android_ble.rs` re-export
+those placeholder symbols on Android. This is Phase 0 contract direction only;
+no P2P implementation is included here.
+
+### P2P-2 — Relay ticket minting requires `submit_domain_command`; observers are excluded
+
+**Date:** 2026-09-23
+
+**Ruling:** `POST /api/relay-ticket` requires the caller's session to have `can_submit_domain_commands = true`. This excludes `mobile_observer` sessions from minting relay tickets.
+
+**Rationale:** Relay ticket issuance enables participation in the sync transport fabric (peer-to-peer data propagation). Sync participation is a mutation-class action because it propagates operational state between replicas. The `mobile_observer` ceiling sets every mutation-capable flag to `false`. Relay participation is therefore denied to observers by the existing capability ceiling, with no new capability field needed.
+
+**Enforcement:** `require_capability(&actor, |c| c.can_submit_domain_commands, "submit_domain_command")` is now called in `relay::issue_ticket` before ticket minting. The existing `relay_ticket` token type continues to propagate the caller's `client_type` into the ticket claims.
+
+**Evidence:** `crates/bins/api-server/src/routes/relay.rs:290` — `issue_ticket` now calls the capability check after `authenticate_headers`.
+
+### P2P-3 — Bootstrap's unauthenticated, token-gated, one-time path is a special client-class case exempt from capability checks
+
+**Date:** 2026-09-24
+
+**Ruling:** `POST /api/admin/bootstrap` remains intentionally unauthenticated and is excluded from capability checks. It is the only unauthenticated write endpoint in the server, is gated by a one-time token, and permanently self-closes once any user exists.
+
+**Rationale:** Capability checks (including the `mobile_observer` ceiling) authenticate a session before applying the caller's capability flags. Bootstrap cannot do this — it exists precisely for the case where no user exists yet, so there is no principal to authenticate or to hold capabilities. Treating it as a capability-checked endpoint would make the first-admin bootstrap unreachable on an empty store. Its safety comes from its token gate and self-closing design, not from capabilities: it is disabled unless `ONYX_BOOTSTRAP_TOKEN` is set (fail closed), the token is compared in constant time, and the endpoint refuses with `BOOTSTRAP_ALREADY_COMPLETED` once the user count is non-zero, so a second call can never succeed even with the correct token.
+
+**Enforcement:** No `authenticate_headers` or `require_capability` call was added to `admin::bootstrap`. The endpoint is registered at `crates/bins/api-server/src/routes/mod.rs:530` and unchanged. The seeded dev/test admin fallback (`routes/mod.rs:420`) already excludes production and remains separate from the bootstrap path.
+
+**Evidence:** `crates/bins/api-server/src/routes/admin.rs:379-436` — `bootstrap` performs only: (1) fail-closed token-environment check, (2) constant-time token comparison, (3) empty-store refusal. `create_user` at `admin.rs:439` is the capability-checked (`require_admin_mutation`) equivalent for authenticated admin account creation.
+
+### P2P-4 — File download and push-subscription registration are read-class observer routes (MIGRATION_PLAN Phase 1.2)
+
+**Date:** 2026-09-24
+
+**Ruling:** `GET /api/files/:content_hash` is gated by `can_download_files` and `POST/DELETE /api/push/subscriptions...` are gated by `can_read_notifications`. Both flags are true for `mobile_observer`, so observers may use every one of these routes; the checks still exist so a future client class that must not download or receive notifications is refused without a new route.
+
+**Rationale:** Downloading stored file bytes changes no state and registers/unregisters a notification channel for the caller — both are read-class from the observer-ceiling perspective (ONYX-MOB-01 §8 grants observers every `can_read_*` and `can_download_files`). Push registration is deliberately gated by the read flag rather than a mutation flag: it is how a read-only observer opts into receiving notifications, not a domain mutation. The routes add no new capability fields.
+
+**Framing of the two disclosed limitations as explicit, planned scope:** (1) A hash-based download is not tenant-scoped to a `FileAsset` because api-server has no `FileAsset` listing/query path yet; per the MIGRATION_PLAN Phase 3.1 note, that lookup is the declared follow-up when the PWA `FileList` view lands (see `routes/files.rs` module doc). (2) Push registration only *stores* the browser's endpoint + VAPID keys; there is no push delivery backend yet (MIGRATION_PLAN Phase 3.2 — the `push_subscriptions` table is what a future delivery worker reads).
+
+**Enforcement:** `files::download_file` calls `require_capability(&actor, |c| c.can_download_files, "download_files")`; `push::register_subscription`/`unregister_subscription` call `require_capability(&actor, |c| c.can_read_notifications, "read_notifications")`. `ApiState` gained a `blob_store: Arc<dyn BlobStore>` field; `ApiState::new` opens `LocalBlobStore::open(ONYX_BLOB_STORE_ROOT)` (host temp dir when unset). Routes are registered in `routes/mod.rs` (files download, push register/unregister); CORS allow-list gained `DELETE` (added after the H4(a) audit, which had already verified GET/POST solely masked `PUT`).
+
+**Evidence:** `crates/bins/api-server/src/routes/files.rs` and `routes/push.rs`; registrations at `routes/mod.rs` (files ~line 576, push ~lines 634-644); migrations `migrations/{sqlite,postgres}/20260111000000_add_push_subscriptions.{up,down}.sql`; positive-path proof in `crates/bins/api-server/tests/observer_read_routes.rs` (an observer registers/upserts/unregisters its own subscription, cannot remove another user's, and downloads stored bytes). `ApiState::new` reads `ONYX_BLOB_STORE_ROOT` (host temp dir when unset) — documented on the `ApiState::blob_store` field in `routes/mod.rs`. Cross-backend UUID bytes↔`Uuid` conversion mirrors the existing repo convention in `routes/relay.rs`.
+
+### P2P-5 — Phase 2 PWA scaffolding rulings (port, PWA packaging, gateway shape, query types)
+
+**Date:** 2026-09-24
+
+**Ruling:** `mobile-pwa/` is scaffolded per MIGRATION_PLAN Phase 2.1/2.2 with the
+PWA foundation decided as follows:
+
+1. **Vite dev port `:5174`** (0.0.0.0), so the ObserverClient dev server can run
+   beside `web-ui` (which binds `:5173`). LAN access (iPhone acceptance, Phase 5)
+   needs the host's real IP in `--host`/`preview` and `VITE_API_BASE` pointing at
+   the api-server LAN address.
+2. **Plain PWA packaging — no vite-plugin-pwa / PWAKit.** The manifest is a
+   static `public/manifest.webmanifest` and the service worker is generated by a
+   `postinstall` npm script (`scripts/postinstall.mjs` renders
+   `scripts/sw.template.js` into `public/sw.js`), stamping the app version into
+   the cache name. This realizes the plan's "-disable for PWAKit (use plain Vite
+   PWA manifest)" line with manual generation, keeping the plugin's asset
+   fingerprinting out of the equation. Worker strategy: cache-first for
+   hash-named assets, **network-first for `/api/*`** (a stale projection is shown
+   only while offline, with an offline banner planned in Phase 2.3).
+3. **Gateway shape.** The contract's `ObserverHttpGateway` lives in
+   `mobile-pwa/src/api/onyx.ts` as `observerApi`. Unlike the plan sketch,
+   `authenticate` always sends `client_type: "mobile_observer"` — the gateway
+   cannot self-escalate; `query` takes (query_type, filters, options) and encodes
+   the base64url-no-pad envelope itself rather than requiring a pre-encoded
+   string. There is no generic mutation helper (contract §"must not expose"
+   implemented by absence, defense in depth).
+4. **Query types are the backend's dotted names** (`dashboard.summary`,
+   `mission.list`, `approval.list`, `notification.list`, ...), not CamelCase —
+   the api-server handler (`query_handler.rs`) returns empty results for unknown
+   types rather than an error, so an invented name would silently render empty
+   dashboards.
+
+**Evidence:** `mobile-pwa/package.json` (postinstall script, `:5174` in
+`vite.config.ts`), `mobile-pwa/scripts/{postinstall.mjs,sw.template.js}`,
+`mobile-pwa/src/api/onyx.ts`, `mobile-pwa/src/pages/Dashboard/index.tsx`,
+`crates/bins/api-server/src/query_handler.rs:82` (`dashboard.summary`),
+`:86-102` (aggregate query types). Verification: `npm install`, `npm run
+type-check`, `npm run lint`, `npm run build`, `npm run test` all pass in
+`mobile-pwa/`; a `vite preview` smoke test served `/`, `/manifest.webmanifest`
+and `/sw.js` with HTTP 200.
+
+### P2P-6 — Phase 2.3/2.5 observer shell rulings (view-only by absence, evidence/audit maps)
+
+**Date:** 2026-09-24
+
+**Ruling:** The Phase 2.3 observer shell ships every plan-listed view that has
+live backend data; two plan views are deferred because their backend does not
+exist yet, and the contract surface is mapped to real endpoints (Phase 2.5):
+
+1. **View-only is held by absence, not by disabling.** The observer PWA contains
+   no acknowledge/approve/reject/transition mutations at all — there are no
+   `useCommand`-style hooks and no mutation helpers in the gateway. The
+   Notifications view cannot acknowledge and the Approvals view renders
+   decisions as read-only status, even when `web_action_permitted` is true.
+2. **`getEvidence` is folded into the Reports page.** There is no
+   id-addressable evidence record or `evidence.detail` query; evidence exists
+   only as `{label, file_name}` attachment references on `report.detail`
+   projections. `/reports` surfaces those references view-only (web-ui parity),
+   and a dedicated `EvidenceView` waits on a backend evidence query.
+3. **`getAuditView` is backed by the timeline projection.** `timeline.list
+   {subject_id}` is the state-transition timeline; the Mission detail renders
+   it. There is no full audit-log query in `query_handler.rs`.
+4. **`FileList` deferred to Phase 3.1.** The content-addressed `downloadFile`
+   route works (Phase 1.2) and `/files/:contentHash` renders a working
+   download — but there is no FileAsset listing, so there is no `/files` index
+   view. `/reports` evidence references are `file_name`s, not `content_hash`es,
+   so reports cannot yet hyperlink into the file view.
+5. **`getHierarchyView` is live but unpaged.** `GET /api/users/hierarchy`
+   (`admin.rs::list_hierarchy_users`) is authenticated, same-organization, and
+   deliberately not admin-gated, so observers may read the reporting tree — but
+   no Phase 2.3 view consumes it (none of the plan views need it).
+
+**Evidence:** `mobile-pwa/src/pages/{Notifications,Approvals,Reports,Missions/MissionDetail,Files/FileDetail}`,
+`mobile-pwa/src/routes/index.tsx`, `crates/bins/api-server/src/routes/admin.rs:704-715`
+(hierarchy route doc: authenticated, not admin-gated), `query_handler.rs`
+(`report.detail` maps to the `report` aggregate; `timeline.list` to `timeline`),
+MIGRATION_PLAN Phase 2.3/2.5 status blocks. Gates: `type-check`, `lint`,
+`build`, and `npm run test` (15 unit tests) all pass.
+
+### P2P-7 — Phase 2.6 observer test-suite rulings (mock strategy, axia matcher, browser channel)
+
+**Date:** 2026-09-24
+
+**Ruling:** The observer component, a11y, and E2E suites follow web-ui's test
+shapes but diverge intentionally in three places:
+
+1. **No msw dependency; the gateway is mocked at the module boundary.**
+   Component tests replace only `observerApi.query` via
+   `vi.mock` + `vi.importActual<typeof import('../../src/api/onyx')>` and
+   `vi.mocked(...).mockResolvedValue(...)`. Login/network behavior is asserted
+   against `apiClient` with spies. Browser tests need no backend at all:
+   `/api/*` routes are intercepted in-page, dispatch parsed from the
+   base64url `envelope` query parameter by `query_type`.
+2. **Observer sessions are seeded with observer-scoped keys.** Playwright
+   fixtures write `onyx_observer_access_token`, `onyx_observer_refresh_token`,
+   and `onyx_observer_user` — NOT the web-ui `onyx_access_token` family. This
+   matches the separate `client_type: mobile_observer` session namespace and
+   keeps web-ui and observer fixtures from cross-pollinating.
+3. **`toHaveNoViolations` is unusable in vitest-axe 0.1.0; a11y asserts on
+   the raw result.** vitest-axe 0.1.0 ships an empty `dist/extend-expect.js`
+   (the root file just re-exports it), so `import 'vitest-axe/extend-expect'`
+   registers nothing and axe calls throw "Invalid Chai property". The a11y
+   suite follows web-ui: `const results = await axe(container); expect
+   (results.violations).toHaveLength(0);`. A jsdom `HTMLCanvasElement
+   .getContext` stub silences axe-core's icon-ligature probe noise.
+4. **Playwright uses the system Chrome channel.** `npx playwright install
+   chromium` fails to download a browser in this environment (Download
+   failure code=1), so `playwright.config.ts` sets `channel: 'chrome'` and
+   runs against `/usr/bin/google-chrome`, with the Vite dev server on port
+   5174 started by Playwright's `webServer`.
+
+**Evidence:** `mobile-pwa/tests/{test-utils.tsx,setup.ts,component/,
+accessibility/,browser/{fixtures/onyx.ts,observer.spec.ts}}`,
+`mobile-pwa/playwright.config.ts`, `node_modules/vitest-axe/dist/
+extend-expect.js` (empty build). Gates: `type-check`, `lint`, `build`, `npm
+run test` (27 Vitest), `npm run test:a11y`, and `npm run test:browser` (5
+Playwright) all pass.
+
+### P2P-8 — Phase 3.2 Web Push rulings (VAPID config, opt-in lifecycle, E2E simulation)
+
+**Date:** 2026-09-24
+
+**Ruling:** The observer PWA's Web Push delivery-client is delivered. The
+backend still only *registers* subscriptions (`push.rs`); delivery remains a
+future worker. Decisions:
+
+1. **The VAPID *public* key is deployment config, not code.** The browser
+   needs the public key to create a subscription; the PWA reads
+   `VITE_VAPID_PUBLIC_KEY` (env). When unset, the Push notifications card
+   reports `unconfigured` and offers no subscribe button — the UI never
+   fabricates a key. The private key belongs to whatever will deliver
+   (future worker); the PWA never needs it, so it is never configured in
+   `mobile-pwa`.
+2. **Opt-in is a per-view, server-row lifecycle, persisted locally.** The
+   card lives on the Notifications view. `enable` asks permission, creates
+   the browser subscription, `POST`s it, and stores the server's
+   subscription id + endpoint under `onyx_observer_push` (localStorage) so a
+   reload reconciles to `subscribed` without re-POSTing. `disable` DELETE's
+   the stored row (best-effort server, always local unsubscribe) and clears
+   the local record. Because the server-scoped `DELETE` requires the caller's
+   own id, a stale local id from a previous session/user cannot touch another
+   row.
+3. **The service worker already owns show-and-route; the PWA only feeds it.**
+   `public/sw.js` displays `push` payloads `{title, message, url}` and
+   routes `notificationclick` to `url` via the controlling window client.
+   The page-side module (`src/push/push.ts`) never constructs notifications.
+4. **E2E uses a deterministic `PushManager` stub and in-worker event
+   dispatch, not the real FCM endpoint.** `push.spec.ts` stubs
+   `PushManager.subscribe/getSubscription` to return fixed VAPID keys and an
+   endpoint, so the flaky/network-independent opt-in is assertable; the
+   delivery path is proven by dispatching a genuine `PushEvent` into the
+   live controlling service worker and asserting the shown notification then
+   the `notificationclick` navigation. Enabling the SW under Vite dev
+   requires `VITE_ENABLE_SW_DEV=true`, which Playwright's `webServer` env
+   sets (together with a generated P-256 test public key). This keeps
+   service-worker-free dev defaulting unchanged.
+
+**Evidence:** `mobile-pwa/src/push/push.ts`, `mobile-pwa/src/stores/
+pushStore.ts`, `mobile-pwa/src/components/PushNotificationsCard.tsx`,
+`mobile-pwa/src/pages/Notifications/index.tsx`, `scripts/sw.template.js`,
+`mobile-pwa/playwright.config.ts` (webServer env), `mobile-pwa/tests/browser/
+push.spec.ts`, `crates/bins/api-server/src/routes/push.rs` (registration-only,
+no delivery worker). Gates: `type-check`, `lint`, `build`, `npm run test`
+(38 Vitest), `npm run test:a11y`, `npm run test:browser` (7 Playwright) pass.
+### P2P-9 — Phase 5 PWA acceptance rulings (offline-first shell, test env, security baseline)
+
+**Date:** 2026-09-24
+
+PWA-acceptance work for the observer PWA (Phase 5.1/5.2/5.3). The resulting
+decisions:
+
+1. **The shell is pre-cached at build time, not install time.** Hashed asset
+   names are unknowable to a static worker, so `scripts/render-sw.mjs` reads
+   `dist/.vite/manifest.json` (from `build.manifest:true`) and stamps the URL
+   list into `dist/sw.js` via the `__PRECACHE_URLS__` template slot. Dev's
+   `public/sw.js` (rendered by `postinstall`) keeps an empty list — runtime
+   caching covers the dev flow, and `VITE_ENABLE_SW_DEV=true` still gates it.
+2. **Navigations get `networkThenShell`; `/api` stays `networkFirst`; cached
+   responses are sanitized.** A SPA cannot render a deep link offline unless
+   the navigation falls back to the cached `/`, so the fetch handler routes
+   `request.mode === 'navigate'` to network-first-then-shell. Live projections
+   under `/api` keep network-first-with-stale-fallback (offline data must
+   never beat fresh data). All cache stores strip `Vary` and
+   `access-control-allow-origin` because Cache Storage matching honors
+   `Vary` — a host stamping `Vary: Origin` (vite preview does) would
+   otherwise silently break every offline hit. The `activity`/Freshness UIX
+   treat stale snapshots as read-only-as-before.
+3. **The offline acceptance build is same-origin.** The PWA gateway default
+   (`VITE_API_BASE` unset) is `http://127.0.0.1:3000`; the SW's fetch handler
+   only serves same-origin requests, so an offline hit on the API never
+   matches a cached entry unless the test build points at the same origin. The
+   offline suite therefore bakes `VITE_API_BASE=http://localhost:5175` into
+   its build (`pretest:browser:offline`) and runs a `vite preview` webServer on
+   `:5175` (`playwright.offline.config.ts`). The seeded `mission.list`
+   envelope is deterministic because the init script fixes
+   `crypto.randomUUID`, making the SW cache key match the app's request URL.
+4. **Offline shell acceptance is automated against the PRODUCTION build.**
+   `tests/offline/offline.spec.ts` installs the real `dist/sw.js`
+   (precache present), verifies `/` is cached, goes `context.setOffline(true)`,
+   reloads, and asserts the shell, the offline banner, and the cached snapshot
+   render — proving "SW cache serves index.html" in CI without a real iPhone.
+   Real-iphone Home Screen launch, `notificationclick` focus on iOS, and
+   end-to-end push delivery remain hardware/backend-gated.
+5. **Security baseline: 0 npm audit findings.** `react-router-dom` jumped
+   6.30→7.18 because v6 has *no* patched release for GHSA-wrjc-x8rr-h8h6
+   (open redirect via backslash) and GHSA-337j-9hxr-rhxg (SSR
+   `deserializeErrors` constructor injection); the PWA renders client-side
+   only, so neither is exploitable here, but clearing the audit beats arguing
+   about it. `vite` 5→7 and `vitest` 1→4 cleared the esbuild/vite-node chain
+   (high esbuild, critical vitest advisories) and required an explicit
+   `@types/node` devDependency (Vitest 4 no longer brings ambient `Buffer`
+   globals) plus the `tests/offline/**` vitest exclude (Playwright specs live
+   under `tests/` and jsdom must not collect them).
+
+**Evidence:** `mobile-pwa/scripts/render-sw.mjs`, `scripts/sw.template.js`
+(precache + `networkThenShell` + `sanitizeForCache`),
+`mobile-pwa/vite.config.ts`, `mobile-pwa/playwright.offline.config.ts`,
+`mobile-pwa/tests/offline/offline.spec.ts`, `src/hooks/useOnline.ts`,
+`src/components/OfflineBanner.tsx`, `public/screen.html`, `index.html`,
+`package.json` (audit-clean lockfile + test scripts). Gates: `type-check`,
+`lint`, `build` (writes `dist/sw.js`), 38 Vitest, 4 a11y, 7 Playwright dev
+suite, 1 Playwright offline (prod) suite — all pass.
+
+### P2P-10 — Push delivery worker (VAPID keys, RFC 8291, ledger, pruning)
+
+**Date:** 2026-09-24
+
+The backend that actually sends PWA push notifications, completing Phase 3.2
+end-to-end (delivery). `crates/bins/worker/src/push_delivery.rs` +
+`webpush.rs` run as an in-process worker loop in `crates/bins/worker/src/
+main.rs`. Rulings:
+
+1. **Trigger = poll, not a queue.** Notifications are `aggregates` rows
+   (`aggregate_type='notification'`) that can be written by any worker path
+   (e.g. `staff_loan_scheduler`); there is no enqueue point we own. The
+   worker therefore scans every tick for `status='unacknowledged'`
+   notifications and relies on the `push_deliveries` ledger (PK
+   `(subscription_id, notification_id)`, migration
+   `20260112000000_add_push_deliveries`) to make delivery exactly-once. The
+   ledger row is written **only after** the endpoint returns 2xx, so a crash
+   between send and commit re-tries once — acceptable and simple.
+2. **Crypto is `ring`, and the VAPID key arrives as PKCS#8 DER base64url.**
+   RFC 8291 uses ECDH P-256 + HKDF + AES-128-GCM and RFC 8292 uses ES256;
+   BoringSSL-derived `ring` covers all of it (no `p256`/`aes-gcm`/`hkdf`
+   crates needed). `ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64` is exactly what
+   `npx web-push generate-vapid-keys` prints, so ops can generate a pair and
+   feed the public half into `VITE_VAPID_PUBLIC_KEY` (what the PWA's
+   `applicationServerKey` validates against).
+3. **Delivery is per-endpoint and self-healing.** Each POST carries
+   `Authorization: vapid t=..., k=...`, `TTL`, `Urgency: normal` and
+   `Content-Encoding: aes128gcm`. `404`/`410` mean the endpoint is dead
+   (stale registration) → the subscription row and its ledger rows are
+   pruned; everything else non-2xx and all transport errors are left pending
+   for the next tick. A `push_subscriptions` row that fails to decrypt-level
+   validation (e.g. an invalid `p256dh` point) is logged and skipped, never
+   deleted — it may just be a corrupt subscription, and retrying is cheaper
+   than discarding a working opt-in.
+4. **Test boundary keeps crypto pure and DB live.** `webpush.rs` has no
+   HTTP/DB and its unit tests prove JWT signing + RFC 5869 + an
+   encrypt→decrypt round-trip against subscription keys. `push_delivery.rs`
+   injects a `PushSender` trait (`HttpPushSender` = reqwest; stubs in tests)
+   and its integration tests run against real Postgres when `DATABASE_URL`
+   is set, mirroring `staff_loan_scheduler`.
+
+**Still gated:** delivering through a real push service (FCM/etc.) to a
+physical device, and the PWA-side `push.spec.ts` proving that round trip in
+CI — delivery is implemented and unit/integration-tested, device acceptance
+remains cloud/hardware-gated (Phase 5.2 / Phase 4).
+
+**Evidence:** `crates/bins/worker/src/webpush.rs`,
+`crates/bins/worker/src/push_delivery.rs`, `crates/bins/worker/src/main.rs`
+(spawn + env), `migrations/postgres/20260112000000_add_push_deliveries.*`,
+workspace + worker `Cargo.toml` (`ring`, `reqwest`, `url`, `base64`,
+`hmac`, `sha2`). Tests: 10 unit + 2 Postgres-gated integration; `cargo test
+-p worker` green.
+### P2P-11 — Phase 4 code-subset rulings (P2P codec, Kotlin drivers, background contract, release variant)
+
+**Date:** 2026-09-24
+
+Phase 4 Code Executors produced the sandbox-verifiable subset of the Android
+completion plan. Rulings:
+
+1. **P2P crypto/handshake went Rust-first, in the JNI crate, not Team 4's
+   `sync-transport-mobile`.** Firm-and-final design: ephemeral P-256 ECDH
+   (unauthenticated handshake — both public points are bound into the HKDF
+   schedule so MITM is detectable at decrypt time), HKDF-SHA-256 with salt
+   `PROLOGUE("onyx-p2p-v1") ‖ client_pub ‖ server_pub`, AES-256-GCM, strict
+   per-direction 32-byte encryption + nonce keys derived under distinct
+   labels (`r2i`/`i2r`), nonces from HMAC-SHA256 over a monotonic per-direction
+   counter (taken from the first 12 bytes), 5-byte header (`u32` BE length +
+   version byte `0x01`), and stream semantics — a failed `decrypt` permanently
+   desyncs the session rather than sliding. Implemented as
+   `crates/mobile-android-jni/src/p2p.rs`, exported through JNI class
+   `com.onyx.p2p.P2pCodec`, 6/6 unit tests green, clippy `-D warnings` + fmt
+   clean. Restricting all crypto/key-schedule logic to Rust keeps it testable
+   on a host without any Android toolchain.
+2. **Kotlin owns every platform primitive; Rust JNI owns every secret.**
+   `WifiDirectDriver` (WifiP2pManager, port 47015) and `BleDriver`
+   (BLE advertise/scan/GATT) produce `P2pStream`s; `P2pChannel` only
+   reassembles frames and orchestrates the 4-message handshake through
+   `P2pCodec`'s `nativeSession{Start,ClientMessage,Accept,ServerMessage,
+   Complete}`. Plaintext never leaves the Rust side — `encode`/`decode` take
+   and return byte arrays. Manifest permissions reflect current Android 13–15
+   guidance (`NEARBY_WIFI_DEVICES`/`BLUETOOTH_SCAN` `neverForLocation`,
+   legacy location only on ≤ 32, `maxSdkVersion="30"` on the classic
+   `BLUETOOTH` pair).
+3. **The placeholder C-ABI exports were deleted, not extended** (per P2P-1):
+   `sync-transport-mobile::android_wifi_direct`/`android_ble` and
+   `mobile-core`'s re-export modules are removed from the tree, with the crate
+   docs amended. Nothing else referenced them (audited by grep).
+4. **The WorkManager scheduling contract is asserted by an instrumented test**
+   (the "schedule" half of 4.2): `BackgroundSyncInstrumentedTest` uses
+   `WorkManagerTestInitHelper` and proves exactly one unique `ENQUEUED`
+   periodic work for `UNIQUE_WORK_NAME` after a double `scheduleBackgroundSync`
+   (`ExistingPeriodicWorkPolicy.KEEP` idempotency) with the
+   `NetworkType.CONNECTED` constraint, mirroring the frozen Flutter
+   `registerAndroidBackgroundSync()` contract. **Abandoned** a JVM unit-test
+   approach for this: `WorkManager` under Robolectric proves less about the
+   real scheduler than the sandbox's marginal disk would cost; and existing
+   precedent (`MobileCoreRoundTripTest`) already treats instrumented tests as
+   hardware-gated. Anything about *execution* (Doze/airplane-mode delivery,
+   service→`mobile_core_android_do_work` wiring) stays a Phase 4.2 lab gate.
+5. **Release variant is real R8, debug-signed, in CI.** `proguard-rules.pro`
+   keeps native-method names (JNI symbol mangling), the `WorkManagerService`
+   worker, and JNI carrier `object`s; `release { isMinifyEnabled;
+   isShrinkResources; proguardFiles(...); }` signs with the debug keystore and
+   `mobile-android-kotlin` now runs `assembleRelease`. Production keystore +
+   on-device survival of the shrunk APK remain Phase 6 / lab gates. This keeps
+   the sandbox free of signing secrets entirely.
+
+**Evidence:** `crates/mobile-android-jni/src/p2p.rs`; `…/com/onyx/p2p/` (five
+files); `AndroidManifest.xml`; `BackgroundSyncInstrumentedTest.kt`;
+`work-testing` dep; `app/proguard-rules.pro` + `build.gradle.kts` release
+block; `ci.yml` `assembleRelease` step; deleted placeholder modules (git
+diff). Gates are enforced on GitHub only, never on a local machine: the
+`ci.yml` `check` job runs `cargo fmt --check`, workspace clippy `-D
+warnings`, `cargo build --workspace --release` and `cargo test --workspace
+--release` (which runs the P2P codec's 6 unit tests); the
+`mobile-android-kotlin` job cross-compiles the JNI crate via cargo-ndk and
+builds both APKs.
+
+**Process note (2026-09-24):** no local build/test/compile — the sandbox has
+no room for a `target/` directory, so every `cargo`/`gradle` gate runs
+exclusively in GitHub Actions.
+
+### M11-D12 — The event-subscription C ABI gained an explicit userdata parameter
+
+**Date:** 2026-09-24
+
+`mobile_core_subscribe_events` is the only C ABI function that passes a
+callback; its original signature shadowed *all* the project's existing
+FFI conventions (`Dart NativeCallable.listener` / `WorkManager` / the
+`mobile_core_*` ownership docs: callbacks own transferred buffers, freed
+via `mobile_core_free_string`) by having no way to carry caller state.
+The prototype JNI adapter that announced real subscription (this
+increment) resolved that with a deliberate, documented ABI change:
+
+1. **Signature:** `mobile_core_subscribe_events(handle, filter_json,
+   callback, context)` where `callback` is
+   `extern "C" fn(context: *mut c_void, json: *const c_char)` and
+   `context *mut c_void` is passed back verbatim — the standard C
+   "user data" idiom. `CallbackContext` (a `pub(crate)`
+   `Send`/`Sync` newtype over the pointer) carries `context` across the
+   tokio task boundary; its `unsafe impl`s are justified in `lib.rs` by
+   the caller-owned lifetime contract in the function's own `# Safety`
+   doc. No other ABI function changed.
+2. **Baselines were updated by hand, under the
+   `verify_ffi_signatures.sh` procedure.** Both `mobile-core.h` and
+   `expected_ffi.h` carry the predicted cbindgen 0.27 emission for the
+   new signature (48-space continuation indent preserved; the fn-pointer
+   inner type renders name-less as `void (*callback)(void*, const char*)`).
+   The schift of authority remains CI's `build.rs` regeneration: if the
+   next real build wraps differently, re-`cp mobile-core.h
+   expected_ffi.h` after review. `verify_ffi_signatures.sh` is a manual
+   gate, not a CI step.
+3. **Ownership is unchanged for everything else:** the transferred JSON
+   buffer is still owned by the callback and freed via
+   `mobile_core_free_string` (or a `CString::from_raw` reclaim on the
+   Rust side of a JNI trampoline), per M11-D10.
+4. **Secure storage shipped with Android Keystore, not a stub.**
+   `SecureTokenStore.kt` stays the real `on-device secret storage`; the
+   abortive `nativeSecureStorage` JNI/Kotlin stub pair is deleted —
+   `ffi_secure_storage.rs` is a doc-only module that exports no
+   functions and the C headers contain no secure-storage symbols, so the
+   stub referenced a nonexistent surface. A new JNI function will be
+   added only when a real `mobile_core_*` secure-storage export exists.
+5. **Event delivery into the JVM is attach-per-event, skip-on-failure.**
+   The JNI forwarder holds `Arc<JavaVM>` + `GlobalRef` to the Kotlin
+   `EventCallback`; each delivery calls `JavaVM::attach_current_thread`
+   (the `AttachGuard` detaches on drop, so a tokio worker thread never
+   holds a spurious JVM attachment between events). A failing delivery
+   is skipped, never fatal, and the crate has no logger wired — JNI
+   entry points use jni's own `LogErrorAndDefault`; logcat plumbing for
+   the async callback path is future work (a re-entrancy
+   `AtomicBool` guard makes the serial-callback assumption explicit).
+
+**Evidence:** `crates/mobile-core/src/{ffi_events.rs,lib.rs}`; the
+hand-updated `crates/mobile-core/{mobile-core.h,expected_ffi.h}`;
+`crates/mobile-android-jni/src/lib.rs` (real `nativeSubscribeEvents`/
+`nativeUnsubscribe`, `JavaEventForwarder`, `deliver_to_kotlin`; the
+nativeSecureStorage stub removed);
+`mobile-android/…/com/onyx/bridge/{MobileCoreBridge.kt,EventCallback.kt}`
+(`EventCallback.kt` is new); `OnyxController.kt` subscribe/`onCleared`
+wiring; the `EventCallback` keep rule in `proguard-rules.pro`; the new
+real-delivery test in `mobile-core/tests/ffi_integration.rs`
+(a `MarkReady` decision → outbox pump → `EventBus` → callback with the
+exact `context` pointer, asserted over a 20s poll).
+
+### M11-D13 — The last two unwired Kotlin rows are wired (query path + P2P controller)
+
+**Date:** 2026-09-24
+
+With the event-subscription ABI (`M11-D12`) landed, exactly two mobile
+Kotlin rows remained "real but unwired": `nativeExecuteQuery` and the
+P2P driver/codec stack. This increment closes both and leaves no
+implemented FFI surface without a runtime call site.
+
+1. **The Kotlin query path is wired.** A new stateless
+   `QueryEnvelopeFactory` (`mobile-android/…/model/`) builds the
+   registry's exact envelope — `{"query_type": "GetMission"|"GetTask",
+   "target_id": <16 bytes>}` (`QueryEnvelope`), with no organization
+   field, since `mobile_core_new` already binds the registry to the
+   app's organization. `OnyxController.loadAggregateFromQuery`/
+   `loadMission`/`loadTask` call `nativeExecuteQuery`, treat the
+   registry's `null` response as "aggregate not found" (the FFI null
+   sentinel stays the malformed/error signal), and re-inject the
+   envelope's `target_id` as the row `id` because the registry's
+   `LoadedJson` genuinely omits it. The real call sites are the
+   Mission/Task Detail screens' on-open freshness pull: a `LaunchedEffect`
+   queries the single aggregate by id and renders it, falling back to the
+   navigation snapshot if the query fails. (The earlier "detail snapshots
+   go stale" concern was already mitigated by AppShell re-resolving from
+   the live list; the query path now gives the screen its own authoritative
+   read, the same path a list row came from.)
+2. **P2P got its missing controller + settings surface.** The Kotlin
+   `WifiDirectDriver`/`BleDriver`/`P2pStream`/`P2pCodec`/`P2pChannel` stack
+   compiled but nothing drove it. Now:
+   - `P2pController` owns both drivers, a single background executor, and
+     `StateFlow<P2pStatus>` / peers / message-log flows. It routes BLE
+     (server = advertiser/responder, client = scanner/initiator) end-to-end
+     (start → auto-connect → handshake → framed probe messages) and
+     Wi-Fi Direct through discovery, `connectTo`, group-formation polling,
+     and the group-owner TCP stream; both media converge on one
+     `runHandshake`/`send` path.
+   - `P2pChannel` gained a backward-compatible `deferredHandshake`
+     constructor + `setRawReader`/`startFraming` so the two 65-byte codec
+     public points can cross media whose inbound bytes would otherwise hit
+     the frame buffer (BLE's single GATT stream). Existing callers are
+     unaffected (default `false`).
+   - `P2pViewModel` (AndroidViewModel) hosts the controller;
+     `P2pCard` (Settings, via AppShell/MainActivity) exposes transport
+     toggle, role controls, permission request (Activity result contract),
+     probe composer, and message transcript. The card deliberately uses
+     `TextField`, not `OutlinedTextField`, to preserve
+     `SettingsScreenSourceTest`'s single-editable-field invariant.
+3. **Device truth remains deferred (unchanged, Phase 4.1b/d):** the
+   controller is hand-checked against driver code and compiles only via
+   CI (no local Android SDK); the two-device session, BLE MTU behavior,
+   and Wi-Fi Direct callback cadence remain on-device lab gates, tracked
+   in `MIGRATION_PLAN.md` Phase 4.1 and `KOTLIN_IMPLEMENTATION_PLAN.md`
+   Layer 6.
+
+**Correction folded in (supersedes M11-D8's premise):** the KOTLIN plan's
+"notification local domain crates are not present" note is outdated —
+`crates/domains/notification-domain/` exists, is registered, and is
+served by `ListNotificationsHandler` in `query_registry.rs`; the
+`NotificationsScreen` empty state is still honest because the !observer
+view model exposes no notifications list. Likewise the push stack
+(`mobile-pwa/src/push/push.ts`, the delivery worker, `routes/push.rs`)
+exists, so nothing is left to build there.
+
+**Evidence:**
+`mobile-android/…/model/QueryEnvelopeFactory.kt` (new);
+`OnyxController.kt` (`loadAggregateFromQuery`/`loadMission`/`loadTask`);
+`MissionDetailScreen.kt`/`TaskDetailScreen.kt` (`LaunchedEffect` query
+pull); `p2p/P2pChannel.kt` (deferred handshake);
+`p2p/P2pController.kt` + `p2p/P2pViewModel.kt` (new);
+`ui/widgets/P2pCard.kt` (new); `SettingsScreen.kt`/`AppShell.kt`/
+`MainActivity.kt` wiring.

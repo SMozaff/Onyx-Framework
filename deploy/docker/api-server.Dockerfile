@@ -3,7 +3,7 @@ FROM rust:1.97-slim AS builder
 WORKDIR /workspace
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY . .
-RUN cargo generate-lockfile && cargo build --locked --release -p api-server
+RUN cargo build --locked --release -p api-server
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini && rm -rf /var/lib/apt/lists/* \

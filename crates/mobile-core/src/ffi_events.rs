@@ -6,12 +6,12 @@
 //! small and is the manual-trigger counterpart to the same `SyncAgent`
 //! this module's event subscription reads from.
 
-use std::ffi::{c_char, c_int, CString};
+use std::ffi::{c_char, c_int, c_void, CString};
 use std::sync::Arc;
 
 use client_composition::event_bus::EventFilter;
 
-use crate::{cstr_to_string, EventSubscription, MobileApp};
+use crate::{cstr_to_string, CallbackContext, EventSubscription, MobileApp};
 
 /// Triggers a sync session manually. Returns 0 on success, -1 on error.
 /// Team Prompt 5 §3.3. Uses `SyncAgent::trigger_sync_now` — added to
@@ -38,7 +38,14 @@ pub unsafe extern "C" fn mobile_core_trigger_sync(handle: *mut MobileApp) -> c_i
 }
 
 /// Subscribes to events. Returns a subscription handle; the callback is
-/// invoked for each matching event (JSON string). Team Prompt 5 §3.3.
+/// invoked for each matching event (`json`), together with the exact
+/// `context` pointer the caller supplied (the C "user data" idiom — a
+/// JNI adapter, for example, passes a `Box`ed forwarder here so it can
+/// route events back into a JVM). Team Prompt 5 §3.3.
+///
+/// Callers constructing a callback that must run in the JVM should
+/// consider whether the *referent* of `context` is safe to route through
+/// `CallbackContext` — see `crate::CallbackContext`'s doc comment.
 ///
 /// # Safety
 /// `handle` must be valid. `filter_json` must be a valid NUL-terminated
@@ -46,12 +53,15 @@ pub unsafe extern "C" fn mobile_core_trigger_sync(handle: *mut MobileApp) -> c_i
 /// valid for as long as the returned subscription is alive (i.e. until
 /// `mobile_core_unsubscribe` is called) — this is inherently unsafe
 /// FFI-callback lifetime management the C/Swift/Kotlin caller is
-/// responsible for upholding; Rust cannot enforce it.
+/// responsible for upholding; Rust cannot enforce it. `context` must
+/// remain valid (or the caller must otherwise guarantee it is not
+/// dereferenced) for the same lifetime.
 #[no_mangle]
 pub unsafe extern "C" fn mobile_core_subscribe_events(
     handle: *mut MobileApp,
     filter_json: *const c_char,
-    callback: extern "C" fn(*const c_char),
+    callback: extern "C" fn(context: *mut c_void, json: *const c_char),
+    context: *mut c_void,
 ) -> *mut EventSubscription {
     if handle.is_null() {
         return std::ptr::null_mut();
@@ -65,12 +75,16 @@ pub unsafe extern "C" fn mobile_core_subscribe_events(
     };
 
     let event_bus = Arc::clone(&app.state.event_bus);
+    let context = CallbackContext(context);
     // SAFETY (documented, not silently assumed): `callback` is a raw
     // function pointer captured into the spawned task's closure.
     // Function pointers are `Send`/`Copy`, so this compiles without an
     // explicit unsafe block here — the actual safety obligation (the
     // pointer staying valid for the subscription's lifetime) is on the
     // caller, per this function's own `# Safety` doc comment above.
+    // `context` crosses the task boundary as `CallbackContext`, whose
+    // `Send`/`Sync` impls are justified in `lib.rs` by the same
+    // user-data contract.
     let task = app.runtime.spawn(async move {
         let mut subscription = event_bus.subscribe(filter);
         while let Some(event) = subscription.recv().await {
@@ -79,8 +93,11 @@ pub unsafe extern "C" fn mobile_core_subscribe_events(
                 // Dart's cross-thread NativeCallable.listener schedules the
                 // callback asynchronously. Transfer ownership so the buffer
                 // remains valid until the Dart callback reads it and calls
-                // `mobile_core_free_string`.
-                callback(cstring.into_raw());
+                // `mobile_core_free_string`. The same ownership convention
+                // holds for a JVM-attaching callback (jni 0.22's
+                // `get_string` copies), which frees it through the same
+                // `mobile_core_free_string` path.
+                callback(context.get(), cstring.into_raw());
             }
         }
     });

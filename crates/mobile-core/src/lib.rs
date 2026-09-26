@@ -21,12 +21,20 @@
 //! since they operate directly on those shared types. Each FFI entry
 //! point beyond those is split into its own file by concern:
 //! `ffi_commands.rs`, `ffi_queries.rs`, `ffi_events.rs`,
-//! `ios_background.rs`, `android_workmanager.rs` — plus the four P2P
-//! transport stub modules (`ios_multipeer.rs`, `android_wifi_direct.rs`,
-//! `ios_ble.rs`, `android_ble.rs`). This was originally one flat
-//! `lib.rs`; split for the requested file structure with no behavior
-//! change (verified: the full `tests/ffi_integration.rs` suite re-passes
-//! unmodified after the split — see `DECISIONS.md`).
+//! `ios_background.rs`, `android_workmanager.rs` — plus the two remaining
+//! P2P transport modules for iOS (`ios_multipeer.rs`, `ios_ble.rs`). This
+//! was originally one flat `lib.rs`; split for the requested file structure
+//! with no behavior change (verified: the full `tests/ffi_integration.rs`
+//! suite re-passes unmodified after the split — see `DECISIONS.md`).
+//!
+//! # Android P2P placeholder removal (Phase 4.1, DECISIONS P2P-1)
+//! This crate used to re-export `sync-transport-mobile`'s placeholder
+//! `android_wifi_direct`/`android_ble` C-ABI stubs (phantom handles, no
+//! real transport). Those stubs were **deleted, not extended**: per P2P-1
+//! the Android transport is now Kotlin `WifiP2pManager`/`BluetoothLeScanner`
+//! drivers (`mobile-android/.../com/onyx/p2p/`) running framing/encryption/
+//! handshake from `mobile-android-jni`'s `p2p` module, which lives in the
+//! Android JNI crate rather than this C-ABI surface.
 
 use std::ffi::{c_char, CStr, CString};
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -37,8 +45,6 @@ use platform_kernel::{OrganizationId, ReplicaId};
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::runtime::Runtime;
 
-pub mod android_ble;
-pub mod android_wifi_direct;
 pub mod android_workmanager;
 pub mod ffi_commands;
 pub mod ffi_events;
@@ -92,6 +98,44 @@ pub struct MobileApp {
 pub struct EventSubscription {
     pub(crate) task: tokio::task::JoinHandle<()>,
 }
+
+/// Opaque caller-owned context routed verbatim to every event callback.
+///
+/// Wraps a raw C pointer in a type that is (`Send` + `Sync`) so the
+/// subscription's forwarding task can carry it across the async
+/// `recv().await` boundary. This is the standard C "user data" idiom
+/// (libuv, zlib, SDL, ...): the *referent*'s `Send`/`Sync`-ness is the
+/// caller's contract — the callback must be safe to invoke from whatever
+/// runtime thread the forwarding task runs on — and `mobile-core` never
+/// dereferences it.
+///
+/// The JNI adapter (see `mobile-android-jni`) leans on exactly this: the
+/// context it passes is an owned `Box<JavaEventForwarder>` (a JNI
+/// `GlobalRef` to the Kotlin `EventCallback` + the `JavaVM`), so the
+/// pointer being `Send` is what makes delivering into the JVM from a
+/// tokio worker thread well-defined.
+///
+/// `pub(crate)` deliberately: the C surface never mentions this type —
+/// `mobile_core_subscribe_events` receives `void *context` directly — so
+/// it must not leak into the exported C header.
+#[derive(Clone, Copy)]
+pub(crate) struct CallbackContext(*mut ::std::os::raw::c_void);
+
+impl CallbackContext {
+    pub(crate) fn get(&self) -> *mut ::std::os::raw::c_void {
+        self.0
+    }
+}
+
+// SAFETY: `mobile_core_subscribe_events` (and the task it spawns) only
+// ever passes the pointer through to the registered callback, never into
+// a context that requires dereferencing it. Whether the referent itself
+// is `Send`/`Sync` (here: a JNI `GlobalRef`-owning forwarder) is
+// established by the caller, who chose the referent's type. This mirrors
+// the interoperability contract every C library making callback-based
+// user-data calls upholds.
+unsafe impl Send for CallbackContext {}
+unsafe impl Sync for CallbackContext {}
 
 /// The Flutter application owns one mobile core instance per process. Native
 /// background schedulers cannot carry a Dart pointer after suspension, so the

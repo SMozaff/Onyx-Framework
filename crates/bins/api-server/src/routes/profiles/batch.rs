@@ -29,7 +29,7 @@ use super::{
     domain_error, fetch_staff_profile_rows, find_by_owner, infrastructure_error, to_public_dto,
     upsert_profile, PublicProfileDto, UpsertProfileRequest,
 };
-use crate::routes::admin::require_admin;
+use crate::routes::admin::{require_admin, require_admin_mutation};
 use crate::routes::{ApiError, ApiState};
 
 /// One row of the import/export file format, before/after JSON or CSV
@@ -239,7 +239,7 @@ pub async fn import_profiles(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<ImportSummary>, ApiError> {
-    let admin = require_admin(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     let organization_id = uuid::Uuid::parse_str(&admin.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
     let admin_uuid =

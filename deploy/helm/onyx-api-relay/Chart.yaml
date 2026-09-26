@@ -1,0 +1,14 @@
+apiVersion: v2
+name: onyx-api-relay
+description: >-
+  ONYX Cloud Relay switchboard — the same api-server image as onyx-api,
+  deployed as its own single-replica release. RelayRegistry (routes/relay.rs)
+  is process-local, in-memory presence state; it cannot be shared across pods
+  without a redesign (deferred, see DECISIONS.md). Until that redesign lands,
+  every relay WebSocket connection must land on the same process, so this
+  release is deliberately NOT part of onyx-api's horizontally-scaled,
+  autoscaled Rollout. See onyx-api-relay/values.yaml for why replicaCount is
+  hardcoded rather than configurable.
+version: 1.0.0
+appVersion: "1.0.0"
+type: application

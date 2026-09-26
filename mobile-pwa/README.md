@@ -1,0 +1,128 @@
+# ONYX Observer PWA (`mobile-pwa/`)
+
+Read-only ObserverClient for the `mobile_observer` client class, per
+`docs/mobile-migration/MIGRATION_PLAN.md` Phase 2 and the frozen
+`docs/mobile-migration/pwa-observer-contract.md`.
+
+> **Status: Phase 2 + 3.2 + 5.1/5.2/5.3 delivered.** Project structure, build
+> stack, `ObserverHttpGateway` (`src/api/onyx.ts`), the Phase 2.3 observer
+> views (Dashboard, Missions, Tasks, Notifications, Approvals, Reports,
+> FileDetail), the Phase 2.6 test suite, Phase 3.2 Web Push (opt-in/opt-out
+> card, `pushStore`, SW show-and-route, and the backend **delivery worker**
+> in `crates/bins/worker` that VAPID-signs and RFC 8291-encrypts
+> notifications to registered endpoints), and Phase 5 PWA acceptance
+> (build-time shell precache, offline-served app shell + stale snapshot,
+> `OfflineBanner`, launch screen/iOS meta, 0 npm audit findings) are in place
+> and green on every gate — 38 Vitest + 4 a11y + 7 Playwright dev-suite + 1
+> offline prod-suite test, plus `cargo test -p worker` (10 unit + 2
+> Postgres-gated delivery tests). A FileList index (needs a backend FileAsset
+> listing), a device-level push round trip through a real push service,
+> real-iphone Home Screen acceptance, and the Phase 5.4 hosting decision
+> remain future/pending.
+
+## What this client is
+
+- Authenticates as `client_type: "mobile_observer"` (read-only ceiling,
+  ONYX-MOB-01 §8). The backend is authoritative: this absence of mutation
+  methods is defense in depth.
+- Reads observer projections via `/api/query`, profile/hierarchy reads,
+  authorized file downloads (`/api/files/:content_hash`) and Web Push
+  subscription registration (`/api/push/subscriptions`).
+- Web Push is receive-only: the Notifications view offers an opt-in/opt-out
+  card (`src/push/push.ts`) that registers this browser's subscription with
+  the server; the service worker shows inbound notifications and routes
+  clicks. Nothing here ever sends one.
+- **No** `createMission`, `updateTask`, `approve`, `uploadFile`,
+  `transitionLifecycle`, or any `/api/command` / admin mutation surface —
+  by construction. See the contract's "must not expose" list.
+
+## Environment
+
+```bash
+VITE_API_BASE=http://127.0.0.1:3000   # api-server base (default; same as web-ui)
+VITE_ENABLE_SW_DEV=true               # register the SW under `vite dev`
+VITE_VAPID_PUBLIC_KEY=<base64url p-256 public key>
+```
+
+`VITE_API_BASE` lets an iPhone on the LAN override to
+`http://<machine-LAN-IP>:3000`. `VITE_VAPID_PUBLIC_KEY` must be the VAPID
+*public* key published by the deployment (the private key lives only on the
+delivery worker: `ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64` in `crates/bins/
+worker`, i.e. the PKCS#8 DER base64url from `npx web-push
+generate-vapid-keys`). When it is unset the push card reports `unconfigured`
+and never offers to subscribe. The service worker registration
+remains gated in dev unless `VITE_ENABLE_SW_DEV=true`; Playwright's
+`webServer` sets that plus a generated test key (see `playwright.config.ts`).
+`ONYX_BLOB_STORE_ROOT` is read by api-server only, not the PWA.
+
+## Stack (Phase 2.2)
+
+React 18 · TypeScript 5.3 · Vite 7 · Tailwind CSS 3.3 · Zustand 4 ·
+TanStack Query 5 · Axios · React Router 7 · Vitest 4 · Playwright + axe-core.
+
+## Scripts
+
+```bash
+npm install          # also generates public/sw.js via postinstall
+npm run dev          # Vite dev server on :5174 (0.0.0.0)
+npm run type-check   # tsc -b
+npm run lint         # eslint --max-warnings=0
+npm run test         # vitest run (unit + component + a11y)
+npm run test:component # vitest run tests/component
+npm run test:a11y    # vitest run tests/accessibility
+npm run build        # tsc -b && vite build && node scripts/render-sw.mjs
+npm run test:browser # playwright test (system Chrome, channel: 'chrome')
+npm run test:browser:offline # build + preview-server offline acceptance
+```
+
+`build` also renders `dist/sw.js` (from `scripts/render-sw.mjs`) with the
+hashed asset URLs stamped in as the install-time precache list, so the
+production worker is offline-first. `test:browser:offline` runs
+`playwright.offline.config.ts` against `vite preview` on `:5175` with the
+build baked `VITE_API_BASE=http://localhost:5175` (same-origin so the SW can
+serve `/api` from its cache); it proves the shell renders offline with the
+cached `mission.list` snapshot after install.
+
+## Layout (Phase 2.1)
+
+```text
+src/
+  api/       axios client + ObserverHttpGateway (onyx.ts)
+  components/ StatusBadge, Freshness, ProjectionState(+Panel), Layout,
+              OfflineBanner
+  hooks/     useAuth, useObserverQuery, useOnline
+  lib/       pwa.ts (manifest/service-worker registration)
+  pages/     Dashboard, Missions(+detail), Tasks(+detail), Notifications,
+             Approvals, Reports, Files/FileDetail, Login, NotFound
+  push/      push.ts (Web Push opt-in/opt-out plumbing, VAPID keys)
+  routes/    ObserverClient route table (paths frozen here)
+  stores/    Zustand auth + push stores (sessionStorage / localStorage)
+  utils/     auth, error mapping, push-key/hash validation
+  types/     query projections, push payloads, API envelope types
+public/
+  manifest.webmanifest
+  sw.js          # dev SW generated by scripts/postinstall.mjs
+  screen.html    # standalone launch screen
+  icons/
+scripts/
+  postinstall.mjs + sw.template.js + render-sw.mjs (build-time precache)
+tests/setup.ts
+```
+
+## Service worker
+
+`postinstall` renders `public/sw.js` (dev) and `render-sw.mjs` renders
+`dist/sw.js` (build), stamping the app version into the cache name. Strategy:
+- **Install-time precache** of the hashed shell (build worker only) so first
+  offline launch works even without a prior online visit.
+- **`networkThenShell` for navigations** — fresh `index.html` online, the
+  cached `/` offline — so any deep link renders the shell offline.
+- Cache-first for hash-named `dist/` assets; network-first for `/api/*`
+  (the last successful snapshot is served only when the fetch fails offline —
+  the `OfflineBanner` surfaces that state).
+- All cached responses are sanitized (headers `Vary` and
+  `access-control-allow-origin` stripped) so cache matching cannot be broken
+  by a host stamping `Vary: Origin`.
+- The `push` and `notificationclick` handlers live here; page-side
+  registration/permission is Phase 3.2 (`src/push/push.ts` +
+  `PushNotificationsCard`).

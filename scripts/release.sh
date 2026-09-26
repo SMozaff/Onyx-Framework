@@ -16,7 +16,16 @@ command -v gpg >/dev/null
 command -v syft >/dev/null
 
 scripts/ci-pipeline.sh
-cargo generate-lockfile
+# Verifies the committed Cargo.lock still matches Cargo.toml without
+# writing anything -- the release build below relies on --locked to
+# refuse a stale lockfile, which only works if nothing rewrites the
+# lockfile first. A prior version of this script regenerated the
+# lockfile from scratch right before this same --locked build, which
+# silently wrote a fresh copy and then built from that -- self-defeating,
+# since --locked could never actually catch drift against a lockfile it
+# just wrote itself moments earlier. Matches release.yml's own "Verify
+# locked dependency graph" step.
+cargo metadata --locked >/dev/null
 mkdir -p "release/${VERSION}/binaries" "release/${VERSION}/sbom"
 cargo build --locked --release -p api-server -p worker -p sync-agent -p migration-tool
 for binary in api-server worker sync-agent migration-tool; do

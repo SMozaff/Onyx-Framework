@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::{authenticate_headers, ApiError, ApiState, ProjectionPool};
-use crate::routes::admin::{require_admin, require_class};
+use crate::routes::admin::{require_admin_mutation, require_class};
 
 pub(super) fn correlation() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -496,13 +496,15 @@ pub async fn list_profiles(
 /// `PUT /api/admin/profiles` — admin-only single upsert. Confirmed
 /// Admin-only per the original product request ("access for
 /// modifications for admin") — no exceptions, matching
-/// `require_admin`'s use throughout `routes::admin`.
+/// `require_admin_mutation`'s use throughout `routes::admin`'s own
+/// mutation routes (H10/P1.4: this is also a client-capability-gated
+/// mutation, not just an admin-role one).
 pub async fn upsert_profile_route(
     State(state): State<ApiState>,
     headers: HeaderMap,
     Json(req): Json<UpsertProfileRequest>,
 ) -> Result<Json<PublicProfileDto>, ApiError> {
-    let admin = require_admin(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     let organization_id = uuid::Uuid::parse_str(&admin.organization_id)
         .map_err(|_| domain_error("invalid organization id"))?;
     let admin_uuid =

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- A4/A5 core (network sync + A3 login API). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        Phase 4.1 P2P (DECISIONS P2P-1) — Wi-Fi Direct platform driver
+        (com.onyx.p2p.WifiDirectDriver):
+          * ACCESS_WIFI_STATE / CHANGE_WIFI_STATE are normal, auto-granted.
+          * NEARBY_WIFI_DEVICES (API 33+) or ACCESS_FINE_LOCATION
+            (API 29-32) are the runtime-gated discovery/connect permission;
+            Wi-Fi Direct's group-owner TCP stream here uses only the group
+            IP address, never location, so the neverForLocation flag is
+            correct and honest.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!--
+        Phase 4.1 P2P (BLE platform driver, com.onyx.p2p.BleDriver):
+          * API 31+: BLUETOOTH_SCAN / BLUETOOTH_ADVERTISE / BLUETOOTH_CONNECT.
+          * API 29-30: legacy BLUETOOTH / BLUETOOTH_ADMIN (maxSdkVersion) plus
+            runtime ACCESS_FINE_LOCATION for scanning.
+        SCAN carries neverForLocation even though <=30 mandates location for
+        discovery; on 31+ the scan itself does not require it.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Optional radios: both P2P mediums are fallback transports, not a
+         hard install requirement. -->
+    <uses-feature
+        android:name="android.hardware.wifi.direct"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="false" />
+
+    <application
+        android:name=".OnyxApplication"
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.Onyx"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Onyx">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -4721,3 +4721,2007 @@ All 8 jobs green, no regressions. `mobile-android`'s `flutter build apk
 jobs this sandbox itself cannot run) both completed successfully on
 their real runners, confirmed via each job's own step list rather than
 inferred from the run's overall conclusion.
+
+## Hardening H1, H2, H4(a) — production bootstrap, distributed session revocation, CORS fix
+
+Three of six agreed hardening tracks from an independent production-
+readiness audit (H3/relay-ticket auth and H4(b)/transport-TLS are
+separate follow-up tasks; H5/H6 are out of scope here). Every diagnosis
+below was re-confirmed directly against the real source at the current
+`main` tip before any code changed, not assumed from the task text.
+
+### H1 — Production bootstrap
+
+**Diagnosis confirmed.** A deliberately authorized development shortcut
+currently seeds a known administrator credential on an empty database.
+The implementation clearly documents the tradeoff, so this is not an
+undisclosed implementation error. However, the exception is not
+sufficiently isolated from production execution and therefore remains a
+production release blocker.
+
+Concretely: `ApiState::new` (`crates/bins/api-server/src/routes/mod.rs`)
+seeded `"All-Father"` / `"passvord0000"` whenever `user_store.count()
+== 0`, with no environment check at all — a fresh production install is
+also an empty database, so production got exactly the same shortcut as
+local dev. The token-gated `POST /api/admin/bootstrap` flow
+(`ONYX_BOOTSTRAP_TOKEN`, `routes/admin.rs`) was never touched by the
+original change and still works correctly; it was simply never the path
+actually exercised, since the seed always won the race by running first
+in `ApiState::new`.
+
+**Fix.** The seed now reads `if environment != "production" &&
+user_store.count().await? == 0`. `ONYX_ENV=production` categorically
+refuses to seed, full stop — and the function's own pre-existing gates
+already guarantee that a real production boot has a genuine Postgres
+primary, a real `ONYX_AUTHORITY_SIGNING_KEY`, and a real
+`ONYX_GOVERNANCE_DATABASE_URL`, so production's only remaining path to a
+first admin is the untouched, token-gated `/api/admin/bootstrap` flow —
+restored to being the authoritative production path rather than a
+fallback nothing production-side ever exercised.
+
+**New test.** `tests/end-to-end/production_bootstrap.rs`
+(`production_env_never_seeds_the_known_admin_account`): boots a real
+`ApiState` with `ONYX_ENV=production` and a genuinely empty database
+(backed by a real, ephemeral Postgres container via the existing
+`PostgresHarness`/testcontainers harness, exercising the same
+production-only gates a real deployment would hit), asserts `SELECT
+COUNT(*) FROM users` is `0` afterward, then asserts a login attempt with
+the known `"All-Father"` / `"passvord0000"` credentials returns 401. This
+is the test that proves the fix, not just that the gating line changed.
+
+### H2 — Distributed session revocation
+
+**Diagnosis confirmed, and one part of the task's own framing corrected.**
+`revoked_tokens: Arc<RwLock<HashSet<String>>>` was real, in-process,
+per-instance memory — genuinely incompatible with a multi-replica
+deployment, exactly as described. However, checking every call site
+directly (not assumed) found that only `logout` and refresh-token
+rotation ever touched it. `deactivate_user` and `set_user_password`
+(`routes/admin.rs`) did **not** touch it at all — their own existing doc
+comments said so explicitly ("existing tokens for this user remain valid
+until they expire... the in-memory revocation set cannot express 'revoke
+all tokens for a user' across pods"). So this fix isn't just "move four
+existing call sites to a shared store" — two of the four never had any
+revocation behavior to move, and had to be wired up for the first time.
+
+**Design decision: both models, not one.** The task asked for an explicit
+choice between individual-token tracking and session/family tracking.
+The honest answer is that a single model doesn't cover both real call
+sites:
+- `logout` and refresh-token rotation each hand back **one** specific
+  token they hold. Individual-token revocation (a hash of the token,
+  looked up on every `validate_token` call) matches this exactly and
+  changes nothing about existing behavior.
+- `deactivate_user` and `set_user_password` need to invalidate **every**
+  session a user currently has, and the server has never tracked which
+  individual tokens are outstanding for a user (no session table, no
+  enumeration). Individual-token tracking cannot express this without
+  retroactively building that tracking. A per-user watermark
+  (`user_token_revocations.revoked_before`, compared against each
+  token's own `iat` claim) expresses "everything issued before now is
+  dead" in one write, independent of how many sessions exist.
+
+Implemented as a new `TokenRevocationStore` port
+(`security_application::ports::token_revocation`) with both operations,
+backed by `PostgresTokenRevocationStore`
+(`security-adapter/src/token_revocation.rs`) — real, shared, durable,
+selected by `ApiState::new` via the exact same governance-pool-then-
+primary-pool precedence `PostgresSlidingWindowRateLimiter` already uses.
+An `InMemoryTokenRevocationStore` fallback exists only for a pure-
+SQLite, single-instance, no-governance-database composition (local dev),
+carrying the same disclosed non-durability the old field had everywhere
+— now honestly scoped to the one topology where it's harmless. Production
+can never reach it: `ONYX_ENV=production` already requires a Postgres
+primary and `ONYX_GOVERNANCE_DATABASE_URL`, both of which route to
+`PostgresTokenRevocationStore`. Two new tables
+(`20260109000000_add_token_revocation.{up,down}.sql`, both migration
+sets, mirroring the existing `rate_limit_events` migration's dual-
+directory convention): `revoked_tokens (token_hash, revoked_at)` and
+`user_token_revocations (user_id, revoked_before)`. Tokens are hashed
+(SHA-256) before storage, never stored raw. `validate_token` now checks
+both: an individually-revoked hash, and the caller's per-user watermark
+against the token's `iat`.
+
+**New tests**, both in `tests/end-to-end/`, both proving the actual
+production-topology property (a revocation performed on one replica must
+be visible to a second, independent replica that shares nothing but the
+database — the exact thing an in-process `HashSet` could never satisfy):
+- `session_revocation.rs`'s
+  `logout_on_one_replica_revokes_the_token_on_a_second_independent_replica`:
+  two separate `ApiState`/`Router` instances against one real Postgres
+  database; confirms the token works against replica B before logout (so
+  the later rejection is attributable to the revocation, not a generic
+  auth failure), logs out via replica A only, then confirms replica B
+  rejects the same token.
+- `deactivating_a_user_on_one_replica_revokes_their_session_on_a_second_replica`:
+  same two-replica structure, proving the per-user watermark path
+  (previously nonexistent) is genuinely shared too, not just the
+  single-token path.
+
+### H4(a) — CORS fix
+
+**Diagnosis confirmed, and the task's own hint to "check for real" paid
+off.** `allow_methods([GET, POST, OPTIONS])` was indeed missing `PUT`
+for `/api/admin/mobile-access`'s `.put(admin::set_mobile_access)` as
+described — but auditing every `.route(...)` call in the router (not
+assuming that was the only one) found a **second**, undisclosed PUT
+mismatch: `/api/admin/profiles` (`put(profiles::upsert_profile_route)`)
+is a PUT-only route with no GET/POST alternative at all, so it was
+completely unreachable cross-origin from a browser, not merely missing
+one verb alongside others. Every other registered route in this router
+uses GET or POST only — confirmed by reading the whole router body, not
+sampled.
+
+**Fix, part 1 (small, mechanical):** added `Method::PUT` to
+`allow_methods`, covering both real routes.
+
+**Fix, part 2 (origin allow-list — the real open question):** moved off
+`allow_origin(Any)` toward an explicit, config-driven allow-list
+(`ONYX_CORS_ALLOWED_ORIGINS`, comma-separated), required and validated in
+production. The concrete origin list could not honestly be hardcoded:
+checked this repo's actual deployment config directly
+(`deploy/helm/`, `deploy/docker/`) and confirmed neither `web-ui` nor
+`admin-shell` has a Dockerfile, Helm chart, or ingress entry anywhere —
+both exist today only as local Vite dev servers (ports 5173 and 5174
+respectively). Only `api-server` itself is deployed
+(`deploy/helm/onyx-api`, `api.onyx.example.com`). Since no real
+production origin for either browser client has been decided or
+deployed yet, this is genuinely a deployment-time config decision, not
+something the code can guess — `ApiState::new` refuses to boot in
+production without `ONYX_CORS_ALLOWED_ORIGINS` set to at least one valid
+origin, with an error message explaining exactly why, rather than
+silently falling back to permissive or to an invented placeholder
+domain. Outside production the permissive `Any` default is unchanged, so
+every existing local dev/test workflow (both Vite dev servers,
+desktop-shell's webview, mobile emulators, the `web`/`native-ui-
+evidence` CI jobs) keeps working exactly as before.
+
+**Note on numbering:** this task's H1/H2/H4(a) labels are a task-local
+renumbering. This repository's own `docs/AUDIT_REGISTER.md` calls these
+same three items H-01 (bootstrap portion)/H-02/H-03 respectively; its H-04
+is an unrelated dependency-currency finding, not this task's H4(b). Both
+numbering schemes are preserved verbatim in code comments/migration
+names where each already existed, to avoid erasing either trail.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean (after one `cargo fmt` pass on the 3 new files) |
+| `cargo test -p api-server --release` | 31 passed, 0 failed — includes all 6 previously-verified tests, confirmed still passing, zero regression from the `validate_token`/`logout`/`refresh`/`deactivate_user`/`set_user_password` rewiring |
+| `cargo test --workspace --release --no-fail-fast -- --test-threads=1` (real D-Bus/gnome-keyring session started locally, matching CI's own setup step exactly, including the `--components=secrets --daemonize` unlock this session's own keyring tests need) | 557 passed, 19 failed — every failure is a disclosed, pre-existing infra gap this local sandbox cannot provide: 7 from `crates/team8-e2e-tests` (testcontainers needs a live Docker daemon; `docker info` confirms none is running here) and 12 from `persistence-postgres`'s own direct-Postgres integration tests (`DATABASE_URL must be set`, requiring the real Postgres service only CI's `check` job provisions) — zero unexplained or newly-introduced failures |
+| H1's new test (`production_bootstrap.rs`) | fails locally only because it also needs the same live-Postgres testcontainers harness as the e2e crate (`Socket not found: /var/run/docker.sock`) — cannot be verified in this sandbox; will run for real in CI, where GitHub-hosted runners provide Docker natively (same reasoning `tests/end-to-end`'s pre-existing journeys already rely on) |
+| H2's two new tests (`session_revocation.rs`) | same testcontainers/Docker limitation as above — not verifiable in this sandbox, will run for real in CI |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table below |
+
+Out of scope, confirmed untouched: H3 (relay topology, relay-ticket
+auth), H4(b) (transport/TLS enforcement), H5 (Docker lockfile
+reproducibility), H6 (mobile CI immutability/native acceptance gates).
+
+### Real CI caught a real bug: off-by-one in H2's per-user watermark
+
+The first `workflow_dispatch` of the above (run `33289176310`, commit
+`540682c`) genuinely exercised the two new tests' Docker-backed Postgres
+path for the first time (this sandbox cannot run testcontainers at all —
+see above) and found a real defect, not a sandbox artifact:
+`session_revocation.rs`'s cross-replica deactivation test failed —
+`left: 200, right: 401` — while `logout_on_one_replica_revokes_...` and
+`production_bootstrap.rs` both genuinely passed in that same run.
+
+Root cause: `validate_token`'s watermark check was `claims.iat <
+revoked_before`, and both values come from `unix_seconds()` — 1-second
+resolution. The test logs in and calls `deactivate_user` fast enough
+that both timestamps land in the same second, so `iat == revoked_before`
+and the strict `<` treated the token as still valid. Fixed by changing
+the comparison to `<=` (`crates/bins/api-server/src/routes/mod.rs`) —
+fail-closed on the tie. The only cost is a legitimate caller who logs in
+again within the same second a deactivation/password-reset watermark was
+set getting one extra rejected request; the alternative (a token that
+should be dead staying valid) is the actual security property H2 exists
+to close, so the tradeoff is the right one. Pushed as `67ebf8b`; a second
+`workflow_dispatch` re-verifies both new tests for real against this fix.
+
+## Hardening H3 (relay topology isolation) and H4(b) (transport security)
+
+Two of the audit's remaining tracks, deliberately scoped together because both
+touch `crates/bins/api-server/src/routes/relay.rs` (H1/H2/H4(a) landed
+separately as commit `540682c`; H5/H6 remain future work).
+
+### Discrepancy resolved first: "3-20" vs "5-30" replicas
+
+The audit cited "3-20 replicas"; a direct check of
+`deploy/helm/onyx-api/values-production.yaml` found `replicaCount: 5` and
+`autoscaling: {minReplicas: 5, maxReplicas: 30}` instead. Both numbers are
+real and current, not a stale audit figure: `deploy/helm/onyx-api/values.yaml`
+(the base chart's own defaults, read directly rather than assumed) has
+`replicaCount: 3` / `autoscaling: {minReplicas: 3, maxReplicas: 20}` --
+exactly the audit's figure. `values-production.yaml` is an environment
+overlay applied via `-f values-production.yaml` at deploy time, raising the
+production numbers to 5/5-30. Neither file is wrong; they are different
+layers of the same Helm chart. As anticipated, the exact number does not
+change either fix below -- what matters is "more than one replica,
+autoscaled," which is true under either figure.
+
+### H3 -- Relay topology isolation
+
+**Diagnosis confirmed.** `RelayRegistry` (`routes/relay.rs`) is genuinely
+in-memory, per-process peer presence with no cross-process forwarding. Two
+users landed on different `onyx-api` replicas could not reach each other over
+Cloud Relay -- a silent correctness failure, not a crash, exactly as
+described.
+
+**Code-coupling check performed, not assumed.** Read `relay_route` and
+`serve_relay` in full before deciding: their only real dependencies are
+`ApiState::relay_registry`, `ApiState::secret_provider`, and
+`ApiState::token_revocation_store` (via `validate_token`) -- narrow. But
+`ApiState::new` unconditionally constructs the *entire* application state on
+every boot (every repository, migrations, the rate limiter, the audit
+writer, the password hasher, the user store) with no lighter-weight
+constructor, and `router()` wires every route into one `Router`
+unconditionally. Splitting relay into a genuinely separate binary would mean
+introducing a second, parallel "minimal ApiState" construction path and a
+second router -- real new surface area, and a second thing to keep in sync
+with every future `ApiState` field. That is a bigger, riskier change than
+"immediate containment" calls for.
+
+**Design chosen: same binary, separate Helm release, decoupled routing.**
+New chart `deploy/helm/onyx-api-relay/` reuses the exact `onyx-api` container
+image (confirmed via `deploy/docker/api-server.Dockerfile` -- no new
+Dockerfile needed) but is deployed as its own release:
+
+- `templates/deployment.yaml` hardcodes `replicas: 1` directly in the
+  template -- not `{{ .Values.replicaCount }}` -- and the value is not
+  exposed in `values.yaml` at all. This is deliberate: a plain Deployment
+  (no Argo `Rollout`, no HPA, no canary) whose replica count cannot be
+  changed by any values override, environment file, or `helm upgrade --set`,
+  because there is nothing to override. Uses `strategy: {type: Recreate}`
+  rather than the default `RollingUpdate`, so a deploy never briefly runs two
+  pods of this Deployment (which the default 25% `maxSurge` would round up to
+  for a single-replica Deployment) -- a short full outage of relay during
+  deploys, in exchange for the single-replica invariant genuinely never being
+  violated even transiently.
+- A second `Ingress` object (`templates/ingress.yaml`) on the *same* host as
+  `onyx-api`'s own ingress, carrying only the `/api/relay` path.
+  nginx-ingress-controller merges every Ingress object for a given host into
+  one compiled routing table and matches by path specificity regardless of
+  which Ingress resource (or Helm release) a rule came from, so `/api/relay`
+  always wins over `onyx-api`'s own `/` catch-all -- this is what actually
+  routes relay WebSocket traffic to the dedicated pod, not an assumption that
+  clients dial the right place. `/api/relay-ticket` (new, see H4(b) below) is
+  deliberately a sibling path, not a child of `/api/relay`, specifically so
+  this Prefix rule does not also catch ticket-minting traffic and pull it off
+  the scaled, autoscaled `onyx-api` fleet where it belongs (minting is
+  stateless and cheap).
+- `RelayRegistry`'s own doc comment (`routes/relay.rs`) now states this is
+  the actual, enforced production topology, not an aspirational note about a
+  known limitation -- corrected as part of this change, not left stale.
+
+**Deferred, explicitly, not built:** the long-term fix is shared presence
+plus inter-node pub/sub (Redis or NATS) so relay itself can run more than one
+replica. Moving `RelayRegistry` into Postgres alone -- the audit's own
+rejected alternative -- would only have fixed presence *discovery*, not
+actual cross-process WebSocket frame forwarding, which needs a real message
+bus between nodes. Not attempted here; this task is containment only.
+
+**Real verification, not a YAML review.** Installed Helm 3.15.3 (matching
+`ci.yml`'s pinned version) and actually rendered the chart:
+- `helm template ... --set replicaCount=5` on `onyx-api-relay` still renders
+  `replicas: 1` -- confirmed live, not just claimed: the override has zero
+  effect because the value was never wired to anything.
+- Confirmed exactly one `Deployment` and zero `HorizontalPodAutoscaler`
+  objects render from the chart.
+- Rendered `onyx-api` with `-f values-production.yaml` and confirmed its own
+  HPA still renders with `minReplicas: 5` / `maxReplicas: 30`, unaffected by
+  the new chart's existence -- ordinary API replicas keep scaling
+  independently.
+- `helm lint` passes on the new chart.
+- All of the above is now also a real CI step (`deploy-check` job, "Verify
+  the relay chart genuinely renders single-replica (H3)"), not just something
+  run once locally.
+
+### H4(b) -- Transport security
+
+**Item 1: plaintext HTTP for non-loopback Admin connections.**
+
+Confirmed two real, independent save paths for the server address, not one:
+`Login.tsx`'s `ConnectionSettings` component and `Settings.tsx`'s
+`ServerConnectionSettings` -- both fixed. Checked for an existing client-side
+equivalent to the server's `ONYX_ENV` first, rather than assuming one exists
+or inventing a new one blind: none exists anywhere in `admin-shell/ui`. One
+was not needed, though -- Vite's own, already-real build-mode flag,
+`import.meta.env.PROD`, already exactly tracks "is this the packaged,
+distributed app" vs. "a local `npm run dev` / `tauri dev` session," since
+`package.json`'s `build` script (what `tauri build` invokes to produce the
+real shipped app) always runs `vite build`, which sets `PROD = true`
+unconditionally regardless of `--mode`. Introducing a parallel
+`ONYX_ENV`-style variable would just be a second flag carrying the same
+meaning Vite already provides for free.
+
+`isSecureEnoughForProduction()` (`utils/serverAddress.ts`): allows any
+`https://` address, allows `http://` only to `127.0.0.1`/`localhost`/`::1`,
+rejects every other `http://` address, and is a no-op (returns `true`
+unconditionally) outside `import.meta.env.PROD` so every local dev/test
+workflow is unchanged. Wired into both save paths (reject before the health
+check even runs) and, as a backstop, into `api/client.ts`'s request
+interceptor -- covering an address saved by a build predating this check, or
+one edited directly in `localStorage`, not just the two UI save flows.
+
+**Real verification, not a code read.** No test framework exists in
+`admin-shell/ui` at all (no vitest/jest, no `test` script in `package.json`)
+-- confirmed by searching, not assumed; adding one for a single check would
+be a real scope expansion beyond this task. Instead ran the actual production
+build (`npm run build` -- real `tsc -b && vite build`, the same command
+`tauri build` invokes) and inspected the emitted bundle directly:
+`dist/assets/client-*.js` contains the compiled `isSecureEnoughForProduction`
+with the `if (!import.meta.env.PROD) return true` branch entirely absent --
+Vite statically evaluated `import.meta.env.PROD` to the literal `true` for
+every `vite build` invocation and dead-code-eliminated the bypass, proving
+the guard is unconditionally live in the real, shipped artifact, not merely
+reachable in theory. `tsc -b` (part of the same build command) and `oxlint`
+both pass clean.
+
+**Item 2: relay auth token in the WebSocket query string.**
+
+Confirmed present exactly as described: `/api/relay/:target_id?token=...`
+put the real, hour-long, full-API-scope bearer access token in a URL.
+Replaced with a purpose-built relay ticket:
+
+- **New route**: `POST /api/relay-ticket` (`routes/relay::issue_ticket`),
+  authenticated normally (`authenticate_headers`), takes `{"target_id": ...}`.
+  Deliberately a normal, stateless route left on the scaled `onyx-api` fleet
+  (see the Ingress placement above) -- it reads only the shared JWT signing
+  key every replica already has, so it does not need the single relay
+  replica the WebSocket upgrade itself requires.
+- **Lifetime**: 30 seconds (`RELAY_TICKET_TTL_SECONDS`), enforced by the
+  exact same `exp` check `validate_token` already applies to access/refresh
+  tokens -- long enough to cover minting-then-connecting over a real network
+  including one retry, short enough that a leaked ticket is nearly worthless
+  by the time anyone could act on it.
+- **Scope**: bound to the specific `target_id` requested, carried in the
+  reused `TokenScope::object_id` field. `relay_route` rejects a ticket
+  whose `object_id` does not match the path segment actually dialled --
+  proven directly by
+  `relay_ticket_cannot_be_used_against_a_different_target` (new test).
+- **Single-use**: enforced by `RelayRegistry::redeem_ticket_once`, keyed on
+  the ticket's own `jti`. This is intentionally process-local, in-memory
+  state -- which would have been the wrong choice before this task (see H2's
+  reasoning for `revoked_tokens` in the earlier entry), but is the *correct*
+  choice here specifically because H3 (above) now guarantees exactly one
+  relay process exists: there is no cross-replica redemption race to defend
+  against, because there is only ever one replica. Proven directly by
+  `relay_ticket_cannot_be_redeemed_twice` (new test): an identical, unexpired,
+  correctly-scoped ticket is refused the second time it is presented.
+- Reuses the existing `TokenClaims`/`Ed25519JwtCodec` machinery rather than
+  inventing a parallel token format, with a new `token_type` discriminator
+  (`"relay_ticket"`) so a ticket can never be accepted where an access/refresh
+  token belongs or vice versa. `validate_token`'s existing revocation checks
+  (`is_token_revoked`, `user_revoked_before`) apply to tickets for free, so a
+  deactivated user's in-flight ticket is also correctly invalidated.
+
+**Real client fix, not server-only.** The only real, shipping relay client in
+this codebase is `desktop-shell`'s `TungsteniteRelaySocketFactory`
+(`mobile-core`'s equivalent is still `NotYetImplementedSocketFactory`, a
+placeholder -- confirmed, nothing to fix there). Updated it to call
+`POST /api/relay-ticket` over real HTTPS (deriving the ticket endpoint's host
+from the relay's own WebSocket URL, swapping `wss`/`ws` for `https`/`http`)
+before dialling the WebSocket, and to send the returned ticket, not the raw
+bearer token, as the `ticket=` query parameter.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo test -p api-server --release` | 33 passed, 0 failed -- includes all 6 previously-verified tests and both of H1/H2's prior new tests (via the shared harness in the earlier task), plus 2 new relay-ticket tests, with zero regressions |
+| `cargo test --workspace --release --no-fail-fast` (real D-Bus/gnome-keyring session) | 559 passed, 19 failed -- the identical, already-disclosed set from the prior task (7 testcontainers/Docker-dependent e2e tests, 12 `persistence-postgres` direct-Postgres tests), zero new or unexplained failures |
+| `helm lint deploy/helm/onyx-api-relay` | clean |
+| `helm template` single-replica proof (see H3 above) | confirmed live, both locally and as a new CI step |
+| `npm run build` (admin-shell/ui) | clean; production bundle inspected directly and confirms the H4(b) item 1 guard is unconditionally compiled in |
+| `oxlint` (admin-shell/ui) | clean |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+Out of scope, confirmed untouched: the long-term shared-bus relay redesign
+(documented above as deferred), H5 (Docker lockfile reproducibility), H6
+(mobile CI immutability/native acceptance gates), and `/api/events`'s own,
+separate `?token=` query parameter (a different route, not part of this
+task).
+
+## Hardening H5 (deterministic release builds) and H6 (CI immutability + native acceptance gates)
+
+The last two of six hardening tracks from the production-readiness audit.
+H1/H2/H4(a) (`540682c`/`67ebf8b`/`2024dbe`) and H3/H4(b) (`57b826e`) are both
+already done and CI-confirmed; this task is independent of both (no code
+overlap -- confirmed by reading the diffs, not assumed) and closes the audit
+out.
+
+### H5 -- Deterministic release builds
+
+**Diagnosis confirmed, and it turned out to run deeper than the audit's
+single cited example.** Direct grep confirmed the buggy
+`cargo generate-lockfile && cargo build --locked --release` pattern in all 5
+Dockerfiles (`api-server`, `desktop-shell`, `migration-tool`, `sync-agent`,
+`worker`) -- self-defeating, since regenerating the lockfile immediately
+before a `--locked` build means `--locked` can never catch drift against a
+lockfile it just wrote itself. The exact same pattern was also present in
+`scripts/release.sh` (line 19, immediately before its own `--locked` build)
+-- not mentioned in the task text, found by reading the script in full while
+tracing what `verify_team8_static.py`'s second check (below) actually
+validated.
+
+**Fix:** removed `cargo generate-lockfile &&` from all 5 Dockerfiles, which
+now build `cargo build --locked --release -p <crate>` directly against
+`Cargo.lock` as committed (already present via `COPY . .`). `release.sh`'s
+`cargo generate-lockfile` was replaced with a read-only
+`cargo metadata --locked` check (see below) rather than simply deleted, so a
+stale lockfile is caught with a clear error before a multi-minute release
+build starts, instead of failing confusingly partway through or (worse)
+silently succeeding against freshly-rewritten dependencies.
+
+**`verify_team8_static.py`'s two checks, handled as the task asked --
+distinctly, not blanket-removed:**
+
+- **Line ~100** (Docker pattern): previously required the literal buggy
+  string to be present -- inverted to require the corrected pattern
+  (`cargo build --locked --release` present, `cargo generate-lockfile`
+  absent) in every Dockerfile body.
+- **Line ~267-268** (release workflow/script pairing): read this one's full
+  context before touching it, per the task's explicit instruction, since it
+  visibly combined two different files. Confirmed `release_workflow`
+  (`.github/workflows/release.yml`)'s own `cargo metadata --locked --no-deps`
+  gate was already present in all three of its build jobs, ahead of their
+  own `--locked` builds -- genuinely correct on first read. The
+  `release_script` half required `scripts/release.sh` to literally contain
+  `cargo generate-lockfile` -- which is exactly the same bug being fixed
+  elsewhere, just required by the verifier as if it were a correctness
+  property. Not blanket-removed: replaced with a requirement that
+  `release.sh` contain the same corrected `cargo metadata --locked` gate
+  instead, so the check now enforces the fixed pattern in both files rather
+  than the bug's presence in one of them.
+
+**A second, more consequential bug found by actually testing the "already
+correct" gate, not by reading it.** Before concluding `cargo metadata
+--locked --no-deps` was a legitimate check worth preserving, it was tested
+directly: pinned a workspace dependency (`anyhow`) to an exact version the
+committed `Cargo.lock` cannot satisfy, then ran the exact command. It exited
+`0` -- passed -- despite genuine, real drift. `--no-deps` skips full
+dependency-graph resolution entirely, so `--locked` has nothing left to
+validate against; `cargo metadata --locked` (same command, `--no-deps`
+dropped) correctly failed the identical test with a real
+`failed to select a version for the requirement` error. This means the
+"legitimate" gate the task described was itself silently non-functional
+everywhere it existed: all three `release.yml` build jobs, and a third file
+not mentioned in the task at all -- `.github/workflows/Debug.yml` (a manual,
+Windows-only debug-build workflow), which had the identical broken
+`--no-deps` pattern in three more places. Fixed by dropping `--no-deps` in
+every one of these locations (`release.yml` x3, `Debug.yml` x3,
+`scripts/release.sh`, plus the new `ci.yml` step below), and updated
+`verify_team8_static.py`'s line-267 check accordingly (requires the base
+string present and the broken `--no-deps` variant absent, in both files).
+
+**`ci.yml` had no lockfile-drift gate at all.** Confirmed by grep before
+assuming otherwise: `cargo metadata --locked` appeared nowhere in `ci.yml`.
+A lockfile drifted out of sync with `Cargo.toml` on an ordinary push/PR was
+never caught there -- only at actual release time, if at all (given the
+`--no-deps` bug above, not even then). Added a "Verify locked dependency
+graph" step to the `check` job, placed before Clippy/Build so a stale
+lockfile is reported as exactly that rather than a confusing downstream
+compile error.
+
+**`cargo sqlx prepare --check`, added per the original plan.** This repo
+carries committed `.sqlx/` offline query metadata (`SQLX_OFFLINE=true` in
+`ci.yml`), so a query that changes without regenerating that metadata would
+previously build successfully against the stale cache with no warning.
+Added `cargo sqlx prepare --check --workspace -- --all-targets` (after
+`sqlx-cli` installation and after the `check` job's own migration step,
+since unlike the workspace build itself this genuinely needs a live,
+migrated schema to check queries against).
+
+**Real verification, both properties, not assumed:**
+- Installed Helm... no -- installed a real local PostgreSQL 16 (already
+  present in this sandbox's apt cache) and `sqlx-cli`, ran migrations, then
+  ran `cargo sqlx prepare --check` against the real, current `.sqlx/`
+  metadata: passed silently (exit 0, the correct behavior on a match).
+  Deleted one `.sqlx/query-*.json` file to simulate real drift and reran:
+  failed with `.sqlx is missing one or more queries; you should re-run sqlx
+  prepare` (exit 1) -- restored the file afterward, confirmed `git status`
+  clean.
+- Deliberately staled `Cargo.lock` (pinned `anyhow = "=1.0.200"` in the
+  workspace manifest, a version the lock cannot satisfy, without touching
+  `Cargo.lock`): `cargo metadata --locked` (the corrected command, no
+  `--no-deps`) failed with a real, specific error naming the unsatisfiable
+  requirement; reverted with `git checkout --` and confirmed clean again.
+  This is the actual property H5 exists to guarantee, tested directly
+  rather than inferred from the Dockerfiles looking different.
+- `python3 scripts/verify/verify_team8_static.py`: 363/363 checks pass
+  against the fixed files.
+
+### H6 -- CI immutability (mobile) + native acceptance gates
+
+**Part 1 (done). Diagnosis confirmed exactly as described** in `ci.yml`'s
+`mobile-dart` job: `flutter pub upgrade` ran immediately after `flutter pub
+get`, silently bumping every dependency to the latest version its
+constraints allowed before anything was validated -- a green run proved the
+*upgraded* tree passed, not the tree actually committed in
+`pubspec.lock`. `dart fix --apply || true` ran after that, mutating source
+in place, with `|| true` additionally swallowing any failure from the fix
+step itself so CI never reported whether it even succeeded.
+
+Removed both. Installed a real Flutter 3.47.2 SDK in this sandbox (not
+previously present) to verify the replacement job for real rather than by
+inspection:
+- `flutter pub get` alone (no `upgrade`) installs cleanly from the committed
+  `pubspec.lock`.
+- `flutter analyze` (no `dart fix` beforehand) reports **zero issues**
+  against the current tree -- confirmed directly, not assumed, before
+  deciding whether fatal warnings were safe to enable. Since there is no
+  existing backlog, making warnings fatal (dropping `--no-fatal-warnings`)
+  cannot turn CI red for anything unrelated to a given change, so it was
+  enabled outright rather than deferred. This also directly confirms the
+  task's premise: `flutter analyze` alone is sufficient to catch real
+  issues -- this session's own earlier `mobile/lib/net/auth.dart` parser
+  ambiguity was caught by `flutter analyze` directly, never by an auto-fix
+  step, which only ever mutates, never diagnoses.
+- `flutter test`: 16 passed, 1 skipped (the same pre-existing device-lab
+  skip noted below), unaffected by removing the mutation steps.
+- `bash scripts/verify/verify_mobile.sh`: passes.
+
+**Part 2 (scoping only, per the task -- nothing built).** Read all three
+currently-`#[ignore]`d native journeys in full, not just their attribute
+text:
+
+- `tests/end-to-end/p2p_sync.rs` (`journey_6_p2p_sync`) --
+  `#[ignore = "requires signed Team 5 desktop/mobile clients and radio
+  adapters"]`. Empty body (`{}`) -- a reserved slot, not a partially-blocked
+  test.
+- `tests/end-to-end/background_sync.rs` (`journey_7_background_sync`) --
+  `#[ignore = "requires Team 5 iOS BGTask and Android WorkManager release
+  builds"]`. Also an empty body.
+- `tests/end-to-end/notification_sync.rs` (`journey_5_notification_sync`) --
+  `#[ignore = "Team 5 client event integration is not production-complete"]`,
+  with its own doc comment citing "Team 8 ruling R11: keeps client-dependent
+  journeys ignored until Team 5 native-client completion and release signing
+  are available." Also an empty body; its own comment notes the backend
+  half (command/query flow) is already covered elsewhere (Team 6 integration
+  tests) -- this journey is specifically the *client* half.
+
+The mobile-side counterpart, `mobile/test/integration/p2p_sync_test.dart`,
+is instructive about how far the scaffolding for this already goes: it
+gates on `ONYX_MOBILE_DEVICE_TEST=1` and, even when that variable is set,
+its body only calls a fake `triggerSync()` against a mocked API -- the
+env-var gate exists as a naming convention for a future real device-lab
+run, not a working one today.
+
+**Honest assessment, per journey:**
+
+1. **`journey_6_p2p_sync` (Wi-Fi Direct / BLE).** Highest cost, most
+   infrastructure-heavy of the three. These radios cannot be virtualized in
+   any meaningful way -- a cloud CI runner has no Bluetooth/Wi-Fi Direct
+   hardware at all, and there is no credible emulator substitute for actual
+   short-range radio behavior (discovery, pairing, real-world interference,
+   range). Converting this into a real gate needs a physical device lab:
+   at minimum two real phones (one iOS, one Android, per the ignore reason)
+   on a persistent bench or a managed device-farm service with radio
+   support (most cloud device farms, e.g. Firebase Test Lab, explicitly do
+   not support BLE-to-BLE or Wi-Fi Direct pairing between two rented
+   devices in the same session -- this would likely require an
+   in-house/self-hosted lab, not a SaaS farm). Feasibility: low without a
+   real hardware investment and ongoing maintenance (device OS updates,
+   battery/charging management, physical security); the test itself is
+   also going to be flakier than anything running purely on CI hardware,
+   since it's exercising real radio conditions.
+2. **`journey_7_background_sync` (iOS BGTask / Android WorkManager).**
+   Medium cost. Android WorkManager behaves reasonably well in an emulator
+   for basic scheduling, but real fidelity (Doze mode, battery-optimization
+   task killing, actual background execution windows) is only fully
+   trustworthy on real hardware. iOS's BGTaskScheduler is the harder half:
+   the iOS Simulator does not fire background tasks on its own timeline at
+   all -- triggering one requires either a real device or manually invoking
+   the task via a debugger/`simctl` command, which tests *that the handler
+   runs when invoked*, not that the OS actually schedules and fires it
+   under real conditions. A CI-hosted acceptance gate could plausibly cover
+   the "handler executes correctly when triggered" half on
+   simulators/emulators relatively cheaply; the "OS actually decides to run
+   it in the background, on schedule, under real power/network conditions"
+   half realistically still needs real devices. Feasibility: medium --
+   partial automation is achievable now, full-fidelity acceptance testing
+   is not.
+3. **`journey_5_notification_sync` (client notification-event integration).**
+   Lowest cost of the three, but blocked on unfinished native-client work
+   rather than infrastructure alone -- its own ignore reason says the
+   client integration itself is "not production-complete," not that a test
+   environment is missing. Whether this needs real devices or could run on
+   emulators/simulators depends on a fact not yet established from this
+   codebase alone: whether "notification" here means an in-app event
+   delivered over this system's own sync transport (fully emulator-testable
+   -- no OS push infrastructure involved) or an OS-level push notification
+   (would need real or virtual APNs/FCM credentials and device-token
+   plumbing, meaningfully more setup). This should be the first thing a
+   dedicated follow-up task confirms, since it changes the feasibility
+   assessment substantially.
+
+None of this is committed to or built here -- per the task, this is scoping
+for a future, dedicated task, and the three journeys remain `#[ignore]`d.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean (no Rust source changed this task -- Dockerfiles, shell scripts, and workflow YAML only) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo test -p api-server --release` | all passing, no regressions |
+| `cargo test --workspace --release --no-fail-fast` (real D-Bus/gnome-keyring session, and for the first time in this session a real local Postgres instead of none) | 571 passed, 7 failed -- the 7 are the same disclosed `crates/team8-e2e-tests` testcontainers/Docker-dependent journeys as every prior task (no Docker daemon in this sandbox); having a real local Postgres available this time genuinely resolved all 12 of the previously-disclosed `persistence-postgres` failures, confirming those were exactly the infra gap they were always described as, not a masked defect |
+| `python3 scripts/verify/verify_team8_static.py` | 363/363 |
+| Deliberately-stale `Cargo.lock` test (see above) | genuinely fails `cargo metadata --locked`; genuinely passes once reverted |
+| Deliberately-stale `.sqlx/` test (see above) | genuinely fails `cargo sqlx prepare --check`; genuinely passes once restored |
+| `flutter analyze` (real Flutter 3.47.2, installed fresh this session) | 0 issues |
+| `flutter test` | 16 passed, 1 skipped (device-lab journey, see H6 Part 2) |
+| `bash scripts/verify/verify_mobile.sh` | passes |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+### All six hardening tracks are now complete
+
+H1 (production bootstrap), H2 (distributed session revocation), H3 (relay
+topology isolation), H4(a) (CORS), H4(b) (transport security), H5
+(deterministic release builds), and H6 Part 1 (CI immutability) are all
+landed and CI-confirmed. H6 Part 2 (native acceptance gates) is deliberately
+scoped, not built, per the original plan and this task's own instructions --
+its assessment above is the explicit next step for a future, dedicated task.
+This closes out the production-readiness audit as originally scoped.
+
+## Hardening H7 (relay ticket self-identity binding)
+
+A second-pass, independent re-audit of the H1-H6 work above found a
+genuinely new P1 in the very feature H4(b) built to close the previous
+relay-token problem. This is that fix.
+
+### The gap H4(b) left open
+
+`POST /api/relay-ticket` (`crates/bins/api-server/src/routes/relay.rs`,
+`issue_ticket`) mints a real, well-designed ticket -- 30s TTL, single-use
+via `jti`, correctly scoped to a specific `target_id`. But
+`IssueTicketRequest` only ever carried `target_id`; the minted
+`TokenClaims` never said anything about which *replica* the caller was
+entitled to register as once it opened the WebSocket. Separately,
+`RelayAuth` (the WS-upgrade query params) has its own `self_replica`
+field -- a plain, unauthenticated URL query parameter, parsed at
+`relay_route` and handed straight into `RelayRegistry::register()` with
+zero verification against the ticket's own claims. The ticket proved who
+the authenticated user was and which target they could reach; it proved
+nothing about which replica identity they were allowed to claim as their
+own on connection.
+
+**Practical consequence, preserved here in the re-auditor's own precise
+framing because it is the accurate severity, not a rounder-sounding one:**
+a compromised or malicious authenticated client *inside* an organization
+could connect while asserting another legitimate replica's UUID as
+`self_replica`. Because `register()` replaces whatever was previously
+registered under that UUID, this was a **same-tenant
+replica-impersonation / connection-displacement / denial-of-service
+vector -- not cross-tenant** (the existing organization check on every
+frame still held). The relay's existing check that a frame's
+`sender_replica` matches the connection's declared `self_id` only proved
+internal consistency with the attacker's own unverified declaration, not
+actual ownership of that declaration.
+
+### Resolving the `device_id`-vs-`self_replica` question first
+
+The task's own instructions asked to check, before building anything,
+whether the relay's replica identity is meant to be the *same* concept as
+the already-authenticated actor's `device_id` (`platform-kernel::authority`'s
+`ActorContext`) -- if so, the smaller fix is to derive `self_replica` from
+that already-verified identity instead of adding a new table.
+
+Read with real evidence, not assumed either way:
+
+- `platform-kernel::versioning::ReplicaId` is a genuinely distinct Rust
+  type from `DeviceId` (itself just `pub type DeviceId = ObjectId`) --
+  not a literal alias.
+- But `desktop-shell/src/lib.rs`'s `SessionInfo::from_session` derives the
+  app's own "device_id" (the value returned to the frontend) *directly*
+  from `local_replica: ReplicaId`, and `login`'s own doc comment says the
+  device's `ReplicaId` is "a property of this physical device/install, not
+  of who happens to be logged in" -- strong evidence the two concepts
+  really are meant to be the same identity in this codebase's design.
+- However, reading the actual wire request both real clients send at
+  login settles the practical question: `desktop-shell/src/session.rs`'s
+  `LoginRequest { username, password, client_type }` and
+  `mobile/lib/net/auth.dart`'s equivalent body carry **no device_id or
+  replica_id field at all**. Neither does `TokenClaims`/`AuthenticatedUser`
+  for ordinary access/refresh tokens.
+
+So the "preferred, smaller" path is not available today without also
+extending the login contract across all three real clients and the JWT
+schema for every token type -- a materially larger, riskier change than
+this task should make. **Decision: implement Option A**, a durable
+ownership table, checked at ticket-issuance time. Option B (per-replica
+cryptographic keypairs) is the stronger long-term answer, correctly
+identified as such by the re-auditor, and is explicitly deferred future
+work -- the same treatment H3 gave the deferred Redis/NATS shared-bus
+option, not silently dropped.
+
+### The fix
+
+- **`migrations/{postgres,sqlite}/20260110000000_add_replica_ownership.{up,down}.sql`** --
+  a new `replica_ownership` table: `replica_id` primary key, `user_id`,
+  `organization_id`, `claimed_at`. First-claim-wins, enforced by the
+  primary key itself: `INSERT ... ON CONFLICT (replica_id) DO NOTHING`
+  followed by a `SELECT` of the actual owner relies on the database to
+  resolve two concurrent first claims atomically, with no
+  `SELECT`-then-`INSERT` race window (`claim_replica_ownership` in
+  `relay.rs`).
+- **`IssueTicketRequest`** gained a required `self_replica` field. The
+  caller now declares, at mint time, which replica identity it intends to
+  register as.
+- **`issue_ticket`** calls `claim_replica_ownership` before minting
+  anything: if `self_replica` is unclaimed, it is claimed for the calling
+  `user_id` now; if it is already claimed by that same user, minting
+  proceeds as before; if it is claimed by a *different* user, minting is
+  refused (401) and the attempt is logged.
+- **`TokenScope`** (`routes/mod.rs`) gained an optional
+  `#[serde(default)] self_replica: Option<String>` field, `None` for
+  every existing access/refresh token, `Some(...)` only for a
+  `relay_ticket`-typed token whose `self_replica` has passed the ownership
+  check above. This reuses `validate_token`'s existing generic
+  exp/revocation logic unmodified -- no second claims type was needed.
+- **`relay_route`** now checks `claims.scope.self_replica` against the
+  WebSocket's `self` query parameter and rejects a mismatch *before* the
+  upgrade is accepted, in addition to the pre-existing `target_id` scope
+  check. This is the actual fix: the query parameter is still
+  unauthenticated on its own, but it can no longer diverge from what the
+  ownership-checked ticket actually authorized.
+- **`desktop-shell/src/relay_socket.rs`**'s `mint_relay_ticket` now sends
+  `self_replica` (the factory's own `local_replica`, which it already held)
+  in the ticket-mint request body -- the one real client in this codebase
+  that calls this endpoint.
+- The "Ticket design" doc comment on `issue_ticket`, and `RelayAuth`'s
+  doc comment on its `self` field, were both updated to describe this
+  binding -- their previous silence on self-identity verification is part
+  of why the original re-audit caught this and the first one didn't.
+
+### Known, disclosed limitation -- not a reopening of the vulnerability
+
+The ownership model is permanent-per-user by design (first-claim-wins).
+`desktop-shell`'s own doc comment says a device's `ReplicaId` is stable
+per physical install and is deliberately *not* reset on login, so that a
+second login after logout doesn't fragment sync history already on that
+machine -- which also means a *different* real employee logging into the
+same shared physical install would legitimately reuse that same
+persisted `ReplicaId`. Under this fix, if a first employee has already
+claimed that id under their own `user_id`, a second employee sharing the
+device will be refused a relay ticket for it.
+
+This is an availability inconvenience in an intentionally narrow scenario
+(a shared desktop install used by more than one person), not a security
+hole: refusing to mint the ticket is the fail-safe direction, and it does
+not let anyone connect as a replica they don't own. The real fix for this
+edge case is the same one that would also obsolete this whole table --
+extending the login contract to carry a verified device identity (the
+"preferred" path examined and set aside above), or Option B's per-replica
+keypairs. Both are deferred, not built here, and both are noted so this
+tradeoff isn't rediscovered as a surprise later.
+
+### Verification
+
+Two new tests in `crates/bins/api-server/tests/relay_switchboard.rs`,
+against a real bound server and real WebSocket connections (same harness
+as every other test in that file, not mocked):
+
+- `relay_rejects_a_connection_that_declares_a_different_replica_than_the_ticket` --
+  mints a ticket honestly bound to one replica id, then attempts to open
+  the WebSocket declaring a *different*, un-owned replica id via `self`;
+  confirms the connection is now genuinely refused (the HTTP upgrade
+  itself fails), not just differently formatted.
+- `relay_ticket_issuance_refuses_a_replica_owned_by_another_user` -- the
+  seeded admin claims a replica id via a real minted ticket; a second,
+  genuinely distinct authenticated user (created via the real
+  `POST /api/admin/users` route and logged in for a real access token)
+  then attempts to mint a ticket declaring that same replica id as their
+  own `self_replica`; confirms the mint itself is refused before a ticket
+  ever exists.
+
+Both pre-existing legitimate-path assertions in the same file
+(`relay_forwards_a_frame_between_two_replicas`, and every `open()` call
+throughout the suite, which always mints and connects with the *same*
+replica id for the same authenticated user) continue to pass unchanged,
+proving the ordinary case still works exactly as before.
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo test -p api-server --test relay_switchboard` | 7 passed (5 pre-existing H4(b) tests unchanged, 2 new H7 tests), 0 failed |
+| `cargo test --workspace --exclude desktop-shell` | all passing except the same 7 disclosed, Docker-dependent `crates/team8-e2e-tests` journeys as every prior task in this session (no Docker daemon in this sandbox) -- no new regressions |
+| `cargo clippy --workspace --exclude desktop-shell --all-targets -- -D warnings` | clean |
+| `cargo clippy -p desktop-shell --all-targets -- -D warnings` | clean (run separately from the rest of the workspace purely to manage this sandbox's limited disk space during Tauri/WebKit's large build; not a narrower check) |
+| Existing single-use (`redeem_ticket_once`), target-scoping (`object_id`), and 30s-TTL properties from H4(b) | all three's original tests (`relay_ticket_cannot_be_redeemed_twice`, `relay_ticket_cannot_be_used_against_a_different_target`, and `exp` via `validate_token`) still pass unmodified -- this task added the missing binding without weakening anything already correctly built |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+### Not acted on in this task (flagged by the same re-audit, lower priority)
+
+Two other findings the re-audit surfaced are deliberately out of scope
+here and noted so they aren't lost:
+
+- `load-smoke`'s real run-to-run variance at the identical commit
+  (0.60%/1.54s p95 vs. 0%/191ms), and the fact it runs
+  `DATABASE_URL=sqlite://...` despite spinning up a Postgres service
+  alongside it -- meaning it never actually exercises the production
+  Postgres path. A real, separate test-design gap.
+- Documentation drift: the README's "27 crates"/"Rust 1.75" claims (the
+  real count is 41 workspace members, the real toolchain is 1.97.1 per
+  `rust-toolchain.toml`), and other docs still describing the pre-H4(a)
+  `allow_origin(Any)` CORS behavior and the pre-H5 lockfile-regeneration
+  pattern as if current.
+
+## Hardening H10 (mobile observer client-capability enforcement)
+
+Two governance documents (`ONYX-MOB-00_Mobile_Client_Strategy_Manifesto_v1.1`,
+`ONYX-MOB-01_Android_Kotlin_iOS_PWA_Technical_Blueprint_v1.1`, both now
+under `docs/governance/`) specify a closed `client_type` contract and a
+server-enforced `mobile_observer` capability ceiling
+(`effective_permissions(user, session) = user_permissions(user) ∩
+observer_capabilities(session.client_type)`) in normative, present-tense
+"MUST" language. Read against the actual codebase before writing anything,
+neither existed: `LoginRequest::client_type` (`routes/auth.rs`) was a
+loose `Option<String>`, and the only place it was ever read was one
+hardcoded comparison, `payload.client_type.as_deref() == Some("mobile")`,
+gating a single mobile-class-access check. No code path anywhere denied a
+mutation on the basis of *what kind of client* sent it, and no
+unrecognized `client_type` value was ever rejected. This task built the
+enforcement the documents describe, for the first time.
+
+### What was built
+
+`crates/bins/api-server/src/routes/client_type.rs`, new:
+
+- **`ClientType`** — a closed, `#[serde(rename_all = "snake_case")]` enum
+  (`Mobile`, `MobileObserver`, `Desktop`, `Admin`, `Web`). A plain
+  string-valued `Deserialize` enum already rejects any string outside
+  this set (`serde::de::Error::unknown_variant`, confirmed against
+  current serde docs, not assumed) — this alone satisfies "the backend
+  MUST reject unknown client types" with no hand-written validation.
+  Confirmed by direct inspection that every real client's login call site
+  already sends one of these five literal strings
+  (`mobile/lib/net/auth.dart`: `"mobile"`; `desktop-shell/src/session.rs`:
+  `"desktop"`; `admin-shell/ui/src/pages/Login.tsx`: `"admin"`;
+  `web-ui/src/hooks/useAuth.ts`: `"web"`) — no client-side change was
+  needed for this to be a pure tightening, not a breaking change.
+- **`ClientType::default_on_absence` → `Web`** — an *absent* `client_type`
+  is a distinct case from an unrecognized one. Grepping every real
+  internal caller (`crates/bins/api-server/tests/*.rs`, this project's
+  end-to-end/integration suites) found dozens of existing tests,
+  including the shared `test_harness.rs` used by every end-to-end
+  journey, that call `/api/auth/login` without ever sending `client_type`
+  at all. Requiring the field outright would have broken those real
+  callers, not a hypothetical one. `Web` (full capabilities) was chosen
+  as the fallback over inventing a sixth "unclassified" variant, because
+  it is the literal continuation of the pre-existing "absent client_type
+  is never gated" behavior, not a new policy, and keeps the enum matching
+  the five real client classes the governance documents define.
+- **`ClientCapabilities`** and **`capabilities_for`** — a static mapping
+  (`FULL_CAPABILITIES` for every class except `MobileObserver`;
+  `OBSERVER_CAPABILITIES` — every `can_read_*`/`can_download_files` true,
+  every mutation flag false — for it), matching ONYX-MOB-01 §8's field
+  list exactly and using the "enum/bitset/typed policy object" latitude
+  that section explicitly leaves open.
+- **`require_capability`** — denies with `403
+  CLIENT_CAPABILITY_DENIED` (this project's real `ApiError`/
+  `safe_details` envelope, not ONYX-MOB-01 §9's illustrative flat JSON
+  example verbatim, per that section's own "must align with ONYX error
+  conventions" caveat) unless the session's mapped capability permits the
+  action. Wired into every mutation-class endpoint ONYX-MOB-01 §9
+  enumerates: mission/task command endpoints, approval decisions,
+  lifecycle transitions, conflict resolution, file upload, and
+  organization/user/policy/administrative mutation
+  (`routes/{admin,auth,command,policy_admin,profiles/*,todo_admin}.rs`).
+  This check runs in addition to, never instead of, this project's
+  existing per-route authority checks (`require_admin`, ownership checks,
+  etc.) — a user who already fails their existing authority check is
+  still denied by that check first; the capability ceiling only ever
+  narrows further.
+
+### Deliberately out of scope
+
+This project has no pre-existing unified `user_permissions` object to
+literally intersect against — authority today is checked ad hoc per route
+(`require_admin`, verifier resolution, H2's revocation watermark, H7's
+relay ownership, etc.). Retroactively unifying all of that into one real
+permissions type, so that `effective_permissions` could be computed as a
+literal set intersection rather than "the mutation-class check runs after
+the route's own authority check," is a materially larger and riskier
+change than this task's scope (closing the `mobile_observer` boundary)
+calls for, and was not attempted. `can_read_evidence`/`can_download_files`
+are likewise flat bools, not a policy-object hook, per ONYX-MOB-01 §8's
+own "policy-controlled" caveat — no real per-file/per-evidence
+authorization policy engine exists in this codebase to hook into today.
+
+### Governance document corrections
+
+Both `ONYX-MOB-00` §4 and `ONYX-MOB-01` §26 P1 read, on a literal
+reading, as if this enforcement already existed and only needed
+documenting. Both now carry an explicit "Implementation note (H10)"
+pointing at this entry and at `client_type.rs`, and `ONYX-MOB-01`'s single
+P1 bullet list has been expanded into P1.1–P1.5, each naming the actual
+file/module/test that satisfies it, so a future reader cannot mistake the
+blueprint's aspirational phasing for a record of prior work.
+
+### Verification
+
+New test file
+`crates/bins/api-server/tests/mobile_observer_capability.rs`, against a
+real bound server and real authenticated sessions (same harness pattern
+as every other integration test in this crate):
+
+- `mobile_observer_reads_normally_but_every_mutation_endpoint_denies_it`
+  -- a session that declares `client_type = "mobile_observer"` at login
+  continues to succeed on read endpoints while every representative
+  mutation endpoint now returns `403 CLIENT_CAPABILITY_DENIED`.
+- `cross_tenant_command_still_rejected_independent_of_client_capability`
+  -- confirms the new capability check is additive: an existing,
+  unrelated authority check (cross-tenant access) still fires on its own
+  terms regardless of client class.
+- `observer_session_refresh_preserves_the_capability_ceiling` -- refreshing
+  a `mobile_observer` session's token does not silently reset it to full
+  capabilities.
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean |
+| `cargo test -p api-server` (full crate, all test files) | 46 passed, 0 failed |
+| `cargo clippy -p api-server --all-targets -- -D warnings` | clean |
+| `cargo clippy --workspace --exclude desktop-shell --exclude admin-shell --all-targets -- -D warnings` | clean |
+| `cargo test --workspace --exclude desktop-shell --exclude admin-shell` | all passing except the same 7 disclosed, Docker-dependent `crates/team8-e2e-tests` journeys as every prior task in this session (no Docker daemon in this sandbox) -- no new regressions |
+| `cargo fmt --all -- --check` | clean |
+
+## H10.M0 (freeze the Flutter Android reference implementation)
+
+Migration Sequence step 1 (ONYX-MOB-00 §25) / Android Work Package A0
+(ONYX-MOB-01 §25), sequenced immediately after H10 per both governance
+documents' agreed order. This is a documentation-and-process task, not
+development: per ONYX-MOB-00 §8, the Flutter client becomes a Frozen
+Reference Implementation ("no ordinary new product development;
+security fixes MAY continue; critical defects MAY continue") while a
+native Kotlin Android rewrite and an iOS Observer PWA are built
+separately. No `mobile/lib/` application behavior was changed by this
+task -- the point is capturing exactly what exists today as the ground
+truth those rewrites must match, and making the freeze a real,
+enforced invariant rather than a written-only policy.
+
+### `docs/mobile-migration/parity-matrix.md` (new)
+
+Per ONYX-MOB-01 §5's repository layout, confirmed not to already exist.
+Documents, screen by screen (Dashboard, Missions list, Mission Detail,
+Tasks list, Task Detail, Approvals, Notifications, Files, Settings,
+both login screens, startup/error recovery, the shared-refresh
+controller architecture, and the full FFI contract surface): what each
+does today, which real backend endpoints/`mobile-core` FFI functions it
+calls, what state it reads/writes, and non-obvious behavior. This is
+written as real acceptance criteria for the Kotlin rewrite, not a
+high-level summary -- e.g. it pins down that Approvals is a filtered
+view over already-loaded Task/Mission state (not its own aggregate,
+and `controller.approvals` is loaded but never actually populated or
+read by any screen), that Mission's decision commands are
+`ActivateMission`/`RejectApproval` (not a direct `ApproveMission`
+mirror of Task's `ApproveTask`/`RejectTask` shape), the exact
+reason-required-before-Reject gating, and the literal `"mobile"`
+`client_type` value sent at login (`mobile/lib/net/auth.dart:46`).
+
+**A real discrepancy surfaced and resolved while building this
+document**, worth recording since it corrects this task's own starting
+assumption: the FFI contract is 18 functions declared in
+`mobile-core.h`, not "17 plus one Android-specific" as this task's own
+instructions assumed. Reading the header and every real call site
+(Dart's `lib/bridge/*.dart`, Kotlin's `WorkManagerService.kt`, Swift's
+`BackgroundService.swift`) directly: 15 functions are called from
+Dart, `mobile_core_android_do_work` is called from Kotlin (not Dart --
+an `external fun nativeAndroidDoWork()` bound via
+`System.loadLibrary`), `mobile_core_background_sync_registered` is
+called from Swift (via `dlsym`, not a static import), and
+`mobile_core_ios_background_sync` was not found called from any file
+this review reached in either Dart, Kotlin, or the one Swift file
+read -- left as a real, disclosed open question (possibly dead code,
+possibly called from a Swift file not read in this task) rather than
+silently assumed resolved.
+
+### Real, current test baseline (re-run fresh, not assumed from a prior session)
+
+Against this task's real tip (this branch, carrying H10):
+
+```
+flutter analyze  ->  No issues found! (ran in 16.7s)
+flutter test     ->  16 passed, 1 skipped, 0 failed
+```
+
+The one skip (`test/integration/p2p_sync_test.dart`) is real and
+disclosed, not silently dropped: `Skip: Requires two authorized
+iOS/Android devices and ONYX_MOBILE_DEVICE_TEST=1` -- gated behind an
+explicit opt-in environment variable because it genuinely cannot run
+without two real physical/authorized devices. This 16-passed/1-skipped/
+0-failed baseline, recorded per-test in the parity matrix's final
+section, is the parity floor the Kotlin rewrite's own (differently
+structured, not line-for-line ported) test suite must not regress
+below.
+
+### Freeze enforcement: a real CI gate, not a verbal policy
+
+This project has consistently preferred enforced invariants over
+written-only agreements (H1's production-mode bootstrap refusal, H10's
+`ClientType` rejection). Two options were weighed for making "no
+ordinary new product development in `mobile/`" real: a hard CI gate
+requiring an explicit override marker per change, versus a lighter
+`CODEOWNERS`/README-notice-only approach. The hard CI gate was chosen
+-- this project's own prior pattern (a *rejected* invalid state, not
+just a documented one) is the closer fit than a purely social
+convention, and the gate's cost is low: it only fires on diffs that
+actually touch `mobile/lib/`, which per this task's own scope should
+now be rare.
+
+**`scripts/verify/verify_mobile_freeze.sh`** (new), wired as the
+`mobile-freeze-guard` job in `ci.yml` (runs on every push/PR, ahead of
+`mobile-dart`): computes `git diff --name-only` between the merge-base
+of `origin/main` and `HEAD`; if any changed path starts with
+`mobile/lib/`, the diff must also touch `mobile/FROZEN_EXCEPTION.md`
+(new, a real exception log with instructions and an empty log section)
+or the job fails with a message explaining exactly why and what to do.
+Deliberately scoped to `mobile/lib/` only -- not `mobile/test/`,
+`mobile/android/`, `mobile/ios/`, or `mobile/tool/` -- since platform
+scaffold, CI, and test maintenance needed to keep the frozen app
+building on newer toolchains is not "new product development" and
+gating it would make the freeze actively harmful rather than useful.
+
+`mobile/README.md` also gained a prominent freeze notice pointing at
+both the parity matrix and the exception file, per the task's
+proportionality question -- both the process guard and the visible
+documentation were built, not one instead of the other, since the
+guard alone is invisible until someone's diff already fails it.
+
+### Verification
+
+Real test-then-revert proof the guard actually works, run against this
+task's own M0 commit as the base (not a hypothetical):
+
+1. Appended a trivial comment to `mobile/lib/main.dart`, committed
+   without touching `FROZEN_EXCEPTION.md`.
+   `verify_mobile_freeze.sh <M0-commit>` -> **exit 1, BLOCKED**, real
+   error message printed.
+2. Amended that commit to also touch `mobile/FROZEN_EXCEPTION.md`.
+   `verify_mobile_freeze.sh <M0-commit>` -> **exit 0, OK**.
+3. `git reset --hard` back to the real M0 commit -- the test commit
+   never reached the pushed branch.
+
+| Check | Result |
+|---|---|
+| `flutter analyze` (mobile/) | clean, 0 issues |
+| `flutter test` (mobile/) | 16 passed, 1 disclosed skip, 0 failed |
+| `verify_mobile_freeze.sh` block case | confirmed blocks (exit 1) |
+| `verify_mobile_freeze.sh` exception case | confirmed passes (exit 0) |
+| Fresh `workflow_dispatch` of `ci.yml` | see the job table in this task's chat report |
+
+### Not built in this task (explicitly out of scope per the task's own instructions)
+
+`mobile-android/` (the Kotlin project) and `mobile-pwa/` were not
+touched or started -- those are A1 and P2 respectively, later,
+separate tasks. No `mobile/lib/` application code or behavior was
+changed.
+
+## H10.A1 (Kotlin skeleton + `mobile-android-jni` adapter)
+
+Android Work Package A1 (ONYX-MOB-01 §25), sequenced after M0. Builds
+the real, separate `mobile-android/` Kotlin project and
+`crates/mobile-android-jni` JNI adapter, and proves a genuine
+Kotlin/JVM -> JNI -> Rust round trip, per the task's own "prove the
+connection, don't build every wrapper" scope.
+
+### Architecture decision: a thin JNI adapter crate, not `mobile-core` calling itself JNI-native
+
+Two real options existed, both investigated against `mobile-core`'s
+actual exported signatures (`mobile-core.h`) rather than assumed:
+
+1. A dedicated `mobile-android-jni` crate wrapping the C ABI.
+2. Kotlin `external fun`s binding straight to `mobile-core`'s own
+   `#[no_mangle] extern "C"` functions -- the pattern
+   `mobile/android/.../WorkManagerService.kt`'s existing
+   `nativeAndroidDoWork()` already uses for
+   `mobile_core_android_do_work`.
+
+Option 2 does not generalize: `mobile_core_android_do_work` happens to
+take no string/JNI-object arguments at all, so a parameterless `Int`
+`external fun` coincidentally lines up with a JNI-callable native
+signature. Every other function that matters for the rewrite --
+`mobile_core_execute_command`/`_execute_query` (JSON string in/out),
+`mobile_core_new` (two strings in, pointer out) -- takes `*const
+c_char`/`*mut c_char`, which is not a JNI-native-method-compatible
+parameter type at all (JNI requires object types like `jstring` for
+Java-side strings, never a raw `char*`). Option 1 was built. The
+resulting crate has no business logic (per the manifesto's explicit
+prohibition) -- every wrapper converts JNI types to the C ABI's native
+types, calls straight into `mobile_core::*` (a normal Rust function
+call across the crate boundary, not `dlopen`/`dlsym`, since
+`mobile_core_new` etc. are `pub` items re-exported from `mobile_core`'s
+crate root), converts the result back.
+
+Per A1's own scope ("prove the connection, don't build every
+wrapper"), only handle lifecycle (`mobile_core_new`/`mobile_core_free`)
+and one representative string-round-trip function
+(`mobile_core_execute_command` -- the harder marshalling case, not just
+an opaque-pointer function) are wrapped. The remaining ~15 functions
+follow this exact same pattern and are deliberately left for A3/A4,
+whichever task actually needs each one first.
+
+### `jni` crate version and API -- a real correction mid-task, not assumed
+
+Context7 has no indexed documentation for the Rust `jni` crate under
+any of "jni", "jni-rs", or "jni crate rust" -- checked directly, not
+assumed unavailable. The version was instead confirmed against
+crates.io's own API response: `0.22.4`, current stable, MSRV 1.85.0
+(well under this project's 1.97.1 toolchain). The adapter was first
+drafted against the older, pre-0.22 single-`JNIEnv` API from memory,
+and **failed to compile** with a hard, real error naming the actual
+current shape: 0.22 split `JNIEnv` into an FFI-safe `EnvUnowned`
+(what a native method actually receives) and a full `Env` obtained via
+`EnvUnowned::with_env(|env| ...)` for the duration of one closure. The
+adapter was rewritten against that real API, read directly from
+`jni-0.22.4`'s own vendored source (`~/.cargo/registry/src/.../jni-0.22.4/src/env.rs`)
+rather than guessed a second time -- including using `JString::try_to_string(&env)`
+(the current, non-deprecated string accessor) after a first pass using
+the now-deprecated `Env::get_string` produced a compiler warning that
+was corrected rather than left in place.
+
+### Kotlin project versions -- confirmed live, not remembered, including two real compatibility corrections
+
+- Compose BOM/AGP/Kotlin versions checked via Context7
+  (developer.android.com/develop/ui/compose/*) before writing any
+  build script.
+- The Android Gradle Plugin version needed a real correction beyond
+  Context7's coverage: `dl.google.com`'s own `maven-metadata.xml` for
+  `com.android.tools.build:gradle` was fetched directly, showing 9.4.0
+  as latest stable -- but AGP 9.x requires Gradle 9.5+ per
+  developer.android.com's own compatibility table, while this
+  sandbox's available Gradle is 8.14.3 (upgrading would mean an
+  unverified network download this task doesn't need). 8.13.2 -- the
+  latest genuinely stable 8.x release, confirmed by enumerating every
+  "8."-prefixed version in the same metadata rather than assuming the
+  newest 8.x line -- was used instead, a real, verified-compatible
+  choice over an untested reach for the newest major version.
+- The first real `gradle assembleDebug` attempt failed twice, for two
+  different real reasons, both fixed by reading the actual error
+  rather than guessing again: (1) `kotlinOptions { jvmTarget = "17" }`
+  (the String-setter form) is a hard error under the resolved Kotlin
+  Gradle plugin version -- migrated to the `compilerOptions` DSL
+  (`kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }`);
+  (2) Compose BOM `2026.08.00` requires AGP 9.1+/compileSdk 37, which
+  this project's AGP 8.13.2 doesn't provide -- downgraded to Compose
+  BOM `2026.03.00` with `compileSdk`/`targetSdk` 36 (the maximum AGP
+  8.13.2 itself recommends), confirmed by the real error message
+  naming the exact requirement, not by pre-emptively picking an
+  arbitrary older version.
+
+### ReLinker: confirmed unnecessary, not silently omitted
+
+Current, real Android NDK guidance (developer.android.com/ndk/guides/
+jni-tips, queried via Context7) recommends ReLinker specifically "to
+address potential issues with native library installation and updates
+on older Android versions," and the NDK's own revision history notes
+it replaced `ndk-depends` "for handling native library loading issues
+on older Android versions." A separate passage is explicit about the
+actual affected range: "For apps targeting Android API levels below
+18, the shared library must be loaded before any dependencies," with
+ReLinker recommended there specifically. This project's real minimum
+is API 29 (ONYX-MOB-01 §3), well above that threshold -- ReLinker was
+therefore deliberately not added, with this reasoning recorded in both
+`app/build.gradle.kts`'s own dependency comment and here, rather than
+silently left out with no stated reason.
+
+### `OnyxApplication`: loads the native library from `Application`, per real, current NDK guidance
+
+Confirmed via the same NDK doc query: "For applications with multiple
+classes using native methods, loading the library from the Application
+class ensures it is initialized early and consistently." `OnyxApplication`'s
+companion `init` block calls `System.loadLibrary("mobile_android_jni")`
+before any other class in the app can reach it -- applied from day one,
+since A3/A4 will add exactly the multiple native-calling classes this
+guidance anticipates, not retrofitted once a second one exists.
+
+### Real proof of the Kotlin -> JNI -> Rust round trip
+
+Per ONYX-MOB-00 §25 step 5's actual gate for this task, verified two
+ways:
+
+1. **Real Android cross-compilation.** `cargo ndk -t arm64-v8a -t
+   armeabi-v7a -t x86_64 build -p mobile-android-jni --release`
+   (`mobile-android/tool/build_rust_jni.sh`, mirroring `mobile/tool/
+   build_rust_android.sh`'s existing pattern) produced real ARM64/ARMv7/
+   x86_64 Android `.so` files (`file` confirms `ELF ... ARM aarch64 ...
+   dynamically linked` etc.), and a full `./gradlew assembleDebug`
+   (Gradle 8.14.3, matching the wrapper's pinned version) produced a
+   real, installable `app-debug.apk` with all three ABIs' native
+   libraries packaged in (`packageDebug`/`stripDebugDebugSymbols` ran
+   over `libmobile_android_jni.so`, `libmobile_core.so`,
+   `libsync_transport_mobile.so` for each ABI).
+2. **Real host-JVM execution of the identical JNI entry points**, since
+   this sandbox has no way to execute the cross-compiled Android
+   binary (see disclosure below): a small Java harness
+   (`javac`/`java`, OpenJDK 21) declared the same three `native`
+   methods as `MobileCoreBridge`, loaded the *host* (linux-x86_64)
+   build of `libmobile_android_jni.so` via `System.load`, and called
+   them for real:
+   - `nativeNew(dbPath, configJson)` with a real SQLite path and a
+     real `MobileConfig` JSON body (confirming along the way that
+     `organization_id` serializes as a raw 16-byte JSON array under
+     this project's actual `ObjectId` derive, not a UUID string, by
+     reading `platform-kernel::identifiers` directly rather than
+     guessing) returned a real, non-zero handle -- meaning the full
+     Rust-side `mobile_core_new` path (opening the SQLite pool,
+     running migrations) executed successfully from a JVM-initiated
+     native call.
+   - `nativeExecuteCommand(handle, "{}")` returned `null`, exactly
+     matching `mobile_core_execute_command`'s documented behavior for
+     an envelope that doesn't parse as `CommandEnvelope<Value>` (a
+     malformed-FFI-call case, not a domain rejection) -- the success/
+     domain-rejection JSON-string path was not separately re-proven
+     here since `mobile-core`'s own existing test suite
+     (`crates/mobile-core/tests/ffi_integration.rs`) already exercises
+     `execute_command`'s success path directly in Rust, and duplicating
+     a full, valid `CommandEnvelope` by hand in Java would not prove
+     anything that suite doesn't already cover.
+   - `nativeFree(handle)` returned without crashing the JVM.
+
+### Disclosed limitation: no real Android-device/emulator verification
+
+This sandbox has no `/dev/kvm` and `egrep -c '(vmx|svm)' /proc/cpuinfo`
+reports `0` -- confirmed directly, not assumed -- so no Android
+emulator can boot here, and no physical device was available. The real
+ARM64/ARMv7/x86_64 `.so` files and the `app-debug.apk` described above
+were built and packaged successfully, and a real instrumented test
+(`MobileCoreRoundTripTest`, `app/src/androidTest/`) was written to
+prove the same round trip under `connectedAndroidTest` on a real
+emulator/device -- but it has not actually been executed on-device as
+part of this task. The host-JVM proof above is the disclosed
+substitute: it proves the JNI marshalling and Rust glue are correct,
+not that the specific cross-compiled Android binary loads and runs
+under ART on real hardware. This mirrors this session's own prior
+`flutter build ios` local-vs-CI disclosure pattern rather than silently
+claiming full verification.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo test -p mobile-android-jni` | 0 tests (no Rust-level unit tests -- the crate is pure JNI marshalling, verified instead by the real host-JVM round trip above and the real instrumented test file, per this task's own "prove the connection" gate) |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean (new crate registered in workspace `Cargo.toml`) |
+| `cargo ndk build -p mobile-android-jni --release` for arm64-v8a/armeabi-v7a/x86_64 | all three succeed, real ELF Android `.so` files confirmed via `file` |
+| `./gradlew assembleDebug` (Gradle 8.14.3, AGP 8.13.2) | `BUILD SUCCESSFUL`, real `app-debug.apk` produced with all three ABIs' native libraries packaged |
+| Host-JVM round trip (`javac`/`java`, OpenJDK 21) | `nativeNew` real non-zero handle, `nativeExecuteCommand("{}")` correctly `null`, `nativeFree` clean -- see transcript above |
+| Real, on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (no KVM/virtualization, no device) -- disclosed above, not silently skipped |
+
+### Not built in this task (explicitly out of scope per A1's own instructions)
+
+No real screens, navigation, or application logic beyond the minimal
+Compose skeleton (`OnyxSkeletonScreen`, a single static `Text`). No
+login/auth (A3). No business logic in `mobile-android-jni` itself. No
+changes to `mobile/` (frozen) or `mobile-pwa/` (not started).
+
+## H10.A3 (Kotlin login/session state machine, secure token storage)
+
+Android Work Package A3 (ONYX-MOB-01 §25). Builds the real startup/
+login/error state machine and the secure session it protects, mirroring
+Dart's `main.dart`/`ffi_login_screen.dart`/`startup_error_screen.dart`/
+`net/auth.dart` precisely rather than inventing a different shape.
+
+### A1/A2 overlap status (checked, per this task's own note)
+
+A1 already delivered a real, proven JNI adapter with genuine test
+coverage (the host-JVM round trip, plus A1's own real cross-compile/
+Gradle-build proof) -- A2 ("JNI -- native registration, adapter tests")
+is fully subsumed by A1's actual delivered scope. The one real gap A1
+explicitly left open -- `mobile_core_set_hierarchy` unwrapped -- is
+this task's own prerequisite, not a leftover A2 item, and is closed
+below.
+
+### Architecture confirmed, not invented: HTTP-only login, no `mobile-core` FFI change
+
+`mobile-core`'s own source comment states plainly: "mobile has no
+login/auth" happening in Rust. `AuthApi` (new,
+`app/src/main/kotlin/com/onyx/net/AuthApi.kt`) is therefore a plain
+OkHttp client mirroring `net/auth.dart`'s `OnyxHttpAuthApi` field-for-
+field -- `POST /api/auth/login` with `client_type: "mobile"`,
+`GET /api/users/hierarchy`, `POST /api/auth/refresh`, `POST /api/auth/
+logout` -- confirmed against `api-server::routes::auth`'s real
+`LoginRequest`/`LoginResponse` structs directly, not assumed from
+Dart's comment alone. No new `mobile-core` FFI function was added for
+login; only the *result* of a successful HTTP login is later handed
+into `mobile-core` via `MobileCoreBridge.nativeNew`/
+`nativeSetHierarchy`, exactly Dart's own sequencing.
+
+`MobileAccessRestrictedException` is a direct Kotlin mirror of Dart's
+identically-named/reasoned exception: `auth.rs` deliberately returns
+the same `INVALID_CREDENTIALS` for every other credential failure mode
+(audit finding H-01), so only the mobile-access-restricted case gets a
+distinct UI message.
+
+### A real UUID-encoding gap found and closed: HTTP strings vs. FFI byte arrays
+
+`LoginResponse.organization_id` is a plain `String` (confirmed in
+`api-server::routes::auth`), but `mobile_core_new`'s `MobileConfig.
+organization_id: ObjectId` derives `Deserialize` on `struct
+ObjectId([u8; 16])` -- a JSON array of 16 bytes, not a string (the same
+distinction A1's own host-JVM proof surfaced). Dart's `bridge.dart` has
+its own `uuidToBytes`/`bytesToUuid` pair for exactly this conversion;
+`com.onyx.util.UuidCodec` (new) is a byte-for-byte Kotlin port (strip
+hyphens, parse each hex-byte-pair left to right, no reordering) rather
+than a reinvented scheme, so a value round-trips identically regardless
+of which client produced it.
+
+### `mobile_core_set_hierarchy` JNI wrapper (new, in `mobile-android-jni`)
+
+`Java_com_onyx_bridge_MobileCoreBridge_nativeSetHierarchy` follows the
+exact same pattern A1 established for `nativeExecuteCommand` (JSON
+string in, `mobile_core_set_hierarchy`'s own `i32` result pass-through
+unchanged: `0` success, `-1` invalid arguments or unparseable JSON --
+including this wrapper's own JNI-level string-conversion failure,
+folded into the same `-1` case rather than inventing a third status).
+
+**Real, necessary correction found while testing this wrapper**: the
+hierarchy wire DTO's `id` field
+(`client_composition::hierarchy_cache::HierarchyUserWire.id`) is a
+plain `String`, unlike `MobileConfig.organization_id` -- a real, direct
+host-JVM test using a 16-byte array for `id` (matching the *other*
+struct's shape) failed with `-1` until corrected to a UUID string,
+confirming `HierarchyUserWire`'s real shape by testing it rather than
+assuming both id-carrying structs in this codebase serialize
+identically. `AuthApi.fetchHierarchyJson` and `OnyxSessionViewModel`
+both pass the server's raw JSON straight through unmodified (matching
+`GET /api/users/hierarchy`'s own real response shape, string ids
+included) -- only `organization_id` needs `UuidCodec` before reaching
+`mobile_core_new`.
+
+### Secure token storage: a real correction from Dart's own approach, not a copy
+
+Dart's `FfiSessionStorage` uses `flutter_secure_storage`, which wraps
+Android's `EncryptedSharedPreferences`
+(`androidx.security:security-crypto`). Checked directly against that
+library's real, current release notes before writing
+`com.onyx.security.SecureTokenStore` (not assumed still current just
+because Dart's side uses it): as of version 1.1.0-beta01, **all APIs in
+that library -- including `EncryptedSharedPreferences` -- are
+deprecated "in favour of existing platform APIs and direct use of
+Android Keystore."** `SecureTokenStore` therefore does not mirror
+Dart's library choice; it implements the now-recommended pattern
+directly -- an AES-256-GCM key generated and held inside the Android
+Keystore (`KeyGenParameterSpec`, never exportable), used to encrypt
+token bytes, with only ciphertext + IV persisted in a plain
+`SharedPreferences` file. Same real requirement (a bearer token needs
+materially more protection than a placeholder UUID) as Dart's own doc
+comment states, met via the platform's currently-recommended mechanism
+rather than a now-deprecated wrapper.
+
+### Startup/login/error state machine (`OnyxSessionViewModel`, new)
+
+Mirrors `main.dart::restartApp()`'s branching precisely (this
+skeleton has no HTTP-mode equivalent to mirror, since A1/A3 never built
+one): no saved real session -> `NeedsLogin`; a saved session -> open
+`mobile-core` under the real, previously-logged-in identity and reach
+`Ready`; any failure along the way -> `StartupError`, never a silent
+crash. `login()` follows Dart's exact persistence order (tokens to
+secure storage, *then* the non-secret `hasRealSession` flag) so a crash
+between the two writes can never leave a flag set with nothing backing
+it.
+
+**No manual identity entry, ever -- carried forward deliberately, not
+independently rediscovered.** Dart's `startup_error_screen.dart` doc
+comment records a real, already-fixed security hole: a startup-failure
+recovery screen used to let anyone type in an arbitrary
+`organization_id`/`user_id` by hand, no authentication required. This
+class's only two recovery actions (`retry()`, `signOutAndRetry()`) --
+and `StartupErrorScreen`'s only two buttons -- have no code path that
+accepts a caller-supplied organization or user id. Explicitly named
+here, per this task's own instruction, so this reads as carried forward
+from Dart's fixed history, not something re-discovered independently.
+
+### Proactive token refresh
+
+`scheduleProactiveTokenRefresh` renews the access token at 80% of its
+real `expires_in` TTL (returned by the server, not hardcoded), looping
+for the life of a `Ready` session -- combines Dart's two separate
+mechanisms (`OnyxController.initialize`'s periodic timer +
+`refreshHierarchyBestEffort`'s reactive-refresh-on-expiry fallback)
+into one primarily-proactive path, since a session left open for the
+server's full 1-hour token TTL must not sit on a stale token until
+something else happens to fail first. A refresh-token failure (7-day
+expiry, or revocation) stops the loop rather than retrying in a tight
+loop -- a real password login is required at that point, same
+ceiling Dart's own doc comment states.
+
+### A real discrepancy from the frozen Flutter reference, disclosed not silently copied: cleartext LAN HTTP
+
+`AuthApi`'s login flow talks to a server address the user types in
+(e.g. `http://192.168.1.x:3000`, a LAN `api-server`, matching this
+project's local-first design) -- plain HTTP. Since API 28, Android
+blocks cleartext traffic by default unless an app opts in via a network
+security config. Checked directly: neither `mobile/android/app/src/
+main/AndroidManifest.xml` nor any `network_security_config.xml` exists
+anywhere under `mobile/android/` -- the frozen Flutter reference has no
+such opt-in, meaning its own real LAN HTTP login is very likely already
+blocked by the OS on a real API 28+ device. That is the frozen
+reference's own pre-existing, undisclosed gap; fixing it is out of
+scope under the M0 freeze (a "critical defect" fix there would need its
+own `FROZEN_EXCEPTION.md` entry, a call for whoever owns that decision,
+not this task). The Kotlin rewrite does not reproduce the gap silently:
+`network_security_config.xml` (new, debug-source-set only --
+`cleartextTrafficPermitted="true"` never applies to a release build)
+permits cleartext for real LAN development/testing, with an explicit
+release-variant counterpart keeping the platform default
+(`cleartextTrafficPermitted="false"`) for any real production build.
+
+### Verification
+
+Real host-JVM proof (`javac`/`java`, OpenJDK 21, same technique as A1's
+own round-trip proof, for the same "no KVM/emulator in this sandbox"
+reason -- disclosed there and unchanged here):
+
+```
+nativeNew OK handle=<non-zero>
+nativeSetHierarchy(valid, string id)  = 0   (success)
+nativeSetHierarchy(invalid JSON)      = -1  (documented failure code)
+```
+
+This is the real evidence behind the `HierarchyUserWire.id` correction
+above -- the first attempt (byte-array `id`, matching
+`MobileConfig.organization_id`'s shape) failed with `-1` until
+corrected to a UUID string.
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean |
+| `cargo ndk build -p mobile-android-jni --release` for arm64-v8a/armeabi-v7a/x86_64 | all three succeed |
+| `./gradlew assembleDebug` (Gradle 8.14.3, AGP 8.13.2) | `BUILD SUCCESSFUL`; real `app-debug.apk` confirmed (via `unzip -l`) to package all three ABIs' `libmobile_android_jni.so`/`libmobile_core.so`/`libsync_transport_mobile.so` |
+| Host-JVM `nativeSetHierarchy` round trip | valid string-id hierarchy -> `0`; malformed JSON -> `-1`; both match `mobile_core_set_hierarchy`'s documented contract |
+| Real on-device/emulator instrumented test | **not possible in this sandbox** (no KVM/virtualization, no device -- same disclosed constraint as A1) |
+
+Two real build-time errors were hit and fixed during this task, both
+worth recording since they are genuine mistakes this task made and
+corrected, not hypothetical risks: (1) `--` inside an XML comment
+(`network_security_config.xml`) is invalid per the XML spec and failed
+real resource parsing during `assembleDebug` -- fixed by using single
+hyphens; (2) a doc comment containing the literal substring
+`mobile/lib/bridge/*.dart` opened an unintended *nested* block comment
+(Kotlin, unlike Java, nests `/* */`), leaving the real doc comment
+unclosed until end-of-file and cascading into unrelated "unresolved
+reference" errors elsewhere in the same file -- fixed by removing the
+literal `*.dart` glob from the comment text.
+
+### Not built in this task (explicitly out of scope per A3's own instructions)
+
+No screens beyond login/startup/session management -- Dashboard,
+Missions, Tasks, etc. are A4/A5. No login/auth FFI function was added
+to `mobile-core` (confirmed unnecessary and architecturally wrong
+above). No changes to `mobile/` (frozen) or `mobile-pwa/` (not
+started).
+
+## H10.A4 (core screens: Dashboard, Missions, Tasks, Detail, Notifications)
+
+Android Work Package A4 (ONYX-MOB-01 §25). Builds the five real screens
+this task scopes, plus the shared-refresh `OnyxController` they all
+read from -- re-verified fresh against the current, real Dart reference
+files for this task (not from an earlier session's summary), per A4's
+own instruction.
+
+### Real Dart reference behavior, confirmed screen by screen
+
+- **`mission_detail.dart`/`task_detail.dart` are real, substantial,
+  interactive screens** -- confirmed directly, matching this task's own
+  starting assumption: real `ApproveTask`/`RejectTask` (Task) and
+  `ActivateMission`/`RejectApproval` (Mission) actions gated by a
+  required, non-empty reason for Reject only, wired to the real
+  owner-authority command dispatch. Mission and Task genuinely use
+  *different* command name pairs and *different* status vocabularies
+  for "awaiting a decision" (`AwaitingApproval` vs. `Submitted`) --
+  confirmed directly in both files, not assumed symmetric.
+- **The single, shared, centralized refresh model is real and was
+  mirrored, not "improved."** `ui/app.dart`'s `OnyxController.refresh()`
+  fans out exactly six calls in parallel (`Future.wait`):
+  `listAggregates('mission'/'task'/'approval'/'notification')`,
+  `getSyncStatus()`, `listConflicts()`. Kotlin's `OnyxController`
+  reproduces this exactly (`async`/`awaitAll`, the direct equivalent),
+  including fetching `'approval'` every cycle even though **no real
+  screen anywhere -- Dart's own `ApprovalsScreen` included -- ever
+  reads the result** (confirmed in the parity matrix's §6 finding,
+  re-confirmed here): the call is still made because Dart's
+  `Future.wait` treats a failure there as failing the *entire* refresh,
+  and reproducing only the calls whose results a screen happens to read
+  today would silently change that failure behavior. `missions.dart`/
+  `tasks.dart` list screens are real create-then-refresh flows (a FAB
+  dialog; Tasks additionally short-circuits via a `SnackBar`, not a
+  disabled FAB, when no mission exists yet to attach a task to -- both
+  confirmed directly, not assumed). `notifications.dart` is confirmed
+  genuinely minimal (a direct, un-embellished list) -- no scope was
+  added beyond it.
+
+### Kotlin architecture: `ViewModel` + `StateFlow`, confirmed current via Context7
+
+Dart's `ChangeNotifier`/`context.watch` has no literal Kotlin
+equivalent; the current, real Android pattern (confirmed via Context7,
+developer.android.com/develop/ui/compose/state-hoisting) is a
+`ViewModel` exposing `StateFlow`s, obtained via `viewModel()` --
+documented to return the *same instance* to every composable scoped to
+the same owner, which is exactly the "one shared controller instance
+every screen reads from" property Dart's architecture depends on.
+`OnyxController` (new) is that ViewModel: `missions`/`tasks`/
+`notifications`/`sync`/`conflictCount`/`isLoading`/`error` are all
+`StateFlow`s; `refresh()` is the only method that calls
+`MobileCoreBridge.nativeListAggregates`/`nativeGetSyncStatus`/
+`nativeListConflicts` -- no screen composable calls these directly,
+mirroring Dart's "no screen independently re-queries the backend"
+invariant by construction (there is no other code path to the native
+list-data calls). `isLoading` starts `true` and is never reset to
+`true` again, matching Dart's own documented behavior that a
+mutation-triggered `refresh()` never re-shows a full-screen spinner.
+
+Because `OnyxController` needs the live native handle and the
+CommandEnvelopeFactory user id at construction time (unlike a
+no-arg-constructible ViewModel), it's built via a
+`ViewModelProvider.Factory` (`OnyxController.Factory`), and
+`MainActivity` calls `viewModel(key = handle.toString(), factory = ...)`
+-- keyed on the handle specifically so a sign-out (which frees that
+handle) followed by a fresh login (which mints a new one) gets a
+genuinely new `OnyxController` instance, never one still holding a
+freed/stale native pointer.
+
+### Three new JNI wrappers (`mobile-android-jni`, following A1's exact template)
+
+`nativeListAggregates`/`nativeGetSyncStatus`/`nativeListConflicts`
+follow the same wrapper pattern A1 established for
+`nativeExecuteCommand` (string in where applicable, string out,
+`mobile_core_free_string` called exactly once). The shared tail --
+copy the C string into a JVM string, free it, return `null` unchanged
+for a null result pointer -- was factored into one
+`copy_and_free_c_string` helper rather than left duplicated a fourth
+time, since duplicating it a fourth time would have been the real
+reuse smell A4's own instructions warn against, not a hypothetical one.
+
+### `CommandEnvelopeFactory`: ported field-for-field, placeholders included, not "fixed"
+
+Kotlin's `CommandEnvelopeFactory` reproduces Dart's real, current
+`CommandEnvelopeFactory.create` (`mobile/lib/bridge/bridge.dart`)
+exactly, including two real placeholders this task deliberately did
+NOT "improve": the fixed `deviceId` literal
+(`"22222222-2222-4222-8222-222222222222"`, no real per-device identity
+concept exists yet at this layer) and the `authority_proof` shape
+(`proof_type: "Jwt"`, `signature: null`, a maximal `expires_at`) --
+Dart's own real, current stand-in for a local-first FFI mode that does
+not verify a real JWT. Both are confirmed present in Dart's own real,
+current code, not independently invented here; reproducing them
+exactly (rather than tightening them unilaterally) is what "mirror
+what Dart's reference actually does" requires per A4's own instructions
+-- a real, specific reason to diverge did not emerge, so none was
+taken.
+
+### A real, necessary correction found while implementing `LoadedAggregate`
+
+`HierarchyUserWire.id` (A3's own finding) is a UUID string, but
+`LoadedAggregate.id` -- confirmed directly against Dart's
+`bridge.dart` -- is a raw 16-byte array, matching `mobile_core_new`'s
+`MobileConfig.organization_id` shape, not the hierarchy DTO's. Kotlin's
+`LoadedAggregate.fromJson` parses `id` as a `JSONArray` of ints (via
+`UuidCodec.bytesToUuid`), confirmed against a real unit test fixture
+matching the exact byte layout used throughout this task's prior host-
+JVM proofs, not assumed consistent with the hierarchy DTO by
+similarity of name.
+
+### Real, executed verification
+
+Two real build-time errors were hit and fixed while wiring the Compose
+screens, both worth recording as genuine mistakes corrected, not
+hypothetical risks: (1) `Card(onClick = ...)`/`TopAppBar` are
+`@ExperimentalMaterial3Api` under the resolved Compose BOM version --
+fixed with `@OptIn(ExperimentalMaterial3Api::class)` on each screen
+that needed it; (2) `ExposedDropdownMenuBox`/`ExposedDropdownMenu` (the
+Tasks screen's mission picker) proved more version-fragile than
+warranted for this task's real scope -- replaced with a plain
+`OutlinedButton` + `DropdownMenu` (stable API), a real, deliberate
+simplification, not a silent scope cut (the picker's actual behavior --
+select one of the existing missions -- is unchanged).
+
+14 real, executed local JVM unit tests (`src/test/kotlin/com/onyx/`,
+`testDebugUnitTest`, all passing) prove the pure logic --
+`LoadedAggregate`/`SyncSnapshot` parsing (including the real title/
+status/description fallback chains and null-handling) and
+`CommandEnvelopeFactory`'s exact envelope shape (id-as-byte-array
+fields, the real `authority_proof`/`deviceId` placeholders,
+optimistic-concurrency field threading). These required adding
+`org.json:json:20250517` (Maven Central's confirmed current release)
+as a `testImplementation` dependency -- `org.json.JSONObject` resolves
+to the Android SDK's throwing stub jar under plain `src/test/` JVM
+unit tests otherwise, a real, necessary fix, not an arbitrary
+dependency addition.
+
+A real, complete instrumented test file
+(`OnyxControllerInstrumentedTest`, `src/androidTest/`) was written to
+prove the three properties A4's own verification section calls out --
+create-then-refresh read-back, the real approve/reject status
+transition, and the single-refresh-per-cycle property (checked via a
+new `OnyxController.refreshCount` `StateFlow`, incremented once per
+real `refresh()` completion) -- but has **not been executed** in this
+sandbox, the same disclosed constraint as every prior mobile task this
+session (no `/dev/kvm`, no emulator, no physical device).
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean |
+| `./gradlew compileDebugKotlin` | clean, zero warnings |
+| `./gradlew assembleDebug` | `BUILD SUCCESSFUL`, real `app-debug.apk` produced |
+| `./gradlew testDebugUnitTest` | 14 passed, 0 failed (`LoadedAggregateTest`, `SyncSnapshotTest`, `CommandEnvelopeFactoryTest`, `UuidCodecTest`) |
+| `./gradlew compileDebugAndroidTestKotlin` | clean (proves the instrumented test file itself is real, compilable code) |
+| Real on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (disclosed above, not silently skipped) |
+
+### Not built in this task (explicitly out of scope per A4's own instructions)
+
+Files, Settings, Sync/Conflicts screens are A5. The bottom navigation
+shell exposes only the four destinations this task builds
+(Home/Missions/Tasks/Alerts); Dart's remaining three
+(Approvals/Files/Settings) are visible in `ui/app.dart` but
+intentionally not added to Kotlin's nav bar yet, not a silent parity
+gap. The shared-refresh architecture was not changed "for the better"
+-- no real, specific reason emerged to diverge from Dart's real
+behavior, so none was taken.
+
+## H10.A5 (Files, Settings, Sync status, Conflict resolution, Background sync -- final A-series work package)
+
+Real, current Dart reference behavior re-verified fresh for this task
+(not from memory of A4's summary), against `main` at commit `d78c6a1`
+(H10 through A4 merged): `mobile/lib/ui/screens/files.dart` (151
+lines), `settings.dart` (252 lines), `ui/widgets/sync_status.dart`,
+`ui/widgets/conflict_dialog.dart`, `ui/app.dart`'s `_MobileShell`
+(where the sync status widget and conflict banner actually live -- the
+app bar, not either screen), and `background/android/
+workmanager_service.dart` plus `mobile/android/app/src/main/kotlin/
+com/onyx/WorkManagerService.kt`.
+
+### Files screen
+
+Ported field-for-field: a filesystem-path upload/download UI (no
+file-picker dependency, matching Dart's own documented reason -- none
+exists in this app either, and adding one unverified would be a bigger
+risk than the screen itself), calling through the new
+`OnyxController.uploadFile`/`downloadFile`, which call
+`MobileCoreBridge.nativeUploadFile`/`nativeDownloadFile` (two new
+`mobile-android-jni` wrappers, added following A1's established
+template exactly).
+
+**Real, checked finding on error handling, not assumed richer than it
+is:** `mobile_core_upload_file`/`_download_file`
+(`crates/mobile-core/src/ffi_files.rs`) collapse *every* failure mode
+-- an unreadable file, a file over `file_domain::value::
+MAX_FILE_SIZE_BYTES` (100 MiB), no stored content for a hash, a write
+error -- into a null/`-1` return with zero further detail; the actual
+Rust `String` error message is discarded, not merely unlogged (upload)
+or only `tracing::warn!`-logged, never surfaced past the FFI boundary
+(download). Dart's own `FilesScreen` gets exactly this same generic
+signal (`_decodeOwnedJson` throws `StateError('mobile-core returned
+null')`, nothing more specific). Kotlin's `OnyxController.uploadFile`/
+`downloadFile` therefore surface the same honest, generic failure
+(`"Upload failed (unreadable file, over the 100 MiB size limit, or a
+storage error)"`) -- this is real parity with the reference's actual
+current behavior, not a regression from some richer diagnostic Dart
+secretly has and this task forgot to wire up. `FileTransferInstrumentedTest`
+proves the real upload-then-download byte-for-byte round trip and the
+real oversized-file rejection through the actual JNI wrappers (mirrors
+`crates/mobile-core/tests/file_sharing.rs`'s existing, already-passing
+Rust-level proof of the same underlying functions, one layer up).
+
+### Settings screen -- the one property that must never regress
+
+Ported with the *exact* real security property Dart's own doc comment
+records as a previously-fixed hole (free-text organization/user entry,
+independently re-broken and re-fixed a second time in
+`startup_error_screen.dart`, per A3's own carried-forward instruction):
+`organizationId`/`userId` are `Text`-interpolated, never bound to any
+editable control; the cloud relay endpoint (`SessionPreferences.
+relayEndpoint`, new -- Kotlin previously hardcoded this to a constant
+in `OnyxSessionViewModel`, now persisted the same way Dart's own
+`preferences`-backed `relay_endpoint` key is) is the *only* editable
+field; "Sign out" reuses `OnyxSessionViewModel.signOutAndRetry()`
+unchanged -- the same real reset A3 already built for `StartupErrorScreen`
+(clears secure tokens + non-secret identity, routes back to
+`NeedsLogin`/a real login), not a separately invented, weaker reset.
+
+This app has no HTTP-transport mode to mirror (A1/A3 never built one),
+so Dart's "Connection mode" (local-first vs. LAN) card has no Kotlin
+equivalent -- not a gap, since there is nothing real for it to switch
+between here.
+
+**Explicit, direct, automated proof, not just this doc comment's
+claim:** `SettingsScreenSourceTest` (`src/test/kotlin/com/onyx/ui/
+screens/`) reads `SettingsScreen.kt`'s own real source at test time and
+asserts (1) exactly one editable field exists and it is bound to the
+relay endpoint, not `organizationId`/`userId`; (2) no `.organizationId
+=`/`.userId =` write call site exists anywhere in that file; (3) a
+`onSignOut` affordance is present. This is a real, executed, currently-
+passing test -- and a real, *failing* test when the property is
+violated: verified directly during this task by temporarily injecting
+an `OutlinedTextField(value = organizationId, ...)` into the screen and
+confirming `SettingsScreenSourceTest` failed with a real assertion
+error, then reverting the injection (not left in the tree). No Compose
+UI test harness (e.g. Robolectric) is a dependency of this project, so
+a source-level check is the real, honest mechanism available here --
+same "cannot render Compose under a plain JVM unit test" constraint
+already disclosed for other screens this session.
+
+### Sync status indicator + conflict resolution dialog
+
+Both ported field-for-field from `sync_status.dart`/`conflict_dialog.dart`,
+with one real, checked correction to where this task initially assumed
+they lived: **neither widget is inside a screen file** -- both live in
+`ui/app.dart`'s `_MobileShell` itself (the sync status chip in the
+`AppBar`'s `actions`, the conflict-review banner as a `ListTile` below
+it, opening `ConflictDialog(conflict: controller.conflicts.first)` only
+on tap, not automatically). `AppShell.kt` was updated to match that
+real structure exactly: a `TopAppBar` with `SyncStatusIndicator` (same
+Syncing > Conflict > Queued N > Online > Local > Offline label/icon/
+color precedence as Dart's own `switch`), and the same tap-to-open,
+first-conflict-at-a-time dialog behavior -- not a redesigned "show all
+conflicts" list this task was not asked to build.
+
+Two new `mobile-android-jni` wrappers back this:
+`nativeTriggerSync`/`nativeResolveConflict`, wrapping
+`mobile_core_trigger_sync`/`_resolve_conflict` unchanged, including the
+exact `"local"`/`"remote"`/`"escalate"` resolution strings
+`mobile_core_resolve_conflict` matches on. `OnyxController` gained a
+full `conflicts: StateFlow<List<SyncConflict>>` (A4 only kept the
+count) from the same `listConflicts` call already part of the shared
+six-call refresh fan-out -- no new JNI call added to the refresh cycle,
+just a richer result kept from the one already being made -- plus
+`isSyncing`/`hasNetwork` (the latter a real `ConnectivityManager`
+check, mirroring Dart's `connectivity_plus`-based `hasNetwork`, computed
+once per refresh cycle the same way Dart computes it, not a live
+callback-based listener either).
+
+`FileTransferInstrumentedTest.resolveConflictAndTriggerSync_...` proves
+the real JNI/Rust wiring reaches `mobile-core` and gets back a real,
+defined result for both calls, honestly scoped to what a single-replica
+test can prove: resolving an unknown `conflict_id` is a real, defined
+failure (checked directly against `SyncAgent::resolve_conflict`'s
+`false`-on-no-match body); triggering sync with zero discovered peers
+is a **successful no-op**, not a failure -- checked directly against
+`SyncAgent::run_one_cycle`'s real body (`Ok(())` when discovery finds no
+peers) before writing that assertion, catching what would otherwise
+have been a wrong, untested guess (asserting non-zero) in this test.
+Genuine multi-replica conflict generation (two replicas racing on the
+same field) is real, disclosed out-of-scope for this task -- A5's own
+instructions ask for the resolution UI, not a conflict-generation
+harness this project has never built even at the Rust test level.
+
+### Background sync -- Dart's own real, current scope, matched honestly
+
+**What Dart actually does today, checked directly, not assumed:**
+`background/sync_service.dart`'s `SyncService.startSync()` is a
+one-line pass-through to `api.triggerSync()` -- real, not a stub, but
+minimal. The actual *scheduled* background mechanism is
+`background/android/workmanager_service.dart`'s
+`registerAndroidBackgroundSync()`: a `workmanager` plugin periodic task
+(15 minutes, network-required) whose Dart-side dispatcher runs in a
+**separate background isolate**, checks for a real, previously-logged-in
+session (`has_real_session` in `SharedPreferences`; a fresh install with
+no login is a real, honest no-op, not a hardcoded placeholder identity
+-- itself a previously-fixed bug per that file's own doc comment), and
+if present, opens a **fresh** `mobile-core` handle under the saved
+org id, calls `triggerSync()`, and disposes it.
+
+Separately, `mobile/android/app/src/main/kotlin/com/onyx/
+WorkManagerService.kt` already exists in this repo -- a real
+`CoroutineWorker` calling `mobile_core_android_do_work` via the
+`Java_com_onyx_WorkManagerService_nativeAndroidDoWork` JNI symbol
+(operating on `mobile-core`'s process-wide `REGISTERED_BACKGROUND_APP`
+handle, set by `mobile_core_new`/cleared by `mobile_core_free`) --
+**confirmed, by grepping the whole Flutter Android embedding and its
+manifest, to be dead code: it is never enqueued anywhere.** The
+real, actually-scheduled path is the Dart/`workmanager`-plugin one
+above.
+
+A5's own task instructions direct using the `WorkManagerService`-
+shaped native plumbing directly rather than inventing a different
+mechanism, so Kotlin's native app -- which, unlike Flutter, *is* the
+native layer, with no separate Dart isolate to reopen a handle in --
+ports that existing Kotlin file near-verbatim (`com.onyx.
+WorkManagerService`, same package, same body) and schedules it directly
+via `androidx.work.WorkManager` (`BackgroundSync.kt`,
+`enqueueUniquePeriodicWork`, `KEEP` policy so calling it on every app
+start is a safe no-op once scheduled) with the *same* real 15-minute
+period and network-required constraint Dart's own registration uses --
+called from `MainActivity`'s `Ready` branch. Because this worker calls
+the *registered-handle* JNI path rather than reopening its own handle,
+its real, honest scope is narrower in one specific, disclosed way: it
+only does real work while this app's own process is alive with an open
+session handle (the common case -- Android rarely kills a foreground-
+capable app process outright between 15-minute background sync ticks);
+if the process has been killed and no handle is registered,
+`nativeAndroidDoWork()` returns `0` and the worker retries, the same
+honest "nothing real to do without a live identity" outcome Dart's own
+dispatcher reaches for a different, session-flag-based reason. Not
+silently promising Dart's own separate-isolate-reopen robustness this
+architecture does not need to replicate to reach the same real,
+current *capability* (one manual sync per period, nothing more, matching
+`SyncService.startSync()`'s own minimal scope).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check -p mobile-android-jni` | clean |
+| `cargo clippy -p mobile-android-jni --all-targets -- -D warnings` | clean |
+| `cargo fmt -p mobile-android-jni -- --check` | clean |
+| `cargo check --workspace` | clean |
+| `cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 build -p mobile-android-jni --release` | clean, real `.so` for all 3 ABIs copied into `jniLibs` |
+| `./gradlew compileDebugKotlin` | clean |
+| `./gradlew assembleDebug` | `BUILD SUCCESSFUL`, real `app-debug.apk` with all 3 ABIs' native libs |
+| `./gradlew testDebugUnitTest` | 22 passed, 0 failed (14 from A4 + 5 new `SyncConflictTest` + 3 new `SettingsScreenSourceTest`) |
+| `SettingsScreenSourceTest` negative-case check | confirmed to genuinely fail on an injected editable-org-id violation, then reverted (not left in the tree) |
+| `./gradlew compileDebugAndroidTestKotlin` | clean (`FileTransferInstrumentedTest` + updated `OnyxControllerInstrumentedTest`) |
+| Real on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (no `/dev/kvm`, zero `vmx`/`svm` CPU flags, no physical device -- same disclosed constraint as every prior mobile task) |
+
+### Overall Android Kotlin parity status against M0's parity matrix (A1-A5 complete)
+
+With A5, every real screen/widget the parity matrix (`docs/
+mobile-migration/parity-matrix.md`) documents from the frozen Flutter
+reference has a genuine Kotlin port, built and verified in this
+sandbox to the fullest extent the sandbox allows:
+
+- **Complete, real parity:** app skeleton + JNI adapter (A1); login/
+  session state machine, secure token storage (A3, with one deliberate,
+  justified platform-API improvement over Dart's now-deprecated
+  `EncryptedSharedPreferences` choice); Dashboard, Missions, Tasks,
+  Mission/Task Detail, Notifications, the shared-refresh
+  `OnyxController` architecture (A4); Files, Settings (including its
+  one load-bearing security property), the sync status indicator, the
+  conflict resolution dialog, and background sync scheduling (A5).
+- **Deliberately out of scope, not a silent gap:** the Approvals screen
+  (Dart's 5th nav destination -- computed as an in-memory filter over
+  missions/tasks, not backed by any separate FFI call this project
+  hasn't already wrapped, but the screen itself was never built here);
+  a real file-picker UI (Dart's own flagged follow-up, not built on
+  either platform); an HTTP/LAN transport mode (A1 never built a
+  second `OnyxApi` implementation for Kotlin, so Dart's transport-mode
+  toggle in Settings has no Kotlin equivalent to diverge from).
+- **One honestly narrower real capability, disclosed above, not
+  silently promised away:** background sync only runs against this
+  app's own already-open process handle rather than Dart's
+  separate-isolate fresh-reopen, a direct, structural consequence of
+  Kotlin being the native layer itself rather than a Dart VM sitting on
+  top of it -- reaches the same real, current sync capability
+  (`SyncService.startSync()`'s own single `triggerSync()` call), not a
+  reduced one.
+- **Never executed on a real device/emulator, for every A1-A5
+  instrumented test written:** this sandbox has no `/dev/kvm` and zero
+  `vmx`/`svm` CPU flags at any point across this entire multi-task
+  sequence. Every instrumented test file in this project (`MobileCoreRoundTripTest`,
+  `OnyxControllerInstrumentedTest`, `FileTransferInstrumentedTest`) is
+  real, compiles, and was written to actually run under
+  `connectedAndroidTest` -- and every one of them has only ever been
+  proven by the best available substitutes disclosed in each task's own
+  entry above (host-JVM round trips, direct reads of the exact Rust
+  logic a wrapper calls into, and real local JVM unit tests for every
+  piece of pure Kotlin logic those instrumented tests also exercise).
+  This is the one real, honest limit on this project's Android Kotlin
+  parity claim as of A5's completion -- not a gap in what was built, but
+  in what this sandbox could verify on real Android hardware.
+
+## H10.A5.1 (Approvals screen -- correction to a real scoping error in A5, not new/discovered-late work)
+
+**This is not new scope. It is a correction.** The task that produced
+A5 incorrectly stated Approvals was already covered by A4 and told
+that session to skip it. On rechecking the real blueprint text and the
+actual merged code, that was wrong: `AppShell.kt`'s own doc comment
+(pre-A5.1) said outright "Approvals ... remains deliberately out of
+scope," and `OnyxController.kt`'s doc comment already named the fix by
+its exact intended class name, `ApprovalsFilter`, anticipating this
+exact gap. Both facts confirmed directly against `main` at `b9b3864`
+(A5 merged) before this task started, not assumed from the task
+document alone.
+
+### Real, current Dart reference behavior -- re-verified fresh
+
+Read `mobile/lib/ui/screens/approvals.dart` directly (95 lines).
+Confirmed exactly, field-for-field, not assumed from this task's own
+paraphrase:
+
+- `pendingTasks = controller.tasks.where(status == 'Submitted')`;
+  `pendingMissions = controller.missions.where(status ==
+  'AwaitingApproval')` -- filtered from the *already-loaded* Task/
+  Mission projections, not a separate query.
+- Tasks rendered before missions.
+- Tapping a task pushes the existing `TaskDetailScreen`; tapping a
+  mission pushes the existing `MissionDetailScreen`. No Approve/Reject
+  action anywhere on this screen -- it is a queue/discovery surface
+  only; those actions already live on the detail screens (A4).
+- **Empty-state string confirmed byte-for-byte, not paraphrased:**
+  `"No tasks or missions are currently awaiting approval."` -- matches
+  this task's own document exactly; `ApprovalsScreenTest`'s first case
+  asserts this literal string, not an approximation.
+- Dart's own doc comment (added when this screen was fixed from a
+  stale placeholder) explains *why* `listAggregates('approval')` is
+  never used here: no `Approval` aggregate is ever registered in
+  `client-composition::app_state`'s `AppStateConfig` -- confirmed
+  directly, mission/task/conversation/message/file_asset/
+  upload_session/policy/legal_hold/connection_request/notification are
+  the real registered types, never "approval". A separate, unrelated
+  server-side `ApprovalAggregate` does exist (`api-server::routes::
+  command`), with no owner-authority gate and never wired into
+  `client-composition`, so never reachable from mobile's local command
+  path -- irrelevant to what actually gates Task/Mission approval
+  (`ApproveTask`/`RejectTask`/`RejectApproval`/`ActivateMission`, which
+  operate on the Task/Mission aggregates this screen reads).
+
+### What was built
+
+- `ApprovalsFilter` (`model/`, matching this project's existing
+  convention -- `LoadedAggregate`/`SyncSnapshot`/`SyncConflict`/
+  `CommandEnvelopeFactory` all live there): a pure, dependency-free
+  object with `pendingTasks`/`pendingMissions`/`pending` (tasks-then-
+  missions combined), operating only on already-loaded
+  `List<LoadedAggregate>` -- no FFI call, no new JNI wrapper, nothing
+  Rust-side.
+- `ApprovalsScreen.kt`: renders `ApprovalsFilter`'s output via a real
+  Material3 `PullToRefreshBox` (`androidx.compose.material3.
+  pulltorefresh` -- the current package for this component under the
+  resolved Compose BOM; it is not under the top-level `material3`
+  package as first assumed, a real, checked correction made before this
+  compiled), calling the existing `controller.refresh()` unchanged on
+  the pull gesture (no new refresh mechanism), and routing taps to the
+  existing `openTask`/`openMission` overlay state `AppShell` already
+  manages for Task/Mission Detail -- the exact same navigation path
+  Missions/Tasks/Dashboard already use, not a new one.
+- `AppShell.kt`: Approvals inserted at destination index 4 (between
+  Alerts and Files); Files moved 4->5, Settings moved 5->6. Final order
+  matches Dart's real seven `NavigationDestination`s exactly: Home,
+  Missions, Tasks, Alerts, Approvals, Files, Settings -- this project's
+  Android Kotlin nav now has full destination parity with the frozen
+  Flutter reference for the first time.
+- **`controller.listApprovals()` was deliberately NOT added, and the
+  discarded `listAggregates('approval')` result remains discarded.**
+  `OnyxController.refresh()` still fetches it every cycle (preserving
+  Dart's real six-call parallel-`Future.wait` shape, per A4's own
+  documented reasoning) but never stores or exposes it -- exactly
+  matching Dart's own real, current design, where `ApprovalsScreen`
+  never reads `controller.approvals` either. Adding a path that
+  surfaces it would have been a real, incorrect divergence from the
+  frozen reference, not an improvement, and was not done.
+
+### Zero Rust/JNI changes -- confirmed, not assumed
+
+This task's own scope check ("if anything in Rust needed changing,
+that's a sign this task's scope assumption was wrong, stop and
+report") was verified explicitly: `git diff` against `crates/` after
+this task's changes is empty, and `cargo check --workspace` was run
+and passed clean with the tree in that state, confirming no Rust
+change was needed at any point -- not merely that none was made.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | clean, zero Rust changes present in the diff |
+| `./gradlew compileDebugKotlin` | clean |
+| `./gradlew assembleDebug` | `BUILD SUCCESSFUL`, real APK |
+| `./gradlew testDebugUnitTest` | 27 passed, 0 failed (22 from A4+A5 + 5 new `ApprovalsFilterTest`, covering every case in this task's own Tests section: Submitted-task inclusion/exclusion, AwaitingApproval-mission inclusion/exclusion, tasks-before-missions ordering, empty-result case, and a multi-item ordering case) |
+| `./gradlew compileDebugAndroidTestKotlin` | clean (`ApprovalsScreenTest`, new -- empty-state exact string, task/mission tap-to-navigate, no-Approve/Reject-affordance, pull-to-refresh-calls-onRefresh) |
+| Real on-device/emulator `connectedAndroidTest` run | **not possible in this sandbox** (no `/dev/kvm`, zero `vmx`/`svm` CPU flags, no physical device) -- same disclosed, honest limitation as every prior Android task this session; stated plainly again per this task's own instruction not to let it go unmentioned |
+
+### Navigation index verification
+
+Confirmed directly in `AppShell.kt`'s `when (selectedTab)` block and
+its matching `NavigationBarItem` list: index 4 = `ApprovalsScreen`
+(label "Approvals"), index 5 = `FilesScreen` (label "Files"), index 6
+= `SettingsScreen` (label "Settings") -- exactly the order this task
+specifies.

@@ -60,6 +60,22 @@ jobs:
           shared-key: "release-build"
       - name: Format
         run: cargo fmt --check
+      # H5: read-only -- fails if Cargo.lock doesn't match Cargo.toml,
+      # without writing anything. Every release.yml build job already has
+      # this ahead of its own --locked build; ci.yml itself had no
+      # equivalent gate at all, so a lockfile drifted out of sync with
+      # Cargo.toml on a regular push/PR was never caught here, only (if
+      # at all) at actual release time. Placed before Clippy/Build so a
+      # stale lockfile is reported as exactly that, not as a confusing
+      # downstream compile error. Deliberately NOT `--no-deps`: tested
+      # directly (deliberately pinning a workspace dependency to a version
+      # the committed lockfile can't satisfy) and confirmed `--no-deps`
+      # makes this check pass regardless of drift, because it skips full
+      # dependency resolution entirely -- there's nothing left for
+      # --locked to check against. Without it, the same test genuinely
+      # fails.
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
@@ -74,6 +90,18 @@ jobs:
       # service container started every prior run with no schema at all.
       - name: Run database migrations
         run: cargo run --package migration-tool -- up
+      # H5: this repo carries committed .sqlx/ offline query metadata
+      # (SQLX_OFFLINE=true above) so sqlx macros compile without a live
+      # database. If a query changes but .sqlx/ isn't regenerated, the
+      # build still succeeds against the stale cached metadata -- this is
+      # the only thing that catches that drift. Needs sqlx-cli (not a
+      # built-in cargo subcommand) and, unlike the workspace build itself,
+      # a real schema to check queries against -- placed after migrations
+      # run above, not before.
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres,rustls --locked
+      - name: Verify sqlx offline metadata is current
+        run: cargo sqlx prepare --check --workspace -- --all-targets
       # desktop-shell's secure_storage tests exercise the real `keyring`
       # crate against a live Secret Service, deliberately not mocked (see
       # keyring_adapter.rs's own test doc comments). A bare ubuntu-latest
@@ -122,6 +150,39 @@ jobs:
           helm lint deploy/helm/onyx-api
           helm lint deploy/helm/onyx-worker
           helm lint deploy/helm/onyx-sync-agent
+          helm lint deploy/helm/onyx-api-relay
+      - name: Verify the relay chart genuinely renders single-replica (H3)
+        # Real proof, not a review of the YAML source: renders the chart
+        # exactly as `helm install` would and asserts the actual output.
+        # Also proves an attempt to override the replica count from the
+        # CLI (the normal way a values.yaml default gets overridden in
+        # this repo's other charts) has no effect, since replicaCount is
+        # deliberately not exposed as a value at all -- see
+        # onyx-api-relay/templates/deployment.yaml's own comment.
+        run: |
+          set -euo pipefail
+          rendered=$(helm template relay-check deploy/helm/onyx-api-relay --set replicaCount=5)
+          echo "$rendered" | grep -E '^\s*replicas: 1$'
+          if echo "$rendered" | grep -qE '^\s*replicas: 5$'; then
+            echo "::error::onyx-api-relay rendered replicas: 5 -- replicaCount must not be settable for this chart"
+            exit 1
+          fi
+          if [ "$(echo "$rendered" | grep -c '^kind: Deployment$')" -ne 1 ]; then
+            echo "::error::expected exactly one Deployment in the rendered onyx-api-relay chart"
+            exit 1
+          fi
+          if echo "$rendered" | grep -qi 'HorizontalPodAutoscaler'; then
+            echo "::error::onyx-api-relay must not define an HPA -- it is deliberately not autoscaled"
+            exit 1
+          fi
+          # Confirms the ordinary, horizontally-scaled onyx-api Rollout is
+          # unaffected by the relay chart's existence -- its own HPA still
+          # renders with its own real min/max, independent of the relay
+          # chart's fixed single replica.
+          api_rendered=$(helm template api-check deploy/helm/onyx-api -f deploy/helm/onyx-api/values-production.yaml)
+          echo "$api_rendered" | grep -q 'kind: HorizontalPodAutoscaler'
+          echo "$api_rendered" | grep -E '^\s*minReplicas: 5$'
+          echo "$api_rendered" | grep -E '^\s*maxReplicas: 30$'
       - name: Terraform validate
         run: |
           terraform -chdir=deploy/terraform init -backend=false
@@ -271,74 +332,46 @@ jobs:
       - if: always()
         run: kill "$(cat api.pid)" || true
 
-  mobile-dart:
+  # A1 (ONYX-MOB-01 §25): the native Kotlin Android rewrite.
+  # Builds `mobile-android/`, the new, separate project.
+  mobile-android-kotlin:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Complete Flutter-owned platform scaffold
-        run: bash tool/ensure_platform_scaffold.sh
-      - run: flutter pub get
-      - run: flutter pub upgrade
-      - name: Apply automatic fixes (dart fix)
-        run: dart fix --apply || true
-      - name: Analyze (allow warnings for now)
-        run: flutter analyze --no-fatal-warnings
-      - run: flutter test
-      - name: Mobile structural contract
-        working-directory: .
-        run: bash scripts/verify/verify_mobile.sh
-
-  mobile-android:
-    runs-on: ubuntu-latest
-    needs: mobile-dart
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.97.1"
-      - uses: subosito/flutter-action@v2
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
         with:
-          channel: stable
-          cache: true
-      - run: bash mobile/tool/ensure_platform_scaffold.sh
-      - run: bash mobile/tool/build_rust_android.sh
-      - working-directory: mobile
-        run: flutter pub get
-      - working-directory: mobile
-        run: flutter build apk --debug
+          ndk-version: r28b
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Build native libraries for every target ABI
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: bash mobile-android/tool/build_rust_jni.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Gradle assembleDebug
+        working-directory: mobile-android
+        run: ./gradlew assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: onyx-mobile-android-debug
-          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
-
-  mobile-ios:
-    runs-on: macos-latest
-    needs: mobile-dart
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.97.1"
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - run: bash mobile/tool/ensure_platform_scaffold.sh
-      - run: bash mobile/tool/build_rust_ios.sh
-      - working-directory: mobile
-        run: flutter pub get
-      - working-directory: mobile/ios
-        run: pod install
-      - working-directory: mobile
-        run: flutter build ios --simulator
+          name: onyx-mobile-android-kotlin-debug
+          path: mobile-android/app/build/outputs/apk/debug/app-debug.apk
+      # Phase 4.5: the release variant exercises R8 minify + resource
+      # shrink from the committed proguard-rules.pro (debug keystore
+      # signing, so no private key is involved). A correct build here
+      # proves the JNI/WorkManager keep-rules hold under R8 -- the
+      # on-device runtime consequence is still a Phase 4.x lab gate.
+      - name: Gradle assembleRelease (R8 + debug signing)
+        working-directory: mobile-android
+        run: ./gradlew assembleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: onyx-mobile-ios-simulator-debug
-          path: mobile/build/ios/iphonesimulator/*.app
+          name: onyx-mobile-android-kotlin-release-r8
+          path: mobile-android/app/build/outputs/apk/release/app-release.apk

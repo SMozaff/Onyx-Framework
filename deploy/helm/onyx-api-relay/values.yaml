@@ -1,0 +1,46 @@
+namespace: onyx
+# Same image as onyx-api -- this is not a different binary, just a
+# differently-deployed instance of it (see Chart.yaml). Keep this tag in
+# sync with deploy/helm/onyx-api/values*.yaml's image.tag when releasing.
+image:
+  repository: ghcr.io/example/onyx-api
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  httpPort: 3000
+  metricsPort: 9090
+# Same host as onyx-api's ingress -- this is a second Ingress object for
+# that host, carrying only the /api/relay path. nginx-ingress-controller
+# merges every Ingress object for a given host into one compiled config
+# and matches by path specificity, not by which Ingress resource (or Helm
+# release) a rule came from -- so /api/relay here always wins over
+# onyx-api's own "/" catch-all rule regardless of install order. This is
+# what actually routes Cloud Relay traffic to this dedicated deployment,
+# not an assumption that clients dial the right place on their own.
+ingress:
+  enabled: true
+  className: nginx
+  host: api.onyx.example.com
+  tlsSecret: onyx-api-tls
+resources:
+  requests: {cpu: 100m, memory: 192Mi}
+  limits: {cpu: 500m, memory: 512Mi}
+env:
+  RUST_LOG: info
+  ONYX_ENV: production
+  ONYX_BIND: 0.0.0.0:3000
+  ONYX_METRICS_BIND: 0.0.0.0:9090
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-collector.observability.svc:4317
+# Reuses onyx-api's own Secret -- this is the same application connecting
+# to the same database, not a separate credential surface.
+secretRef: onyx-api-secrets
+secretContract:
+  requiredKeys:
+    - DATABASE_URL
+    - ONYX_GOVERNANCE_DATABASE_URL
+    - ONYX_AUTHORITY_SIGNING_KEY
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001

@@ -51,3 +51,45 @@ export function isPlausibleServerAddress(address: string): boolean {
   if (trimmed.length === 0) return false;
   return /^https?:\/\/.+/i.test(trimmed);
 }
+
+function isLoopbackHost(hostname: string): boolean {
+  // `new URL(...)` strips the brackets from an IPv6 literal host, so the
+  // bare `::1` form is what actually appears here for "[::1]" input.
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+}
+
+/**
+ * Audit finding H4(b): a plaintext `http://` connection to anything other
+ * than this same machine sends credentials (the login password, then every
+ * bearer token) over the network in the clear — trivially interceptable on
+ * shared Wi-Fi, a compromised router, or any on-path network position. Only
+ * loopback traffic (`http://127.0.0.1`, `http://localhost`) never actually
+ * leaves the machine, so it is exempt; every other address must use
+ * `https://`.
+ *
+ * Gated on `import.meta.env.PROD`, Vite's own, already-real build-mode
+ * flag — not a new `ONYX_ENV`-style variable invented for this. This repo
+ * has no existing client-side equivalent to the server's `ONYX_ENV`
+ * (confirmed: no such mechanism exists anywhere in `admin-shell/ui`,
+ * checked directly rather than assumed), but it does not need one: `npm
+ * run build` (what `tauri build` invokes to produce the actual shipped
+ * app; see `package.json`'s `build` script) always runs `vite build`,
+ * which sets `import.meta.env.PROD = true` unconditionally, while `npm run
+ * dev` / `tauri dev` set `import.meta.env.DEV = true` instead. That
+ * distinction already exactly tracks "is this the real, distributed
+ * application or a local development run" — introducing a parallel
+ * `ONYX_ENV`-equivalent would just be a second flag carrying the same
+ * meaning as one Vite already provides for free.
+ */
+export function isSecureEnoughForProduction(address: string): boolean {
+  if (!import.meta.env.PROD) return true;
+  let parsed: URL;
+  try {
+    parsed = new URL(address);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  if (parsed.protocol === "http:") return isLoopbackHost(parsed.hostname);
+  return false;
+}
