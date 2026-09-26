@@ -82,12 +82,12 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+
 
 use jni::errors::{Error as JniError, LogErrorAndDefault};
-use jni::objects::{GlobalRef, JClass, JObject, JString};
+use jni::objects::{Global, JClass, JObject, JString};
 use jni::sys::{jlong, jstring};
-use jni::{Env, EnvUnowned, JavaVM};
+use jni::{jni_sig, jni_str, Env, EnvUnowned, JavaVM};
 
 use mobile_core::MobileApp;
 
@@ -675,8 +675,8 @@ extern "C" fn deliver_to_kotlin(context: *mut c_void, json: *const c_char) {
 /// subscription's `context` pointer, and is reclaimed (dropped) by
 /// `nativeUnsubscribe`.
 struct JavaEventForwarder {
-    vm: Arc<JavaVM>,
-    callback: GlobalRef,
+    vm: JavaVM,
+    callback: Global<JObject<'static>>,
     /// Re-entrancy guard: `mobile_core` invokes the callback serially
     /// from one forwarding task, but this makes that assumption visible
     /// and cheap to uphold rather than silently relying on it. Cleared
@@ -701,7 +701,11 @@ impl JavaEventForwarder {
         // Resolve the method now so delivery (on another thread) never
         // needs to re-resolve it — fail fast on a typo'd name/signature.
         if env
-            .get_method_id(&class, KOTLIN_EVENT_CALLBACK_METHOD, KOTLIN_EVENT_CALLBACK_SIGNATURE)
+            .get_method_id(
+                &class,
+                jni_str!("onEvent"),
+                jni_sig!("(Ljava/lang/String;)V"),
+            )
             .is_err()
         {
             return None;
@@ -744,21 +748,18 @@ impl JavaEventForwarder {
         // attach_current_thread returns an AttachGuard whose Drop
         // detaches; binding it here keeps this one worker thread attached
         // only for the duration of the delivery.
-        let mut guard = self
-            .vm
-            .attach_current_thread()
+        self.vm
+            .attach_current_thread(|env| -> jni::errors::Result<()> {
+                let json_string = env.new_string(json.to_string_lossy().as_ref())?;
+                env.call_method(
+                    self.callback.as_obj(),
+                    jni_str!("onEvent"),
+                    jni_sig!("(Ljava/lang/String;)V"),
+                    &[JValue::Object(&json_string)],
+                )?;
+                Ok(())
+            })
             .map_err(|e| e.to_string())?;
-        let env = &mut *guard;
-        let json_string = env
-            .new_string(json.to_string_lossy().as_ref())
-            .map_err(|e| e.to_string())?;
-        env.call_method(
-            self.callback.as_obj(),
-            KOTLIN_EVENT_CALLBACK_METHOD,
-            KOTLIN_EVENT_CALLBACK_SIGNATURE,
-            &[JValue::Object(&json_string)],
-        )
-        .map_err(|e| e.to_string())?;
         Ok(())
     }
 }
