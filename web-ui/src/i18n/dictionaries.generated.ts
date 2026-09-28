@@ -140,7 +140,8 @@ export const en: Record<string, string> = {
   "settings.cloudRelaySaved": "Cloud relay endpoint saved. Restart the app to apply it.",
   "settings.p2pSync": "Peer-to-peer sync",
   "language.title": "Language / زبان",
-  "language.note": "Interface language. Applies instantly and is remembered on this device."
+  "language.note": "Interface language. Applies instantly and is remembered on this device.",
+  "dashboard.latestChanges": "Latest changes"
 } as Record<string, string>;
 export const fa: Record<string, string> = {
   "app.name": "ONYX",
@@ -282,7 +283,8 @@ export const fa: Record<string, string> = {
   "settings.cloudRelaySaved": "نقطه پایانی رله ابری ذخیره شد. برای اعمال، برنامه را مجدداً راه‌اندازی کنید.",
   "settings.p2pSync": "همگام‌سازی همتا‌به‌همتا",
   "language.title": "Language / زبان",
-  "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود."
+  "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
+  "dashboard.latestChanges": "آخرین تغییرات"
 } as Record<string, string>;
 export const dictionaries = { en, fa } as const;
 export type Locale = "en" | "fa";

@@ -5,7 +5,6 @@
   "app.observer": "ONYX Observer",
   "app.thinClient": "Thin client",
   "app.thinClientNote": "No offline commands or local domain state.",
-
   "nav.overview": "Overview",
   "nav.dashboard": "Dashboard",
   "nav.missions": "Missions",
@@ -25,7 +24,6 @@
   "nav.skipToContent": "Skip to main content",
   "nav.openMenu": "Open navigation",
   "nav.closeMenu": "Close navigation",
-
   "auth.signIn": "Sign in",
   "auth.signOut": "Sign out",
   "auth.signInToOnyx": "Sign in to ONYX",
@@ -41,7 +39,6 @@
   "auth.secureBrowserAccess": "Secure browser access",
   "auth.heroTitle": "Operational clarity, from any authorized browser.",
   "auth.heroBody": "Review missions, monitor critical work, acknowledge notifications, and make permitted approval decisions without installing a native replica.",
-
   "common.loading": "Loading…",
   "common.retry": "Retry",
   "common.refresh": "Refresh",
@@ -77,7 +74,6 @@
   "common.readOnly": "View only",
   "common.readOnlyScope": "Read-only web scope",
   "common.readOnlyProjection": "Read-only projection",
-
   "status.pending": "Pending",
   "status.approved": "Approved",
   "status.rejected": "Rejected",
@@ -92,7 +88,6 @@
   "status.unavailable": "Unavailable",
   "status.stale": "Stale",
   "status.empty": "Empty",
-
   "dashboard.title": "Dashboard",
   "dashboard.operationalOverview": "Operational overview",
   "dashboard.activeMissions": "Active missions",
@@ -101,7 +96,6 @@
   "dashboard.operationsStable": "Operations stable",
   "dashboard.createFirstMission": "Create the first mission from the Missions tab.",
   "dashboard.workQueue": "Work queue",
-
   "missions.title": "Missions",
   "missions.singular": "Mission",
   "missions.portfolio": "Mission portfolio",
@@ -115,41 +109,35 @@
   "missions.timeline": "Timeline",
   "missions.reviewApproval": "Review approval request",
   "missions.reasonRequired": "Reason (required)",
-
   "tasks.title": "Tasks",
   "tasks.singular": "Task",
   "tasks.newTask": "New Task",
   "tasks.noTasks": "No tasks are stored on this device.",
   "tasks.staffWorkflow": "Staff workflow",
-
   "notifications.title": "Notifications",
   "notifications.deliveryCenter": "Delivery center",
   "notifications.operationalAlerts": "Operational alerts",
   "notifications.noNotifications": "You have no notifications in this local replica.",
   "notifications.acknowledge": "Acknowledge",
-
   "approvals.title": "Approvals",
   "approvals.escalatedToYou": "Escalated to you",
   "approvals.pendingCount": "{count} pending",
-
   "reports.title": "Reports",
   "reports.evidenceViewer": "Evidence viewer",
   "reports.noReport": "The report projection is unavailable.",
   "reports.summary": "Summary",
-
   "files.title": "Files",
   "files.uploadFile": "Upload a file",
   "files.downloadFile": "Download a file",
   "files.saveToDevice": "Save to path on this device",
   "files.filePath": "File path on this device",
   "files.contentHash": "Content hash",
-
   "settings.title": "Settings",
   "settings.localDb": "Local-first database",
   "settings.cloudRelay": "Cloud relay endpoint",
   "settings.cloudRelaySaved": "Cloud relay endpoint saved. Restart the app to apply it.",
   "settings.p2pSync": "Peer-to-peer sync",
-
   "language.title": "Language / زبان",
-  "language.note": "Interface language. Applies instantly and is remembered on this device."
+  "language.note": "Interface language. Applies instantly and is remembered on this device.",
+  "dashboard.latestChanges": "Latest changes"
 }

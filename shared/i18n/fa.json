@@ -5,7 +5,6 @@
   "app.observer": "ناظر ONYX",
   "app.thinClient": "کلاینت سبک",
   "app.thinClientNote": "بدون دستور آفلاین یا وضعیت دامنه محلی.",
-
   "nav.overview": "نمای کلی",
   "nav.dashboard": "داشبورد",
   "nav.missions": "مأموریت‌ها",
@@ -25,7 +24,6 @@
   "nav.skipToContent": "پرش به محتوای اصلی",
   "nav.openMenu": "باز کردن ناوبری",
   "nav.closeMenu": "بستن ناوبری",
-
   "auth.signIn": "ورود",
   "auth.signOut": "خروج",
   "auth.signInToOnyx": "ورود به ONYX",
@@ -41,7 +39,6 @@
   "auth.secureBrowserAccess": "دسترسی امن مرورگر",
   "auth.heroTitle": "شفافیت عملیاتی، از هر مرورگر مجاز.",
   "auth.heroBody": "مأموریت‌ها را بررسی کنید، کارهای حساس را پایش کنید، اعلان‌ها را تأیید کنید و تصمیم‌های تأییدی مجاز را بدون نصب نسخه بومی بگیرید.",
-
   "common.loading": "در حال بارگذاری…",
   "common.retry": "تلاش مجدد",
   "common.refresh": "به‌روزرسانی",
@@ -77,7 +74,6 @@
   "common.readOnly": "فقط مشاهده",
   "common.readOnlyScope": "دامنه وب فقط‌خواندنی",
   "common.readOnlyProjection": "پروژکشن فقط‌خواندنی",
-
   "status.pending": "در انتظار",
   "status.approved": "تأیید شده",
   "status.rejected": "رد شده",
@@ -92,7 +88,6 @@
   "status.unavailable": "ناموجود",
   "status.stale": "قدیمی",
   "status.empty": "خالی",
-
   "dashboard.title": "داشبورد",
   "dashboard.operationalOverview": "نمای عملیاتی",
   "dashboard.activeMissions": "مأموریت‌های فعال",
@@ -101,7 +96,6 @@
   "dashboard.operationsStable": "عملیات پایدار است",
   "dashboard.createFirstMission": "اولین مأموریت را از زبانه مأموریت‌ها بسازید.",
   "dashboard.workQueue": "صف کار",
-
   "missions.title": "مأموریت‌ها",
   "missions.singular": "مأموریت",
   "missions.portfolio": "سبد مأموریت‌ها",
@@ -115,41 +109,35 @@
   "missions.timeline": "خط زمانی",
   "missions.reviewApproval": "بررسی درخواست تأیید",
   "missions.reasonRequired": "دلیل (الزامی)",
-
   "tasks.title": "وظایف",
   "tasks.singular": "وظیفه",
   "tasks.newTask": "وظیفه جدید",
   "tasks.noTasks": "هیچ وظیفه‌ای در این دستگاه ذخیره نشده است.",
   "tasks.staffWorkflow": "گردش کار پرسنل",
-
   "notifications.title": "اعلان‌ها",
   "notifications.deliveryCenter": "مرکز تحویل",
   "notifications.operationalAlerts": "هشدارهای عملیاتی",
   "notifications.noNotifications": "هیچ اعلانی در این نسخه محلی ندارید.",
   "notifications.acknowledge": "تأیید دریافت",
-
   "approvals.title": "تأییدها",
   "approvals.escalatedToYou": "به شما ارجاع شده",
   "approvals.pendingCount": "{count} در انتظار",
-
   "reports.title": "گزارش‌ها",
   "reports.evidenceViewer": "نمایشگر شواهد",
   "reports.noReport": "پروژکشن گزارش موجود نیست.",
   "reports.summary": "خلاصه",
-
   "files.title": "فایل‌ها",
   "files.uploadFile": "بارگذاری فایل",
   "files.downloadFile": "دانلود فایل",
   "files.saveToDevice": "ذخیره در مسیر این دستگاه",
   "files.filePath": "مسیر فایل در این دستگاه",
   "files.contentHash": "هش محتوا",
-
   "settings.title": "تنظیمات",
   "settings.localDb": "پایگاه‌داده محلی‌محور",
   "settings.cloudRelay": "نقطه پایانی رله ابری",
   "settings.cloudRelaySaved": "نقطه پایانی رله ابری ذخیره شد. برای اعمال، برنامه را مجدداً راه‌اندازی کنید.",
   "settings.p2pSync": "همگام‌سازی همتا‌به‌همتا",
-
   "language.title": "Language / زبان",
-  "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود."
+  "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
+  "dashboard.latestChanges": "آخرین تغییرات"
 }

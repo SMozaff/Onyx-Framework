@@ -97,3 +97,10 @@ Prefixes in `en.json` / `fa.json`:
 - NEVER use local environment (`npm run build`, `npm run test`, `gradle`, etc.) for build or verification.
 - Use GitHub CI Actions exclusively for all builds and tests.
 - No local builds — ever.
+
+## Full-Coverage Update (2026-09-28, build mode)
+- All 6 web-ui page entrypoints (`Dashboard`, `Missions`, `Tasks`, `Notifications`, `Approvals`, `Reports`) now import `useI18n` and have at least partial `t()` replacement.
+- Mobile PWA (`main.tsx`) wrapped with `LocaleProvider`.
+- Desktop/admin Tauri UIs (`main.tsx`) wrapped with `LocaleProvider`.
+- Android: `LocaleHelper.kt` + `values/strings.xml` + `values-fa/strings.xml` complete.
+- No local builds/tests executed (CI-only policy confirmed).

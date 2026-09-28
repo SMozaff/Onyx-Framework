@@ -6,6 +6,7 @@ import type { NotificationProjection } from '../../types/query';
 
 export default function NotificationsPage() {
   const query = useOnyxQuery<NotificationProjection>('notification.list');
+  const { t } = useI18n();
   const state = deriveProjectionState(query);
   const acknowledge = useAcknowledgeNotification();
   const notifications = query.data?.data ?? [];
