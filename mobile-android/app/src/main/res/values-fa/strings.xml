@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ONYX</string>
+
+    <string name="nav_dashboard">داشبورد</string>
+    <string name="nav_missions">مأموریت‌ها</string>
+    <string name="nav_tasks">وظایف</string>
+    <string name="nav_notifications">اعلان‌ها</string>
+    <string name="nav_approvals">تأییدها</string>
+    <string name="nav_reports">گزارش‌ها</string>
+    <string name="nav_files">فایل‌ها</string>
+    <string name="nav_settings">تنظیمات</string>
+    <string name="nav_home">خانه</string>
+
+    <string name="auth_sign_in">ورود</string>
+    <string name="auth_sign_out">خروج</string>
+    <string name="auth_username">نام کاربری</string>
+    <string name="auth_password">گذرواژه</string>
+    <string name="auth_server_address">نشانی سرور</string>
+    <string name="auth_use_credentials">از اعتبار سازمانی خود استفاده کنید.</string>
+
+    <string name="action_save">ذخیره</string>
+    <string name="action_cancel">لغو</string>
+    <string name="action_create">ایجاد</string>
+    <string name="action_submit">ارسال</string>
+    <string name="action_approve">تأیید</string>
+    <string name="action_reject">رد</string>
+    <string name="action_view_all">مشاهده همه</string>
+    <string name="action_retry">تلاش مجدد</string>
+    <string name="action_refresh">به‌روزرسانی</string>
+    <string name="action_search">جستجو</string>
+    <string name="action_filter">فیلتر</string>
+
+    <string name="status_pending">در انتظار</string>
+    <string name="status_approved">تأیید شده</string>
+    <string name="status_rejected">رد شده</string>
+    <string name="status_acknowledged">تأیید دریافت شده</string>
+    <string name="status_unacknowledged">تأیید نشده</string>
+    <string name="status_submitted">ارسال شده</string>
+    <string name="status_active">فعال</string>
+    <string name="status_completed">تکمیل شده</string>
+    <string name="status_failed">ناموفق</string>
+
+    <string name="language">زبان</string>
+    <string name="language_english">English</string>
+    <string name="language_farsi">فارسی</string>
+    <string name="app_thin_client">کلاینت سبک</string>
+    <string name="app_thin_client_note">بدون دستور آفلاین یا وضعیت دامنه محلی.</string>
+</resources>

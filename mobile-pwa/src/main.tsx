@@ -5,6 +5,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppRoutes } from './routes';
 import { registerServiceWorker } from './lib/pwa';
 import './styles.css';
+import './i18n/rtl.css';
+import { LocaleProvider } from './i18n/I18nContext';
+import { dictionaries } from './i18n/dictionaries.generated';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,11 +36,13 @@ function App() {
 
   return (
     <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </QueryClientProvider>
+      <LocaleProvider dictionaries={dictionaries}>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </QueryClientProvider>
+      </LocaleProvider>
     </StrictMode>
   );
 }

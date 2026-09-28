@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "@/App";
 import "@/index.css";
+import { LocaleProvider } from "./i18n/I18nContext";
+import { dictionaries } from "./i18n/dictionaries.generated";
+import "./i18n/rtl.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
@@ -16,8 +19,10 @@ if (!rootEl) {
 // hosts that can't rewrite arbitrary paths to index.html.
 createRoot(rootEl).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <LocaleProvider dictionaries={dictionaries}>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </LocaleProvider>
   </StrictMode>,
 );

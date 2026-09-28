@@ -4,6 +4,9 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './styles.css';
+import './i18n/rtl.css';
+import { LocaleProvider } from './i18n/I18nContext';
+import { dictionaries } from './i18n/dictionaries.generated';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,8 +17,10 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter><App /></BrowserRouter>
-    </QueryClientProvider>
+    <LocaleProvider dictionaries={dictionaries}>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter><App /></BrowserRouter>
+      </QueryClientProvider>
+    </LocaleProvider>
   </React.StrictMode>,
 );

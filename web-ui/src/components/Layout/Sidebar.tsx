@@ -1,15 +1,17 @@
 import { forwardRef, type Ref } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useI18n } from '../../i18n/I18nContext';
+import { LanguageSwitcher } from '../../i18n/LanguageSwitcher';
 
-const links = [
-  ['/', 'Overview'],
-  ['/missions', 'Missions'],
-  ['/tasks', 'Tasks'],
-  ['/todos', 'Todos & Targets'],
-  ['/staff-loans', 'Staff Loans'],
-  ['/notifications', 'Notifications'],
-  ['/approvals', 'Approvals'],
-  ['/reports', 'Reports'],
+const linkDefs = [
+  ['/', 'nav.overview'],
+  ['/missions', 'nav.missions'],
+  ['/tasks', 'nav.tasks'],
+  ['/todos', 'nav.todos'],
+  ['/staff-loans', 'nav.staffLoans'],
+  ['/notifications', 'nav.notifications'],
+  ['/approvals', 'nav.approvals'],
+  ['/reports', 'nav.reports'],
 ] as const;
 
 interface SidebarProps {
@@ -21,20 +23,21 @@ interface SidebarProps {
 
 const Sidebar = forwardRef<HTMLElement, SidebarProps>(function Sidebar({ open, mobile, firstLinkRef, onNavigate }, ref) {
   const closedMobileDrawer = mobile && !open;
+  const { t } = useI18n();
   return (
     <aside
       ref={ref}
       id="primary-navigation"
       className={`sidebar ${open ? 'sidebar-open' : ''}`}
-      aria-label="Primary navigation"
+      aria-label={t('nav.primary')}
       aria-hidden={closedMobileDrawer || undefined}
     >
       <div className="brand-block" aria-label="ONYX Remote Operator">
         <span className="brand-mark" aria-hidden="true">O</span>
-        <div><strong>ONYX</strong><small>Remote Operator</small></div>
+        <div><strong>{t('app.name')}</strong><small>{t('app.remoteOperator')}</small></div>
       </div>
       <nav>
-        {links.map(([to, label], index) => (
+        {linkDefs.map(([to, key], index) => (
           <NavLink
             key={to}
             ref={index === 0 ? firstLinkRef : undefined}
@@ -44,11 +47,12 @@ const Sidebar = forwardRef<HTMLElement, SidebarProps>(function Sidebar({ open, m
             onClick={onNavigate}
             className={({ isActive }) => isActive ? 'nav-link nav-link-active' : 'nav-link'}
           >
-            <span className="nav-indicator" aria-hidden="true" />{label}
+            <span className="nav-indicator" aria-hidden="true" />{t(key)}
           </NavLink>
         ))}
       </nav>
-      <div className="sidebar-note"><strong>Thin client</strong><span>No offline commands or local domain state.</span></div>
+      <div className="sidebar-note"><strong>{t('app.thinClient')}</strong><span>{t('app.thinClientNote')}</span></div>
+      <div style={{ marginTop: 12 }}><LanguageSwitcher /></div>
     </aside>
   );
 });
