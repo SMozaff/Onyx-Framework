@@ -139,5 +139,13 @@
   "settings.p2pSync": "همگام‌سازی همتا‌به‌همتا",
   "language.title": "Language / زبان",
   "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
-  "dashboard.latestChanges": "آخرین تغییرات"
+  "dashboard.latestChanges": "آخرین تغییرات",
+  "common.recentlyUpdated": "به‌تازگی به‌روزرسانی شده",
+  "dashboard.openTasks": "وظایف باز",
+  "dashboard.blockedTasks": "وظایف مسدود",
+  "dashboard.unreadAlerts": "هشدارهای خوانده‌نشده",
+  "dashboard.pendingApprovals": "تأییدهای در انتظار",
+  "dashboard.noBlockedAlerts": "هیچ وظیفه مسدود یا هشدار عملیاتی خوانده‌نشده‌ای وجود ندارد.",
+  "dashboard.attentionRequired": "نیازمند توجه",
+  "dashboard.blockedAlertsNeedReview": "{blocked} وظیفه مسدود و {unread} اعلان خوانده‌نشده نیازمند بررسی است."
 }

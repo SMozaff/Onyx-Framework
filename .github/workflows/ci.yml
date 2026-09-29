@@ -218,6 +218,10 @@ jobs:
         run: npm run test:a11y
       - name: Feature contract audit
         run: npm run feature-audit
+      - name: Verify shared i18n artifacts
+        working-directory: .
+        run: node scripts/sync-i18n.mjs --check --audit-scope=web-ui/src/pages/Dashboard
+
       - name: Install Chromium for browser regressions
         run: npx playwright install --with-deps chromium
       - name: Browser accessibility, keyboard, state, and visual regressions

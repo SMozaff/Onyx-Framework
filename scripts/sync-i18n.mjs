@@ -8,12 +8,14 @@
  *
  * Usage: node scripts/sync-i18n.mjs [--check]
  */
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const check = process.argv.includes("--check");
+const auditArg = process.argv.find((arg) => arg.startsWith("--audit-scope="));
+const auditScope = auditArg ? auditArg.slice("--audit-scope=".length) : null;
 
 const en = JSON.parse(readFileSync(join(root, "shared/i18n/en.json"), "utf8"));
 const fa = JSON.parse(readFileSync(join(root, "shared/i18n/fa.json"), "utf8"));
@@ -36,6 +38,40 @@ export const fa: Record<string, string> = ${JSON.stringify(fa, null, 2)} as Reco
 export const dictionaries = { en, fa } as const;
 export type Locale = "en" | "fa";
 `;
+
+function auditUserFacingLiterals(scope) {
+  const extensions = new Set([".ts", ".tsx"]);
+  const ignored = new Set(["node_modules", "dist", "build", ".git"]);
+  const violations = [];
+
+  function walk(dir) {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (ignored.has(entry.name)) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (extensions.has(entry.name.slice(entry.name.lastIndexOf(".")))) {
+        const source = readFileSync(full, "utf8");
+        const jsxText = />\s*([A-Za-z][^<>{}\n]{2,})\s*</g;
+        for (const match of source.matchAll(jsxText)) {
+          const value = match[1].trim();
+          if (!value || value.startsWith("//")) continue;
+          violations.push(`${full}: ${value}`);
+        }
+      }
+    }
+  }
+
+  walk(join(root, scope));
+  if (violations.length) {
+    console.error("i18n literal audit failed. User-facing JSX text must use t(...) keys:");
+    for (const violation of violations) console.error(`  ${violation}`);
+    process.exit(1);
+  }
+  console.log(`i18n literal audit passed: ${scope}`);
+}
+
+if (auditScope) auditUserFacingLiterals(auditScope);
 
 const targets = [
   "web-ui/src/i18n",

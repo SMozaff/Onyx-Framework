@@ -141,7 +141,15 @@ export const en: Record<string, string> = {
   "settings.p2pSync": "Peer-to-peer sync",
   "language.title": "Language / زبان",
   "language.note": "Interface language. Applies instantly and is remembered on this device.",
-  "dashboard.latestChanges": "Latest changes"
+  "dashboard.latestChanges": "Latest changes",
+  "common.recentlyUpdated": "Recently updated",
+  "dashboard.openTasks": "Open tasks",
+  "dashboard.blockedTasks": "Blocked tasks",
+  "dashboard.unreadAlerts": "Unread alerts",
+  "dashboard.pendingApprovals": "Pending approvals",
+  "dashboard.noBlockedAlerts": "No blocked tasks or unread operational alerts.",
+  "dashboard.attentionRequired": "Attention required",
+  "dashboard.blockedAlertsNeedReview": "{blocked} blocked task(s) and {unread} unread notification(s) need review."
 } as Record<string, string>;
 export const fa: Record<string, string> = {
   "app.name": "ONYX",
@@ -284,7 +292,15 @@ export const fa: Record<string, string> = {
   "settings.p2pSync": "همگام‌سازی همتا‌به‌همتا",
   "language.title": "Language / زبان",
   "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
-  "dashboard.latestChanges": "آخرین تغییرات"
+  "dashboard.latestChanges": "آخرین تغییرات",
+  "common.recentlyUpdated": "به‌تازگی به‌روزرسانی شده",
+  "dashboard.openTasks": "وظایف باز",
+  "dashboard.blockedTasks": "وظایف مسدود",
+  "dashboard.unreadAlerts": "هشدارهای خوانده‌نشده",
+  "dashboard.pendingApprovals": "تأییدهای در انتظار",
+  "dashboard.noBlockedAlerts": "هیچ وظیفه مسدود یا هشدار عملیاتی خوانده‌نشده‌ای وجود ندارد.",
+  "dashboard.attentionRequired": "نیازمند توجه",
+  "dashboard.blockedAlertsNeedReview": "{blocked} وظیفه مسدود و {unread} اعلان خوانده‌نشده نیازمند بررسی است."
 } as Record<string, string>;
 export const dictionaries = { en, fa } as const;
 export type Locale = "en" | "fa";
