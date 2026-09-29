@@ -81,6 +81,12 @@
       "note": "The lifecycle state of an aggregate, a request, or a data projection."
     },
     {
+      "id": "user",
+      "en": "user",
+      "fa": "کاربر",
+      "note": "A principal inside an organization. Distinct from staff, which is a role within the loan hierarchy."
+    },
+    {
       "id": "readOnly",
       "en": "read-only",
       "fa": "فقط‌خواندنی",
