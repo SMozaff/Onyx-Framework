@@ -10,11 +10,12 @@
  * Usage: node --test scripts/verify/verify-i18n-runtime.mjs
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const reactDirectory = join(repositoryRoot, "shared", "i18n", "react");
@@ -28,8 +29,12 @@ if (typeof stripTypeScriptTypes !== "function") {
 async function importCanonicalModule(fileName) {
   const source = readFileSync(join(reactDirectory, fileName), "utf8");
   const stripped = stripTypeScriptTypes(source, { mode: "strip" });
-  const dataUrl = `data:text/javascript;base64,${Buffer.from(stripped, "base64")}`;
-  return import(dataUrl);
+  const scratchPath = join(
+    mkdtempSync(join(tmpdir(), "onyx-i18n-runtime-")),
+    `${fileName.replace(/\.ts$/, "")}.mjs`,
+  );
+  writeFileSync(scratchPath, stripped, "utf8");
+  return import(pathToFileURL(scratchPath).href);
 }
 
 const { createFormatters } = await importCanonicalModule("formatting.ts");
