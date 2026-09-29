@@ -7,7 +7,6 @@ import TaskDetail from './TaskDetail';
 
 export default function TasksPage() {
   const query = useOnyxQuery<TaskSummary>('task.list');
-  const { t } = useI18n();
   const state = deriveProjectionState(query);
   const [selected, setSelected] = useState<TaskSummary | null>(null);
   const [status, setStatus] = useState('all');

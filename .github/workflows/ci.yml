@@ -136,6 +136,28 @@ jobs:
       - name: Contract verification
         run: bash scripts/verify/verify_team7.sh && bash scripts/verify/verify_team8.sh
 
+  # Localization contract gate.
+  #
+  # Deliberately a standalone job with no `needs:`. The gate validates only
+  # `shared/i18n/{en,fa}.json` and the generated `*/src/i18n/` artifacts, so
+  # it has no dependency on any frontend compiling, linting, or passing tests.
+  # It previously lived as a step inside the `web` job, where it sat after
+  # lint/type-check/unit-tests; an unrelated frontend regression therefore
+  # skipped the localization gate entirely and the gate did not run for the
+  # whole i18n migration commit series. A contract gate must fail independently
+  # of the code that consumes it.
+  i18n:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Verify canonical catalogs, parity, and generated-resource determinism
+        run: node scripts/sync-i18n.mjs --check
+      - name: Audit user-facing literals in enforced surfaces
+        run: node scripts/sync-i18n.mjs --check --audit-scope=web-ui/src/pages/Dashboard
+
   deploy-check:
     runs-on: ubuntu-latest
     steps:

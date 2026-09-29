@@ -9,7 +9,6 @@ import { normalizeError } from '../../utils/errorHandler';
 
 export default function ApprovalsPage() {
   const query = useOnyxQuery<ApprovalProjection>('approval.list');
-  const { t } = useI18n();
   const state = deriveProjectionState(query);
   const mutation = useApprovalDecision();
   const [dialog, setDialog] = useState<{ approval: ApprovalProjection; decision: 'approve' | 'reject' } | null>(null);
