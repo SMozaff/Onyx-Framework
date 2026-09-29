@@ -13,7 +13,11 @@ visual/RTL/typography work was done, and no language was added. Exactly one
 application file changed, and only to update a single call site for a key rename
 that was required to repair a demonstrably referenced key.
 
-All executable verification ran through GitHub Actions. All seven jobs passed.
+All executable verification ran through GitHub Actions. The localization gate
+(`i18n`) passed on every run. Six of seven jobs passed on the branch tip; the
+seventh, the unrelated k6 `load-smoke` performance test, failed on a
+`command_latency` threshold after passing on identical code in the previous run,
+and is documented precisely in §8.
 
 Branch: `feat/i18n-phase2-catalog-foundation`
 PR: <https://github.com/SMozaff/Onyx-Framework/pull/20>
@@ -220,8 +224,8 @@ sites identified in Phase 1 remain for a later phase, as instructed.
 ## 8. CI
 
 **GitHub Actions workflow:** CI
-**Run ID:** 36624890985
-**Commit:** 01e031e
+**Run ID:** 36627197624 (branch tip)
+**Commit:** 914bd3c
 **PR:** #20
 
 | Job | Result |
@@ -231,13 +235,52 @@ sites identified in Phase 1 remain for a later phase, as instructed.
 | `web` | PASS |
 | `mobile-android-kotlin` | PASS |
 | `deploy-check` | PASS |
-| `load-smoke` | PASS |
 | `native-ui-evidence` | PASS |
+| `load-smoke` | **FAIL** — unrelated, see below |
 
-Run conclusion: **success**. All seven jobs in the workflow ran; none were
-skipped.
+### The one failure: `load-smoke`
 
-`i18n` job steps, all successful:
+Run 36627197624 concluded `failure` solely because `load-smoke` failed. The
+k6 step reported:
+
+```text
+level=error msg="thresholds on metrics 'command_latency' have been crossed"
+http_req_failed................: 0.04% 10 out of 23612
+http_req_duration..............: avg=255.27ms p(95)=598.3ms
+Process completed with exit code 99
+```
+
+This is a performance-threshold failure in a 100-VU / 60-second load test
+against the Rust API server. It is **not** localization-related, and it is not
+a Phase 2 regression:
+
+- The commit under test changed exactly one file,
+  `docs/i18n/PHASE-2-REPORT.md`. No code, catalog, generated dictionary, or
+  workflow changed between the passing and failing runs.
+- `load-smoke` **passed** on run 36624890985, whose commit differs only in that
+  same documentation file. Identical build input, opposite outcome, so the
+  result is non-deterministic.
+- Phase 2 changed no Rust code, no API path, and no endpoint exercised by
+  `tests/load/smoke-test.js`.
+
+Classification: an unrelated, pre-existing instability in the load-test
+threshold, not a Phase 2 regression and not caused by anything in this branch.
+It is reported rather than dismissed, and it was not "fixed", because
+loosening a performance threshold or editing the load test to make it pass would
+be an out-of-scope change to an unrelated system.
+
+### Earlier green run on the same code
+
+Run **36624890985** (commit `01e031e`) completed with conclusion `success` and
+all seven jobs passing, including `load-smoke`. It covers the same code as the
+branch tip. Two further runs on this branch, 36622328490 (`ed53f74`) and
+36624655634 (`c0d3923`), also completed successfully.
+
+Every catalog guarantee is enforced by the `i18n` job, and the `i18n` job is
+green on the branch tip with all three steps passing. The `load-smoke` result
+does not bear on any Phase 2 invariant.
+
+### `i18n` job on the branch tip
 
 ```text
 1  success  Set up job
@@ -248,7 +291,7 @@ skipped.
 6  success  Unit-test the canonical formatting and pluralization API
 ```
 
-Validator output from that job:
+Validator output:
 
 ```text
 i18n unresolved-key scan passed: 55 literal keys in 134 source files.
@@ -258,7 +301,8 @@ i18n literal audit passed: web-ui/src/pages/Dashboard
 ```
 
 The `i18n` job remains free of `needs:` and therefore independent of the other
-jobs; it was green in the same run in which every other job also passed.
+jobs; it was green in every run listed above, including the run in which
+`load-smoke` failed.
 
 ### New CI invariants
 
@@ -420,9 +464,15 @@ Discovered, deliberately deferred, and not defects introduced by this phase:
 No localization-related blocker is currently open. The Phase 1 blockers B-1 and
 B-2 were resolved on `main` before this branch and both jobs are green.
 
+8. **`load-smoke` is non-deterministic.** The k6 `command_latency` threshold
+   was crossed on run 36627197624 and not on run 36624890985, for identical
+   build input. The smoke test is the only unstable job observed in Phase 2.
+   Left for the owning phase; loosening the threshold to force green would
+   hide a real signal.
+
 ## 12. Final Status
 
-**PHASE 2 COMPLETE**
+**PHASE 2 COMPLETE WITH DOCUMENTED EXCEPTIONS**
 
 Every applicable Definition-of-Done condition is satisfied: both catalogs
 audited; key semantics, duplicate semantics, and naming reviewed; interpolation
@@ -432,17 +482,17 @@ CI-enforced; generated outputs regenerated deterministically through the
 canonical generator; CI validation extended to cover the Phase 2 invariants
 within the existing standalone job; no application, Android/Rust, or
 visual/RTL/typography migration performed; no new language introduced; Phase 1
-CI protections preserved; GitHub Actions verification completed with all seven
-jobs passing in run 36624890985 on commit 01e031e.
+CI protections preserved; GitHub Actions verification completed.
 
-Run 36624890985 verified the complete branch tip, including this report. Two
-earlier runs on the same branch, 36622328490 (commit ed53f74) and 36624655634
-(commit c0d3923), also completed successfully; the differences between them were
-a regenerated dictionary, one terminology entry, and this documentation file, none
-of which affect a catalog guarantee. Any commit made after this report —
-including the one that records this run ID — is documentation-only and cannot
-weaken a catalog invariant, because every catalog guarantee is enforced by the
-`i18n` job on the commit that introduces it.
+The single documented exception is unrelated to localization: on the branch tip
+(run 36627197624) the `load-smoke` job failed a k6 `command_latency` threshold,
+having passed on the previous run for byte-identical build input. It is
+classified, reproduced as non-deterministic, and deliberately not "fixed",
+because relaxing a performance threshold in an unrelated system is outside Phase
+2. See §8.
+
+No Phase 2 contract item is unimplemented, and no catalog guarantee depends on
+`load-smoke`.
 
 Working tree is clean and fully pushed. PR #20 is open against `main` and is
 not merged; merging is left to the project owner.
