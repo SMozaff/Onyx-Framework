@@ -14,10 +14,9 @@ application file changed, and only to update a single call site for a key rename
 that was required to repair a demonstrably referenced key.
 
 All executable verification ran through GitHub Actions. The localization gate
-(`i18n`) passed on every run. Six of seven jobs passed on the branch tip; the
-seventh, the unrelated k6 `load-smoke` performance test, failed on a
-`command_latency` threshold after passing on identical code in the previous run,
-and is documented precisely in §8.
+(`i18n`) passed on every run, and all seven jobs passed on the branch tip
+(run 36629491659). One earlier run failed only on the unrelated k6 `load-smoke`
+performance threshold and is documented precisely in §8.
 
 Branch: `feat/i18n-phase2-catalog-foundation`
 PR: <https://github.com/SMozaff/Onyx-Framework/pull/20>
@@ -224,8 +223,8 @@ sites identified in Phase 1 remain for a later phase, as instructed.
 ## 8. CI
 
 **GitHub Actions workflow:** CI
-**Run ID:** 36627197624 (branch tip)
-**Commit:** 914bd3c
+**Run ID:** 36629491659 (branch tip)
+**Commit:** 4e6460b
 **PR:** #20
 
 | Job | Result |
@@ -235,10 +234,13 @@ sites identified in Phase 1 remain for a later phase, as instructed.
 | `web` | PASS |
 | `mobile-android-kotlin` | PASS |
 | `deploy-check` | PASS |
+| `load-smoke` | PASS |
 | `native-ui-evidence` | PASS |
-| `load-smoke` | **FAIL** — unrelated, see below |
 
-### The one failure: `load-smoke`
+Run conclusion: **success**. All seven jobs in the workflow ran; none were
+skipped.
+
+### The one intermittent failure seen during Phase 2: `load-smoke`
 
 Run 36627197624 concluded `failure` solely because `load-smoke` failed. The
 k6 step reported:
@@ -250,35 +252,36 @@ http_req_duration..............: avg=255.27ms p(95)=598.3ms
 Process completed with exit code 99
 ```
 
-This is a performance-threshold failure in a 100-VU / 60-second load test
-against the Rust API server. It is **not** localization-related, and it is not
-a Phase 2 regression:
+That run's commit changed exactly one file,
+`docs/i18n/PHASE-2-REPORT.md`. The runs on either side of it — 36624890985
+before, 36629491659 after — both concluded `success` with `load-smoke` green,
+and all three runs build byte-identical catalog and generated-dictionary
+content, since none of them changed a catalog, the generator, the schema, the
+terminology model, or any application code.
 
-- The commit under test changed exactly one file,
-  `docs/i18n/PHASE-2-REPORT.md`. No code, catalog, generated dictionary, or
-  workflow changed between the passing and failing runs.
-- `load-smoke` **passed** on run 36624890985, whose commit differs only in that
-  same documentation file. Identical build input, opposite outcome, so the
-  result is non-deterministic.
-- Phase 2 changed no Rust code, no API path, and no endpoint exercised by
-  `tests/load/smoke-test.js`.
+Classification: an unrelated, pre-existing instability in a performance
+threshold, not a Phase 2 regression. It is reported rather than dismissed, and
+it was deliberately not "fixed": relaxing a k6 threshold or editing the load
+test to force it green would be an out-of-scope change to an unrelated system
+and would hide a real signal. Three runs with identical build input produced
+two passes and one failure, which is the definition of a flake.
 
-Classification: an unrelated, pre-existing instability in the load-test
-threshold, not a Phase 2 regression and not caused by anything in this branch.
-It is reported rather than dismissed, and it was not "fixed", because
-loosening a performance threshold or editing the load test to make it pass would
-be an out-of-scope change to an unrelated system.
+### All runs on this branch
 
-### Earlier green run on the same code
+| Run | Commit | Conclusion | `i18n` | `load-smoke` |
+| --- | --- | --- | --- | --- |
+| 36622328490 | ed53f74 | success | pass | pass |
+| 36624655634 | c0d3923 | success | pass | pass |
+| 36624890985 | 01e031e | success | pass | pass |
+| 36627197624 | 914bd3c | failure | pass | **fail** |
+| 36629491659 | 4e6460b | success | pass | pass |
 
-Run **36624890985** (commit `01e031e`) completed with conclusion `success` and
-all seven jobs passing, including `load-smoke`. It covers the same code as the
-branch tip. Two further runs on this branch, 36622328490 (`ed53f74`) and
-36624655634 (`c0d3923`), also completed successfully.
+The `i18n` job passed in every run, including the one where `load-smoke` failed.
+It declares no `needs:` and is therefore independent of every other job.
 
-Every catalog guarantee is enforced by the `i18n` job, and the `i18n` job is
-green on the branch tip with all three steps passing. The `load-smoke` result
-does not bear on any Phase 2 invariant.
+Any commit made after this report is documentation-only and cannot weaken a
+catalog invariant, because every catalog guarantee is enforced by the `i18n`
+job on the commit that introduces it.
 
 ### `i18n` job on the branch tip
 
@@ -472,7 +475,7 @@ B-2 were resolved on `main` before this branch and both jobs are green.
 
 ## 12. Final Status
 
-**PHASE 2 COMPLETE WITH DOCUMENTED EXCEPTIONS**
+**PHASE 2 COMPLETE**
 
 Every applicable Definition-of-Done condition is satisfied: both catalogs
 audited; key semantics, duplicate semantics, and naming reviewed; interpolation
@@ -482,17 +485,16 @@ CI-enforced; generated outputs regenerated deterministically through the
 canonical generator; CI validation extended to cover the Phase 2 invariants
 within the existing standalone job; no application, Android/Rust, or
 visual/RTL/typography migration performed; no new language introduced; Phase 1
-CI protections preserved; GitHub Actions verification completed.
+CI protections preserved; GitHub Actions verification completed with all seven
+jobs passing on the branch tip (run 36629491659, commit 4e6460b).
 
-The single documented exception is unrelated to localization: on the branch tip
-(run 36627197624) the `load-smoke` job failed a k6 `command_latency` threshold,
-having passed on the previous run for byte-identical build input. It is
-classified, reproduced as non-deterministic, and deliberately not "fixed",
-because relaxing a performance threshold in an unrelated system is outside Phase
-2. See §8.
+The one exception encountered during the phase — the intermittent k6
+`load-smoke` `command_latency` threshold on run 36627197624 — is unrelated to
+localization, is documented with evidence in §8, and is left visible rather
+than masked. It does not gate any Phase 2 invariant, the `i18n` job passed in
+that same run, and `load-smoke` is not owned by this phase.
 
-No Phase 2 contract item is unimplemented, and no catalog guarantee depends on
-`load-smoke`.
+No Phase 2 contract item is unimplemented.
 
 Working tree is clean and fully pushed. PR #20 is open against `main` and is
 not merged; merging is left to the project owner.
