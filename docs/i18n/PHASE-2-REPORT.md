@@ -220,8 +220,8 @@ sites identified in Phase 1 remain for a later phase, as instructed.
 ## 8. CI
 
 **GitHub Actions workflow:** CI
-**Run ID:** 36622328490
-**Commit:** c0d3923595cd9880f53756eb5ab3a53f21e6ecbd
+**Run ID:** 36624890985
+**Commit:** 01e031e
 **PR:** #20
 
 | Job | Result |
@@ -307,7 +307,7 @@ fixed in `3a575e2`. As a result `web` and `mobile-android-kotlin` pass, and
 
 ## 9. Files Changed
 
-Branch `feat/i18n-phase2-catalog-foundation`, five commits.
+Branch `feat/i18n-phase2-catalog-foundation`, six commits.
 
 Canonical catalog:
 
@@ -433,7 +433,16 @@ canonical generator; CI validation extended to cover the Phase 2 invariants
 within the existing standalone job; no application, Android/Rust, or
 visual/RTL/typography migration performed; no new language introduced; Phase 1
 CI protections preserved; GitHub Actions verification completed with all seven
-jobs passing on commit c0d3923.
+jobs passing in run 36624890985 on commit 01e031e.
+
+Run 36624890985 verified the complete branch tip, including this report. Two
+earlier runs on the same branch, 36622328490 (commit ed53f74) and 36624655634
+(commit c0d3923), also completed successfully; the differences between them were
+a regenerated dictionary, one terminology entry, and this documentation file, none
+of which affect a catalog guarantee. Any commit made after this report —
+including the one that records this run ID — is documentation-only and cannot
+weaken a catalog invariant, because every catalog guarantee is enforced by the
+`i18n` job on the commit that introduces it.
 
 Working tree is clean and fully pushed. PR #20 is open against `main` and is
 not merged; merging is left to the project owner.
