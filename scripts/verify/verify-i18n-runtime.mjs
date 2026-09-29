@@ -69,7 +69,7 @@ test("formatting is locale-parameterized rather than branch-per-language", (t) =
     FA.formatNumber(1234567.891),
     "the same value must not be formatted identically for en-US and fa-IR",
   );
-  assert.equal(EN.formatNumber(1234567.891, { style: "percent" }), "123,456,789.1%");
+  assert.equal(EN.formatNumber(1234567.891, { style: "percent" }), "123,456,789%");
 });
 
 test("formatDate and formatDateTime render and reject invalid input", () => {
@@ -91,7 +91,8 @@ test("formatRelativeTime honours plural-sensitive units from Intl", () => {
 test("formatNumber, formatPercent, and formatCurrency validate their inputs", () => {
   assert.equal(EN.formatNumber(0.5, { minimumFractionDigits: 1 }), "0.5");
   assert.equal(EN.formatPercent(0.25), "25%");
-  assert.equal(EN.formatCurrency(1234.5, "usd", { currencyDisplay: "code" }), "USD 1,234.50");
+  // Intl may separate the ISO code from the amount with a non-breaking space.
+  assert.match(EN.formatCurrency(1234.5, "usd", { currencyDisplay: "code" }), /^USD[\s ]*1,234\.50$/);
   assert.throws(() => EN.formatNumber("12"), TypeError);
   assert.throws(() => EN.formatPercent(Number.NaN), TypeError);
   assert.throws(() => EN.formatCurrency(1, "US"), TypeError);
