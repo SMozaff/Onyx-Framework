@@ -157,6 +157,8 @@ jobs:
         run: node scripts/sync-i18n.mjs --check
       - name: Audit user-facing literals in enforced surfaces
         run: node scripts/sync-i18n.mjs --check --audit-scope=web-ui/src/pages/Dashboard
+      - name: Unit-test the canonical formatting and pluralization API
+        run: node --test scripts/verify/verify-i18n-runtime.mjs
 
   deploy-check:
     runs-on: ubuntu-latest

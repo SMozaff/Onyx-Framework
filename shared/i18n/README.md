@@ -195,15 +195,17 @@ scripts/sync-i18n.mjs
 The generator is the sole mechanism for producing and checking generated
 localization resources.
 
-Canonical commands:
+Authoritative commands:
 
 ```bash
 node scripts/sync-i18n.mjs --check
 node scripts/sync-i18n.mjs --check --audit-scope=web-ui/src/pages/Dashboard
+node --test scripts/verify/verify-i18n-runtime.mjs
 ```
 
 The first command validates and checks generated-resource determinism. The
-second adds the existing scoped user-facing literal audit.
+second adds the existing scoped user-facing literal audit. The third unit-tests
+the formatting and pluralization API.
 
 Authoritative executable verification occurs through GitHub Actions. Local
 commands are for authoring and regeneration, not for claiming that CI passes.
@@ -222,6 +224,11 @@ commands are for authoring and regeneration, not for claiming that CI passes.
 The scoped audit additionally ensures that JSX text in
 `web-ui/src/pages/Dashboard` uses translation keys rather than hardcoded
 user-facing literals.
+
+`node --test scripts/verify/verify-i18n-runtime.mjs` unit-tests the
+formatting and pluralization API, including locale parameterization,
+`Intl.PluralRules` agreement, `other`-fallback behaviour, and input
+validation.
 
 Unresolved-key detection covers static calls obtained from `useI18n()` and
 direct `translateStatic()` calls. Dynamically constructed keys, template
@@ -283,7 +290,8 @@ Localization is enforced by the standalone `i18n` job in:
 The job has no dependency on frontend linting, type-checking, tests, builds,
 or unrelated jobs. It verifies canonical catalogs, schema validity, EN/FA
 parity, interpolation parity, deterministic generation, unresolved literal
-translation keys, and the existing enforced literal audit.
+translation keys, the existing enforced literal audit, and the formatting and
+pluralization unit tests.
 
 The `web` job retains its own redundant localization step for frontend
 context. The standalone `i18n` job is authoritative.
