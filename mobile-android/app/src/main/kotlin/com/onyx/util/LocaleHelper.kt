@@ -1,39 +1,40 @@
-package com.onyx.util;
+package com.onyx.util
 
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.content.res.Configuration;
-import java.util.Locale;
+import android.content.Context
+import android.content.SharedPreferences
+import android.content.res.Configuration
+import java.util.Locale
 
-public final class LocaleHelper {
-    private static final String PREFS = "onyx_prefs";
-    private static final String KEY_LOCALE = "locale";
+object LocaleHelper {
+    private const val PREFS = "onyx_prefs"
+    private const val KEY_LOCALE = "locale"
 
-    public static String getStoredLocale(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String stored = prefs.getString(KEY_LOCALE, null);
-        return (stored != null && (stored.equals("fa") || stored.equals("en"))) ? stored : "en";
+    @JvmStatic
+    fun getStoredLocale(context: Context): String {
+        val prefs: SharedPreferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val stored = prefs.getString(KEY_LOCALE, null)
+        return if (stored == "fa" || stored == "en") stored else "en"
     }
 
-    public static void setLocale(Context context, String locale) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        prefs.edit().putString(KEY_LOCALE, locale).apply();
-        updateResources(context, locale);
+    @JvmStatic
+    fun setLocale(context: Context, locale: String) {
+        val prefs: SharedPreferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_LOCALE, locale).apply()
+        updateResources(context, locale)
     }
 
-    public static void applyFromStorage(Context context) {
-        String stored = getStoredLocale(context);
-        updateResources(context, stored);
+    @JvmStatic
+    fun applyFromStorage(context: Context) {
+        updateResources(context, getStoredLocale(context))
     }
 
-    private static void updateResources(Context context, String locale) {
-        Locale target = locale.equals("fa") ? new Locale("fa", "IR") : Locale.ENGLISH;
-        Locale.setDefault(target);
-        Configuration config = context.getResources().getConfiguration();
-        config.setLocale(target);
-        config.setLayoutDirection(target);
-        context.getResources().updateConfiguration(config, context.getResources().getDisplayMetrics());
-    }
+    private fun updateResources(context: Context, locale: String) {
+        val target = if (locale == "fa") Locale("fa", "IR") else Locale.ENGLISH
+        Locale.setDefault(target)
 
-    private LocaleHelper() {}
+        val config = Configuration(context.resources.configuration)
+        config.setLocale(target)
+        config.setLayoutDirection(target)
+        context.resources.updateConfiguration(config, context.resources.displayMetrics)
+    }
 }
