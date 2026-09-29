@@ -10,22 +10,41 @@ function walk(directory: string): string[] {
   });
 }
 
+function findExcludedFeatureViolations(root: string): string[] {
+  const excluded = [
+    /class\s+OfflineQueue/i,
+    /function\s+uploadFile/i,
+    /createBlueprint/i,
+    /MeetingChat/i,
+  ];
+  const violations: string[] = [];
+
+  for (const file of walk(root).filter((path) => /\.(ts|tsx)$/.test(path))) {
+    const content = readFileSync(file, 'utf8');
+    for (const pattern of excluded) {
+      if (pattern.test(content)) violations.push(`${file}: ${pattern}`);
+    }
+
+    // Locale persistence is presentation preference, not operational domain
+    // state. T6-D12 remains binding for domain-state persistence; the
+    // canonical i18n locale write is the single explicit presentation-layer
+    // exception required by the localization contract.
+    const contentWithoutSanctionedLocaleWrite = content.replace(
+      /localStorage\.setItem\(LOCALE_STORAGE_KEY\s*,\s*locale\s*\)/g,
+      '',
+    );
+    if (/localStorage\.setItem/i.test(contentWithoutSanctionedLocaleWrite)) {
+      violations.push(`${file}: /localStorage\\.setItem/i`);
+    }
+  }
+
+  return violations;
+}
+
 describe('v1 feature scope audit', () => {
   it('contains no excluded feature implementation', () => {
     const root = join(dirname(fileURLToPath(import.meta.url)), '../../src');
-    const excluded = [
-      /class\s+OfflineQueue/i,
-      /function\s+uploadFile/i,
-      /createBlueprint/i,
-      /MeetingChat/i,
-      /localStorage\.setItem/i,
-    ];
-    const violations: string[] = [];
-    for (const file of walk(root).filter((path) => /\.(ts|tsx)$/.test(path))) {
-      const content = readFileSync(file, 'utf8');
-      for (const pattern of excluded) if (pattern.test(content)) violations.push(`${file}: ${pattern}`);
-    }
-    expect(violations).toEqual([]);
+    expect(findExcludedFeatureViolations(root)).toEqual([]);
   });
 
   it('uses sessionStorage only for authentication material', () => {
