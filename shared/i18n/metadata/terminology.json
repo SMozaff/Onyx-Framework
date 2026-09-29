@@ -1,0 +1,105 @@
+{
+  "$comment": "Small canonical terminology model for the ONYX translation catalogs. This is NOT a translation-management system. It records the single preferred term per core product concept so that later migration phases do not invent competing wording. CI verifies each declared term actually appears in the catalog it claims to describe, which keeps this model from rotting.",
+  "enforcedBy": "scripts/sync-i18n.mjs (validateTerminology)",
+  "concepts": [
+    {
+      "id": "mission",
+      "en": "mission",
+      "fa": "مأموریت",
+      "note": "The top-level unit of work owned by an organization. Never 'job', 'assignment', or 'task'."
+    },
+    {
+      "id": "task",
+      "en": "task",
+      "fa": "وظیفه",
+      "note": "Work decomposed from a mission. Distinct from mission and from the Todo/Target aggregate."
+    },
+    {
+      "id": "todo",
+      "en": "todo",
+      "fa": "کار",
+      "note": "The TodoList/TargetList aggregate surfaced as 'Todos & Targets'. A separate domain concept from task."
+    },
+    {
+      "id": "staffLoan",
+      "en": "staff loan",
+      "fa": "واگذاری پرسنل",
+      "note": "Secondment of a staff member to another manager in the chain of authority. Not a mission."
+    },
+    {
+      "id": "approval",
+      "en": "approval",
+      "fa": "تأیید",
+      "note": "A formal decision request and its outcome. Distinct from notification acknowledgement."
+    },
+    {
+      "id": "acknowledgement",
+      "en": "acknowledge",
+      "fa": "تأیید دریافت",
+      "note": "Confirmation that a notification was seen. Never rendered as bare 'approved'."
+    },
+    {
+      "id": "notification",
+      "en": "notification",
+      "fa": "اعلان",
+      "note": "An addressed message delivered to a user. Distinct from operational alert."
+    },
+    {
+      "id": "alert",
+      "en": "alert",
+      "fa": "هشدار",
+      "note": "An operational warning surfaced in dashboards. Distinct from notification."
+    },
+    {
+      "id": "report",
+      "en": "report",
+      "fa": "گزارش",
+      "note": "A generated operational document."
+    },
+    {
+      "id": "file",
+      "en": "file",
+      "fa": "فایل",
+      "note": "A stored artifact addressed by path and content hash."
+    },
+    {
+      "id": "organization",
+      "en": "organization",
+      "fa": "سازمان",
+      "note": "The tenancy boundary that owns missions, users, and scopes."
+    },
+    {
+      "id": "settings",
+      "en": "settings",
+      "fa": "تنظیمات",
+      "note": "Per-device and per-account configuration."
+    },
+    {
+      "id": "status",
+      "en": "status",
+      "fa": "وضعیت",
+      "note": "The lifecycle state of an aggregate, a request, or a data projection."
+    },
+    {
+      "id": "readOnly",
+      "en": "read-only",
+      "fa": "فقط‌خواندنی",
+      "note": "Permitted to observe but not to act. The thin-client capability boundary."
+    },
+    {
+      "id": "language",
+      "en": "language",
+      "fa": "زبان",
+      "note": "Interface locale selection. Language endonyms stay untranslated in the picker."
+    }
+  ],
+  "reservedMachineIdentifiers": {
+    "$comment": "Machine-facing identifiers that collide with the translation key shape. They are query keys, cache keys, and event aggregate references. They must never be added to the catalogs and must never be passed to t(). A naive key-shaped-literal scan would flag these, so Phase 2 deliberately scopes detection to translation call arguments.",
+    "examples": [
+      "dashboard.summary",
+      "mission.list",
+      "approval.list",
+      "notification.list"
+    ]
+  }
+}
