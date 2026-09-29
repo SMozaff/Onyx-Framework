@@ -8,9 +8,11 @@
  *
  * Validation performed before any write:
  *   locale-registry shape, translation-schema conformance, EN/FA key parity,
- *   interpolation-placeholder parity, and unresolved literal translation keys.
+ *   interpolation-placeholder parity and brace syntax, canonical key ordering,
+ *   unknown namespaces, pluralization structure, terminology-model agreement,
+ *   and unresolved literal translation keys.
  *
- * Usage: node scripts/sync-i18n.mjs [--check] [--audit-scope=<path>]
+ * Usage: node scripts/sync-i18n.mjs [--check] [--audit-scope=<path>] [--sort-catalogs]
  */
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname, sep } from "node:path";
@@ -20,6 +22,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const check = process.argv.includes("--check");
 const auditArg = process.argv.find((arg) => arg.startsWith("--audit-scope="));
 const auditScope = auditArg ? auditArg.slice("--audit-scope=".length) : null;
+const sortCatalogs = process.argv.includes("--sort-catalogs");
 const failures = [];
 
 function readJsonDocument(relativePath) {
@@ -175,6 +178,174 @@ for (const key of enKeys) {
     );
   }
 }
+
+// Phase 2 (P2-5): placeholder parity alone cannot see a placeholder that is
+// malformed in *both* locales, so brace shape is validated independently.
+function validatePlaceholderSyntax(catalogName, catalog) {
+  for (const [key, value] of Object.entries(catalog)) {
+    if (typeof value !== "string") continue;
+    const malformed = [];
+    for (const match of value.matchAll(/\{([^{}]*)\}/g)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(match[1])) {
+        malformed.push(`{${match[1]}}`);
+      }
+    }
+    const withoutPlaceholders = value.replace(/\{[^{}]*\}/g, "");
+    if (withoutPlaceholders.includes("{") || withoutPlaceholders.includes("}")) {
+      malformed.push("unbalanced brace");
+    }
+    if (malformed.length > 0) {
+      reportFailure(
+        `i18n malformed interpolation in ${catalogName}["${key}"]: ${malformed.join(", ")} (placeholders must be {camelCaseName})`,
+      );
+    }
+  }
+}
+
+validatePlaceholderSyntax("shared/i18n/en.json", en);
+validatePlaceholderSyntax("shared/i18n/fa.json", fa);
+
+// Phase 2 (P2-13): canonical, editor-independent ordering. Namespaces follow
+// the ratified order; leaves sort lexicographically inside their namespace.
+const CANONICAL_NAMESPACE_ORDER = [
+  "app",
+  "nav",
+  "auth",
+  "common",
+  "status",
+  "dashboard",
+  "missions",
+  "tasks",
+  "notifications",
+  "approvals",
+  "reports",
+  "files",
+  "settings",
+  "language",
+];
+
+function canonicalSortKey(key) {
+  const namespace = key.slice(0, key.indexOf("."));
+  const rank = CANONICAL_NAMESPACE_ORDER.indexOf(namespace);
+  return `${String(rank === -1 ? CANONICAL_NAMESPACE_ORDER.length : rank).padStart(3, "0")}|${key}`;
+}
+
+// Deliberately not localeCompare: catalog ordering must be identical on every
+// machine regardless of the runner's ICU build.
+function compareCanonicalKeys(a, b) {
+  const left = canonicalSortKey(a);
+  const right = canonicalSortKey(b);
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function validateCanonicalOrdering(catalogName, catalog) {
+  // Object.keys preserves the order the keys appear in the file, which is what
+  // deterministic ordering means here. catalogKeys() would pre-sort and hide
+  // exactly the defect this check exists to find.
+  const actual = typeof catalog === "object" && catalog !== null && !Array.isArray(catalog)
+    ? Object.keys(catalog)
+    : [];
+  if (actual.length === 0) return;
+  const expected = [...actual].sort(compareCanonicalKeys);
+  if (actual.join("\n") !== expected.join("\n")) {
+    // A --sort-catalogs run is the sanctioned way to fix this, so the failure
+    // is reported as a note and normalized instead of blocking the run.
+    if (sortCatalogs) {
+      console.log(`i18n ordering note in ${catalogName}: rewriting in canonical order.`);
+      return;
+    }
+    const firstDivergence = expected.findIndex((key, index) => actual[index] !== key);
+    reportFailure(
+      `i18n ordering error in ${catalogName}: keys are not in canonical order (namespace order ${CANONICAL_NAMESPACE_ORDER.join(", ")}, then leaf). First divergence at "${expected[firstDivergence] ?? "?"}". Run: node scripts/sync-i18n.mjs --sort-catalogs`,
+    );
+  }
+}
+
+const unknownNamespaces = new Set();
+for (const key of [...enKeys, ...faKeys]) {
+  const namespace = key.slice(0, key.indexOf("."));
+  if (!CANONICAL_NAMESPACE_ORDER.includes(namespace)) unknownNamespaces.add(namespace);
+}
+if (unknownNamespaces.size > 0) {
+  reportFailure(
+    `i18n unknown namespace(s): ${[...unknownNamespaces].sort().join(", ")}. Add the namespace to CANONICAL_NAMESPACE_ORDER and the schema before using it.`,
+  );
+}
+
+validateCanonicalOrdering("shared/i18n/en.json", en);
+validateCanonicalOrdering("shared/i18n/fa.json", fa);
+
+// Phase 2 (P2-10): quantities must stay compatible with the Phase 1
+// pluralization API rather than encoding singular/plural inside the string.
+const FORBIDDEN_PLURAL_PATTERNS = [/\(\s*s\s*\)/i, /\(\s*es\s*\)/i, /\{\s*count\s*\}s\b/i, /\bif count\b/i];
+
+function validatePluralizationStructure(catalogName, catalog) {
+  for (const [key, value] of Object.entries(catalog)) {
+    if (typeof value !== "string") continue;
+    for (const pattern of FORBIDDEN_PLURAL_PATTERNS) {
+      if (pattern.test(value)) {
+        reportFailure(
+          `i18n pluralization error in ${catalogName}["${key}"]: hard-coded plural form "${value}". Use an invariant noun phrase and let pluralCategory/selectPluralForm select the form.`,
+        );
+        break;
+      }
+    }
+  }
+}
+
+validatePluralizationStructure("shared/i18n/en.json", en);
+validatePluralizationStructure("shared/i18n/fa.json", fa);
+
+// Phase 2 (P2-9): the terminology model is small on purpose. It is checked for
+// internal consistency and for agreement with the catalogs, never used to
+// rewrite values.
+function validateTerminology(model) {
+  if (typeof model !== "object" || model === null || Array.isArray(model)) {
+    reportFailure("i18n terminology error: shared/i18n/metadata/terminology.json must be an object.");
+    return;
+  }
+  const concepts = model.concepts;
+  if (!Array.isArray(concepts) || concepts.length === 0) {
+    reportFailure("i18n terminology error: terminology.json must declare a non-empty concepts array.");
+    return;
+  }
+  const ids = new Set();
+  const catalogs = { en, fa };
+  for (const concept of concepts) {
+    if (typeof concept !== "object" || concept === null) {
+      reportFailure("i18n terminology error: every terminology concept must be an object.");
+      continue;
+    }
+    if (typeof concept.id !== "string" || concept.id.length === 0) {
+      reportFailure("i18n terminology error: every terminology concept needs a non-empty id.");
+      continue;
+    }
+    if (ids.has(concept.id)) {
+      reportFailure(`i18n terminology error: duplicate concept id "${concept.id}".`);
+      continue;
+    }
+    ids.add(concept.id);
+    for (const locale of Object.keys(catalogs)) {
+      const term = concept[locale];
+      if (typeof term !== "string" || term.trim().length === 0) {
+        reportFailure(`i18n terminology error: concept "${concept.id}" needs a non-empty ${locale} term.`);
+        continue;
+      }
+      const present = Object.values(catalogs[locale]).some((value) =>
+        typeof value === "string" && value.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase()),
+      );
+      if (!present) {
+        reportFailure(
+          `i18n terminology error: the ${locale} term "${term}" for concept "${concept.id}" does not appear in shared/i18n/${locale}.json.`,
+        );
+      }
+    }
+  }
+}
+
+validateTerminology(readJsonDocument("shared/i18n/metadata/terminology.json"));
 
 
 const translationCallSurfaces = [
@@ -402,6 +573,26 @@ function auditUserFacingLiterals(scope) {
 
 if (auditScope) auditUserFacingLiterals(auditScope);
 
+if (sortCatalogs) {
+  // Phase 2 (P2-13): rewrite the canonical catalogs in canonical order instead
+  // of relying on a human to hand-sort 150 lines. Values are never modified.
+  for (const [relativePath, catalog] of [
+    ["shared/i18n/en.json", en],
+    ["shared/i18n/fa.json", fa],
+  ]) {
+    const target = join(root, relativePath);
+    const sorted = {};
+    for (const key of Object.keys(catalog).sort(compareCanonicalKeys)) {
+      sorted[key] = catalog[key];
+    }
+    const serialized = `${JSON.stringify(sorted, null, 2)}\n`;
+    if (readFileSync(target, "utf8") !== serialized) {
+      writeFileSync(target, serialized, "utf8");
+      console.log(`sorted ${relativePath} (${Object.keys(sorted).length} keys)`);
+    }
+  }
+}
+
 let generated;
 try {
   generated = buildGeneratedDictionary();
@@ -413,7 +604,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `i18n validation passed: schema, EN/FA parity, interpolation parity, and unresolved-key scan (${enKeys.length} keys).`,
+  `i18n validation passed: schema, EN/FA parity, interpolation parity, canonical ordering, pluralization structure, terminology, and unresolved-key scan (${enKeys.length} keys).`,
 );
 
 const targets = [
