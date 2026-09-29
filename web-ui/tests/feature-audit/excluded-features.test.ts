@@ -36,6 +36,12 @@ function findExcludedFeatureViolations(root: string): string[] {
     if (/localStorage\.setItem/i.test(contentWithoutSanctionedLocaleWrite)) {
       violations.push(`${file}: /localStorage\\.setItem/i`);
     }
+    if (
+      file.endsWith('/src/i18n/I18nContext.tsx') &&
+      (content.match(/localStorage\.setItem\(LOCALE_STORAGE_KEY\s*,\s*locale\s*\)/g) ?? []).length !== 1
+    ) {
+      violations.push(`${file}: expected exactly one sanctioned locale persistence write`);
+    }
   }
 
   return violations;
