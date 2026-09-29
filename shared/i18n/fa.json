@@ -147,5 +147,6 @@
   "dashboard.pendingApprovals": "تأییدهای در انتظار",
   "dashboard.noBlockedAlerts": "هیچ وظیفه مسدود یا هشدار عملیاتی خوانده‌نشده‌ای وجود ندارد.",
   "dashboard.attentionRequired": "نیازمند توجه",
-  "dashboard.blockedAlertsNeedReview": "{blocked} وظیفه مسدود و {unread} اعلان خوانده‌نشده نیازمند بررسی است."
+  "dashboard.blockedAlertsNeedReview": "{blocked} وظیفه مسدود و {unread} اعلان خوانده‌نشده نیازمند بررسی است.",
+  "common.total_items": "تعداد کل موارد"
 }

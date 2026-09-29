@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onyx.local/shared/i18n/schema/translation.schema.json",
+  "title": "ONYX canonical translation catalog",
+  "description": "Validates the flat, two-segment ONYX translation catalogs. New keys must use lowerCamelCase leaves. common.total_items is a single grandfathered Phase 1 syntax exception.",
+  "type": "object",
+  "minProperties": 1,
+  "propertyNames": {
+    "pattern": "^(?:(?:app|nav|auth|common|status|dashboard|missions|tasks|notifications|approvals|reports|files|settings|language)\\.[a-z][A-Za-z0-9]*|common\\.total_items)$",
+    "description": "Keys must be exactly two segments: a ratified namespace plus a lowerCamelCase leaf. common.total_items is the single grandfathered exception."
+  },
+  "properties": {
+    "common.total_items": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Grandfathered Phase 1 syntax exception for one unresolved call-site key."
+    }
+  },
+  "patternProperties": {
+    "^(app|nav|auth|common|status|dashboard|missions|tasks|notifications|approvals|reports|files|settings|language)\\.[a-z][A-Za-z0-9]*$": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

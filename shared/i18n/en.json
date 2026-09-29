@@ -147,5 +147,6 @@
   "dashboard.pendingApprovals": "Pending approvals",
   "dashboard.noBlockedAlerts": "No blocked tasks or unread operational alerts.",
   "dashboard.attentionRequired": "Attention required",
-  "dashboard.blockedAlertsNeedReview": "{blocked} blocked task(s) and {unread} unread notification(s) need review."
+  "dashboard.blockedAlertsNeedReview": "{blocked} blocked task(s) and {unread} unread notification(s) need review.",
+  "common.total_items": "Total items"
 }

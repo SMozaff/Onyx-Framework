@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import ConnectionSettings from "@/components/ConnectionSettings";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 import { getServerAddress } from "@/utils/serverAddress";
 
@@ -66,6 +67,9 @@ export default function Login() {
           <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">ADMINISTRATOR</p>
           <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">Sign in to ONYX</h1>
           <p className="mt-2 text-sm leading-5 text-onyx-text-dim">Use an administrator account for this organization.</p>
+          <div className="mt-4">
+            <LanguageSwitcher />
+          </div>
 
           <div className="mt-6">
             <label htmlFor="username" className="block text-xs font-bold text-onyx-text">Username</label>

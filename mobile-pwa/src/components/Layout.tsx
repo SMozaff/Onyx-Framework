@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
 import { OfflineBanner } from './OfflineBanner';
+import { LanguageSwitcher } from '../i18n/LanguageSwitcher';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -25,6 +26,7 @@ export function ObserverLayout() {
             <span className="text-xs text-slate-300">read-only</span>
           </div>
           <div className="flex items-center gap-3">
+            <LanguageSwitcher />
             <span className="text-sm text-slate-300">{user?.username}</span>
             <button
               type="button"

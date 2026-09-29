@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 
 const NAV_ITEMS = [
@@ -53,6 +54,7 @@ export default function MainLayout() {
             <p className="mt-0.5 text-[0.65rem] text-onyx-text-dim">Administrative control plane</p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
+            <LanguageSwitcher />
             <span className="onyx-state-chip bg-sky-50 text-onyx-accent">Admin session</span>
             <div className="hidden border-l border-onyx-border pl-3 text-right sm:block">
               <p className="text-xs font-semibold text-onyx-text">{user?.username}</p>

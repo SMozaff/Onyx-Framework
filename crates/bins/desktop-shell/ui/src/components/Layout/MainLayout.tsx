@@ -4,6 +4,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { SyncStatus } from "@/types/onyx";
 import { useSession } from "@/hooks/useSession";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { userFacingMessage } from "@/utils/userFacingError";
 import onyxLogoHorizontal from "@/assets/onyx-logo-horizontal.png";
 
@@ -197,6 +198,7 @@ export default function MainLayout({ children, onLogout }: { children: ReactNode
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
+            <LanguageSwitcher />
             <SyncIndicator status={syncStatus} />
             <div className="hidden border-l border-onyx-border pl-3 text-right sm:block">
               <p className="text-xs font-semibold text-onyx-text">{session.username}</p>

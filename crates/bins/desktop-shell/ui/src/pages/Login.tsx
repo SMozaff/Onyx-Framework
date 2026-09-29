@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate } from "react-router-dom";
 import { isShellError, type ShellError } from "@/types/onyx";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { userFacingMessage } from "@/utils/userFacingError";
 import type { SessionWire } from "@/hooks/useSession";
 import onyxLogo from "@/assets/onyx-logo.png";
@@ -132,6 +133,9 @@ export default function Login({
           <p className="mt-2 text-sm leading-5 text-onyx-text-dim">
             Use your organization credentials. Your session remains in secure native storage on this device.
           </p>
+          <div className="mt-4">
+            <LanguageSwitcher />
+          </div>
 
           <div className="mt-6">
             <label htmlFor="username" className="block text-xs font-bold text-onyx-text">

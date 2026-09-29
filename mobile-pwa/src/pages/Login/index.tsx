@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { LanguageSwitcher } from '../../i18n/LanguageSwitcher';
 import { normalizeError } from '../../utils/errorHandler';
 
 export function LoginPage() {
@@ -29,6 +30,9 @@ export function LoginPage() {
           A read-only view into your organization&apos;s missions. Your account must be granted
           observer access by an administrator.
         </p>
+        <div className="mb-4 flex justify-center">
+          <LanguageSwitcher />
+        </div>
         <form onSubmit={onSubmit} className="space-y-4">
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Username</span>
