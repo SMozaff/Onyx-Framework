@@ -23,7 +23,8 @@ interface Props {
  *   `ApprovalDialog`'s rejection reason.
  */
 export default function DecisionDialog({
-  const { t } = useI18n(); decision, busy, onCancel, onConfirm }: Props) {
+decision, busy, onCancel, onConfirm }: Props) {
+  const { t } = useI18n();
   const [outcome, setOutcome] = useState<VerificationOutcome>('Flawless');
   const [wantsComment, setWantsComment] = useState(false);
   const [comment, setComment] = useState('');
