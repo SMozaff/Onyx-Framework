@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/I18nContext';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ApprovalProjection } from '../../types/query';
 
@@ -19,7 +20,8 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>('button:not([disabled]), [href], textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'));
 }
 
-export default function ApprovalDialog({ approval, decision, busy, error, onCancel, onConfirm }: Props) {
+export default function ApprovalDialog({
+  const { t } = useI18n(); approval, decision, busy, error, onCancel, onConfirm }: Props) {
   const [reason, setReason] = useState('');
   const dialogRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -67,7 +69,7 @@ export default function ApprovalDialog({ approval, decision, busy, error, onCanc
         <textarea ref={textareaRef} id="decision-reason" value={reason} onChange={(event) => setReason(event.target.value)} rows={4} aria-required={policy.required} />
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="dialog-actions">
-          <button className="button-secondary" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="button-secondary" type="button" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
           <button className={decision === 'approve' ? 'button-primary' : 'button-danger'} type="button" onClick={() => onConfirm(reason.trim())} disabled={!canSubmit}>
             {busy ? 'Submitting…' : decision === 'approve' ? 'Confirm approval' : 'Confirm rejection'}
           </button>
