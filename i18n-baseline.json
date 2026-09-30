@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "policy": "Shrink-only baseline. Entries are line-independent fingerprints of pre-existing localization debt.",
+  "generatedFrom": "Phase 3 bootstrap",
+  "entries": []
+}
