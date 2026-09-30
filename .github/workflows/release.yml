@@ -21,6 +21,25 @@ permissions:
   artifact-metadata: write
   actions: read
 jobs:
+  # Localization is a release gate as well as a PR/CI gate.
+  i18n:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify canonical i18n resources
+        run: node scripts/sync-i18n.mjs --check
+      - name: Verify Phase 3 localization baseline
+        run: node scripts/verify/i18n-ci.mjs --report=artifacts/i18n-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-i18n-report-${{ github.sha }}
+          path: artifacts/i18n-report.json
+          if-no-files-found: warn
+
   # Windows-only: the real production server is a Windows 10 machine in
   # the office (see DECISIONS.md) -- there is no current deployment
   # target for Linux/macOS server binaries. Previously built all three
@@ -32,6 +51,7 @@ jobs:
   # runner builds every service's Linux container image, regardless of
   # native server-binary platform support).
   release-binaries:
+    needs: [i18n]
     strategy:
       matrix:
         include:
@@ -86,6 +106,7 @@ jobs:
   # own "targets": "all" already specifies every platform's native
   # bundle format; this job is what actually invokes the bundler.
   release-desktop:
+    needs: [i18n]
     strategy:
       fail-fast: false
       matrix:
@@ -246,6 +267,7 @@ jobs:
   # cache paths and future signing/release requirements remain independently
   # readable, while each continues to build the same three supported targets.
   release-admin-desktop:
+    needs: [i18n]
     strategy:
       fail-fast: false
       matrix:
@@ -373,6 +395,7 @@ jobs:
   # name an image after, and this project's manual-trigger use case is
   # "give me debug build artifacts," not "publish a release."
   release-images:
+    needs: [i18n]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     strategy:
