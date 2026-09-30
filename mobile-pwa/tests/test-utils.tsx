@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { render } from '@testing-library/react';
 import { useAuthStore } from '../src/stores/authStore';
+import { LocaleProvider } from '../src/i18n/I18nContext';
+import { dictionaries } from '../src/i18n/dictionaries.generated';
 
 export const TEST_USER = {
   id: '22222222-2222-2222-2222-222222222222',
@@ -30,9 +32,11 @@ export function createTestClient() {
 export function TestProviders({ children, path = '/' }: PropsWithChildren<{ path?: string }>) {
   const client = createTestClient();
   return (
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
-    </QueryClientProvider>
+    <LocaleProvider dictionaries={dictionaries}>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
+      </QueryClientProvider>
+    </LocaleProvider>
   );
 }
 
