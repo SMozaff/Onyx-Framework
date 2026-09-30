@@ -25,7 +25,8 @@ import type { StaffLoanProjection } from '../../types/query';
  * posture as `TodoTargets/ListDetail.tsx`'s D.4 note).
  */
 export default function LoanCard({
-  const { t } = useI18n(); loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null }) {
+loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null }) {
+  const { t } = useI18n();
   const decide = useDecideStaffLoan();
   const [extending, setExtending] = useState(false);
   const [newEndAt, setNewEndAt] = useState('');
