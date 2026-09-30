@@ -51,6 +51,7 @@ export function ProjectionStatePanel({
   state: Extract<ProjectionState, { kind: 'unavailable' | 'stale' }>;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
   const unavailable = state.kind === 'unavailable';
   const title = unavailable ? `${resource} unavailable` : `${resource} may be stale`;
   const message = unavailable
