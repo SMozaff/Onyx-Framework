@@ -159,6 +159,18 @@ jobs:
         run: node scripts/sync-i18n.mjs --check --audit-scope=web-ui/src/pages/Dashboard
       - name: Unit-test the canonical formatting and pluralization API
         run: node --test scripts/verify/verify-i18n-runtime.mjs
+      - name: Phase 3 baseline audit and JSON report
+        run: |
+          mkdir -p artifacts/i18n
+          node scripts/verify/i18n-ci.mjs --report=artifacts/i18n/report.json
+      - name: Upload Phase 3 i18n report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: onyx-i18n-phase3-report-${{ github.sha }}
+          path: artifacts/i18n/report.json
+          if-no-files-found: warn
+          retention-days: 30
 
   deploy-check:
     runs-on: ubuntu-latest
@@ -263,6 +275,35 @@ jobs:
             web-ui/test-results/
           if-no-files-found: warn
           retention-days: 14
+
+  # Phase 3: bring the observer PWA into CI before surface migration.
+  mobile-pwa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile-pwa/package-lock.json
+      - name: Install dependencies
+        working-directory: mobile-pwa
+        run: npm ci
+      - name: Lint
+        working-directory: mobile-pwa
+        run: npm run lint
+      - name: Type check
+        working-directory: mobile-pwa
+        run: npm run type-check
+      - name: Unit/component/accessibility tests
+        working-directory: mobile-pwa
+        run: npm test && npm run test:a11y
+      - name: Production build
+        working-directory: mobile-pwa
+        run: npm run build
+      - name: Browser tests
+        working-directory: mobile-pwa
+        run: npx playwright install --with-deps chromium && npm run test:browser
 
   native-ui-evidence:
     runs-on: ubuntu-latest
@@ -385,6 +426,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Verify Android locale resource parity
+        run: node scripts/verify/verify-android-i18n.mjs
       - name: Gradle assembleDebug
         working-directory: mobile-android
         run: ./gradlew assembleDebug --stacktrace
