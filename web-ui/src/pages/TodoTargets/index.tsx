@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/I18nContext';
 import { useMemo, useState } from 'react';
 import { useOnyxQuery } from '../../hooks/useQuery';
 import { useAuthStore } from '../../stores/authStore';
@@ -13,6 +14,7 @@ import ListDetail from './ListDetail';
  * escalation inbox.
  */
 export default function TodoTargetsPage() {
+  const { t } = useI18n();
   const [kind, setKind] = useState<'todo_list' | 'target_list'>('todo_list');
   const [view, setView] = useState<'all' | 'escalated'>('all');
   const user = useAuthStore((state) => state.user);
@@ -44,7 +46,7 @@ export default function TodoTargetsPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Staff workflow</p>
+          <p className="eyebrow">{t('tasks.staffWorkflow')}</p>
           <h1>Todos &amp; Targets</h1>
           <p>Task lists and time-bound targets, verified by the owner's manager.</p>
         </div>
@@ -73,7 +75,7 @@ export default function TodoTargetsPage() {
             Show
             <select value={view} onChange={(event) => selectView(event.target.value as 'all' | 'escalated')}>
               <option value="all">All {kind === 'todo_list' ? 'todo lists' : 'targets'}</option>
-              <option value="escalated">Escalated to you</option>
+              <option value="escalated">{t('approvals.escalatedToYou')}</option>
             </select>
           </label>
         </div>
