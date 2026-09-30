@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/I18nContext';
 import { useState } from 'react';
 import StatusBadge from '../../components/StatusBadge';
 import { useDecideStaffLoan } from '../../hooks/useCommand';
@@ -23,7 +24,8 @@ import type { StaffLoanProjection } from '../../types/query';
  * regardless of what buttons this component chooses to show (same
  * posture as `TodoTargets/ListDetail.tsx`'s D.4 note).
  */
-export default function LoanCard({ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null }) {
+export default function LoanCard({
+  const { t } = useI18n(); loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null }) {
   const decide = useDecideStaffLoan();
   const [extending, setExtending] = useState(false);
   const [newEndAt, setNewEndAt] = useState('');
@@ -84,9 +86,7 @@ export default function LoanCard({ loan, currentUserId }: { loan: StaffLoanProje
                   type="button"
                   disabled={decide.isPending}
                   onClick={() => decide.mutate({ loan, decision: 'approve' })}
-                >
-                  Approve
-                </button>
+                >{t('common.approve')}</button>
                 <button
                   className="button-danger"
                   type="button"
@@ -129,9 +129,7 @@ export default function LoanCard({ loan, currentUserId }: { loan: StaffLoanProje
               rows={2}
             />
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="button-secondary" type="button" onClick={() => setDeclineReason(null)}>
-                Cancel
-              </button>
+              <button className="button-secondary" type="button" onClick={() => setDeclineReason(null)}>{t('common.cancel')}</button>
               <button
                 className="button-danger"
                 type="button"
@@ -153,9 +151,7 @@ export default function LoanCard({ loan, currentUserId }: { loan: StaffLoanProje
               <input type="datetime-local" value={newEndAt} onChange={(e) => setNewEndAt(e.target.value)} />
             </label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="button-secondary" type="button" onClick={() => setExtending(false)}>
-                Cancel
-              </button>
+              <button className="button-secondary" type="button" onClick={() => setExtending(false)}>{t('common.cancel')}</button>
               <button className="button-primary" type="button" disabled={decide.isPending || !newEndAt} onClick={confirmExtend}>
                 Confirm extension
               </button>
