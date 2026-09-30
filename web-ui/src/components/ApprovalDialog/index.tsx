@@ -21,7 +21,8 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
 }
 
 export default function ApprovalDialog({
-  const { t } = useI18n(); approval, decision, busy, error, onCancel, onConfirm }: Props) {
+approval, decision, busy, error, onCancel, onConfirm }: Props) {
+  const { t } = useI18n();
   const [reason, setReason] = useState('');
   const dialogRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
