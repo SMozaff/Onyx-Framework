@@ -27,7 +27,11 @@ rm -f "$DB_FILE"
 
 if command -v npm >/dev/null; then
   (cd web-ui && if [[ -f package-lock.json ]]; then npm ci; else npm install; fi && npm run type-check && npm test && npm run test:a11y && npm run feature-audit && npm run build && npm run bundle-check)
+  (cd mobile-pwa && npm ci && npm run lint && npm run type-check && npm test && npm run test:a11y && npm run build)
 fi
+
+run node scripts/sync-i18n.mjs --check
+run node scripts/verify/i18n-ci.mjs --report=/tmp/onyx-i18n-report.json
 if command -v helm >/dev/null; then
   run helm lint deploy/helm/onyx-api
   run helm lint deploy/helm/onyx-worker
