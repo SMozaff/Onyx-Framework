@@ -426,6 +426,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Verify Android locale resource parity
+        run: node scripts/verify/verify-android-i18n.mjs
       - name: Gradle assembleDebug
         working-directory: mobile-android
         run: ./gradlew assembleDebug --stacktrace
