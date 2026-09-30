@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/I18nContext';
 import { useState } from 'react';
 import StatusBadge from '../../components/StatusBadge';
 import { useAuthStore } from '../../stores/authStore';
@@ -22,7 +23,9 @@ type ListItem = TodoListProjection | TargetListProjection;
  * to the current user; all remain gated server-side by D.4's
  * verifier-resolution).
  */
-export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
+export default function ListDetail({
+list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
+  const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
   const submit = useSubmitList(kind);
   const decide = useDecideList(kind);
@@ -76,7 +79,7 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
           <dd>{list.origin === 'ManagerAssigned' ? 'Manager-assigned' : 'Self-authored'}</dd>
         </div>
         <div>
-          <dt>Version</dt>
+          <dt>{t('common.version')}</dt>
           <dd>{list.version}</dd>
         </div>
       </dl>
@@ -104,9 +107,7 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
                 rows={3}
               />
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="button-secondary" type="button" onClick={() => setPreCheckOpen(false)}>
-                  Cancel
-                </button>
+                <button className="button-secondary" type="button" onClick={() => setPreCheckOpen(false)}>{t('common.cancel')}</button>
                 <button
                   className="button-primary"
                   type="button"
@@ -149,12 +150,8 @@ export default function ListDetail({ list, kind }: { list: ListItem; kind: 'todo
               <button type="button" className="button-primary" onClick={() => setDialog('verify')}>
                 Verify
               </button>
-              <button type="button" className="button-secondary" onClick={() => setDialog('escalate')}>
-                Escalate
-              </button>
-              <button type="button" className="button-danger" onClick={() => setDialog('reject')}>
-                Reject
-              </button>
+              <button type="button" className="button-secondary" onClick={() => setDialog('escalate')}>{t('common.escalate')}</button>
+              <button type="button" className="button-danger" onClick={() => setDialog('reject')}>{t('common.reject')}</button>
             </>
           ) : null}
           {!canSubmit && !canDecide ? <p className="muted">No actions available at this status.</p> : null}

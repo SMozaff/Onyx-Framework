@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/I18nContext';
 import { useMemo, useState } from 'react';
 import { useOnyxQuery } from '../../hooks/useQuery';
 import { useAuthStore } from '../../stores/authStore';
@@ -22,6 +23,7 @@ import LoanCard from './LoanCard';
  * §2.1's advance-warning/expiry job), never a user action.
  */
 export default function StaffLoansPage() {
+  const { t } = useI18n();
   const query = useOnyxQuery<StaffLoanProjection>('staff_loan.list');
   const user = useAuthStore((state) => state.user);
   const [filter, setFilter] = useState<'all' | 'mine' | 'escalated'>('all');
@@ -40,8 +42,8 @@ export default function StaffLoansPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Staff workflow</p>
-          <h1>Staff Loans</h1>
+          <p className="eyebrow">{t('tasks.staffWorkflow')}</p>
+          <h1>{t('nav.staffLoans')}</h1>
           <p>Temporary reassignment of a staff member's working authority to another manager.</p>
         </div>
         <label className="filter-label">
@@ -49,7 +51,7 @@ export default function StaffLoansPage() {
           <select value={filter} onChange={(e) => setFilter(e.target.value as 'all' | 'mine' | 'escalated')}>
             <option value="all">All loans</option>
             <option value="mine">Involving me</option>
-            <option value="escalated">Escalated to you</option>
+            <option value="escalated">{t('approvals.escalatedToYou')}</option>
           </select>
         </label>
       </header>

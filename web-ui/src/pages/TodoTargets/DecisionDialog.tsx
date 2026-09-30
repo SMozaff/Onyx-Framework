@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/I18nContext';
 import { useState } from 'react';
 import type { VerificationOutcome } from '../../types/query';
 
@@ -21,7 +22,9 @@ interface Props {
  * - `reject`/`escalate`: a required reason, same shape as
  *   `ApprovalDialog`'s rejection reason.
  */
-export default function DecisionDialog({ decision, busy, onCancel, onConfirm }: Props) {
+export default function DecisionDialog({
+decision, busy, onCancel, onConfirm }: Props) {
+  const { t } = useI18n();
   const [outcome, setOutcome] = useState<VerificationOutcome>('Flawless');
   const [wantsComment, setWantsComment] = useState(false);
   const [comment, setComment] = useState('');
@@ -85,15 +88,13 @@ export default function DecisionDialog({ decision, busy, onCancel, onConfirm }: 
           </>
         ) : (
           <>
-            <label htmlFor="decision-reason">Reason (required)</label>
+            <label htmlFor="decision-reason">{t('missions.reasonRequired')}</label>
             <textarea id="decision-reason" value={reason} onChange={(event) => setReason(event.target.value)} rows={4} autoFocus />
           </>
         )}
 
         <div className="dialog-actions">
-          <button className="button-secondary" type="button" onClick={onCancel} disabled={busy}>
-            Cancel
-          </button>
+          <button className="button-secondary" type="button" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
           <button
             className={decision === 'reject' ? 'button-danger' : 'button-primary'}
             type="button"
