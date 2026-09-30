@@ -24,7 +24,8 @@ type ListItem = TodoListProjection | TargetListProjection;
  * verifier-resolution).
  */
 export default function ListDetail({
-  const { t } = useI18n(); list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
+list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
+  const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
   const submit = useSubmitList(kind);
   const decide = useDecideList(kind);
