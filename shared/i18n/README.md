@@ -14,7 +14,8 @@ shared/i18n/
 ├── en.json
 ├── fa.json
 ├── metadata/
-│   └── locales.json
+│   ├── locales.json
+│   └── terminology.json
 ├── react/
 │   ├── I18nContext.tsx
 │   ├── LanguageSwitcher.tsx
@@ -26,7 +27,8 @@ shared/i18n/
 └── README.md
 ```
 
-Only English (`en`) and Persian (`fa`) are supported in Phase 1.
+Only English (`en`) and Persian (`fa`) are supported. No additional language
+may be added without a decision record.
 
 ## Catalogs
 
@@ -35,10 +37,38 @@ shared/i18n/en.json
 shared/i18n/fa.json
 ```
 
-Both catalogs must contain the same keys. Key parity is CI-enforced.
+`en.json` is the canonical source language. Both catalogs must contain the same
+keys; parity is CI-enforced. Values must be non-empty strings. Catalogs must
+remain flat objects; nested translation objects are prohibited.
 
-Values must be non-empty strings. Catalogs must remain flat objects; nested
-translation objects are prohibited.
+### Deterministic ordering
+
+Keys are stored in canonical order and CI rejects any other order:
+
+1. namespaces in the ratified order
+
+   ```text
+   app, nav, auth, common, status, dashboard, missions, tasks,
+   notifications, approvals, reports, files, settings, language
+   ```
+
+2. leaves lexicographically (code-point) within their namespace.
+
+Ordering is compared with a locale-independent comparator so it does not drift
+with the runner's ICU build. To normalize ordering:
+
+```bash
+node scripts/sync-i18n.mjs --sort-catalogs
+```
+
+This rewrites the catalogs in canonical order and never modifies a value.
+
+### Quantity strings
+
+Strings that express a quantity must not encode a singular/plural decision.
+`task(s)`, `notification(s)`, and `{count}s` are rejected. Use an invariant noun
+phrase and select the form at render time with the Phase 1 pluralization API
+(`pluralCategory` / `selectPluralForm`).
 
 ## Key convention
 
@@ -218,6 +248,11 @@ commands are for authoring and regeneration, not for claiming that CI passes.
 - translation-schema conformance for both catalogs;
 - exact EN/FA key parity;
 - interpolation-placeholder parity for every shared key;
+- interpolation brace syntax and identifier shape in each locale;
+- canonical key ordering in both catalogs;
+- absence of unknown namespaces;
+- pluralization-compatible quantity strings;
+- agreement between `metadata/terminology.json` and both catalogs;
 - absence of unresolved static translation keys at application call sites;
 - byte-identical generated dictionaries and runtime copies.
 
@@ -236,6 +271,10 @@ literals containing interpolations, translation calls in tests and fixtures,
 and generated runtime copies are intentionally outside that static scan.
 Runtime rendering must therefore return an empty string—not a raw key—if a
 key is nevertheless absent.
+
+Keys referenced indirectly — for example from a `const` lookup table passed to
+`t(label)` — are not resolved by this scan. Keep such tables in sync manually
+and prefer passing the key literal to `t()` where practical.
 
 Missing translations resolve as:
 
@@ -274,10 +313,38 @@ Must never be localized:
 - frozen error `code`, `category`, `retryability`, and correlation fields;
 - cryptographic hashes, UUIDs, numeric protocol values, and locale-sensitive
   formatting of non-display data;
-- logs and diagnostics unless explicitly intended for end users.
+- logs and diagnostics unless explicitly intended for end users;
+- query keys and cache keys, including `dashboard.summary`, `mission.list`,
+  `approval.list`, and `notification.list`.
 
-All Phase 1 surfaces remain `unmanaged` because Phase 1 builds the foundation
-without migrating application screens.
+### Machine identifiers that look like translation keys
+
+Some machine-facing identifiers use the same `namespace.leaf` shape as a
+translation key — `dashboard.summary` is a query key, not a string to display.
+These are listed in `shared/i18n/metadata/terminology.json` under
+`reservedMachineIdentifiers`.
+
+Consequence for tooling: unresolved-key detection is scoped to translation call
+arguments on purpose. A scan that flagged every key-shaped string literal would
+report these machine identifiers as missing translations. Never add a machine
+identifier to a catalog, and never pass one to `t()`.
+
+## Terminology
+
+```text
+shared/i18n/metadata/terminology.json
+```
+
+A deliberately small model recording one preferred term per core product concept
+(mission, task, approval, notification, alert, report, file, organization,
+status, and others). It is not a translation-management system.
+
+CI verifies that each declared term actually appears in the catalog it claims to
+describe, so the model cannot drift away from the catalogs. Use it when adding a
+new key: reuse the existing term for an existing concept rather than inventing
+a new word, and add a concept only when a genuinely new domain noun appears.
+
+## Boundaries
 
 ## CI
 
@@ -289,8 +356,10 @@ Localization is enforced by the standalone `i18n` job in:
 
 The job has no dependency on frontend linting, type-checking, tests, builds,
 or unrelated jobs. It verifies canonical catalogs, schema validity, EN/FA
-parity, interpolation parity, deterministic generation, unresolved literal
-translation keys, the existing enforced literal audit, and the formatting and
+parity, interpolation parity and brace syntax, canonical ordering, unknown
+namespaces, pluralization structure, terminology agreement, deterministic
+generation, unresolved literal translation keys, the existing enforced literal
+audit, and the formatting and
 pluralization unit tests.
 
 The `web` job retains its own redundant localization step for frontend

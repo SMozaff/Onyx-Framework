@@ -5,7 +5,7 @@ const stats = [
   ['dashboard.activeMissions', 'active_missions'],
   ['dashboard.openTasks', 'tasks'],
   ['dashboard.blockedTasks', 'blocked_tasks'],
-  ['dashboard.unreadAlerts', 'unread_notifications'],
+  ['dashboard.unreadNotifications', 'unread_notifications'],
   ['dashboard.pendingApprovals', 'pending_approvals'],
 ] as const;
 
