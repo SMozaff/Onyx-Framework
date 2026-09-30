@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/I18nContext';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { QueryResponse } from '../../types/query';
 import { normalizeError, type UserFacingError } from '../../utils/errorHandler';
@@ -63,7 +64,7 @@ export function ProjectionStatePanel({
         <p>{message}</p>
         {!unavailable && <small>Last updated {formatTimestamp(state.lastUpdatedAt)}</small>}
       </div>
-      {state.error?.retryable !== false && <button type="button" className="button-secondary" onClick={state.retry}>Retry</button>}
+      {state.error?.retryable !== false && <button type="button" className="button-secondary" onClick={state.retry}>{t('common.retry')}</button>}
     </section>
   );
 }
