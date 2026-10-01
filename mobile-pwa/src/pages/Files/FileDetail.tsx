@@ -4,8 +4,10 @@ import { observerApi } from '../../api/onyx';
 import { isContentHash } from '../../utils/validation';
 import { normalizeError } from '../../utils/errorHandler';
 import type { FileDownload } from '../../types/api';
+import { useI18n } from '../../i18n/I18nContext';
 
 export function FileDetailPage() {
+  const { t } = useI18n();
   const { contentHash = '' } = useParams<{ contentHash: string }>();
   const [result, setResult] = useState<FileDownload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export function FileDetailPage() {
   return (
     <div className="space-y-6">
       <Link className="text-sm text-slate-500 underline underline-offset-4" to="/reports">
-        ← Reports
+        ← {t("nav.reports")}
       </Link>
 
       <header>
