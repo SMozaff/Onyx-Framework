@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import { Navigate, Route, Routes } from "react-router-dom";
 import MainLayout from "@/components/Layout/MainLayout";
 import { useAuthStore } from "@/stores/authStore";
@@ -30,12 +31,13 @@ function ProtectedLayout() {
 }
 
 function AdminOnlyLayout() {
+  const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
   if (!user?.is_admin) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4">
         <div className="max-w-md rounded-lg border border-onyx-border bg-onyx-surface p-6 text-center">
-          <h1 className="text-lg font-semibold text-onyx-text">Admin access required</h1>
+          <h1 className="text-lg font-semibold text-onyx-text">{t("auth.adminAccessRequired")}</h1>
           <p className="mt-2 text-sm text-onyx-text-dim">
             Your account ({user?.username}) does not have administrator access. Contact your
             organization's Admin if you believe this is incorrect.

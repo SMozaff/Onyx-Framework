@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import { apiClient } from "@/api/client";
 import { describeError } from "@/utils/errorHandler";
 
@@ -32,6 +33,7 @@ interface UserRow {
 }
 
 export default function Users() {
+  const { t } = useI18n();
   const [users, setUsers] = useState<UserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,26 +53,26 @@ export default function Users() {
 
   return (
     <div className="max-w-6xl">
-      <p className="text-[0.66rem] font-extrabold tracking-[0.15em] text-onyx-accent">IDENTITY MANAGEMENT</p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-onyx-text">Users</h1>
-      <p className="mt-1 text-sm text-onyx-text-dim">Create, classify, and maintain organization access with explicit account state.</p>
+      <p className="text-[0.66rem] font-extrabold tracking-[0.15em] text-onyx-accent">{t("common.identityManagement")}</p>
+      <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-onyx-text">{t("nav.users")}</h1>
+      <p className="mt-1 text-sm text-onyx-text-dim">{t("common.userAccessDescription")}</p>
 
       <CreateUserForm onCreated={() => void refresh()} />
 
       {error && <p className="mt-4 text-sm text-onyx-status-blocked">{error}</p>}
-      {users === null && !error && <p className="mt-4 text-sm text-onyx-text-dim">Loading…</p>}
+      {users === null && !error && <p className="mt-4 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
 
       {users && (
         <div className="mt-6 overflow-x-auto rounded-xl border border-onyx-border bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-onyx-border bg-slate-50 text-onyx-text-dim">
               <tr>
-                <th className="px-3 py-2 font-medium">Username</th>
-                <th className="px-3 py-2 font-medium">Admin</th>
-                <th className="px-3 py-2 font-medium">Class</th>
-                <th className="px-3 py-2 font-medium">Parent</th>
-                <th className="px-3 py-2 font-medium">Active</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
+                <th className="px-3 py-2 font-medium">{t("auth.username")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.admin")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.class")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.parent")}</th>
+                <th className="px-3 py-2 font-medium">{t("status.active")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -86,6 +88,7 @@ export default function Users() {
 }
 
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
@@ -119,10 +122,10 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
     <section className="mt-6 rounded-xl border border-onyx-border bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold text-onyx-text">Create user</h2>
-          <p className="mt-1 text-xs text-onyx-text-dim">New accounts receive only the classification and administrator access selected here.</p>
+          <h2 className="text-base font-semibold text-onyx-text">{t("common.createUser")}</h2>
+          <p className="mt-1 text-xs text-onyx-text-dim">{t("common.newAccountDescription")}</p>
         </div>
-        <span className="onyx-state-chip bg-sky-50 text-onyx-accent">New account</span>
+        <span className="onyx-state-chip bg-sky-50 text-onyx-accent">{t("common.newAccount")}</span>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <label className="block text-xs font-bold text-onyx-text">
@@ -130,7 +133,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="Username"
+            placeholder={t("auth.username")}
             className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none"
           />
         </label>
@@ -140,7 +143,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             type="password"
-            placeholder="Password"
+            placeholder={t("auth.password")}
             className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none"
           />
         </label>
@@ -151,7 +154,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             onChange={(e) => setUserClass(e.target.value)}
             className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
           >
-            <option value="">No class</option>
+            <option value="">{t("common.noClass")}</option>
             {USER_CLASSES.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -171,7 +174,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         disabled={loading || !username || !password}
         className="mt-5 rounded-lg bg-onyx-accent px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#174d7b] disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {loading ? "Creating…" : "Create user"}
+        {loading ? t("common.creating") : t("common.createUser")}
       </button>
     </section>
   );
@@ -186,6 +189,7 @@ function UserRowView({
   allUsers: UserRow[];
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -234,7 +238,7 @@ function UserRowView({
   return (
     <tr className="border-b border-onyx-border last:border-0">
       <td className="px-3 py-2 text-onyx-text">{user.username}</td>
-      <td className="px-3 py-2 text-onyx-text-dim">{user.is_admin ? "Yes" : "—"}</td>
+      <td className="px-3 py-2 text-onyx-text-dim">{user.is_admin ? t("common.yes") : "—"}</td>
       <td className="px-3 py-2">
         <select
           value={user.class ?? ""}
@@ -242,7 +246,7 @@ function UserRowView({
           disabled={busy}
           className="rounded-md border border-onyx-border bg-onyx-bg px-2 py-1 text-xs text-onyx-text"
         >
-          <option value="">Unclassified</option>
+          <option value="">{t("common.unclassified")}</option>
           {USER_CLASSES.map((c) => (
             <option key={c} value={c}>
               {c}
@@ -257,7 +261,7 @@ function UserRowView({
           disabled={busy}
           className="rounded-md border border-onyx-border bg-onyx-bg px-2 py-1 text-xs text-onyx-text"
         >
-          <option value="">No parent</option>
+          <option value="">{t("common.noParent")}</option>
           {allUsers
             .filter((u) => u.id !== user.id)
             .map((u) => (
@@ -267,7 +271,7 @@ function UserRowView({
             ))}
         </select>
       </td>
-      <td className="px-3 py-2 text-onyx-text-dim">{user.is_active ? "Active" : "Inactive"}</td>
+      <td className="px-3 py-2 text-onyx-text-dim">{user.is_active ? t("status.active") : t("common.inactive")}</td>
       <td className="px-3 py-2">
         <button
           type="button"
@@ -275,7 +279,7 @@ function UserRowView({
           disabled={busy}
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
-          {user.is_active ? "Deactivate" : "Activate"}
+          {user.is_active ? t("common.deactivate") : t("common.activate")}
         </button>
         {error && <p className="mt-1 text-xs text-onyx-status-blocked">{error}</p>}
       </td>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
@@ -13,6 +14,7 @@ import { getServerAddress } from "@/utils/serverAddress";
  * address, so a wrong server cannot masquerade as invalid credentials.
  */
 export default function Login() {
+  const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export default function Login() {
         setError(`Could not reach the server at ${getServerAddress()}. Check the connection setup below, or confirm the server is running and reachable.`);
         setShowServerSettings(true);
       } else {
-        setError("Invalid username or password.");
+        setError(t("auth.adminInvalidCredentials"));
       }
     } finally {
       setLoading(false);
@@ -46,12 +48,12 @@ export default function Login() {
         <div className="relative z-10 flex items-center gap-2.5">
           <span className="onyx-brand-mark" aria-hidden="true">O</span>
           <div>
-            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">ONYX</p>
-            <p className="mt-0.5 text-[0.62rem] text-sky-100/70">Administration</p>
+            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">{t("app.name")}</p>
+            <p className="mt-0.5 text-[0.62rem] text-sky-100/70">{t("common.administration")}</p>
           </div>
         </div>
         <div className="onyx-auth-copy">
-          <p className="text-[0.72rem] font-extrabold tracking-[0.19em] text-sky-100/90">SECURE ADMIN ACCESS</p>
+          <p className="text-[0.72rem] font-extrabold tracking-[0.19em] text-sky-100/90">{t("auth.adminSecureAccess")}</p>
           <h2 id="admin-signin-context" className="mt-4 max-w-md text-4xl font-light leading-[1.03] tracking-[-0.045em] text-white sm:text-5xl">
             Govern operations with calm, visible control.
           </h2>
@@ -59,20 +61,20 @@ export default function Login() {
             Manage organization policy, access, and staff profiles from a dedicated administrative workspace.
           </p>
         </div>
-        <p className="relative z-10 text-[0.68rem] text-sky-100/75">Organization-scoped administration · Explicit server verification</p>
+        <p className="relative z-10 text-[0.68rem] text-sky-100/75">{t("auth.adminOrganizationAdministration")}</p>
       </section>
 
       <section className="flex flex-1 items-center justify-center px-5 py-10 sm:px-10 lg:px-16">
         <form onSubmit={submit} className="onyx-auth-card p-6 sm:p-7">
-          <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">ADMINISTRATOR</p>
-          <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">Sign in to ONYX</h1>
-          <p className="mt-2 text-sm leading-5 text-onyx-text-dim">Use an administrator account for this organization.</p>
+          <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">{t("auth.adminTitle")}</p>
+          <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">{t("auth.adminSignIn")}</h1>
+          <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.adminAccountForOrganization")}</p>
           <div className="mt-4">
             <LanguageSwitcher />
           </div>
 
           <div className="mt-6">
-            <label htmlFor="username" className="block text-xs font-bold text-onyx-text">Username</label>
+            <label htmlFor="username" className="block text-xs font-bold text-onyx-text">{t("auth.username")}</label>
             <input
               id="username"
               value={username}
@@ -83,7 +85,7 @@ export default function Login() {
             />
           </div>
           <div className="mt-4">
-            <label htmlFor="password" className="block text-xs font-bold text-onyx-text">Password</label>
+            <label htmlFor="password" className="block text-xs font-bold text-onyx-text">{t("auth.password")}</label>
             <input
               id="password"
               type="password"
@@ -100,8 +102,8 @@ export default function Login() {
           </button>
 
           <div className="mt-5 rounded-lg border border-sky-100 bg-sky-50/75 p-3">
-            <p className="text-xs font-bold text-onyx-text">Connection security</p>
-            <p className="mt-1 text-[0.68rem] leading-4 text-onyx-text-dim">A server address is only stored after its health endpoint responds successfully.</p>
+            <p className="text-xs font-bold text-onyx-text">{t("auth.adminConnectionSecurity")}</p>
+            <p className="mt-1 text-[0.68rem] leading-4 text-onyx-text-dim">{t("auth.serverAddressStoredAfterHealth")}</p>
           </div>
 
           <button

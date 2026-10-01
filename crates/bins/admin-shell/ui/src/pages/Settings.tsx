@@ -31,7 +31,11 @@ import {
  * `/api/command` cannot express. Every other Policy/LegalHold action
  * goes through `/api/command` via `useCommand`.
  */
+const POLICY_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
+const SERVER_ADDRESS_PLACEHOLDER = "http://192.168.0.250:3000";
+
 export default function Settings() {
+  const { t } = useI18n();
   const { policyId } = useParams<{ policyId?: string }>();
   const navigate = useNavigate();
 
@@ -45,7 +49,7 @@ export default function Settings() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Policy &amp; Settings</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("common.policySettings")}</h1>
       <p className="mt-1 text-sm text-onyx-text-dim">
         Organization policy: feature availability, limits, retention, and legal holds.
       </p>
@@ -57,10 +61,10 @@ export default function Settings() {
 
       {targetId && (
         <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-          {loading && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loading && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {error && <p className="text-sm text-onyx-status-blocked">{error.message}</p>}
           {!loading && !error && !policyRow && (
-            <p className="text-sm text-onyx-text-dim">No policy found for this id.</p>
+            <p className="text-sm text-onyx-text-dim">{t("common.noPolicyFound")}</p>
           )}
           {policyRow && (
             <PolicyPanel targetId={targetId} policy={policyRow} onChanged={() => void refetch()} />
@@ -94,6 +98,7 @@ const USER_CLASSES: { value: string; label: string }[] = [
  * aggregate.
  */
 function MobileAccessPanel() {
+  const { t } = useI18n();
   const [allowed, setAllowed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -139,13 +144,13 @@ function MobileAccessPanel() {
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-semibold text-onyx-text">Mobile access</h2>
+      <h2 className="text-sm font-semibold text-onyx-text">{t("common.mobileAccess")}</h2>
       <p className="mt-1 text-sm text-onyx-text-dim">
         Only the user classes checked below may sign in from the mobile app. A class with no
         checkmark is denied mobile login entirely, until enabled here — Administrators always
         retain mobile access regardless of this list.
       </p>
-      {loading && <p className="mt-3 text-sm text-onyx-text-dim">Loading…</p>}
+      {loading && <p className="mt-3 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
       {error && <p className="mt-3 text-sm text-onyx-status-blocked">{error}</p>}
       {!loading && (
         <div className="mt-3 flex flex-col gap-2">
@@ -162,7 +167,7 @@ function MobileAccessPanel() {
           ))}
         </div>
       )}
-      {savedAt && !saving && <p className="mt-2 text-xs text-onyx-text-dim">Saved.</p>}
+      {savedAt && !saving && <p className="mt-2 text-xs text-onyx-text-dim">{t("common.saved")}</p>}
     </div>
   );
 }
@@ -178,6 +183,7 @@ function MobileAccessPanel() {
  * immediately, with no restart required.
  */
 function ServerConnectionSettings() {
+  const { t } = useI18n();
   const [value, setValue] = useState(() => getServerAddress());
   const [status, setStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -196,7 +202,7 @@ function ServerConnectionSettings() {
   async function handleSave() {
     if (!isPlausibleServerAddress(value)) {
       setStatus("error");
-      setMessage("Enter a full address including http:// or https://, e.g. http://192.168.0.250:3000");
+      setMessage(t("settings.invalidServerAddress"));
       return;
     }
     if (!isSecureEnoughForProduction(value)) {
@@ -220,12 +226,12 @@ function ServerConnectionSettings() {
     }
     setServerAddress(value);
     setStatus("ok");
-    setMessage("Saved. This app will now use this address for all requests.");
+    setMessage(t("settings.savedAddress"));
   }
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-semibold text-onyx-text">Server connection</h2>
+      <h2 className="text-sm font-semibold text-onyx-text">{t("settings.serverConnection")}</h2>
       <p className="mt-1 text-xs text-onyx-text-dim">
         The address of the ONYX backend this app talks to. Change this if you're running
         the Admin app on a different computer than the server — e.g. a LAN address like{" "}
@@ -240,7 +246,7 @@ function ServerConnectionSettings() {
             setValue(e.target.value);
             setStatus("idle");
           }}
-          placeholder="http://192.168.0.250:3000"
+          placeholder={SERVER_ADDRESS_PLACEHOLDER}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -249,7 +255,7 @@ function ServerConnectionSettings() {
           disabled={status === "testing"}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
-          {status === "testing" ? "Testing…" : "Test & Save"}
+          {status === "testing" ? t("auth.testing") : t("settings.testAndSave")}
         </button>
       </div>
 
@@ -277,7 +283,7 @@ function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
         <input
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="00000000-0000-0000-0000-000000000000"
+          placeholder={POLICY_ID_PLACEHOLDER}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -293,6 +299,7 @@ function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
 }
 
 function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -316,12 +323,12 @@ function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Create policy</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("common.createPolicy")}</h2>
       <div className="mt-2 flex gap-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Policy name, e.g. Default Org Governance"
+          placeholder={t("common.policyNameExample")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -392,12 +399,13 @@ function VersionHistory({
 }: {
   versions: { version_number?: number; status?: string; rules?: DraftRule[] }[];
 }) {
+  const { t } = useI18n();
   if (versions.length === 0) {
-    return <p className="mt-3 text-xs text-onyx-text-dim">No versions yet.</p>;
+    return <p className="mt-3 text-xs text-onyx-text-dim">{t("common.noVersionsYet")}</p>;
   }
   return (
     <div className="mt-3">
-      <h3 className="text-xs font-medium text-onyx-text-dim">Versions</h3>
+      <h3 className="text-xs font-medium text-onyx-text-dim">{t("files.versions")}</h3>
       <ul className="mt-1 space-y-2">
         {versions.map((v) => (
           <li key={v.version_number} className="rounded-md border border-onyx-border p-2 text-xs">
@@ -468,7 +476,7 @@ function DraftVersionForm({
 
   return (
     <div className="mt-4 rounded-md border border-onyx-border bg-onyx-bg p-3">
-      <h3 className="text-xs font-medium text-onyx-text-dim">Draft a new version</h3>
+      <h3 className="text-xs font-medium text-onyx-text-dim">{t("common.draftNewVersion")}</h3>
       {rules.map((rule, i) => (
         <div key={i} className="mt-2 flex flex-wrap items-center gap-2">
           <select
@@ -486,13 +494,13 @@ function DraftVersionForm({
             list="suggested-keys"
             value={rule.key}
             onChange={(e) => updateRule(i, { key: e.target.value })}
-            placeholder="key, e.g. messaging.enabled"
+            placeholder={t("common.keyExample")}
             className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-2 py-1 text-xs text-onyx-text"
           />
           <input
             value={rule.value}
             onChange={(e) => updateRule(i, { value: e.target.value })}
-            placeholder="value"
+            placeholder={t("common.inputValue")}
             className="w-28 rounded-md border border-onyx-border bg-onyx-surface px-2 py-1 text-xs text-onyx-text"
           />
         </div>
@@ -533,6 +541,7 @@ function PolicyActions({
   version: number;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const publishCmd = useCommand();
   const retireCmd = useCommand();
   const evaluateCmd = useCommand();
@@ -578,7 +587,7 @@ function PolicyActions({
         <input
           value={evaluateKey}
           onChange={(e) => setEvaluateKey(e.target.value)}
-          placeholder="rule key to evaluate"
+          placeholder={t("common.ruleKeyToEvaluate")}
           className="rounded-md border border-onyx-border bg-onyx-bg px-2 py-1 text-xs text-onyx-text"
         />
         <button
@@ -609,6 +618,7 @@ function PolicyActions({
 }
 
 function LegalHoldPanel() {
+  const { t } = useI18n();
   const [holdIdRaw, setHoldIdRaw] = useState("");
   const targetId = holdIdRaw || null;
   const { data, refetch } = useQuery<Record<string, unknown>>(
@@ -648,24 +658,24 @@ function LegalHoldPanel() {
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Legal holds</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("common.legalHolds")}</h2>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <input
           value={targetIdInput}
           onChange={(e) => setTargetIdInput(e.target.value)}
-          placeholder="Target id (UUID)"
+          placeholder={t("common.targetIdUuid")}
           className="rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <input
           value={targetTypeInput}
           onChange={(e) => setTargetTypeInput(e.target.value)}
-          placeholder="Target type, e.g. file_asset"
+          placeholder={t("common.targetTypeExample")}
           className="rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <input
           value={reasonInput}
           onChange={(e) => setReasonInput(e.target.value)}
-          placeholder="Reason"
+          placeholder={t("common.reason")}
           className="col-span-2 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
       </div>
@@ -680,11 +690,11 @@ function LegalHoldPanel() {
       </button>
 
       <div className="mt-4">
-        <label className="block text-xs font-medium text-onyx-text-dim">View a hold by id</label>
+        <label className="block text-xs font-medium text-onyx-text-dim">{t("common.viewHoldById")}</label>
         <input
           value={holdIdRaw}
           onChange={(e) => setHoldIdRaw(e.target.value)}
-          placeholder="Legal hold id (UUID)"
+          placeholder={t("common.userIdUuid")}
           className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
       </div>
