@@ -57,7 +57,6 @@ function AdminOnlyLayout() {
 }
 
 export default function App() {
-  const { t } = useI18n();
   return (
     <Suspense
       fallback={
