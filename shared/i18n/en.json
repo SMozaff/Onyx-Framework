@@ -41,6 +41,7 @@
   "auth.username": "Username",
   "common.account": "Account",
   "common.activate": "Activate",
+  "common.addRule": "Add rule",
   "common.approve": "Approve",
   "common.cancel": "Cancel",
   "common.close": "Close",
