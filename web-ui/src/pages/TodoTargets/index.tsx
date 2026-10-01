@@ -48,7 +48,7 @@ export default function TodoTargetsPage() {
         <div>
           <p className="eyebrow">{t('tasks.staffWorkflow')}</p>
           <h1>{t('common.todosAndTargets')}</h1>
-          <p>Task lists and time-bound targets, verified by the owner's manager.</p>
+          <p>{t('common.todoTargetsDescription')}</p>
         </div>
         <div style={{ display: 'grid', gap: 10, justifyItems: 'end' }}>
           <div style={{ display: 'flex', gap: 10 }} role="tablist" aria-label={t('common.listKind')}>
