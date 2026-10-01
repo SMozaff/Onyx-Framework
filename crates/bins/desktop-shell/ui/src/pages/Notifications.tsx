@@ -4,6 +4,7 @@ import { useCallback, useEffect } from "react";
 import { useCommand } from "@/hooks/useCommand";
 import { useQuery } from "@/hooks/useQuery";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 import type { Id16, LoadedAggregate } from "@/types/onyx";
 
 interface DesktopNotification {
@@ -54,6 +55,7 @@ function priorityClass(priority: string): string {
  * layer is introduced here.
  */
 export default function Notifications() {
+  const { t } = useI18n();
   const session = useSession();
   const { data, loading, error, refetch } = useQuery<NotificationInbox>(
     "ListNotifications",
@@ -123,9 +125,9 @@ export default function Notifications() {
     <div className="max-w-4xl">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-onyx-text">Notifications</h1>
+          <h1 className="text-xl font-semibold text-onyx-text">{t("notifications.title")}</h1>
           <p className="mt-1 text-sm text-onyx-text-dim">
-            Notifications addressed to you in this device&apos;s local ONYX replica.
+            {t("notifications.desktopLocalReplicaNote")}
           </p>
         </div>
         <button
@@ -138,12 +140,12 @@ export default function Notifications() {
       </div>
 
       <div className="mt-6 space-y-3">
-        {loading && <p className="text-sm text-onyx-text-dim">Loading notifications…</p>}
+        {loading && <p className="text-sm text-onyx-text-dim">{t("notifications.loadingDesktop")}</p>}
         {error && <p className="text-sm text-onyx-status-blocked">{error.message}</p>}
         {commandError && <p className="text-sm text-onyx-status-blocked">{commandError.message}</p>}
         {!loading && !error && notifications.length === 0 && (
           <p className="rounded-lg border border-dashed border-onyx-border p-5 text-sm text-onyx-text-dim">
-            You have no notifications in this local replica.
+            {t("notifications.noLocalNotifications")}
           </p>
         )}
 
@@ -171,7 +173,7 @@ export default function Notifications() {
                   {notification.source_type} · {new Date(notification.created_at).toLocaleString()}
                 </span>
                 {acknowledged ? (
-                  <span className="text-onyx-status-approved">Acknowledged</span>
+                  <span className="text-onyx-status-approved">{t("status.acknowledged")}</span>
                 ) : (
                   <button
                     type="button"
@@ -179,7 +181,7 @@ export default function Notifications() {
                     onClick={() => void acknowledge(notification)}
                     className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {acknowledging ? "Acknowledging…" : "Acknowledge"}
+                    {acknowledging ? t("notifications.acknowledging") : t("notifications.acknowledge")}
                   </button>
                 )}
               </div>
