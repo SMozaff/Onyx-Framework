@@ -1,5 +1,6 @@
 import { render } from '@testing-library/react';
 import { axe } from 'vitest-axe';
+import { renderWithProviders } from '../test-utils';
 import { describe, expect, it } from 'vitest';
 import StatusBadge from '../../src/components/StatusBadge';
 import ApprovalDialog from '../../src/components/ApprovalDialog';
@@ -28,7 +29,7 @@ describe('accessibility', () => {
       lifecycle_epoch: 0,
       authority_epoch: 0,
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ApprovalDialog
         approval={approval}
         decision="approve"
