@@ -31,6 +31,7 @@ import {
  * goes through `/api/command` via `useCommand`.
  */
 export default function Settings() {
+  const { t } = useI18n();
   const { policyId } = useParams<{ policyId?: string }>();
   const navigate = useNavigate();
 
@@ -506,7 +507,7 @@ function DraftVersionForm({
           onClick={addRule}
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover"
         >
-          + Add rule
+          + {t("common.addRule")}
         </button>
         <button
           type="button"
