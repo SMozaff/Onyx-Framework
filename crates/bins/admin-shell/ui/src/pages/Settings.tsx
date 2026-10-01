@@ -368,7 +368,6 @@ function baseCommandParams(targetId: string, organizationId: string, expectedVer
 }
 
 function PolicyPanel({
-  const { t } = useI18n();
   targetId,
   policy,
   onChanged,
@@ -377,6 +376,7 @@ function PolicyPanel({
   policy: Record<string, unknown>;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const status = String(policy.status ?? "Unknown");
   const name = String(policy.name ?? "(unnamed)");
   const version = typeof policy.version === "number" ? policy.version : 0;
@@ -398,11 +398,11 @@ function PolicyPanel({
 }
 
 function VersionHistory({
-  const { t } = useI18n();
   versions,
 }: {
   versions: { version_number?: number; status?: string; rules?: DraftRule[] }[];
 }) {
+  const { t } = useI18n();
   if (versions.length === 0) {
     return <p className="mt-3 text-xs text-onyx-text-dim">{t("common.noVersionsYet")}</p>;
   }
@@ -433,7 +433,6 @@ function VersionHistory({
 }
 
 function DraftVersionForm({
-  const { t } = useI18n();
   targetId,
   version,
   onChanged,
@@ -442,6 +441,7 @@ function DraftVersionForm({
   version: number;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const { t } = useI18n();
   const [rules, setRules] = useState<DraftRule[]>([
     { rule_type: "FeatureToggle", key: "", value: "" },
@@ -537,7 +537,6 @@ function DraftVersionForm({
 }
 
 function PolicyActions({
-  const { t } = useI18n();
   targetId,
   version,
   onChanged,
@@ -546,6 +545,7 @@ function PolicyActions({
   version: number;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const publishCmd = useCommand();
   const retireCmd = useCommand();
   const evaluateCmd = useCommand();
