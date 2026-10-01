@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import { Navigate, Route, Routes } from "react-router-dom";
 import MainLayout from "@/components/Layout/MainLayout";
 import { useAuthStore } from "@/stores/authStore";
@@ -30,6 +31,7 @@ function ProtectedLayout() {
 }
 
 function AdminOnlyLayout() {
+  const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
   if (!user?.is_admin) {
     return (
@@ -55,6 +57,7 @@ function AdminOnlyLayout() {
 }
 
 export default function App() {
+  const { t } = useI18n();
   return (
     <Suspense
       fallback={
