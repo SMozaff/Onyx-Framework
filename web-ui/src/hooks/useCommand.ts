@@ -270,8 +270,6 @@ export function useDecideList(kind: 'todo_list' | 'target_list') {
     onSuccess: async (_, variables) => {
       await client.invalidateQueries({ queryKey: [`${kind}.list`] });
       await client.invalidateQueries({ queryKey: [`${kind}.detail`] });
-      const verb =
-        variables.decision === 'verify' ? 'Verified' : variables.decision === 'reject' ? 'Rejected' : 'Escalated';
       showToast(t(variables.decision === 'verify' ? 'common.verified' : variables.decision === 'reject' ? 'common.rejected' : 'common.escalated'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
@@ -363,9 +361,6 @@ export function useDecideStaffLoan() {
     },
     onSuccess: async (_, variables) => {
       await client.invalidateQueries({ queryKey: ['staff_loan.list'] });
-      const verbs: Record<typeof variables.decision, string> = {
-        approve: 'Approved', decline: 'Declined', extend: 'Extended', end: 'Ended',
-      };
       showToast(t(`common.staffLoan${variables.decision[0].toUpperCase()}${variables.decision.slice(1)}`), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
