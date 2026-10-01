@@ -105,6 +105,12 @@ function auditFile(file) {
   for (const match of source.matchAll(callPattern)) {
     addViolation(violations, "presentation-call", relative, unescape(match[3], match[2]), match[1]);
   }
+  // Also cover the JSX/JavaScript expression form: toast.error({"Request failed"}).
+  // Dynamic expressions remain intentionally outside the static audit.
+  const callExpressionPattern = /\b(toast\.(?:success|error|warning|info)|showToast|notify|setError|setSuccess|setWarning|setInfo|window\.(?:alert|confirm|prompt))\s*\(\s*\{\s*(["'])([\s\S]*?)\2\s*\}/g;
+  for (const match of source.matchAll(callExpressionPattern)) {
+    addViolation(violations, "presentation-call", relative, unescape(match[3], match[2]), match[1]);
+  }
 
   return violations;
 }
