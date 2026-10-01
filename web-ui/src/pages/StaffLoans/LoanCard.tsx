@@ -63,11 +63,11 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
         </div>
         <dl className="inline-details">
           <div>
-            <dt>Window starts</dt>
+            <dt>{t('common.windowStarts')}</dt>
             <dd>{new Date(loan.window.start_at / 1_000_000).toLocaleString()}</dd>
           </div>
           <div>
-            <dt>Window ends</dt>
+            <dt>{t('common.windowEnds')}</dt>
             <dd>{new Date(loan.window.end_at / 1_000_000).toLocaleString()}</dd>
           </div>
         </dl>
@@ -126,7 +126,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
             <textarea
               value={declineReason}
               onChange={(e) => setDeclineReason(e.target.value)}
-              placeholder="Reason for declining (required)"
+              placeholder={t("common.declineReasonRequired")}
               rows={2}
             />
             <div style={{ display: 'flex', gap: 8 }}>
@@ -137,7 +137,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
                 disabled={decide.isPending || !declineReason.trim()}
                 onClick={confirmDecline}
               >
-                Confirm decline
+                {t('common.confirmDecline')}
               </button>
             </div>
           </div>
@@ -154,7 +154,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="button-secondary" type="button" onClick={() => setExtending(false)}>{t('common.cancel')}</button>
               <button className="button-primary" type="button" disabled={decide.isPending || !newEndAt} onClick={confirmExtend}>
-                Confirm extension
+                {t('common.confirmExtension')}
               </button>
             </div>
           </div>
