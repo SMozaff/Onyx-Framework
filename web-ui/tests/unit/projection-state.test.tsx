@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { deriveProjectionState, ProjectionStatePanel } from '../../src/components/ProjectionState';
+import { renderWithProviders } from '../test-utils';
 import { normalizeError } from '../../src/utils/errorHandler';
 import type { QueryResponse } from '../../src/types/query';
 
@@ -49,7 +50,7 @@ describe('projection state', () => {
   it('renders an unavailable panel with recovery action and no empty-state count', () => {
     const state = deriveProjectionState(queryFixture({ isError: true }));
     if (state.kind !== 'unavailable') throw new Error('expected unavailable state');
-    render(<ProjectionStatePanel resource="Missions" state={state} />);
+    renderWithProviders(<ProjectionStatePanel resource="Missions" state={state} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Missions unavailable');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
     expect(screen.queryByText(/0 total/i)).not.toBeInTheDocument();
