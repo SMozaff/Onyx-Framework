@@ -179,6 +179,7 @@ export function useRecordPreCheck(kind: 'todo_list' | 'target_list') {
  * both rather than two near-identical copies.
  */
 export function useSubmitList(kind: 'todo_list' | 'target_list') {
+  const { t } = useI18n();
   const client = useQueryClient();
   const commandType = kind === 'todo_list' ? 'todo_list.SubmitTodoList' : 'target_list.SubmitTargetList';
   const payloadKey = kind === 'todo_list' ? 'SubmitTodoList' : 'SubmitTargetList';
