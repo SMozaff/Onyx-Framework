@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
@@ -13,6 +14,7 @@ import { getServerAddress } from "@/utils/serverAddress";
  * address, so a wrong server cannot masquerade as invalid credentials.
  */
 export default function Login() {
+  const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export default function Login() {
         <div className="relative z-10 flex items-center gap-2.5">
           <span className="onyx-brand-mark" aria-hidden="true">O</span>
           <div>
-            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">ONYX</p>
+            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">{t("app.name")}</p>
             <p className="mt-0.5 text-[0.62rem] text-sky-100/70">Administration</p>
           </div>
         </div>
@@ -72,7 +74,7 @@ export default function Login() {
           </div>
 
           <div className="mt-6">
-            <label htmlFor="username" className="block text-xs font-bold text-onyx-text">Username</label>
+            <label htmlFor="username" className="block text-xs font-bold text-onyx-text">{t("auth.username")}</label>
             <input
               id="username"
               value={username}
@@ -83,7 +85,7 @@ export default function Login() {
             />
           </div>
           <div className="mt-4">
-            <label htmlFor="password" className="block text-xs font-bold text-onyx-text">Password</label>
+            <label htmlFor="password" className="block text-xs font-bold text-onyx-text">{t("auth.password")}</label>
             <input
               id="password"
               type="password"
