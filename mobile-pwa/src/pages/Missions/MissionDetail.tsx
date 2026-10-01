@@ -2,8 +2,10 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { StatusBadge } from '../../components/StatusBadge';
 import { useObserverQuery } from '../../hooks/useQuery';
 import type { MissionSummary, TimelineEntry } from '../../types/query';
+import { useI18n } from '../../i18n/I18nContext';
 
 export function MissionDetailPage() {
+  const { t } = useI18n();
   const { id } = useParams<{ id: string }>();
   const mission = useObserverQuery<MissionSummary>('mission.detail', { id: id ?? '' });
   const timeline = useObserverQuery<TimelineEntry>('timeline.list', { subject_id: id ?? '' });
@@ -25,7 +27,7 @@ export function MissionDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <Link className="text-sm text-slate-500 underline underline-offset-4" to="/missions">
-          ← All missions
+          ← {t("missions.title")}
         </Link>
         <StatusBadge status={status} />
       </div>
