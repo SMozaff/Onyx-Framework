@@ -37,7 +37,7 @@ function AdminOnlyLayout() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4">
         <div className="max-w-md rounded-lg border border-onyx-border bg-onyx-surface p-6 text-center">
-          <h1 className="text-lg font-semibold text-onyx-text">Admin access required</h1>
+          <h1 className="text-lg font-semibold text-onyx-text">{t("auth.adminAccessRequired")}</h1>
           <p className="mt-2 text-sm text-onyx-text-dim">
             Your account ({user?.username}) does not have administrator access. Contact your
             organization's Admin if you believe this is incorrect.
