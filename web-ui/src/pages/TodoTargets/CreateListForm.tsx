@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useI18n } from '../../i18n/I18nContext';
 import UserPicker from '../../components/UserPicker';
 import { useCreateTargetList, useCreateTodoList } from '../../hooks/useCommand';
 import type { ListOrigin } from '../../types/query';
@@ -10,6 +11,7 @@ import type { ListOrigin } from '../../types/query';
  * `ManagerAssigned` origin.
  */
 export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 'target_list'; ownerId: string }) {
+  const { t } = useI18n();
   const createTodo = useCreateTodoList();
   const createTarget = useCreateTargetList();
 
@@ -77,10 +79,10 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
       </div>
       {assignedToSomeoneElse ? (
         <UserPicker
-          label="Assignee"
+          label={t("common.assignee")}
           value={assigneeId}
           onChange={setAssigneeId}
-          placeholder="Choose the person who will own this work"
+          placeholder={t("common.chooseOwner")}
         />
       ) : null}
     </fieldset>
@@ -90,7 +92,7 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
     return (
       <section className="panel">
         <div className="panel-heading">
-          <h2>Create a todo list</h2>
+          <h2>{t('common.createTodoList')}</h2>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
           Starts with one item — add more from the detail view once created.
@@ -101,7 +103,7 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
             <input
               value={itemText}
               onChange={(event) => setItemText(event.target.value)}
-              placeholder="First item, e.g. Write the weekly report"
+              placeholder={t("common.firstItemExample")}
             />
             <button
               type="button"
@@ -109,7 +111,7 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
               onClick={createTodoList}
               disabled={createTodo.isPending || itemText.trim().length === 0 || !ownerSelected}
             >
-              {createTodo.isPending ? 'Creating…' : 'Create'}
+              {createTodo.isPending ? t('common.creating') : t('common.create')}
             </button>
           </div>
         </div>
@@ -120,14 +122,14 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h2>Create a target</h2>
+        <h2>{t('common.createTarget')}</h2>
       </div>
       <div style={{ display: 'grid', gap: 10 }}>
         {assignmentControl}
         <input
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="What does hitting this target mean?"
+          placeholder={t("common.whatDoesTargetMean")}
         />
         <div style={{ display: 'flex', gap: 10 }}>
           <label style={{ flex: 1 }}>
@@ -149,7 +151,7 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
           onClick={createTargetList}
           disabled={createTarget.isPending || description.trim().length === 0 || !startAt || !endAt || !ownerSelected}
         >
-          {createTarget.isPending ? 'Creating…' : 'Create'}
+          {createTarget.isPending ? t('common.creating') : t('common.create')}
         </button>
       </div>
     </section>

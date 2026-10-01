@@ -47,11 +47,11 @@ export default function TodoTargetsPage() {
       <header className="page-header">
         <div>
           <p className="eyebrow">{t('tasks.staffWorkflow')}</p>
-          <h1>Todos &amp; Targets</h1>
-          <p>Task lists and time-bound targets, verified by the owner's manager.</p>
+          <h1>{t('common.todosAndTargets')}</h1>
+          <p>{t('common.todoTargetsDescription')}</p>
         </div>
         <div style={{ display: 'grid', gap: 10, justifyItems: 'end' }}>
-          <div style={{ display: 'flex', gap: 10 }} role="tablist" aria-label="List kind">
+          <div style={{ display: 'flex', gap: 10 }} role="tablist" aria-label={t('common.listKind')}>
             <button
               type="button"
               role="tab"
@@ -86,7 +86,7 @@ export default function TodoTargetsPage() {
       <div className="master-detail">
         <section className="panel">
           <div className="panel-heading">
-            <h2>{view === 'escalated' ? 'Escalated to you' : kind === 'todo_list' ? 'Todo lists' : 'Targets'}</h2>
+            <h2>{view === 'escalated' ? t('approvals.escalatedToYou') : kind === 'todo_list' ? t('common.todoLists') : t('common.targets')}</h2>
             <span>{lists.length} shown</span>
           </div>
           {query.isLoading ? (

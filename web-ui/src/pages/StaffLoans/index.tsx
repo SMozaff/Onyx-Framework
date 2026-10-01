@@ -44,13 +44,13 @@ export default function StaffLoansPage() {
         <div>
           <p className="eyebrow">{t('tasks.staffWorkflow')}</p>
           <h1>{t('nav.staffLoans')}</h1>
-          <p>Temporary reassignment of a staff member's working authority to another manager.</p>
+          <p>{t('common.staffLoanDescription')}</p>
         </div>
         <label className="filter-label">
           Show
           <select value={filter} onChange={(e) => setFilter(e.target.value as 'all' | 'mine' | 'escalated')}>
-            <option value="all">All loans</option>
-            <option value="mine">Involving me</option>
+            <option value="all">{t('common.allLoans')}</option>
+            <option value="mine">{t('common.involvingMe')}</option>
             <option value="escalated">{t('approvals.escalatedToYou')}</option>
           </select>
         </label>
@@ -60,7 +60,7 @@ export default function StaffLoansPage() {
 
       <section className="panel">
         <div className="panel-heading">
-          <h2>Loans</h2>
+          <h2>{t('common.loans')}</h2>
           <span>{loans.length} shown</span>
         </div>
         {query.isLoading ? (
@@ -68,10 +68,10 @@ export default function StaffLoansPage() {
         ) : loans.length === 0 ? (
           <p style={{ color: 'var(--muted)', padding: '12px 4px' }}>
             {filter === 'mine'
-              ? 'No loans involve you yet.'
+              ? t('common.noLoansInvolvingYou')
               : filter === 'escalated'
-                ? 'No loan approvals have been escalated to you.'
-                : 'No loans yet. Request one above.'}
+                ? t('common.noLoanApprovalsEscalated')
+                : t('common.noLoansYetRequestOne')}
           </p>
         ) : (
           <div className="card-list">

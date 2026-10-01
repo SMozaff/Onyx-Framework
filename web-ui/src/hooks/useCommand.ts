@@ -11,6 +11,7 @@ import type {
   VerificationOutcome,
 } from '../types/query';
 import { normalizeError, showToast } from '../utils/errorHandler';
+import { useI18n } from '../i18n/I18nContext';
 
 const organizationId = () => {
   const raw = sessionStorage.getItem('onyx_user');
@@ -18,6 +19,7 @@ const organizationId = () => {
 };
 
 export function useAcknowledgeNotification() {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -33,13 +35,14 @@ export function useAcknowledgeNotification() {
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['notification.list'] });
       await client.invalidateQueries({ queryKey: ['dashboard.summary'] });
-      showToast('Notification acknowledged.', 'success');
+      showToast(t('common.notificationAcknowledged'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
 }
 
 export function useApprovalDecision() {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -55,7 +58,7 @@ export function useApprovalDecision() {
     onSuccess: async (_, variables) => {
       await client.invalidateQueries({ queryKey: ['approval.list'] });
       await client.invalidateQueries({ queryKey: ['dashboard.summary'] });
-      showToast(`Approval ${variables.decision === 'approve' ? 'granted' : 'rejected'}.`, 'success');
+      showToast(t(variables.decision === 'approve' ? 'common.approvalGranted' : 'common.approvalRejected'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
@@ -71,6 +74,7 @@ export function useApprovalDecision() {
  * to `/api/admin/policies` directly rather than through `useCommand`.
  */
 export function useCreateTodoList() {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -78,13 +82,14 @@ export function useCreateTodoList() {
       apiClient.post<{ todo_list_id: string }>('/api/todo/lists', input).then((r) => r.data),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['todo_list.list'] });
-      showToast('Todo list created.', 'success');
+      showToast(t('common.todoListCreated'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
 }
 
 export function useCreateTargetList() {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -96,7 +101,7 @@ export function useCreateTargetList() {
     }) => apiClient.post<{ target_list_id: string }>('/api/todo/targets', input).then((r) => r.data),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['target_list.list'] });
-      showToast('Target created.', 'success');
+      showToast(t('common.targetCreated'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
@@ -111,6 +116,7 @@ export function useCreateTargetList() {
  * `AddItem` doc comment: "Rejected once the list has been submitted").
  */
 export function useAddTodoItem() {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -125,7 +131,7 @@ export function useAddTodoItem() {
       }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['todo_list.list'] });
-      showToast('Item added.', 'success');
+      showToast(t('common.itemAdded'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
@@ -142,6 +148,7 @@ export function useAddTodoItem() {
  * caller gets a real domain error surfaced via the existing toast path.
  */
 export function useRecordPreCheck(kind: 'todo_list' | 'target_list') {
+  const { t } = useI18n();
   const client = useQueryClient();
   const commandType =
     kind === 'todo_list' ? 'todo_list.RecordTeamLeaderPreCheck' : 'target_list.RecordTeamLeaderPreCheck';
@@ -159,7 +166,7 @@ export function useRecordPreCheck(kind: 'todo_list' | 'target_list') {
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: [`${kind}.list`] });
       await client.invalidateQueries({ queryKey: [`${kind}.detail`] });
-      showToast('Pre-check recorded.', 'success');
+      showToast(t('common.preCheckRecorded'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
@@ -173,6 +180,7 @@ export function useRecordPreCheck(kind: 'todo_list' | 'target_list') {
  * both rather than two near-identical copies.
  */
 export function useSubmitList(kind: 'todo_list' | 'target_list') {
+  const { t } = useI18n();
   const client = useQueryClient();
   const commandType = kind === 'todo_list' ? 'todo_list.SubmitTodoList' : 'target_list.SubmitTargetList';
   const payloadKey = kind === 'todo_list' ? 'SubmitTodoList' : 'SubmitTargetList';
@@ -190,7 +198,7 @@ export function useSubmitList(kind: 'todo_list' | 'target_list') {
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: [`${kind}.list`] });
       await client.invalidateQueries({ queryKey: [`${kind}.detail`] });
-      showToast('Submitted for verification.', 'success');
+      showToast(t('common.submittedForVerification'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
@@ -207,6 +215,7 @@ export function useSubmitList(kind: 'todo_list' | 'target_list') {
  * UI does not duplicate that resolution logic).
  */
 export function useDecideList(kind: 'todo_list' | 'target_list') {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -263,9 +272,7 @@ export function useDecideList(kind: 'todo_list' | 'target_list') {
     onSuccess: async (_, variables) => {
       await client.invalidateQueries({ queryKey: [`${kind}.list`] });
       await client.invalidateQueries({ queryKey: [`${kind}.detail`] });
-      const verb =
-        variables.decision === 'verify' ? 'Verified' : variables.decision === 'reject' ? 'Rejected' : 'Escalated';
-      showToast(`${verb}.`, 'success');
+      showToast(t(variables.decision === 'verify' ? 'common.verified' : variables.decision === 'reject' ? 'common.rejected' : 'common.escalated'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
@@ -280,6 +287,7 @@ export function useDecideList(kind: 'todo_list' | 'target_list') {
  * `useDecideStaffLoan` below — design doc §2.1.
  */
 export function useRequestStaffLoan() {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -292,7 +300,7 @@ export function useRequestStaffLoan() {
     }) => apiClient.post<{ staff_loan_id: string }>('/api/todo/staff-loans', input).then((r) => r.data),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['staff_loan.list'] });
-      showToast('Staff loan requested.', 'success');
+      showToast(t('common.staffLoanRequested'), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });
@@ -315,6 +323,7 @@ export function useRequestStaffLoan() {
  * existing toast path.
  */
 export function useDecideStaffLoan() {
+  const { t } = useI18n();
   const client = useQueryClient();
   return useMutation({
     networkMode: 'always',
@@ -354,10 +363,7 @@ export function useDecideStaffLoan() {
     },
     onSuccess: async (_, variables) => {
       await client.invalidateQueries({ queryKey: ['staff_loan.list'] });
-      const verbs: Record<typeof variables.decision, string> = {
-        approve: 'Approved', decline: 'Declined', extend: 'Extended', end: 'Ended',
-      };
-      showToast(`${verbs[variables.decision]}.`, 'success');
+      showToast(t(`common.staffLoan${variables.decision[0].toUpperCase()}${variables.decision.slice(1)}`), 'success');
     },
     onError: (error) => showToast(normalizeError(error).message, 'error'),
   });

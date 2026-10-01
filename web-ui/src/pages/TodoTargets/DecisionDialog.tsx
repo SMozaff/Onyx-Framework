@@ -30,7 +30,7 @@ decision, busy, onCancel, onConfirm }: Props) {
   const [comment, setComment] = useState('');
   const [reason, setReason] = useState('');
 
-  const title = decision === 'verify' ? 'Verify list' : decision === 'reject' ? 'Reject list' : 'Escalate list';
+  const title = decision === 'verify' ? t('common.verifyList') : decision === 'reject' ? t('common.rejectList') : t('common.escalateList');
   const reasonRequired = decision === 'reject' || decision === 'escalate';
   const confirmDisabled = busy || (reasonRequired && !reason.trim());
 
@@ -82,7 +82,7 @@ decision, busy, onCancel, onConfirm }: Props) {
                 onChange={(event) => setComment(event.target.value)}
                 rows={4}
                 autoFocus
-                aria-label="Comment"
+                aria-label={t("common.comment")}
               />
             ) : null}
           </>
@@ -101,7 +101,7 @@ decision, busy, onCancel, onConfirm }: Props) {
             onClick={confirm}
             disabled={confirmDisabled}
           >
-            {busy ? 'Submitting…' : `Confirm ${decision}`}
+            {busy ? t('common.submitting') : t(decision === 'verify' ? 'common.confirmVerify' : decision === 'reject' ? 'common.confirmReject' : 'common.confirmEscalate')}
           </button>
         </div>
       </section>

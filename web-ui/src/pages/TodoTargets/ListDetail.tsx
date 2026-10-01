@@ -60,7 +60,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
           <p className="eyebrow">{kind === 'todo_list' ? 'Todo list' : 'Target'}</p>
           <h2 id="list-title">
             {kind === 'todo_list'
-              ? `${(list as TodoListProjection).items.length} items`
+              ? t('common.itemsCount', { count: (list as TodoListProjection).items.length })
               : (list as TargetListProjection).description}
           </h2>
         </div>
@@ -75,8 +75,8 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
 
       <dl className="detail-grid">
         <div>
-          <dt>Origin</dt>
-          <dd>{list.origin === 'ManagerAssigned' ? 'Manager-assigned' : 'Self-authored'}</dd>
+          <dt>{t('common.origin')}</dt>
+          <dd>{list.origin === 'ManagerAssigned' ? t('common.managerAssigned') : t('common.selfAuthored')}</dd>
         </div>
         <div>
           <dt>{t('common.version')}</dt>
@@ -94,7 +94,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
 
       {canRecordPreCheck ? (
         <div className="detail-section">
-          <h3>Team Leader pre-check</h3>
+          <h3>{t('common.teamLeaderPreCheck')}</h3>
           <p className="muted" style={{ marginTop: 0 }}>
             Optional, informal, and does not gate verification. Only available to Team Leaders.
           </p>
@@ -103,7 +103,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
               <textarea
                 value={preCheckNotes}
                 onChange={(e) => setPreCheckNotes(e.target.value)}
-                placeholder="Notes (visible to Managers, hidden from the list owner)"
+                placeholder={t("common.preCheckNotes")}
                 rows={3}
               />
               <div style={{ display: 'flex', gap: 8 }}>
@@ -132,7 +132,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
       ) : null}
 
       <div className="detail-section">
-        <h3>Actions</h3>
+        <h3>{t('common.actions')}</h3>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {canSubmit && isOwner ? (
             <button
@@ -144,7 +144,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
               {submit.isPending ? 'Submitting…' : 'Submit for verification'}
             </button>
           ) : null}
-          {canSubmit && !isOwner ? <p className="muted">Only the owner can submit this list.</p> : null}
+          {canSubmit && !isOwner ? <p className="muted">{t('common.onlyOwnerCanSubmit')}</p> : null}
           {canDecide ? (
             <>
               <button type="button" className="button-primary" onClick={() => setDialog('verify')}>
@@ -154,7 +154,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
               <button type="button" className="button-danger" onClick={() => setDialog('reject')}>{t('common.reject')}</button>
             </>
           ) : null}
-          {!canSubmit && !canDecide ? <p className="muted">No actions available at this status.</p> : null}
+          {!canSubmit && !canDecide ? <p className="muted">{t('common.noActionsAvailable')}</p> : null}
         </div>
       </div>
 
@@ -174,6 +174,7 @@ function TodoItems({
   canAddItem: boolean;
   addItem: ReturnType<typeof useAddTodoItem>;
 }) {
+  const { t } = useI18n();
   const [text, setText] = useState('');
   function submit() {
     if (!text.trim()) return;
@@ -181,9 +182,9 @@ function TodoItems({
   }
   return (
     <div className="detail-section">
-      <h3>Items</h3>
+      <h3>{t('common.items')}</h3>
       {list.items.length === 0 ? (
-        <p className="muted">No items.</p>
+        <p className="muted">{t('common.noItems')}</p>
       ) : (
         <ul style={{ margin: 0, paddingLeft: 20 }}>
           {list.items.map((item) => (
@@ -193,9 +194,9 @@ function TodoItems({
       )}
       {canAddItem ? (
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add another item" />
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t("common.addAnotherItem")} />
           <button className="button-secondary" type="button" onClick={submit} disabled={addItem.isPending || !text.trim()}>
-            Add
+            {t('common.add')}
           </button>
         </div>
       ) : null}
@@ -204,14 +205,15 @@ function TodoItems({
 }
 
 function TargetWindow({ list }: { list: TargetListProjection }) {
+  const { t } = useI18n();
   return (
     <dl className="detail-grid">
       <div>
-        <dt>Window starts</dt>
+        <dt>{t('common.windowStarts')}</dt>
         <dd>{new Date(list.time_window.start_at / 1_000_000).toLocaleString()}</dd>
       </div>
       <div>
-        <dt>Window ends</dt>
+        <dt>{t('common.windowEnds')}</dt>
         <dd>{new Date(list.time_window.end_at / 1_000_000).toLocaleString()}</dd>
       </div>
     </dl>
@@ -229,17 +231,17 @@ function TargetWindow({ list }: { list: TargetListProjection }) {
  * misleading about the list's real state.
  */
 function PreCheckSection({ list }: { list: ListItem }) {
+  const { t } = useI18n();
   const preCheck = list.team_leader_pre_check;
   if (!preCheck) return null;
   const hasNotes = typeof preCheck.notes === 'string';
   return (
     <div className="detail-section">
-      <h3>Team Leader pre-check</h3>
+      <h3>{t('common.teamLeaderPreCheck')}</h3>
       <p className="muted">
-        Checked {new Date(preCheck.checked_at / 1_000_000).toLocaleString()}. This is informal and does not gate
-        verification.
+        {t('common.preCheckChecked', { time: new Date(preCheck.checked_at / 1_000_000).toLocaleString() })}
       </p>
-      {hasNotes ? <p>{preCheck.notes}</p> : <p className="muted">Notes are not shown to the list owner.</p>}
+      {hasNotes ? <p>{preCheck.notes}</p> : <p className="muted">{t('common.preCheckNotesHidden')}</p>}
     </div>
   );
 }

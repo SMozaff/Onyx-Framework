@@ -85,7 +85,7 @@ export default function MainLayout() {
         <OfflineBanner />
         <header className="topbar">
           <button ref={menuButtonRef} className="menu-button" type="button" aria-label={menuOpen ? t('nav.closeMenu') : t('nav.openMenu')} aria-controls="primary-navigation" aria-expanded={mobile ? menuOpen : undefined} onClick={() => setMenuOpen((value) => !value)}><span aria-hidden="true">☰</span></button>
-          <div className="topbar-context" aria-label="Current organization"><span>{t('common.organization')}</span><strong title={user?.organization_id}>{organizationLabel(user, t)}</strong></div>
+          <div className="topbar-context" aria-label={t('common.organization')}><span>{t('common.organization')}</span><strong title={user?.organization_id}>{organizationLabel(user, t)}</strong></div>
           <div className="topbar-actions">
             <StatusBadge status={streamStatus} />
             <div className="user-summary"><span>{user?.username}</span><small>{t('app.remoteOperator')}</small></div>
