@@ -44,13 +44,13 @@ export default function StaffLoansPage() {
         <div>
           <p className="eyebrow">{t('tasks.staffWorkflow')}</p>
           <h1>{t('nav.staffLoans')}</h1>
-          <p>Temporary reassignment of a staff member's working authority to another manager.</p>
+          <p>{t('common.staffLoanDescription')}</p>
         </div>
         <label className="filter-label">
           Show
           <select value={filter} onChange={(e) => setFilter(e.target.value as 'all' | 'mine' | 'escalated')}>
-            <option value="all">All loans</option>
-            <option value="mine">Involving me</option>
+            <option value="all">{t('common.allLoans')}</option>
+            <option value="mine">{t('common.involvingMe')}</option>
             <option value="escalated">{t('approvals.escalatedToYou')}</option>
           </select>
         </label>
