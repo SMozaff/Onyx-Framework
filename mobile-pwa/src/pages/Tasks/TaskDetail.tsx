@@ -2,8 +2,10 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { StatusBadge } from '../../components/StatusBadge';
 import { useObserverQuery } from '../../hooks/useQuery';
 import type { TaskSummary } from '../../types/query';
+import { useI18n } from '../../i18n/I18nContext';
 
 export function TaskDetailPage() {
+  const { t } = useI18n();
   const { id } = useParams<{ id: string }>();
   const task = useObserverQuery<TaskSummary>('task.detail', { id: id ?? '' });
 
@@ -23,7 +25,7 @@ export function TaskDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <Link className="text-sm text-slate-500 underline underline-offset-4" to="/tasks">
-          ← All tasks
+          ← {t("tasks.title")}
         </Link>
         <StatusBadge status={status} />
       </div>
