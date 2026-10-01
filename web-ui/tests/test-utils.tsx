@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { render } from '@testing-library/react';
 import { useAuthStore } from '../src/stores/authStore';
-import { LocaleProvider, dictionaries } from '../src/i18n/I18nContext';
+import { LocaleProvider } from '../src/i18n/I18nContext';
+import { dictionaries } from '../src/i18n/dictionaries.generated';
 
 export function authenticate() {
   useAuthStore.getState().login({ access_token: 'mock.access.token', refresh_token: 'mock.refresh.token', user: { id: '22222222-2222-2222-2222-222222222222', username: 'test-admin', organization_id: '11111111-1111-1111-1111-111111111111' } });
