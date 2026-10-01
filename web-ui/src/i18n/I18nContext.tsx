@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { defaultLocale, dictionaries, en, localeIds, localeMetadata } from "./dictionaries.generated";
+import { defaultLocale, en, localeIds, localeMetadata } from "./dictionaries.generated";
+export { dictionaries } from "./dictionaries.generated";
 import type { Locale } from "./dictionaries.generated";
 import { createFormatters, type Formatters } from "./formatting";
 import { pluralCategory as resolvePluralCategory, type PluralCategory } from "./plural";
