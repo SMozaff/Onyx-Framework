@@ -174,6 +174,7 @@ function TodoItems({
   canAddItem: boolean;
   addItem: ReturnType<typeof useAddTodoItem>;
 }) {
+  const { t } = useI18n();
   const [text, setText] = useState('');
   function submit() {
     if (!text.trim()) return;
@@ -195,7 +196,7 @@ function TodoItems({
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t("common.addAnotherItem")} />
           <button className="button-secondary" type="button" onClick={submit} disabled={addItem.isPending || !text.trim()}>
-            Add
+            {t('common.add')}
           </button>
         </div>
       ) : null}
@@ -204,6 +205,7 @@ function TodoItems({
 }
 
 function TargetWindow({ list }: { list: TargetListProjection }) {
+  const { t } = useI18n();
   return (
     <dl className="detail-grid">
       <div>
@@ -229,6 +231,7 @@ function TargetWindow({ list }: { list: TargetListProjection }) {
  * misleading about the list's real state.
  */
 function PreCheckSection({ list }: { list: ListItem }) {
+  const { t } = useI18n();
   const preCheck = list.team_leader_pre_check;
   if (!preCheck) return null;
   const hasNotes = typeof preCheck.notes === 'string';
@@ -236,8 +239,7 @@ function PreCheckSection({ list }: { list: ListItem }) {
     <div className="detail-section">
       <h3>{t('common.teamLeaderPreCheck')}</h3>
       <p className="muted">
-        Checked {new Date(preCheck.checked_at / 1_000_000).toLocaleString()}. This is informal and does not gate
-        verification.
+        {t('common.preCheckChecked', { time: new Date(preCheck.checked_at / 1_000_000).toLocaleString() })}
       </p>
       {hasNotes ? <p>{preCheck.notes}</p> : <p className="muted">{t('common.preCheckNotesHidden')}</p>}
     </div>
