@@ -5,6 +5,7 @@ import { newId16 } from "@/types/onyx";
 import { useQuery } from "@/hooks/useQuery";
 import { useCommand } from "@/hooks/useCommand";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 
 /**
  * Conversation list-by-id + thread view, plus a Connections panel for
@@ -22,6 +23,7 @@ import { useSession } from "@/hooks/useSession";
  * professional work tool, not a consumer chat app.
  */
 export default function Messaging() {
+  const { t } = useI18n();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   const session = useSession();
@@ -48,12 +50,12 @@ export default function Messaging() {
 
           {targetId && (
             <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-              {loadingConversation && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+              {loadingConversation && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
               {conversationError && (
                 <p className="text-sm text-onyx-status-blocked">{conversationError.message}</p>
               )}
               {!loadingConversation && !conversationError && conversation === null && (
-                <p className="text-sm text-onyx-text-dim">No conversation found for this id.</p>
+                <p className="text-sm text-onyx-text-dim">{t("messaging.noConversationFoundForId")}</p>
               )}
               {conversation && (
                 <ConversationPanel
@@ -74,6 +76,7 @@ export default function Messaging() {
 }
 
 function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
+  const { t } = useI18n();
   const [raw, setRaw] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -93,13 +96,13 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
   return (
     <div>
       <label className="block text-xs font-medium text-onyx-text-dim">
-        Look up by conversation id (JSON array of 16 bytes)
+        {t("messaging.lookupByConversationId")}
       </label>
       <div className="mt-1 flex gap-2">
         <input
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -128,6 +131,7 @@ function CreateConversationForm({
   session: ReturnType<typeof useSession>;
   onCreated: (id: Id16) => void;
 }) {
+  const { t } = useI18n();
   const [conversationType, setConversationType] = useState<ConversationTypeOption>("Channel");
   const [parentSupergroupRaw, setParentSupergroupRaw] = useState("");
   const { execute, loading, error } = useCommand();
@@ -183,10 +187,10 @@ function CreateConversationForm({
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Create conversation</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("messaging.createConversation")}</h2>
       <div className="mt-2 space-y-2">
         <div>
-          <label className="block text-xs font-medium text-onyx-text-dim">Type</label>
+          <label className="block text-xs font-medium text-onyx-text-dim">{t("common.type")}</label>
           <select
             value={conversationType}
             onChange={(e) => setConversationType(e.target.value as ConversationTypeOption)}
@@ -227,7 +231,7 @@ function CreateConversationForm({
           disabled={loading}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
-          {loading ? "Creating…" : "Create"}
+          {loading ? t("common.creating") : t("common.create")}
         </button>
       </div>
     </div>
@@ -280,6 +284,7 @@ function AddMemberForm({
   session: ReturnType<typeof useSession>;
   onAdded: () => void;
 }) {
+  const { t } = useI18n();
   const [userIdRaw, setUserIdRaw] = useState("");
   const [isParentSupergroupMember, setIsParentSupergroupMember] = useState(false);
   const { execute, loading, error } = useCommand();
@@ -325,7 +330,7 @@ function AddMemberForm({
 
   return (
     <div className="mt-4 rounded-md border border-onyx-border bg-onyx-bg p-3">
-      <label className="block text-xs font-medium text-onyx-text-dim">Add member (user id)</label>
+      <label className="block text-xs font-medium text-onyx-text-dim">{t("messaging.addMemberUserId")}</label>
       <div className="mt-1 flex gap-2">
         <input
           value={userIdRaw}
@@ -379,6 +384,7 @@ function MessageThread({
   // plus a lookup-by-id viewer for one message at a time, not a live
   // scrolling thread. Not invented here; a real thread view needs a
   // projection this increment's backend doesn't have.
+  const { t } = useI18n();
   const [messageIdRaw, setMessageIdRaw] = useState("");
   const targetMessageId: Id16 | null = messageIdRaw ? tryParseId16(messageIdRaw) : null;
   const {
@@ -444,6 +450,7 @@ function ComposeMessage({
   session: ReturnType<typeof useSession>;
   onPosted: (id: Id16) => void;
 }) {
+  const { t } = useI18n();
   const [body, setBody] = useState("");
   const { execute, loading, error } = useCommand();
 
@@ -473,12 +480,12 @@ function ComposeMessage({
 
   return (
     <div>
-      <label className="block text-xs font-medium text-onyx-text-dim">Post a message</label>
+      <label className="block text-xs font-medium text-onyx-text-dim">{t("messaging.postMessage")}</label>
       <div className="mt-1 flex gap-2">
         <input
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder="Message text"
+          placeholder={t("messaging.messageTextPlaceholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -487,7 +494,7 @@ function ComposeMessage({
           disabled={loading || body.trim().length === 0}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
-          {loading ? "Sending…" : "Send"}
+          {loading ? t("messaging.sending") : t("common.send")}
         </button>
       </div>
       {error && <p className="mt-1 text-xs text-onyx-status-blocked">{error.message}</p>}
@@ -506,6 +513,7 @@ function MessageDetail({
   session: ReturnType<typeof useSession>;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const [editBody, setEditBody] = useState("");
   const [reactionCode, setReactionCode] = useState("");
   const editCmd = useCommand();
@@ -547,7 +555,7 @@ function MessageDetail({
               <input
                 value={editBody}
                 onChange={(e) => setEditBody(e.target.value)}
-                placeholder="New text"
+                placeholder={t("messaging.newTextPlaceholder")}
                 className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
               />
               <button
@@ -573,7 +581,7 @@ function MessageDetail({
               <input
                 value={reactionCode}
                 onChange={(e) => setReactionCode(e.target.value)}
-                placeholder="Reaction code, e.g. thumbsup"
+                placeholder={t("messaging.reactionCodePlaceholder")}
                 className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
               />
               <button
@@ -642,6 +650,7 @@ function MessageDetail({
  * not have.
  */
 function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> }) {
+  const { t } = useI18n();
   const [recipientRaw, setRecipientRaw] = useState("");
   const [requestIdRaw, setRequestIdRaw] = useState("");
   const sendCmd = useCommand();
@@ -710,11 +719,11 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
 
   return (
     <div className="rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Connections</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("messaging.connections")}</h2>
 
       <div className="mt-2">
         <label className="block text-xs font-medium text-onyx-text-dim">
-          Send a connection request (recipient user id)
+          {t("messaging.sendConnectionRequest")}
         </label>
         <div className="mt-1 flex gap-2">
           <input
@@ -741,7 +750,7 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
 
       <div className="mt-4">
         <label className="block text-xs font-medium text-onyx-text-dim">
-          View a request by id
+          {t("messaging.viewRequestById")}
         </label>
         <input
           value={requestIdRaw}
