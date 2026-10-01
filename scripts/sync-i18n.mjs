@@ -455,8 +455,6 @@ function findLiteralTranslationKeys(source, callees) {
   for (const match of source.matchAll(pattern)) {
     const quote = match[2];
     const raw = match[3];
-    const quote = match[2];
-    const raw = match[3];
     if (quote === "`" && raw.includes("${")) continue;
     found.push({ callee: match[1], key: unescapeStringLiteral(raw, quote) });
   }
