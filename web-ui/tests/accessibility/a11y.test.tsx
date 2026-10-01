@@ -6,7 +6,7 @@ import ApprovalDialog from '../../src/components/ApprovalDialog';
 
 describe('accessibility', () => {
   it('renders status with text and no axe violations', async () => {
-    const { container } = render(<StatusBadge status="active" />);
+    const { container } = renderWithProviders(<StatusBadge status="active" />);
     const results = await axe(container);
     expect(results.violations).toHaveLength(0);
   });
