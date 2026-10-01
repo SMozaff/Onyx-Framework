@@ -1,4 +1,3 @@
-import { render } from '@testing-library/react';
 import { axe } from 'vitest-axe';
 import { renderWithProviders } from '../test-utils';
 import { describe, expect, it } from 'vitest';
