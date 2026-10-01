@@ -31,7 +31,12 @@ import {
  * `/api/command` cannot express. Every other Policy/LegalHold action
  * goes through `/api/command` via `useCommand`.
  */
+const POLICY_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
+const SERVER_ADDRESS_PLACEHOLDER = "http://192.168.0.250:3000";
+const LOCAL_SERVER_ADDRESS = "http://127.0.0.1:3000";
+
 export default function Settings() {
+  const { t } = useI18n();
   const { policyId } = useParams<{ policyId?: string }>();
   const navigate = useNavigate();
 
@@ -57,7 +62,7 @@ export default function Settings() {
 
       {targetId && (
         <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-          {loading && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loading && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {error && <p className="text-sm text-onyx-status-blocked">{error.message}</p>}
           {!loading && !error && !policyRow && (
             <p className="text-sm text-onyx-text-dim">No policy found for this id.</p>
@@ -94,6 +99,7 @@ const USER_CLASSES: { value: string; label: string }[] = [
  * aggregate.
  */
 function MobileAccessPanel() {
+  const { t } = useI18n();
   const [allowed, setAllowed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -145,7 +151,7 @@ function MobileAccessPanel() {
         checkmark is denied mobile login entirely, until enabled here — Administrators always
         retain mobile access regardless of this list.
       </p>
-      {loading && <p className="mt-3 text-sm text-onyx-text-dim">Loading…</p>}
+      {loading && <p className="mt-3 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
       {error && <p className="mt-3 text-sm text-onyx-status-blocked">{error}</p>}
       {!loading && (
         <div className="mt-3 flex flex-col gap-2">
@@ -178,6 +184,7 @@ function MobileAccessPanel() {
  * immediately, with no restart required.
  */
 function ServerConnectionSettings() {
+  const { t } = useI18n();
   const [value, setValue] = useState(() => getServerAddress());
   const [status, setStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -225,7 +232,7 @@ function ServerConnectionSettings() {
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-semibold text-onyx-text">Server connection</h2>
+      <h2 className="text-sm font-semibold text-onyx-text">{t("settings.serverConnection")}</h2>
       <p className="mt-1 text-xs text-onyx-text-dim">
         The address of the ONYX backend this app talks to. Change this if you're running
         the Admin app on a different computer than the server — e.g. a LAN address like{" "}
@@ -267,6 +274,7 @@ function ServerConnectionSettings() {
 }
 
 function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
+  const { t } = useI18n();
   const [raw, setRaw] = useState("");
   return (
     <div className="mt-4">
@@ -293,6 +301,7 @@ function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
 }
 
 function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -359,6 +368,7 @@ function baseCommandParams(targetId: string, organizationId: string, expectedVer
 }
 
 function PolicyPanel({
+  const { t } = useI18n();
   targetId,
   policy,
   onChanged,
@@ -388,6 +398,7 @@ function PolicyPanel({
 }
 
 function VersionHistory({
+  const { t } = useI18n();
   versions,
 }: {
   versions: { version_number?: number; status?: string; rules?: DraftRule[] }[];
@@ -397,7 +408,7 @@ function VersionHistory({
   }
   return (
     <div className="mt-3">
-      <h3 className="text-xs font-medium text-onyx-text-dim">Versions</h3>
+      <h3 className="text-xs font-medium text-onyx-text-dim">{t("files.versions")}</h3>
       <ul className="mt-1 space-y-2">
         {versions.map((v) => (
           <li key={v.version_number} className="rounded-md border border-onyx-border p-2 text-xs">
@@ -422,6 +433,7 @@ function VersionHistory({
 }
 
 function DraftVersionForm({
+  const { t } = useI18n();
   targetId,
   version,
   onChanged,
@@ -525,6 +537,7 @@ function DraftVersionForm({
 }
 
 function PolicyActions({
+  const { t } = useI18n();
   targetId,
   version,
   onChanged,
@@ -609,6 +622,7 @@ function PolicyActions({
 }
 
 function LegalHoldPanel() {
+  const { t } = useI18n();
   const [holdIdRaw, setHoldIdRaw] = useState("");
   const targetId = holdIdRaw || null;
   const { data, refetch } = useQuery<Record<string, unknown>>(
