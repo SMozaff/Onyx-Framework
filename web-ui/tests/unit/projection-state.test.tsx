@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { deriveProjectionState, ProjectionStatePanel } from '../../src/components/ProjectionState';
 import { renderWithProviders } from '../test-utils';
