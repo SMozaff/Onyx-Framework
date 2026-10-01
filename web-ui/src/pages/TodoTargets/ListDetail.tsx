@@ -234,12 +234,12 @@ function PreCheckSection({ list }: { list: ListItem }) {
   const hasNotes = typeof preCheck.notes === 'string';
   return (
     <div className="detail-section">
-      <h3>Team Leader pre-check</h3>
+      <h3>{t('common.teamLeaderPreCheck')}</h3>
       <p className="muted">
         Checked {new Date(preCheck.checked_at / 1_000_000).toLocaleString()}. This is informal and does not gate
         verification.
       </p>
-      {hasNotes ? <p>{preCheck.notes}</p> : <p className="muted">Notes are not shown to the list owner.</p>}
+      {hasNotes ? <p>{preCheck.notes}</p> : <p className="muted">{t('common.preCheckNotesHidden')}</p>}
     </div>
   );
 }
