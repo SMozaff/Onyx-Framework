@@ -450,7 +450,7 @@ function findLiteralTranslationKeys(source, callees) {
   // cannot be resolved without executing the application.
   // Require an identifier boundary before the translation callee so a
   // setter such as setText("") cannot be mistaken for t("").
-  const pattern = new RegExp(`(?<![A-Za-z0-9_$])(${calleePattern})\\s*\\(\\s*(['"\\`])((?:\\\\.|(?!\\2)[^\\\\])*)\\2`, "g");
+  const pattern = new RegExp("(?<![A-Za-z0-9_$])(" + calleePattern + ")\\s*\\(\\s*([\x27\"\\x60])((?:\\\\.|(?!\\2)[^\\\\])*)\\2", "g");
   const found = [];
   for (const match of source.matchAll(pattern)) {
     const quote = match[2];
