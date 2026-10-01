@@ -38,7 +38,7 @@ export default function Messaging() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Messaging</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("nav.messaging")}</h1>
 
       <div className="mt-4 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6">
         <div>
@@ -109,9 +109,7 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
           type="button"
           onClick={submit}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
-        >
-          Open
-        </button>
+        >{t("common.open")}</button>
       </div>
       {parseError && <p className="mt-1 text-xs text-onyx-status-blocked">{parseError}</p>}
     </div>
@@ -343,9 +341,7 @@ function AddMemberForm({
           onClick={() => void addMember()}
           disabled={loading}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-        >
-          Add
-        </button>
+        >{t("common.add")}</button>
       </div>
       {isSubTeam && (
         <label className="mt-2 flex items-center gap-2 text-xs text-onyx-text-dim">
@@ -353,9 +349,7 @@ function AddMemberForm({
             type="checkbox"
             checked={isParentSupergroupMember}
             onChange={(e) => setIsParentSupergroupMember(e.target.checked)}
-          />
-          This user is already a member of the parent Supergroup
-        </label>
+          />{t("messaging.parentSupergroupMember")}</label>
       )}
       {isSubTeam && !isParentSupergroupMember && (
         <p className="mt-1 text-xs text-onyx-text-dim">
@@ -416,7 +410,7 @@ function MessageThread({
 
       {targetMessageId && (
         <div className="mt-3 rounded-md border border-onyx-border bg-onyx-bg p-3">
-          {loadingMessage && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loadingMessage && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {messageError && <p className="text-sm text-onyx-status-blocked">{messageError.message}</p>}
           {message && (
             <MessageDetail
@@ -567,9 +561,7 @@ function MessageDetail({
                   )
                 }
                 className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-              >
-                Edit
-              </button>
+              >{t("common.edit")}</button>
             </div>
             {editCmd.error && (
               <p className="mt-1 text-xs text-onyx-status-blocked">{editCmd.error.message}</p>
@@ -593,9 +585,7 @@ function MessageDetail({
                   })
                 }
                 className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-              >
-                React
-              </button>
+              >{t("messaging.react")}</button>
               <button
                 type="button"
                 disabled={reactCmd.loading || reactionCode.trim().length === 0}
@@ -605,9 +595,7 @@ function MessageDetail({
                   })
                 }
                 className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-              >
-                Un-react
-              </button>
+              >{t("messaging.unreact")}</button>
             </div>
             {reactCmd.error && (
               <p className="mt-1 text-xs text-onyx-status-blocked">{reactCmd.error.message}</p>
@@ -624,9 +612,7 @@ function MessageDetail({
                 })
               }
               className="rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-sm text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
-            >
-              Redact
-            </button>
+            >{t("messaging.redact")}</button>
             {redactCmd.error && (
               <p className="mt-1 text-xs text-onyx-status-blocked">{redactCmd.error.message}</p>
             )}
@@ -774,25 +760,19 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
                     disabled={acceptCmd.loading}
                     onClick={() => void decide(acceptCmd, "AcceptConnectionRequest")}
                     className="rounded-md bg-onyx-status-approved/15 px-3 py-1.5 text-xs text-onyx-status-approved hover:bg-onyx-status-approved/25 disabled:opacity-50"
-                  >
-                    Accept
-                  </button>
+                  >{t("messaging.accept")}</button>
                   <button
                     type="button"
                     disabled={declineCmd.loading}
                     onClick={() => void decide(declineCmd, "DeclineConnectionRequest")}
                     className="rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
-                  >
-                    Decline
-                  </button>
+                  >{t("messaging.decline")}</button>
                   <button
                     type="button"
                     disabled={revokeCmd.loading}
                     onClick={() => void decide(revokeCmd, "RevokeConnectionRequest")}
                     className="rounded-md bg-onyx-surface px-3 py-1.5 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-                  >
-                    Revoke
-                  </button>
+                  >{t("messaging.revoke")}</button>
                 </div>
               )}
               {(acceptCmd.error ?? declineCmd.error ?? revokeCmd.error) && (
