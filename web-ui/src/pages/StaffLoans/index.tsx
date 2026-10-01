@@ -60,7 +60,7 @@ export default function StaffLoansPage() {
 
       <section className="panel">
         <div className="panel-heading">
-          <h2>Loans</h2>
+          <h2>{t('common.loans')}</h2>
           <span>{loans.length} shown</span>
         </div>
         {query.isLoading ? (
@@ -68,10 +68,10 @@ export default function StaffLoansPage() {
         ) : loans.length === 0 ? (
           <p style={{ color: 'var(--muted)', padding: '12px 4px' }}>
             {filter === 'mine'
-              ? 'No loans involve you yet.'
+              ? t('common.noLoansInvolvingYou')
               : filter === 'escalated'
-                ? 'No loan approvals have been escalated to you.'
-                : 'No loans yet. Request one above.'}
+                ? t('common.noLoanApprovalsEscalated')
+                : t('common.noLoansYetRequestOne')}
           </p>
         ) : (
           <div className="card-list">
