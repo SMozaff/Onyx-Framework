@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import { apiClient } from "@/api/client";
 import { describeError } from "@/utils/errorHandler";
 
@@ -32,6 +33,7 @@ interface UserRow {
 }
 
 export default function Users() {
+  const { t } = useI18n();
   const [users, setUsers] = useState<UserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,25 +54,25 @@ export default function Users() {
   return (
     <div className="max-w-6xl">
       <p className="text-[0.66rem] font-extrabold tracking-[0.15em] text-onyx-accent">IDENTITY MANAGEMENT</p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-onyx-text">Users</h1>
+      <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-onyx-text">{t("nav.users")}</h1>
       <p className="mt-1 text-sm text-onyx-text-dim">Create, classify, and maintain organization access with explicit account state.</p>
 
       <CreateUserForm onCreated={() => void refresh()} />
 
       {error && <p className="mt-4 text-sm text-onyx-status-blocked">{error}</p>}
-      {users === null && !error && <p className="mt-4 text-sm text-onyx-text-dim">Loading…</p>}
+      {users === null && !error && <p className="mt-4 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
 
       {users && (
         <div className="mt-6 overflow-x-auto rounded-xl border border-onyx-border bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-onyx-border bg-slate-50 text-onyx-text-dim">
               <tr>
-                <th className="px-3 py-2 font-medium">Username</th>
+                <th className="px-3 py-2 font-medium">{t("auth.username")}</th>
                 <th className="px-3 py-2 font-medium">Admin</th>
                 <th className="px-3 py-2 font-medium">Class</th>
                 <th className="px-3 py-2 font-medium">Parent</th>
-                <th className="px-3 py-2 font-medium">Active</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
+                <th className="px-3 py-2 font-medium">{t("status.active")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -86,6 +88,7 @@ export default function Users() {
 }
 
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
@@ -178,6 +181,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
 }
 
 function UserRowView({
+  const { t } = useI18n();
   user,
   allUsers,
   onChanged,
