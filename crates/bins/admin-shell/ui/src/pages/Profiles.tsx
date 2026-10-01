@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import { apiClient } from "@/api/client";
 import { describeError } from "@/utils/errorHandler";
 
@@ -26,6 +27,7 @@ interface ProfileRow {
 }
 
 export default function Profiles() {
+  const { t } = useI18n();
   const [profiles, setProfiles] = useState<ProfileRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProfileRow | "new" | null>(null);
@@ -61,7 +63,7 @@ export default function Profiles() {
 
       {error && <p className="mt-4 text-sm text-onyx-status-blocked">{error}</p>}
       {profiles === null && !error && (
-        <p className="mt-4 text-sm text-onyx-text-dim">Loading…</p>
+        <p className="mt-4 text-sm text-onyx-text-dim">{t("common.loading")}</p>
       )}
 
       {profiles && (
@@ -69,7 +71,7 @@ export default function Profiles() {
           <table className="w-full text-left text-sm">
             <thead className="border-b border-onyx-border bg-onyx-surface text-onyx-text-dim">
               <tr>
-                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">{t("common.name")}</th>
                 <th className="px-3 py-2 font-medium">Job title</th>
                 <th className="px-3 py-2 font-medium">Department</th>
                 <th className="px-3 py-2 font-medium">Class</th>
@@ -139,6 +141,7 @@ const MANDATORY_FIELDS = [
 ] as const;
 
 function EditProfileDialog({
+  const { t } = useI18n();
   profile,
   onClose,
   onSaved,
@@ -253,6 +256,7 @@ function EditProfileDialog({
 }
 
 function Field({
+  const { t } = useI18n();
   label,
   value,
   onChange,
@@ -291,6 +295,7 @@ interface ImportSummary {
 }
 
 function ImportExportPanel({ onImported }: { onImported: () => void }) {
+  const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
