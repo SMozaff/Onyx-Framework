@@ -148,6 +148,7 @@ export function useAddTodoItem() {
  * caller gets a real domain error surfaced via the existing toast path.
  */
 export function useRecordPreCheck(kind: 'todo_list' | 'target_list') {
+  const { t } = useI18n();
   const client = useQueryClient();
   const commandType =
     kind === 'todo_list' ? 'todo_list.RecordTeamLeaderPreCheck' : 'target_list.RecordTeamLeaderPreCheck';
