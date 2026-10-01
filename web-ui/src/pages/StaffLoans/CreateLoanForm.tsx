@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useI18n } from '../../i18n/I18nContext';
 import UserPicker from '../../components/UserPicker';
 import { useRequestStaffLoan } from '../../hooks/useCommand';
 
@@ -7,6 +8,7 @@ import { useRequestStaffLoan } from '../../hooks/useCommand';
  * the shared user picker rather than manually entered opaque UUIDs.
  */
 export default function CreateLoanForm() {
+  const { t } = useI18n();
   const request = useRequestStaffLoan();
   const [staffUserId, setStaffUserId] = useState('');
   const [realOwnerId, setRealOwnerId] = useState('');
@@ -45,29 +47,29 @@ export default function CreateLoanForm() {
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h2>Request a staff loan</h2>
+        <h2>{t('common.requestStaffLoan')}</h2>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>
-        Requires the real owner's approval before it takes effect — see the Loans list below once submitted.
+        {t('common.staffLoanApprovalNote')}
       </p>
       <div style={{ display: 'grid', gap: 10 }}>
         <UserPicker
-          label="Staff member"
+          label={t("common.staffMember")}
           value={staffUserId}
           onChange={setStaffUserId}
-          placeholder="Choose the staff member being loaned"
+          placeholder={t("common.chooseLoanedStaff")}
         />
         <UserPicker
-          label="Real owner"
+          label={t("common.realOwner")}
           value={realOwnerId}
           onChange={setRealOwnerId}
-          placeholder="Choose the staff member's owning manager"
+          placeholder={t("common.chooseOwningManager")}
         />
         <UserPicker
-          label="Borrowing manager"
+          label={t("common.borrowingManager")}
           value={borrowingManagerId}
           onChange={setBorrowingManagerId}
-          placeholder="Choose the manager receiving temporary authority"
+          placeholder={t("common.chooseBorrowingManager")}
         />
         {realOwnerId && realOwnerId === borrowingManagerId ? (
           <p role="alert" className="muted" style={{ margin: 0 }}>
