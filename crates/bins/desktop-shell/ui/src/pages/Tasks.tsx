@@ -156,7 +156,7 @@ function CreateTaskForm({
   onCreated: (id: Id16) => void;
 }) {
   const { t } = useI18n();
-  const [title, setTitle = useState("");
+  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [missionIdRaw, setMissionIdRaw] = useState("");
   const { execute, loading, error } = useCommand();
