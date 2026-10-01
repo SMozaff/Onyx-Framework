@@ -181,7 +181,6 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
 }
 
 function UserRowView({
-  const { t } = useI18n();
   user,
   allUsers,
   onChanged,
@@ -190,6 +189,7 @@ function UserRowView({
   allUsers: UserRow[];
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
