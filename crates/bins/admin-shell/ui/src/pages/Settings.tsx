@@ -33,7 +33,6 @@ import {
  */
 const POLICY_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
 const SERVER_ADDRESS_PLACEHOLDER = "http://192.168.0.250:3000";
-const LOCAL_SERVER_ADDRESS = "http://127.0.0.1:3000";
 
 export default function Settings() {
   const { t } = useI18n();
@@ -376,7 +375,6 @@ function PolicyPanel({
   policy: Record<string, unknown>;
   onChanged: () => void;
 }) {
-  const { t } = useI18n();
   const status = String(policy.status ?? "Unknown");
   const name = String(policy.name ?? "(unnamed)");
   const version = typeof policy.version === "number" ? policy.version : 0;
@@ -441,7 +439,6 @@ function DraftVersionForm({
   version: number;
   onChanged: () => void;
 }) {
-  const { t } = useI18n();
   const { t } = useI18n();
   const [rules, setRules] = useState<DraftRule[]>([
     { rule_type: "FeatureToggle", key: "", value: "" },
