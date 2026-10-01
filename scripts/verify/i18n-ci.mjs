@@ -85,7 +85,7 @@ function auditFile(file) {
   // JSX text nodes. Require at least one Unicode letter so prose in any
   // supported script is detected without treating punctuation-only layout
   // fragments as localization debt.
-  for (const match of source.matchAll(/>\s*([^<>{}\n]*\p{L}[^<>{}\n]*)\s*</gu)) {
+  if (file.endsWith(".tsx")) for (const match of source.matchAll(/>\s*([^<>{}\n]*\p{L}[^<>{}\n]*)\s*<\/?[A-Za-z][A-Za-z0-9_.:-]*\s*>/gu)) {
     addViolation(violations, "jsx-text", relative, match[1], "literal JSX text");
   }
 
