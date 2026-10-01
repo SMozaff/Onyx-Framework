@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useI18n } from '../i18n/I18nContext';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
 
@@ -37,6 +38,7 @@ export default function UserPicker({
     networkMode: 'always',
   });
 
+  const { t } = useI18n();
   const users = useMemo(() => {
     const normalized = search.trim().toLocaleLowerCase();
     if (!normalized) return usersQuery.data ?? [];
@@ -64,8 +66,8 @@ export default function UserPicker({
         aria-label={label}
         disabled={disabled || usersQuery.isLoading || usersQuery.isError}
       >
-        <option value="">{usersQuery.isLoading ? 'Loading people…' : placeholder}</option>
-        {selectedUnavailable ? <option value={value}>Previously selected person</option> : null}
+        <option value="">{usersQuery.isLoading ? t('common.loadingPeople') : placeholder}</option>
+        {selectedUnavailable ? <option value={value}>{t('common.previouslySelectedPerson')}</option> : null}
         {users.map((user) => (
           <option key={user.id} value={user.id}>
             {user.username}
@@ -74,12 +76,12 @@ export default function UserPicker({
       </select>
       {usersQuery.isError ? (
         <span className="muted" role="alert" style={{ fontSize: 13 }}>
-          People could not be loaded. Try again shortly.
+          {t('common.peopleLoadFailed')}
         </span>
       ) : null}
       {!usersQuery.isLoading && !usersQuery.isError && users.length === 0 ? (
         <span className="muted" style={{ fontSize: 13 }}>
-          No people match this search.
+          {t('common.noPeopleMatch')}
         </span>
       ) : null}
     </label>
