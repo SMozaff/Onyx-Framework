@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useI18n } from "@/i18n/I18nContext";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
  * not an invented sync or connection status.
  */
 export default function MainLayout() {
+  const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
   const organizationLabel = user ? `Organization ${user.organization_id.slice(0, 8)}…` : "Organization context";
 
@@ -24,7 +26,7 @@ export default function MainLayout() {
         <div className="mb-8 flex items-center gap-2.5 px-2 pt-1">
           <span className="onyx-brand-mark" aria-hidden="true">O</span>
           <div>
-            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">ONYX</p>
+            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">{t("app.name")}</p>
             <p className="mt-0.5 text-[0.62rem] text-sky-100/70">Administration</p>
           </div>
         </div>
@@ -49,7 +51,7 @@ export default function MainLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="onyx-workspace-header flex min-h-16 shrink-0 items-center justify-between gap-4 border-b border-onyx-border px-5 sm:px-7">
           <div className="min-w-0">
-            <p className="text-[0.63rem] font-bold uppercase tracking-[0.14em] text-onyx-text-dim">Organization</p>
+            <p className="text-[0.63rem] font-bold uppercase tracking-[0.14em] text-onyx-text-dim">{t("common.organization")}</p>
             <p className="truncate text-sm font-semibold text-onyx-text" title={user?.organization_id}>{organizationLabel}</p>
             <p className="mt-0.5 text-[0.65rem] text-onyx-text-dim">Administrative control plane</p>
           </div>
