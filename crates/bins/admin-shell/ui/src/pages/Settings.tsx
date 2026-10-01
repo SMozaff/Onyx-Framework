@@ -5,6 +5,7 @@ import { useCommand } from "@/hooks/useCommand";
 import { useQuery } from "@/hooks/useQuery";
 import { describeError } from "@/utils/errorHandler";
 import { useAuthStore } from "@/stores/authStore";
+import { useI18n } from "@/i18n/I18nContext";
 import {
   getServerAddress,
   setServerAddress,
