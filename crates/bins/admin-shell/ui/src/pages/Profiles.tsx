@@ -141,7 +141,6 @@ const MANDATORY_FIELDS = [
 ] as const;
 
 function EditProfileDialog({
-  const { t } = useI18n();
   profile,
   onClose,
   onSaved,
@@ -150,6 +149,7 @@ function EditProfileDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useI18n();
   const [form, setForm] = useState({
     owner_id: profile?.owner_id ?? "",
     full_name: profile?.full_name ?? "",
@@ -256,7 +256,6 @@ function EditProfileDialog({
 }
 
 function Field({
-  const { t } = useI18n();
   label,
   value,
   onChange,
@@ -267,6 +266,7 @@ function Field({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div>
       <label className="block text-xs font-medium text-onyx-text-dim">{label}</label>
