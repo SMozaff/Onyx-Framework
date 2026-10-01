@@ -1,5 +1,4 @@
-import {
-  const { t } = useI18n(); useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { useCommand } from "@/hooks/useCommand";
@@ -423,6 +422,7 @@ function VersionHistory({
 }
 
 function DraftVersionForm({
+  const { t } = useI18n();
   targetId,
   version,
   onChanged,
