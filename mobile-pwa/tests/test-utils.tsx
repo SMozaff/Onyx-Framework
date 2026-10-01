@@ -32,6 +32,11 @@ export function createTestClient() {
 export function TestProviders({ children, path = '/' }: PropsWithChildren<{ path?: string }>) {
   const client = createTestClient();
   return (
+    <LocaleProvider dictionaries={dictionaries}>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
+      </QueryClientProvider>
+    </LocaleProvider>
     <QueryClientProvider client={client}>
       <LocaleProvider dictionaries={dictionaries}>
         <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
