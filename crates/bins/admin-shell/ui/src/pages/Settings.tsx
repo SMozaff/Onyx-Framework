@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import {
+  const { t } = useI18n(); useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { useCommand } from "@/hooks/useCommand";
@@ -32,7 +33,6 @@ import {
  * goes through `/api/command` via `useCommand`.
  */
 export default function Settings() {
-  const { t } = useI18n();
   const { policyId } = useParams<{ policyId?: string }>();
   const navigate = useNavigate();
 
