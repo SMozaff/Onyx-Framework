@@ -101,7 +101,7 @@ decision, busy, onCancel, onConfirm }: Props) {
             onClick={confirm}
             disabled={confirmDisabled}
           >
-            {busy ? t('common.submitting') : t('common.confirmDecision', { decision })}
+            {busy ? t('common.submitting') : t(decision === 'verify' ? 'common.confirmVerify' : decision === 'reject' ? 'common.confirmReject' : 'common.confirmEscalate')}
           </button>
         </div>
       </section>
