@@ -266,7 +266,6 @@ function Field({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
-  const { t } = useI18n();
   return (
     <div>
       <label className="block text-xs font-medium text-onyx-text-dim">{label}</label>
