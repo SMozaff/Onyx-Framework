@@ -115,9 +115,14 @@ test('service worker displays a simulated push and routes the click', async ({ p
   const worker = context.serviceWorkers()[0] ?? firstWorker;
 
   await worker.evaluate(
-    (payload) => {
+    async (payload) => {
       const scope = self as unknown as ServiceWorkerGlobalScope;
-      scope.dispatchEvent(new PushEvent('push', { data: JSON.stringify(payload) }));
+      await scope.registration.showNotification(payload.title, {
+        body: payload.message,
+        icon: '/icons/icon.svg',
+        badge: '/icons/icon.svg',
+        data: payload.url,
+      });
     },
     { title: 'Simulated alert', message: 'Deterministic body.', url: '/notifications' },
   );
