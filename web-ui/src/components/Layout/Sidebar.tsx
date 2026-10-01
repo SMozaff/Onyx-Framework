@@ -32,7 +32,7 @@ const Sidebar = forwardRef<HTMLElement, SidebarProps>(function Sidebar({ open, m
       aria-label={t('nav.primary')}
       aria-hidden={closedMobileDrawer || undefined}
     >
-      <div className="brand-block" aria-label="ONYX Remote Operator">
+      <div className="brand-block" aria-label={t('app.remoteOperator')}>
         <span className="brand-mark" aria-hidden="true">O</span>
         <div><strong>{t('app.name')}</strong><small>{t('app.remoteOperator')}</small></div>
       </div>
