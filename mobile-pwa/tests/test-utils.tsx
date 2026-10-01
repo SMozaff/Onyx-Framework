@@ -37,11 +37,6 @@ export function TestProviders({ children, path = '/' }: PropsWithChildren<{ path
         <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
       </QueryClientProvider>
     </LocaleProvider>
-    <QueryClientProvider client={client}>
-      <LocaleProvider dictionaries={dictionaries}>
-        <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
-      </LocaleProvider>
-    </QueryClientProvider>
   );
 }
 
