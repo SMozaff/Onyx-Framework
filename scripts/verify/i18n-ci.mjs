@@ -82,23 +82,33 @@ function auditFile(file) {
   const source = stripComments(readFileSync(file, "utf8"));
   const violations = [];
 
-  // JSX text nodes.
-  for (const match of source.matchAll(/>\s*([A-Za-z][^<>{}\n]{2,})\s*</g)) {
+  // JSX text nodes. Require at least one Unicode letter so prose in any
+  // supported script is detected without treating punctuation-only layout
+  // fragments as localization debt.
+  for (const match of source.matchAll(/>\s*([^<>{}\n]*\p{L}[^<>{}\n]*)\s*</gu)) {
     addViolation(violations, "jsx-text", relative, match[1], "literal JSX text");
   }
 
-  // User-facing JSX attributes. Keep this intentionally conservative.
+  // User-facing JSX attributes. Cover both direct literals and the common
+  // JSX-expression form: aria-label={"Open menu"}. Dynamic expressions are
+  // intentionally excluded because resolving them requires execution.
   for (const match of source.matchAll(/\b(placeholder|aria-label|title|alt|label|helperText)\s*=\s*(["'])([\s\S]*?)\2/g)) {
-    const value = match[3];
-    if (!value.includes("{")) {
-      addViolation(violations, "jsx-attribute", relative, value, match[1]);
-    }
+    addViolation(violations, "jsx-attribute", relative, unescape(match[3], match[2]), match[1]);
+  }
+  for (const match of source.matchAll(/\b(placeholder|aria-label|title|alt|label|helperText)\s*=\s*\{\s*(["'])([\s\S]*?)\2\s*\}/g)) {
+    addViolation(violations, "jsx-attribute", relative, unescape(match[3], match[2]), match[1]);
   }
 
   // Common presentation/error notification APIs. This deliberately does not
   // flag generic Error() or console output because those can be diagnostics.
   const callPattern = /\b(toast\.(?:success|error|warning|info)|showToast|notify|setError|setSuccess|setWarning|setInfo|window\.(?:alert|confirm|prompt))\s*\(\s*(["'])([\s\S]*?)\2/g;
   for (const match of source.matchAll(callPattern)) {
+    addViolation(violations, "presentation-call", relative, unescape(match[3], match[2]), match[1]);
+  }
+  // Also cover the JSX/JavaScript expression form: toast.error({"Request failed"}).
+  // Dynamic expressions remain intentionally outside the static audit.
+  const callExpressionPattern = /\b(toast\.(?:success|error|warning|info)|showToast|notify|setError|setSuccess|setWarning|setInfo|window\.(?:alert|confirm|prompt))\s*\(\s*\{\s*(["'])([\s\S]*?)\2\s*\}/g;
+  for (const match of source.matchAll(callExpressionPattern)) {
     addViolation(violations, "presentation-call", relative, unescape(match[3], match[2]), match[1]);
   }
 

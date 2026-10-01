@@ -448,7 +448,9 @@ function findLiteralTranslationKeys(source, callees) {
   // Only static string literals are checked. Template literals containing
   // ${...} and variable-derived keys are intentionally ignored because they
   // cannot be resolved without executing the application.
-  const pattern = new RegExp(`(${calleePattern})\\s*\\(\\s*(['"\`])((?:\\\\.|(?!\\2)[^\\\\])*)\\2`, "g");
+  // Require an identifier boundary before the translation callee so a
+  // setter such as setText("") cannot be mistaken for t("").
+  const pattern = new RegExp(`(?<![A-Za-z0-9_$])(${calleePattern})\\s*\\(\\s*(['"\\`])((?:\\\\.|(?!\\2)[^\\\\])*)\\2`, "g");
   const found = [];
   for (const match of source.matchAll(pattern)) {
     const quote = match[2];
