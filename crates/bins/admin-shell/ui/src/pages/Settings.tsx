@@ -367,6 +367,7 @@ function PolicyPanel({
   policy: Record<string, unknown>;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const status = String(policy.status ?? "Unknown");
   const name = String(policy.name ?? "(unnamed)");
   const version = typeof policy.version === "number" ? policy.version : 0;
@@ -422,7 +423,6 @@ function VersionHistory({
 }
 
 function DraftVersionForm({
-  const { t } = useI18n();
   targetId,
   version,
   onChanged,
