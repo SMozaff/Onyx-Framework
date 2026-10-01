@@ -3,19 +3,11 @@ import { Link } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { SyncStatus } from "@/types/onyx";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 
-/**
- * The command-center landing page. There is currently no "list all
- * missions" / "list all tasks" query anywhere in the backend —
- * `client-composition`'s `QueryRegistry` only has `GetMission`/`GetTask`
- * (single-aggregate lookup by id, per `app_state.rs`), not a projection
- * or index query. This page is honest about that rather than faking
- * list data: it shows the real sync status (the one thing genuinely
- * queryable without a target id) and points to the Missions/Tasks pages
- * for anything that needs a specific aggregate.
- */
 export default function Dashboard() {
   const { organizationIdText, serverAddress } = useSession();
+  const { t } = useI18n();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -35,31 +27,31 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Dashboard</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("dashboard.title")}</h1>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Command center overview for this replica.
+        {t("dashboard.commandCenterOverview")}
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
-          label="Pending outbox"
+          label={t("dashboard.pendingOutbox")}
           value={status ? String(status.pending_outbox_count) : "—"}
         />
         <StatCard
-          label="Open conflicts"
+          label={t("dashboard.openConflicts")}
           value={status ? String(status.open_conflict_count) : "—"}
           warn={status !== null && status.open_conflict_count > 0}
         />
         <StatCard
-          label="Sync status"
-          value={status === null ? "—" : status.online ? "Online" : "Offline"}
+          label={t("dashboard.syncStatus")}
+          value={status === null ? "—" : status.online ? t("common.online") : t("common.offline")}
           warn={status !== null && !status.online}
         />
       </div>
 
       {loadError && (
         <p className="mt-4 text-sm text-onyx-status-blocked">
-          Failed to load sync status: {loadError}
+          {t("dashboard.failedToLoadSyncStatus")}: {loadError}
         </p>
       )}
 
@@ -68,24 +60,24 @@ export default function Dashboard() {
           to="/missions"
           className="rounded-md bg-onyx-surface px-4 py-2 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Open Missions
+          {t("dashboard.openMissions")}
         </Link>
         <Link
           to="/tasks"
           className="rounded-md bg-onyx-surface px-4 py-2 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Open Tasks
+          {t("dashboard.openTasks")}
         </Link>
         <Link
           to="/approvals"
           className="rounded-md bg-onyx-surface px-4 py-2 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Review Approvals
+          {t("dashboard.reviewApprovals")}
         </Link>
       </div>
 
       <p className="mt-8 text-xs text-onyx-text-dim">
-        Connected to {serverAddress} for organization {organizationIdText}.
+        {t("dashboard.connectedTo")} {serverAddress} {t("dashboard.forOrganization")} {organizationIdText}.
       </p>
     </div>
   );
@@ -96,9 +88,7 @@ function StatCard({ label, value, warn }: { label: string; value: string; warn?:
     <div className="rounded-lg border border-onyx-border bg-onyx-surface p-4">
       <div className="text-xs text-onyx-text-dim">{label}</div>
       <div
-        className={`mt-1 text-2xl font-semibold ${
-          warn ? "text-onyx-status-blocked" : "text-onyx-text"
-        }`}
+        className={`mt-1 text-2xl font-semibold ${warn ? "text-onyx-status-blocked" : "text-onyx-text"}`}
       >
         {value}
       </div>
