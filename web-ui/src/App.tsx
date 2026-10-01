@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/Layout/MainLayout';
 import { useAuthStore } from './stores/authStore';
+import { useI18n } from './i18n/I18nContext';
 
 const LoginPage = lazy(() => import('./pages/Login'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
@@ -19,8 +20,9 @@ function ProtectedLayout() {
 }
 
 export default function App() {
+  const { t } = useI18n();
   return (
-    <Suspense fallback={<div className="app-loading" role="status">Loading ONYX…</div>}>
+    <Suspense fallback={<div className="app-loading" role="status">{t('common.loadingOnyx')}</div>}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedLayout />}>
