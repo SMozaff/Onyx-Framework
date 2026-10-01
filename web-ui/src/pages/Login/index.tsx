@@ -17,10 +17,10 @@ export default function LoginPage() {
   const submit = (event: FormEvent) => { event.preventDefault(); login.mutate({ username, password }); };
   return (
     <div className={styles.page}>
-      <section className={styles.hero} aria-label="ONYX product introduction">
+      <section className={styles.hero} aria-label={t('auth.productIntroduction')}>
         <div className="brand-block brand-block-light"><span className="brand-mark">O</span><div><strong>{t('app.name')}</strong><small>{t('app.tagline')}</small></div></div>
         <div><p className="eyebrow eyebrow-light">{t('auth.secureBrowserAccess')}</p><h1>{t('auth.heroTitle')}</h1><p>{t('auth.heroBody')}</p></div>
-        <small>Thin client · Server-authoritative · No offline command queue</small>
+        <small>{t('auth.thinClientServerAuthoritative')}</small>
       </section>
       <section className={styles.panel}>
         <form className={styles.card} onSubmit={submit}>
