@@ -49,7 +49,7 @@ export default function Profiles() {
   return (
     <div className="max-w-5xl">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-onyx-text">Staff Profiles</h1>
+        <h1 className="text-xl font-semibold text-onyx-text">{t("common.staffProfiles")}</h1>
         <button
           type="button"
           onClick={() => setEditing("new")}
@@ -72,10 +72,10 @@ export default function Profiles() {
             <thead className="border-b border-onyx-border bg-onyx-surface text-onyx-text-dim">
               <tr>
                 <th className="px-3 py-2 font-medium">{t("common.name")}</th>
-                <th className="px-3 py-2 font-medium">Job title</th>
-                <th className="px-3 py-2 font-medium">Department</th>
-                <th className="px-3 py-2 font-medium">Class</th>
-                <th className="px-3 py-2 font-medium">Contact</th>
+                <th className="px-3 py-2 font-medium">{t("common.jobTitle")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.department")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.class")}</th>
+                <th className="px-3 py-2 font-medium">{t("common.contact")}</th>
                 <th className="px-3 py-2 font-medium"></th>
               </tr>
             </thead>
@@ -205,7 +205,7 @@ function EditProfileDialog({
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4">
       <div className="w-full max-w-lg rounded-lg border border-onyx-border bg-onyx-surface p-5">
         <h2 className="text-base font-medium text-onyx-text">
-          {profile ? "Edit profile" : "New profile"}
+          {profile ? "Edit profile" : t("common.newProfile")}
         </h2>
         {!profile && (
           <p className="mt-1 text-xs text-onyx-text-dim">
@@ -215,17 +215,17 @@ function EditProfileDialog({
         )}
 
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <Field label="User id (UUID)" value={form.owner_id} onChange={(v) => update("owner_id", v)} disabled={!!profile} />
-          <Field label="Full name" value={form.full_name} onChange={(v) => update("full_name", v)} />
-          <Field label="Job title" value={form.job_title} onChange={(v) => update("job_title", v)} />
-          <Field label="Department" value={form.department} onChange={(v) => update("department", v)} />
-          <Field label="Contact email" value={form.contact_email} onChange={(v) => update("contact_email", v)} />
-          <Field label="Contact phone" value={form.contact_phone} onChange={(v) => update("contact_phone", v)} />
-          <Field label="Class label" value={form.class_label} onChange={(v) => update("class_label", v)} />
-          <Field label="Parent display name" value={form.parent_display_name} onChange={(v) => update("parent_display_name", v)} />
-          <Field label="Photo blob key" value={form.photo_blob_key} onChange={(v) => update("photo_blob_key", v)} />
+          <Field label={t("common.userIdUuid")} value={form.owner_id} onChange={(v) => update("owner_id", v)} disabled={!!profile} />
+          <Field label={t("common.fullName")} value={form.full_name} onChange={(v) => update("full_name", v)} />
+          <Field label={t("common.jobTitle")} value={form.job_title} onChange={(v) => update("job_title", v)} />
+          <Field label={t("common.department")} value={form.department} onChange={(v) => update("department", v)} />
+          <Field label={t("common.contactEmail")} value={form.contact_email} onChange={(v) => update("contact_email", v)} />
+          <Field label={t("common.contactPhone")} value={form.contact_phone} onChange={(v) => update("contact_phone", v)} />
+          <Field label={t("common.classLabel")} value={form.class_label} onChange={(v) => update("class_label", v)} />
+          <Field label={t("common.parentDisplayName")} value={form.parent_display_name} onChange={(v) => update("parent_display_name", v)} />
+          <Field label={t("common.photoBlobKey")} value={form.photo_blob_key} onChange={(v) => update("photo_blob_key", v)} />
           <Field
-            label="Team memberships (;-separated)"
+            label={t("common.teamMemberships")}
             value={form.team_memberships}
             onChange={(v) => update("team_memberships", v)}
           />
@@ -338,7 +338,7 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
 
   return (
     <div className="mt-4 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Batch import / export</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("common.batchImportExport")}</h2>
       <p className="mt-1 text-xs text-onyx-text-dim">
         Mandatory columns: user_id, full_name, contact_email, contact_phone, job_title,
         department. user_id must already have an account. Rows matching an existing profile
@@ -357,7 +357,7 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
           }}
           className="text-xs text-onyx-text-dim"
         />
-        {loading && <span className="text-xs text-onyx-text-dim">Importing…</span>}
+        {loading && <span className="text-xs text-onyx-text-dim">{t("common.importing")}</span>}
         <a
           href={exportUrl("csv")}
           target="_blank"
