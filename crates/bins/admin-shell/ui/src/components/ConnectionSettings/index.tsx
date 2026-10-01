@@ -68,7 +68,7 @@ export default function ConnectionSettings() {
       </div>
       <label htmlFor="admin-server-address" className="mt-3 block text-xs font-medium text-onyx-text-dim">{t("auth.serverAddress")}</label>
       {mode === "network" && <p className="mt-1 text-[11px] text-onyx-text-dim">{t("common.exampleServerAddress")}</p>}
-      <input id="admin-server-address" value={value} onChange={(event) => { setValue(event.target.value); setStatus("idle"); setMessage(null); }} placeholder={mode === "local" ? LOCAL_ADDRESS : "http://192.168.0.250:3000"} className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-surface px-2 py-1.5 text-xs text-onyx-text focus:border-onyx-accent focus:outline-none" />
+      <input id="admin-server-address" value={value} onChange={(event) => { setValue(event.target.value); setStatus("idle"); setMessage(null); }} placeholder={mode === "local" ? LOCAL_ADDRESS : NETWORK_ADDRESS_PLACEHOLDER} className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-surface px-2 py-1.5 text-xs text-onyx-text focus:border-onyx-accent focus:outline-none" />
       <button type="button" onClick={() => void handleTestAndSave()} disabled={status === "testing"} className="mt-2 w-full rounded-md bg-onyx-surface-hover px-2 py-1.5 text-xs font-medium text-onyx-text hover:bg-onyx-border disabled:opacity-50">{status === "testing" ? t("auth.testing") : t("settings.testConnectionAndSave")}</button>
       {message && <p className={`mt-2 text-[11px] ${status === "error" ? "text-onyx-status-blocked" : "text-onyx-text-dim"}`} role="status">{message}</p>}
     </section>
