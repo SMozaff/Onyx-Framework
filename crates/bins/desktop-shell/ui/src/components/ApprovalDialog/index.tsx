@@ -3,6 +3,7 @@ import type { Id16 } from "@/types/onyx";
 import { useCommand } from "@/hooks/useCommand";
 import AccessibleDialog from "@/components/Dialog/AccessibleDialog";
 import { userFacingMessage } from "@/utils/userFacingError";
+import { useI18n } from "@/i18n/I18nContext";
 
 export interface ApprovalDialogProps {
   open: boolean;
@@ -32,6 +33,7 @@ export default function ApprovalDialog({
   userId,
   deviceId,
 }: ApprovalDialogProps) {
+  const { t } = useI18n();
   const [reason, setReason] = useState("");
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const { execute, loading, error } = useCommand();
@@ -56,7 +58,7 @@ export default function ApprovalDialog({
   return (
     <AccessibleDialog
       open={open}
-      title="Review submission"
+      title={t("approvals.reviewSubmission")}
       description={taskTitle}
       initialFocusRef={reasonRef}
       busy={loading}
@@ -75,9 +77,9 @@ export default function ApprovalDialog({
       />
       {error && <p className="mt-2 text-sm text-onyx-status-blocked" role="alert">{userFacingMessage(error)}</p>}
       <div className="mt-4 flex justify-end gap-2">
-        <button type="button" onClick={onClose} disabled={loading} className="rounded-md px-3 py-1.5 text-sm text-onyx-text-dim hover:bg-onyx-surface-hover">Cancel</button>
-        <button type="button" onClick={() => void decide("RejectTask")} disabled={loading || reason.trim().length === 0} className="rounded-md border border-onyx-status-blocked px-3 py-1.5 text-sm text-onyx-status-blocked hover:bg-onyx-status-blocked/10 disabled:opacity-50">Reject</button>
-        <button type="button" onClick={() => void decide("ApproveTask")} disabled={loading} className="rounded-md bg-onyx-status-approved px-3 py-1.5 text-sm font-medium text-onyx-bg hover:opacity-90 disabled:opacity-50">Approve</button>
+        <button type="button" onClick={onClose} disabled={loading} className="rounded-md px-3 py-1.5 text-sm text-onyx-text-dim hover:bg-onyx-surface-hover">{t("common.cancel")}</button>
+        <button type="button" onClick={() => void decide("RejectTask")} disabled={loading || reason.trim().length === 0} className="rounded-md border border-onyx-status-blocked px-3 py-1.5 text-sm text-onyx-status-blocked hover:bg-onyx-status-blocked/10 disabled:opacity-50">{t("common.reject")}</button>
+        <button type="button" onClick={() => void decide("ApproveTask")} disabled={loading} className="rounded-md bg-onyx-status-approved px-3 py-1.5 text-sm font-medium text-onyx-bg hover:opacity-90 disabled:opacity-50">{t("common.approve")}</button>
       </div>
     </AccessibleDialog>
   );

@@ -6,33 +6,20 @@ import { isShellError } from "@/types/onyx";
 import { useQuery } from "@/hooks/useQuery";
 import { useCommand } from "@/hooks/useCommand";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 
-/**
- * File sharing: upload a local file, view a `FileAsset`'s metadata and
- * versions, manage per-user access, and download previously-uploaded
- * content back to disk.
- *
- * Upload/download go through the dedicated `upload_file`/`download_file`
- * Tauri commands rather than `execute_command`, because a real upload is
- * a multi-step domain sequence that also needs the actual file bytes —
- * see `client_composition::file_upload`'s module doc comment. Everything
- * else on this page (access grants, quarantine, archive) is a plain
- * `FileAssetCommand` through the normal command registry.
- *
- * Same "no list/projection query exists yet" caveat as the other pages:
- * this is id-driven, not a browsable file listing.
- */
 export default function Files() {
   const { fileAssetId } = useParams<{ fileAssetId?: string }>();
   const navigate = useNavigate();
   const session = useSession();
+  const { t } = useI18n();
 
   const targetId: Id16 | null = fileAssetId ? JSON.parse(fileAssetId) : null;
   const { data, loading, error, refetch } = useQuery<LoadedAggregate>("GetFileAsset", targetId);
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Files</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("files.title")}</h1>
 
       <IdLookup onLookup={(id) => navigate(`/files/${JSON.stringify(id)}`)} />
 
@@ -40,10 +27,10 @@ export default function Files() {
 
       {targetId && (
         <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-          {loading && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loading && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {error && <p className="text-sm text-onyx-status-blocked">{error.message}</p>}
           {!loading && !error && data === null && (
-            <p className="text-sm text-onyx-text-dim">No file found for this id.</p>
+            <p className="text-sm text-onyx-text-dim">{t("files.noFileFoundForId")}</p>
           )}
           {data && (
             <FileAssetPanel
@@ -60,6 +47,7 @@ export default function Files() {
 }
 
 function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
+  const { t } = useI18n();
   const [raw, setRaw] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -79,13 +67,13 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
   return (
     <div className="mt-4">
       <label className="block text-xs font-medium text-onyx-text-dim">
-        Look up by file id (JSON array of 16 bytes)
+        {t("files.lookupByFileId")}
       </label>
       <div className="mt-1 flex gap-2">
         <input
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -93,7 +81,7 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
           onClick={submit}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          View
+          {t("common.view")}
         </button>
       </div>
       {parseError && <p className="mt-1 text-xs text-onyx-status-blocked">{parseError}</p>}
@@ -101,10 +89,6 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
   );
 }
 
-/** 100 MB — mirrors `file_domain::value::MAX_FILE_SIZE_BYTES`, which the
- * backend enforces independently. Shown here only so the user gets an
- * immediate, local message rather than a round trip for an obviously
- * oversized file; the backend remains the authority. */
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 
 function UploadPanel({
@@ -114,6 +98,7 @@ function UploadPanel({
   session: ReturnType<typeof useSession>;
   onUploaded: (id: Id16) => void;
 }) {
+  const { t } = useI18n();
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,16 +132,15 @@ function UploadPanel({
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Upload a file</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("files.uploadFile")}</h2>
       <p className="mt-1 text-xs text-onyx-text-dim">
-        Enter the full path of a file on this machine. Maximum{" "}
-        {MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB.
+        {t("files.uploadPathNote")} {MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB.
       </p>
       <div className="mt-2 flex gap-2">
         <input
           value={path}
           onChange={(e) => setPath(e.target.value)}
-          placeholder="/home/user/documents/report.pdf"
+          placeholder={t("files.uploadPathPlaceholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -165,13 +149,13 @@ function UploadPanel({
           disabled={busy || path.trim().length === 0}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
-          {busy ? "Uploading…" : "Upload"}
+          {busy ? t("common.uploading") : t("common.upload")}
         </button>
       </div>
       {error && <p className="mt-1 text-xs text-onyx-status-blocked">{error}</p>}
       {lastHash && (
         <p className="mt-2 break-all text-xs text-onyx-text-dim">
-          Uploaded. Content hash: <span className="text-onyx-text">{lastHash}</span>
+          {t("files.uploadedContentHash")} <span className="text-onyx-text">{lastHash}</span>
         </p>
       )}
     </div>
@@ -189,8 +173,9 @@ function FileAssetPanel({
   session: ReturnType<typeof useSession>;
   onChanged: () => void;
 }) {
-  const fileName = String(asset.aggregate.file_name ?? "(unnamed)");
-  const mimeType = String(asset.aggregate.mime_type ?? "unknown");
+  const { t } = useI18n();
+  const fileName = String(asset.aggregate.file_name ?? t("files.unnamed"));
+  const mimeType = String(asset.aggregate.mime_type ?? t("files.unknownType"));
   const status = String(asset.aggregate.status ?? "Unknown");
   const versions = Array.isArray(asset.aggregate.versions)
     ? (asset.aggregate.versions as { content_hash?: string; size_bytes?: number }[])
@@ -203,19 +188,14 @@ function FileAssetPanel({
         <span className="text-xs text-onyx-text-dim">{status}</span>
       </div>
       <p className="mt-1 text-xs text-onyx-text-dim">{mimeType}</p>
-
       <VersionList versions={versions} />
-
       <AccessControls targetId={targetId} asset={asset} session={session} onChanged={onChanged} />
     </div>
   );
 }
 
-function VersionList({
-  versions,
-}: {
-  versions: { content_hash?: string; size_bytes?: number }[];
-}) {
+function VersionList({ versions }: { versions: { content_hash?: string; size_bytes?: number }[] }) {
+  const { t } = useI18n();
   const [destination, setDestination] = useState("");
   const [busyHash, setBusyHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -223,7 +203,7 @@ function VersionList({
 
   async function download(contentHash: string) {
     if (destination.trim().length === 0) {
-      setError("Enter a destination path first.");
+      setError(t("files.destinationRequired"));
       return;
     }
     setBusyHash(contentHash);
@@ -234,7 +214,7 @@ function VersionList({
         contentHash,
         destinationPath: destination,
       })) as number;
-      setSaved(`${bytesWritten} bytes written to ${destination}`);
+      setSaved(t("files.bytesWrittenTo", { count: bytesWritten, path: destination }));
     } catch (e) {
       setError(isShellError(e) ? e.message : String(e));
     } finally {
@@ -245,23 +225,20 @@ function VersionList({
   if (versions.length === 0) {
     return (
       <p className="mt-4 text-sm text-onyx-text-dim">
-        No versions recorded yet. A file uploaded through this app records its first version
-        automatically.
+        {t("files.noVersions")}
       </p>
     );
   }
 
   return (
     <div className="mt-4">
-      <h3 className="text-sm font-medium text-onyx-text">Versions</h3>
+      <h3 className="text-sm font-medium text-onyx-text">{t("files.versions")}</h3>
       <div className="mt-2">
-        <label className="block text-xs font-medium text-onyx-text-dim">
-          Download destination path
-        </label>
+        <label className="block text-xs font-medium text-onyx-text-dim">{t("files.downloadDestination")}</label>
         <input
           value={destination}
           onChange={(e) => setDestination(e.target.value)}
-          placeholder="/home/user/downloads/report.pdf"
+          placeholder={t("files.downloadPathPlaceholder")}
           className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
       </div>
@@ -270,17 +247,11 @@ function VersionList({
           const hash =
             typeof v.content_hash === "string"
               ? v.content_hash
-              : // `ContentHash` is a newtype over String; serde emits it
-                // transparently as a bare string, but tolerate an object
-                // shape rather than crash if that ever changes.
-                String((v.content_hash as unknown as { 0?: string } | undefined)?.[0] ?? "");
+              : String((v.content_hash as unknown as { 0?: string } | undefined)?.[0] ?? "");
           return (
-            <li
-              key={`${hash}-${i}`}
-              className="rounded-md border border-onyx-border bg-onyx-bg p-2 text-xs"
-            >
+            <li key={`${hash}-${i}`} className="rounded-md border border-onyx-border bg-onyx-bg p-2 text-xs">
               <p className="break-all text-onyx-text-dim">
-                v{i + 1} · {v.size_bytes ?? 0} bytes
+                {t("files.versionSummary", { version: i + 1, size: v.size_bytes ?? 0 })}
               </p>
               <p className="mt-1 break-all text-onyx-text-dim">{hash}</p>
               <button
@@ -289,7 +260,7 @@ function VersionList({
                 disabled={busyHash !== null || hash.length === 0}
                 className="mt-2 rounded-md bg-onyx-surface-hover px-3 py-1 text-xs text-onyx-text disabled:opacity-50"
               >
-                {busyHash === hash ? "Downloading…" : "Download"}
+                {busyHash === hash ? t("common.downloading") : t("common.download")}
               </button>
             </li>
           );
@@ -312,6 +283,7 @@ function AccessControls({
   session: ReturnType<typeof useSession>;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const [userIdRaw, setUserIdRaw] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const grantCmd = useCommand();
@@ -347,11 +319,7 @@ function AccessControls({
     onChanged();
   }
 
-  async function runSimple(
-    hook: ReturnType<typeof useCommand>,
-    commandType: string,
-    payload: unknown,
-  ) {
+  async function runSimple(hook: ReturnType<typeof useCommand>, commandType: string, payload: unknown) {
     await hook.execute({
       commandType,
       targetId,
@@ -368,12 +336,12 @@ function AccessControls({
 
   return (
     <div className="mt-6 border-t border-onyx-border pt-4">
-      <h3 className="text-sm font-medium text-onyx-text">Access</h3>
+      <h3 className="text-sm font-medium text-onyx-text">{t("files.access")}</h3>
       <div className="mt-2 flex gap-2">
         <input
           value={userIdRaw}
           onChange={(e) => setUserIdRaw(e.target.value)}
-          placeholder="User id [12,34,...]"
+          placeholder={t("files.userIdPlaceholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -382,7 +350,7 @@ function AccessControls({
           onClick={() => void runWithUserId(grantCmd, "GrantFileAccess")}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
-          Grant
+          {t("files.grant")}
         </button>
         <button
           type="button"
@@ -390,7 +358,7 @@ function AccessControls({
           onClick={() => void runWithUserId(revokeCmd, "RevokeFileAccess")}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
-          Revoke
+          {t("files.revoke")}
         </button>
       </div>
       {(formError ?? grantCmd.error ?? revokeCmd.error) && (
@@ -403,24 +371,18 @@ function AccessControls({
         <button
           type="button"
           disabled={quarantineCmd.loading}
-          onClick={() =>
-            void runSimple(quarantineCmd, "QuarantineFile", {
-              QuarantineFile: { reason: "Flagged for review" },
-            })
-          }
+          onClick={() => void runSimple(quarantineCmd, "QuarantineFile", { QuarantineFile: { reason: "Flagged for review" } })}
           className="rounded-md bg-onyx-status-review/15 px-3 py-1.5 text-xs text-onyx-status-review hover:bg-onyx-status-review/25 disabled:opacity-50"
         >
-          Quarantine
+          {t("files.quarantine")}
         </button>
         <button
           type="button"
           disabled={archiveCmd.loading}
-          onClick={() =>
-            void runSimple(archiveCmd, "ArchiveFile", { ArchiveFile: { reason: null } })
-          }
+          onClick={() => void runSimple(archiveCmd, "ArchiveFile", { ArchiveFile: { reason: null } })}
           className="rounded-md bg-onyx-status-closed/15 px-3 py-1.5 text-xs text-onyx-status-closed hover:bg-onyx-status-closed/25 disabled:opacity-50"
         >
-          Archive
+          {t("files.archive")}
         </button>
       </div>
       {(quarantineCmd.error ?? archiveCmd.error) && (

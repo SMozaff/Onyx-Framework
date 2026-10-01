@@ -5,6 +5,7 @@ import { newId16 } from "@/types/onyx";
 import { useQuery } from "@/hooks/useQuery";
 import { useCommand } from "@/hooks/useCommand";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 
 /**
  * Conversation list-by-id + thread view, plus a Connections panel for
@@ -22,6 +23,7 @@ import { useSession } from "@/hooks/useSession";
  * professional work tool, not a consumer chat app.
  */
 export default function Messaging() {
+  const { t } = useI18n();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   const session = useSession();
@@ -36,7 +38,7 @@ export default function Messaging() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Messaging</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("nav.messaging")}</h1>
 
       <div className="mt-4 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6">
         <div>
@@ -48,12 +50,12 @@ export default function Messaging() {
 
           {targetId && (
             <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-              {loadingConversation && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+              {loadingConversation && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
               {conversationError && (
                 <p className="text-sm text-onyx-status-blocked">{conversationError.message}</p>
               )}
               {!loadingConversation && !conversationError && conversation === null && (
-                <p className="text-sm text-onyx-text-dim">No conversation found for this id.</p>
+                <p className="text-sm text-onyx-text-dim">{t("common.noConversationFoundForId")}</p>
               )}
               {conversation && (
                 <ConversationPanel
@@ -74,6 +76,7 @@ export default function Messaging() {
 }
 
 function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
+  const { t } = useI18n();
   const [raw, setRaw] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -93,22 +96,20 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
   return (
     <div>
       <label className="block text-xs font-medium text-onyx-text-dim">
-        Look up by conversation id (JSON array of 16 bytes)
+        {t("common.lookupByConversationId")}
       </label>
       <div className="mt-1 flex gap-2">
         <input
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
           type="button"
           onClick={submit}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
-        >
-          Open
-        </button>
+        >{t("common.open")}</button>
       </div>
       {parseError && <p className="mt-1 text-xs text-onyx-status-blocked">{parseError}</p>}
     </div>
@@ -128,6 +129,7 @@ function CreateConversationForm({
   session: ReturnType<typeof useSession>;
   onCreated: (id: Id16) => void;
 }) {
+  const { t } = useI18n();
   const [conversationType, setConversationType] = useState<ConversationTypeOption>("Channel");
   const [parentSupergroupRaw, setParentSupergroupRaw] = useState("");
   const { execute, loading, error } = useCommand();
@@ -183,10 +185,10 @@ function CreateConversationForm({
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Create conversation</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("common.createConversation")}</h2>
       <div className="mt-2 space-y-2">
         <div>
-          <label className="block text-xs font-medium text-onyx-text-dim">Type</label>
+          <label className="block text-xs font-medium text-onyx-text-dim">{t("common.type")}</label>
           <select
             value={conversationType}
             onChange={(e) => setConversationType(e.target.value as ConversationTypeOption)}
@@ -227,7 +229,7 @@ function CreateConversationForm({
           disabled={loading}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
-          {loading ? "Creating…" : "Create"}
+          {loading ? t("common.creating") : t("common.create")}
         </button>
       </div>
     </div>
@@ -280,6 +282,7 @@ function AddMemberForm({
   session: ReturnType<typeof useSession>;
   onAdded: () => void;
 }) {
+  const { t } = useI18n();
   const [userIdRaw, setUserIdRaw] = useState("");
   const [isParentSupergroupMember, setIsParentSupergroupMember] = useState(false);
   const { execute, loading, error } = useCommand();
@@ -325,7 +328,7 @@ function AddMemberForm({
 
   return (
     <div className="mt-4 rounded-md border border-onyx-border bg-onyx-bg p-3">
-      <label className="block text-xs font-medium text-onyx-text-dim">Add member (user id)</label>
+      <label className="block text-xs font-medium text-onyx-text-dim">{t("common.addMemberUserId")}</label>
       <div className="mt-1 flex gap-2">
         <input
           value={userIdRaw}
@@ -338,9 +341,7 @@ function AddMemberForm({
           onClick={() => void addMember()}
           disabled={loading}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-        >
-          Add
-        </button>
+        >{t("common.add")}</button>
       </div>
       {isSubTeam && (
         <label className="mt-2 flex items-center gap-2 text-xs text-onyx-text-dim">
@@ -348,9 +349,7 @@ function AddMemberForm({
             type="checkbox"
             checked={isParentSupergroupMember}
             onChange={(e) => setIsParentSupergroupMember(e.target.checked)}
-          />
-          This user is already a member of the parent Supergroup
-        </label>
+          />{t("common.parentSupergroupMember")}</label>
       )}
       {isSubTeam && !isParentSupergroupMember && (
         <p className="mt-1 text-xs text-onyx-text-dim">
@@ -379,6 +378,7 @@ function MessageThread({
   // plus a lookup-by-id viewer for one message at a time, not a live
   // scrolling thread. Not invented here; a real thread view needs a
   // projection this increment's backend doesn't have.
+  const { t } = useI18n();
   const [messageIdRaw, setMessageIdRaw] = useState("");
   const targetMessageId: Id16 | null = messageIdRaw ? tryParseId16(messageIdRaw) : null;
   const {
@@ -410,7 +410,7 @@ function MessageThread({
 
       {targetMessageId && (
         <div className="mt-3 rounded-md border border-onyx-border bg-onyx-bg p-3">
-          {loadingMessage && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loadingMessage && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {messageError && <p className="text-sm text-onyx-status-blocked">{messageError.message}</p>}
           {message && (
             <MessageDetail
@@ -444,6 +444,7 @@ function ComposeMessage({
   session: ReturnType<typeof useSession>;
   onPosted: (id: Id16) => void;
 }) {
+  const { t } = useI18n();
   const [body, setBody] = useState("");
   const { execute, loading, error } = useCommand();
 
@@ -473,12 +474,12 @@ function ComposeMessage({
 
   return (
     <div>
-      <label className="block text-xs font-medium text-onyx-text-dim">Post a message</label>
+      <label className="block text-xs font-medium text-onyx-text-dim">{t("common.postMessage")}</label>
       <div className="mt-1 flex gap-2">
         <input
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder="Message text"
+          placeholder={t("common.messageTextPlaceholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -487,7 +488,7 @@ function ComposeMessage({
           disabled={loading || body.trim().length === 0}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
-          {loading ? "Sending…" : "Send"}
+          {loading ? t("common.sending") : t("common.send")}
         </button>
       </div>
       {error && <p className="mt-1 text-xs text-onyx-status-blocked">{error.message}</p>}
@@ -506,6 +507,7 @@ function MessageDetail({
   session: ReturnType<typeof useSession>;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const [editBody, setEditBody] = useState("");
   const [reactionCode, setReactionCode] = useState("");
   const editCmd = useCommand();
@@ -547,7 +549,7 @@ function MessageDetail({
               <input
                 value={editBody}
                 onChange={(e) => setEditBody(e.target.value)}
-                placeholder="New text"
+                placeholder={t("common.newTextPlaceholder")}
                 className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
               />
               <button
@@ -559,9 +561,7 @@ function MessageDetail({
                   )
                 }
                 className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-              >
-                Edit
-              </button>
+              >{t("common.edit")}</button>
             </div>
             {editCmd.error && (
               <p className="mt-1 text-xs text-onyx-status-blocked">{editCmd.error.message}</p>
@@ -573,7 +573,7 @@ function MessageDetail({
               <input
                 value={reactionCode}
                 onChange={(e) => setReactionCode(e.target.value)}
-                placeholder="Reaction code, e.g. thumbsup"
+                placeholder={t("common.reactionCodePlaceholder")}
                 className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
               />
               <button
@@ -585,9 +585,7 @@ function MessageDetail({
                   })
                 }
                 className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-              >
-                React
-              </button>
+              >{t("common.react")}</button>
               <button
                 type="button"
                 disabled={reactCmd.loading || reactionCode.trim().length === 0}
@@ -597,9 +595,7 @@ function MessageDetail({
                   })
                 }
                 className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-              >
-                Un-react
-              </button>
+              >{t("common.unreact")}</button>
             </div>
             {reactCmd.error && (
               <p className="mt-1 text-xs text-onyx-status-blocked">{reactCmd.error.message}</p>
@@ -616,9 +612,7 @@ function MessageDetail({
                 })
               }
               className="rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-sm text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
-            >
-              Redact
-            </button>
+            >{t("common.redact")}</button>
             {redactCmd.error && (
               <p className="mt-1 text-xs text-onyx-status-blocked">{redactCmd.error.message}</p>
             )}
@@ -642,6 +636,7 @@ function MessageDetail({
  * not have.
  */
 function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> }) {
+  const { t } = useI18n();
   const [recipientRaw, setRecipientRaw] = useState("");
   const [requestIdRaw, setRequestIdRaw] = useState("");
   const sendCmd = useCommand();
@@ -710,11 +705,11 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
 
   return (
     <div className="rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Connections</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("common.connections")}</h2>
 
       <div className="mt-2">
         <label className="block text-xs font-medium text-onyx-text-dim">
-          Send a connection request (recipient user id)
+          {t("common.sendConnectionRequest")}
         </label>
         <div className="mt-1 flex gap-2">
           <input
@@ -741,7 +736,7 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
 
       <div className="mt-4">
         <label className="block text-xs font-medium text-onyx-text-dim">
-          View a request by id
+          {t("common.viewRequestById")}
         </label>
         <input
           value={requestIdRaw}
@@ -765,25 +760,19 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
                     disabled={acceptCmd.loading}
                     onClick={() => void decide(acceptCmd, "AcceptConnectionRequest")}
                     className="rounded-md bg-onyx-status-approved/15 px-3 py-1.5 text-xs text-onyx-status-approved hover:bg-onyx-status-approved/25 disabled:opacity-50"
-                  >
-                    Accept
-                  </button>
+                  >{t("common.accept")}</button>
                   <button
                     type="button"
                     disabled={declineCmd.loading}
                     onClick={() => void decide(declineCmd, "DeclineConnectionRequest")}
                     className="rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
-                  >
-                    Decline
-                  </button>
+                  >{t("common.decline")}</button>
                   <button
                     type="button"
                     disabled={revokeCmd.loading}
                     onClick={() => void decide(revokeCmd, "RevokeConnectionRequest")}
                     className="rounded-md bg-onyx-surface px-3 py-1.5 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
-                  >
-                    Revoke
-                  </button>
+                  >{t("common.revoke")}</button>
                 </div>
               )}
               {(acceptCmd.error ?? declineCmd.error ?? revokeCmd.error) && (

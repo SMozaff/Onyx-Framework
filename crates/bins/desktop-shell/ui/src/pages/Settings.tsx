@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 
 const ConnectionStatus = {
   Idle: "idle",
@@ -25,6 +26,7 @@ export default function Settings({
   onRequireReauthentication: (nextLoginAddress: string) => Promise<void>;
 }) {
   const session = useSession();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [serverAddress, setServerAddress] = useState(session.serverAddress);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(ConnectionStatus.Idle);
@@ -74,13 +76,13 @@ export default function Settings({
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Settings</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("settings.title")}</h1>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Review the connection used by this staff desktop application.
+        {t("settings.desktopConnectionNote")}
       </p>
 
       <section className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-5">
-        <h2 className="text-base font-semibold text-onyx-text">Server connection</h2>
+        <h2 className="text-base font-semibold text-onyx-text">{t("settings.serverConnection")}</h2>
         <p className="mt-1 text-sm text-onyx-text-dim">
           You are signed in as <strong className="font-medium text-onyx-text">{session.username}</strong>.
           The server address and your session tokens are saved together, so changing the address
@@ -101,7 +103,7 @@ export default function Settings({
           className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <p className="mt-2 text-xs text-onyx-text-dim">
-          Example: http://192.168.0.250:3000 for a server on another PC on your network.
+          {t("auth.serverAddressExample")}
         </p>
 
         {message && (
@@ -123,7 +125,7 @@ export default function Settings({
             disabled={connectionStatus === ConnectionStatus.Testing || endingSession}
             className="rounded-md bg-onyx-surface-hover px-3 py-1.5 text-sm font-medium text-onyx-text disabled:opacity-50"
           >
-            {connectionStatus === ConnectionStatus.Testing ? "Testing…" : "Test connection"}
+            {connectionStatus === ConnectionStatus.Testing ? t("auth.testing") : t("settings.testConnection")}
           </button>
           {changed && (
             <button
@@ -139,7 +141,7 @@ export default function Settings({
       </section>
 
       <section className="mt-4 rounded-lg border border-onyx-border bg-onyx-surface p-5">
-        <h2 className="text-base font-semibold text-onyx-text">Account</h2>
+        <h2 className="text-base font-semibold text-onyx-text">{t("common.account")}</h2>
         <p className="mt-1 text-sm text-onyx-text-dim">
           Signing out clears the saved server-specific session tokens. It does not reset this
           device’s local SQLite data or replica identity.

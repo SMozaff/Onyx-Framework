@@ -5,6 +5,7 @@ import { newId16 } from "@/types/onyx";
 import { useQuery } from "@/hooks/useQuery";
 import { useCommand } from "@/hooks/useCommand";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 import StatusBadge from "@/components/StatusBadge";
 
 /**
@@ -12,6 +13,7 @@ import StatusBadge from "@/components/StatusBadge";
  * as `Missions.tsx` applies — see that file's doc comment.
  */
 export default function Tasks() {
+  const { t } = useI18n();
   const { taskId } = useParams<{ taskId?: string }>();
   const navigate = useNavigate();
   const session = useSession();
@@ -37,17 +39,17 @@ export default function Tasks() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Tasks</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("tasks.title")}</h1>
 
       <IdLookup onLookup={(id) => navigate(`/tasks/${JSON.stringify(id)}`)} />
       <CreateTaskForm session={session} onCreated={(id) => navigate(`/tasks/${JSON.stringify(id)}`)} />
 
       {targetId && (
         <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-          {loading && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loading && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {error && <p className="text-sm text-onyx-status-blocked">{error.message}</p>}
           {!loading && !error && data === null && (
-            <p className="text-sm text-onyx-text-dim">No task found for this id.</p>
+            <p className="text-sm text-onyx-text-dim">{t("tasks.noTaskFoundForId")}</p>
           )}
           {data && (
             <div>
@@ -83,15 +85,15 @@ export default function Tasks() {
 
               <dl className="mt-4 grid grid-cols-3 gap-2 text-xs text-onyx-text-dim">
                 <div>
-                  <dt>Version</dt>
+                  <dt>{t("common.version")}</dt>
                   <dd className="text-onyx-text">{data.version}</dd>
                 </div>
                 <div>
-                  <dt>Lifecycle epoch</dt>
+                  <dt>{t("tasks.lifecycleEpoch")}</dt>
                   <dd className="text-onyx-text">{data.lifecycle_epoch}</dd>
                 </div>
                 <div>
-                  <dt>Authority epoch</dt>
+                  <dt>{t("tasks.authorityEpoch")}</dt>
                   <dd className="text-onyx-text">{data.authority_epoch}</dd>
                 </div>
               </dl>
@@ -104,6 +106,7 @@ export default function Tasks() {
 }
 
 function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
+  const { t } = useI18n();
   const [raw, setRaw] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -123,13 +126,13 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
   return (
     <div className="mt-4">
       <label className="block text-xs font-medium text-onyx-text-dim">
-        Look up by task id (JSON array of 16 bytes)
+        {t("tasks.lookupByTaskId")}
       </label>
       <div className="mt-1 flex gap-2">
         <input
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -152,7 +155,8 @@ function CreateTaskForm({
   session: ReturnType<typeof useSession>;
   onCreated: (id: Id16) => void;
 }) {
-  const [title, setTitle] = useState("");
+  const { t } = useI18n();
+  const [title, setTitle = useState("");
   const [description, setDescription] = useState("");
   const [missionIdRaw, setMissionIdRaw] = useState("");
   const { execute, loading, error } = useCommand();
@@ -193,25 +197,25 @@ function CreateTaskForm({
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-medium text-onyx-text">Create task</h2>
+      <h2 className="text-sm font-medium text-onyx-text">{t("tasks.createTask")}</h2>
       <div className="mt-2 space-y-2">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Task title"
+          placeholder={t("tasks.titlePlaceholder")}
           className="w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Description (optional)"
+          placeholder={t("tasks.descriptionPlaceholder")}
           rows={2}
           className="w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <input
           value={missionIdRaw}
           onChange={(e) => setMissionIdRaw(e.target.value)}
-          placeholder="Mission id (JSON array of 16 bytes; leave blank for a random placeholder)"
+          placeholder={t("tasks.missionIdPlaceholder")}
           className="w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         {error && <p className="text-xs text-onyx-status-blocked">{error.message}</p>}
@@ -221,7 +225,7 @@ function CreateTaskForm({
           disabled={loading || title.trim().length === 0}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
-          {loading ? "Creating…" : "Create"}
+          {loading ? t("common.creating") : t("common.create")}
         </button>
       </div>
     </div>

@@ -13,6 +13,7 @@ import Login from "@/pages/Login";
 import Settings from "@/pages/Settings";
 import { SessionProvider, type SessionWire } from "@/hooks/useSession";
 import { toUserFacingError, type UserFacingError } from "@/utils/userFacingError";
+import { useI18n } from "@/i18n/I18nContext";
 
 /**
  * Loads the native persisted session before exposing any operational route.
@@ -94,16 +95,18 @@ export default function App() {
 }
 
 function LoadingSession() {
-  return <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4 text-sm text-onyx-text-dim">Loading secure session…</div>;
+  const { t } = useI18n();
+  return <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4 text-sm text-onyx-text-dim">{t("common.loadingSecureSession")}</div>;
 }
 
 function StartupError({ error, onRetry }: { error: UserFacingError; onRetry: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex min-h-screen items-center justify-center bg-onyx-bg px-4">
       <section className="w-full max-w-md rounded-lg border border-onyx-border bg-onyx-surface p-6" role="alert">
         <h1 className="text-lg font-semibold text-onyx-text">{error.title}</h1>
         <p className="mt-2 text-sm text-onyx-text-dim">{error.message}</p>
-        <button type="button" onClick={onRetry} className="mt-4 rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white">Retry</button>
+        <button type="button" onClick={onRetry} className="mt-4 rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white">{t("common.retry")}</button>
       </section>
     </div>
   );

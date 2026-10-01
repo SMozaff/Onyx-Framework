@@ -2,18 +2,13 @@ import { useState } from "react";
 import type { Id16, LoadedAggregate } from "@/types/onyx";
 import { useQuery } from "@/hooks/useQuery";
 import { useSession } from "@/hooks/useSession";
+import { useI18n } from "@/i18n/I18nContext";
 import StatusBadge from "@/components/StatusBadge";
 import ApprovalDialog from "@/components/ApprovalDialog";
 
-/**
- * Approval review page. Same "no list query" caveat as `Missions.tsx`/
- * `Tasks.tsx` — a real "queue of everything Submitted" view needs a
- * projection query the backend doesn't have yet, so this page works
- * against one task at a time by id, same as the other two pages, and
- * surfaces `ApprovalDialog` when that task is in the `Submitted` state.
- */
 export default function Approvals() {
   const session = useSession();
+  const { t } = useI18n();
   const [taskIdRaw, setTaskIdRaw] = useState("");
   const [targetId, setTargetId] = useState<Id16 | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -36,18 +31,18 @@ export default function Approvals() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-xl font-semibold text-onyx-text">Approvals</h1>
+      <h1 className="text-xl font-semibold text-onyx-text">{t("approvals.title")}</h1>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Look up a task by id to review it. Only tasks in the{" "}
-        <code className="rounded bg-onyx-surface px-1 py-0.5">Submitted</code> state can be
-        approved or rejected.
+        {t("approvals.lookupTaskToReview")}{" "}
+        <code className="rounded bg-onyx-surface px-1 py-0.5">{t("status.submitted")}</code>{" "}
+        {t("approvals.submittedOnlyNote")}
       </p>
 
       <div className="mt-4 flex gap-2">
         <input
           value={taskIdRaw}
           onChange={(e) => setTaskIdRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -55,22 +50,22 @@ export default function Approvals() {
           onClick={lookup}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Look up
+          {t("common.lookup")}
         </button>
       </div>
 
       {targetId && (
         <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-          {loading && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loading && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {error && <p className="text-sm text-onyx-status-blocked">{error.message}</p>}
           {!loading && !error && data === null && (
-            <p className="text-sm text-onyx-text-dim">No task found for this id.</p>
+            <p className="text-sm text-onyx-text-dim">{t("tasks.noTaskFoundForId")}</p>
           )}
           {data && (
             <div>
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-medium text-onyx-text">
-                  {String(data.aggregate.title ?? "(untitled)")}
+                  {String(data.aggregate.title ?? t("common.untitled"))}
                 </h2>
                 <StatusBadge status={String(data.aggregate.status ?? "Unknown")} />
               </div>
@@ -81,11 +76,11 @@ export default function Approvals() {
                   onClick={() => setDialogOpen(true)}
                   className="mt-4 rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white"
                 >
-                  Review
+                  {t("common.review")}
                 </button>
               ) : (
                 <p className="mt-4 text-sm text-onyx-text-dim">
-                  This task is not awaiting approval.
+                  {t("approvals.notAwaitingApproval")}
                 </p>
               )}
             </div>
@@ -102,7 +97,7 @@ export default function Approvals() {
             void refetch();
           }}
           taskId={targetId}
-          taskTitle={String(data.aggregate.title ?? "(untitled)")}
+          taskTitle={String(data.aggregate.title ?? t("common.untitled"))}
           taskVersion={data.version}
           organizationId={session.organizationId}
           userId={session.userId}
