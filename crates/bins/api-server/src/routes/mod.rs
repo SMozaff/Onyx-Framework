@@ -959,6 +959,10 @@ pub async fn validate_token(
     Ok(claims)
 }
 
+/// Deterministic fault injection used only by the explicit test-endpoints
+/// feature. The non-feature implementation is a no-op, so production binaries
+/// contain neither the environment switch nor the client-controlled header path.
+#[cfg(feature = "test-endpoints")]
 pub fn test_mode_error(headers: &HeaderMap, correlation_id: &str) -> Option<ApiError> {
     if std::env::var("ONYX_TEST_MODE").ok().as_deref() != Some("1") {
         return None;
@@ -983,6 +987,11 @@ pub fn test_mode_error(headers: &HeaderMap, correlation_id: &str) -> Option<ApiE
         )),
         _ => None,
     }
+}
+
+#[cfg(not(feature = "test-endpoints"))]
+pub fn test_mode_error(_headers: &HeaderMap, _correlation_id: &str) -> Option<ApiError> {
+    None
 }
 
 pub async fn authenticate_headers(
