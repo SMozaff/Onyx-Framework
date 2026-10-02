@@ -39,3 +39,4 @@ pub use command_handler::{
     handle_command, CommandError, CommandResult, OwnerAuthority, OwnerCheck,
 };
 pub use query_handler::load_aggregate;
+
