@@ -55,7 +55,7 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
   const assignmentControl = (
     <fieldset style={{ display: 'grid', gap: 8, border: 0, padding: 0, margin: 0 }}>
       <legend className="muted" style={{ fontSize: 13 }}>
-        Who is this for?
+        {t('common.assignmentQuestion')}
       </legend>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <label>
@@ -95,7 +95,7 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
           <h2>{t('common.createTodoList')}</h2>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
-          Starts with one item — add more from the detail view once created.
+          {t('common.todoStartsWithOneItem')}
         </p>
         <div style={{ display: 'grid', gap: 10 }}>
           {assignmentControl}
@@ -134,13 +134,13 @@ export default function CreateListForm({ kind, ownerId }: { kind: 'todo_list' | 
         <div style={{ display: 'flex', gap: 10 }}>
           <label style={{ flex: 1 }}>
             <span className="muted" style={{ fontSize: 13 }}>
-              Window starts
+              {t('common.windowStarts')}
             </span>
             <input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} />
           </label>
           <label style={{ flex: 1 }}>
             <span className="muted" style={{ fontSize: 13 }}>
-              Window ends
+              {t('common.windowEnds')}
             </span>
             <input type="datetime-local" value={endAt} onChange={(event) => setEndAt(event.target.value)} />
           </label>
