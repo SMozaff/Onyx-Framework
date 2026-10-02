@@ -17,6 +17,31 @@ permissions:
   packages: read
 
 jobs:
+  # Temporary H-02 dependency-resolution evidence job.
+  # This exists only while H-02 is converting Cargo.lock to the modern
+  # dependency graph. It deliberately runs without --locked so the generated
+  # lockfile can be reviewed/imported before the normal locked CI contract.
+  dependency-lock-resolution:
+    if: ${{ github.head_ref == 'phase-2/h02-sqlx-modernization' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - name: Resolve H-02 dependency graph
+        run: |
+          cargo update
+          cargo metadata --format-version 1 --no-deps > dependency-metadata.json
+      - name: Upload generated Cargo.lock
+        uses: actions/upload-artifact@v7
+        with:
+          name: h02-generated-cargo-lock-${{ github.sha }}
+          path: |
+            Cargo.lock
+            dependency-metadata.json
+          if-no-files-found: error
+          retention-days: 2
   check:
     runs-on: ubuntu-latest
     services:
