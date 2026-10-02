@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let state = ApiState::new_with_config(config).await?;
     let metrics_task = tokio::spawn(serve_metrics(state.metrics.clone(), metrics_bind));
     let app = router(state);
-    let listener = tokio::net::TcpListener::bind(bind).await?;
+    let listener = tokio::net::TcpListener::bind(bind.as_str()).await?;
     tracing::info!(
         %bind,
         %storage_backend,
