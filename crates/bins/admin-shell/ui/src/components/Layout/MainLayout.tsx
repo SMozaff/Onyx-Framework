@@ -67,7 +67,7 @@ export default function MainLayout() {
               onClick={() => useAuthStore.getState().logout()}
               className="rounded-md border border-onyx-border bg-white px-3 py-1.5 text-xs font-bold text-onyx-text transition-colors hover:bg-onyx-surface-hover"
             >
-              Sign out
+              {t("auth.signOut")}
             </button>
           </div>
         </header>

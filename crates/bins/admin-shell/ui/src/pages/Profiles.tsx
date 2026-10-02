@@ -55,7 +55,7 @@ export default function Profiles() {
           onClick={() => setEditing("new")}
           className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white"
         >
-          New profile
+          {t("common.newProfile")}
         </button>
       </div>
 
@@ -95,7 +95,7 @@ export default function Profiles() {
                       onClick={() => setEditing(p)}
                       className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover"
                     >
-                      Edit
+                      {t("common.edit")}
                     </button>
                   </td>
                 </tr>
@@ -103,7 +103,7 @@ export default function Profiles() {
               {profiles.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-3 py-6 text-center text-onyx-text-dim">
-                    No profiles yet.
+                    {t("common.noProfilesYet")}
                   </td>
                 </tr>
               )}
@@ -205,7 +205,7 @@ function EditProfileDialog({
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4">
       <div className="w-full max-w-lg rounded-lg border border-onyx-border bg-onyx-surface p-5">
         <h2 className="text-base font-medium text-onyx-text">
-          {profile ? "Edit profile" : t("common.newProfile")}
+          {profile ? t("common.editProfile") : t("common.newProfile")}
         </h2>
         {!profile && (
           <p className="mt-1 text-xs text-onyx-text-dim">
@@ -239,7 +239,7 @@ function EditProfileDialog({
             onClick={onClose}
             className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -247,7 +247,7 @@ function EditProfileDialog({
             disabled={loading}
             className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            {loading ? "Saving…" : "Save"}
+            {loading ? t("common.saving") : t("common.save")}
           </button>
         </div>
       </div>
@@ -363,7 +363,7 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
           rel="noreferrer"
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Export CSV
+          {t("common.exportCsv")}
         </a>
         <a
           href={exportUrl("json")}
@@ -371,7 +371,7 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
           rel="noreferrer"
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Export JSON
+          {t("common.exportJson")}
         </a>
       </div>
 

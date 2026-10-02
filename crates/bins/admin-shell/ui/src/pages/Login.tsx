@@ -55,10 +55,10 @@ export default function Login() {
         <div className="onyx-auth-copy">
           <p className="text-[0.72rem] font-extrabold tracking-[0.19em] text-sky-100/90">{t("auth.adminSecureAccess")}</p>
           <h2 id="admin-signin-context" className="mt-4 max-w-md text-4xl font-light leading-[1.03] tracking-[-0.045em] text-white sm:text-5xl">
-            Govern operations with calm, visible control.
+            {t("auth.adminHeroHeadline")}
           </h2>
           <p className="mt-5 max-w-lg text-sm leading-6 text-sky-50/85">
-            Manage organization policy, access, and staff profiles from a dedicated administrative workspace.
+            {t("auth.adminHeroDescription")}
           </p>
         </div>
         <p className="relative z-10 text-[0.68rem] text-sky-100/75">{t("auth.adminOrganizationAdministration")}</p>

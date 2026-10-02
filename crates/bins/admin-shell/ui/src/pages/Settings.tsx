@@ -51,7 +51,7 @@ export default function Settings() {
     <div className="max-w-3xl">
       <h1 className="text-xl font-semibold text-onyx-text">{t("common.policySettings")}</h1>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Organization policy: feature availability, limits, retention, and legal holds.
+        {t("settings.organizationPolicyDescription")}
       </p>
 
       <ServerConnectionSettings />
@@ -235,8 +235,8 @@ function ServerConnectionSettings() {
       <p className="mt-1 text-xs text-onyx-text-dim">
         The address of the ONYX backend this app talks to. Change this if you're running
         the Admin app on a different computer than the server — e.g. a LAN address like{" "}
-        <code className="rounded bg-onyx-bg px-1 py-0.5">http://192.168.0.250:3000</code>{" "}
-        instead of <code className="rounded bg-onyx-bg px-1 py-0.5">http://127.0.0.1:3000</code>.
+        <code className="rounded bg-onyx-bg px-1 py-0.5">{t("settings.lanAddress")}</code>{" "}
+        instead of <code className="rounded bg-onyx-bg px-1 py-0.5">{t("settings.localhostAddress")}</code>.
       </p>
 
       <div className="mt-3 flex gap-2">
@@ -277,7 +277,7 @@ function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
   return (
     <div className="mt-4">
       <label className="block text-xs font-medium text-onyx-text-dim">
-        Look up by policy id (UUID)
+        {t("settings.lookupPolicyById")}
       </label>
       <div className="mt-1 flex gap-2">
         <input
@@ -291,7 +291,7 @@ function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
           onClick={() => raw && onLookup(raw)}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Open
+          {t("common.open")}
         </button>
       </div>
     </div>
@@ -565,7 +565,7 @@ function PolicyActions({
         }
         className="rounded-md bg-onyx-status-approved/15 px-3 py-1.5 text-xs text-onyx-status-approved hover:bg-onyx-status-approved/25 disabled:opacity-50"
       >
-        Publish draft
+        {t("settings.publishDraft")}
       </button>
       <button
         type="button"
@@ -581,7 +581,7 @@ function PolicyActions({
         }
         className="rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
       >
-        Retire policy
+        {t("settings.retirePolicy")}
       </button>
       <div className="flex items-center gap-2">
         <input
@@ -604,7 +604,7 @@ function PolicyActions({
           }
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
-          Evaluate
+          {t("common.evaluate")}
         </button>
       </div>
       {evaluateResult && <span className="text-xs text-onyx-text-dim">{evaluateResult}</span>}
@@ -720,7 +720,7 @@ function LegalHoldPanel() {
               }
               className="mt-2 rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
             >
-              Release
+              {t("settings.release")}
             </button>
           )}
           {releaseCmd.error && (
