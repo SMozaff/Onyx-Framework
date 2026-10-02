@@ -42,18 +42,18 @@ export function FileDetailPage() {
       </Link>
 
       <header>
-        <p className="text-xs uppercase tracking-wide text-slate-500">Content-addressed file</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500">{t("files.contentAddressedFile")}</p>
         <h2 className="break-all text-lg font-semibold text-slate-900">{contentHash}</h2>
         <p className="text-sm text-slate-600">
           {invalid
-            ? 'A content hash must be a lowercase hex string. This page is reachable only with a valid hash.'
+            ? '{t("files.invalidContentHashHelp")}'
             : 'Download is gated by the can_download_files capability server-side.'}
         </p>
       </header>
 
       {invalid ? (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          Invalid content hash.
+          {t("files.invalidContentHash")}
         </p>
       ) : (
         <div className="space-y-4">
@@ -63,7 +63,7 @@ export function FileDetailPage() {
             onClick={() => void download()}
             disabled={busy}
           >
-            {busy ? 'Downloading…' : 'Download file'}
+            {busy ? t("common.downloading") : t("files.downloadFile")}
           </button>
 
           {error ? (
@@ -75,11 +75,11 @@ export function FileDetailPage() {
           {result ? (
             <dl className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
               <div className="flex justify-between py-1">
-                <dt className="text-slate-500">Size</dt>
+                <dt className="text-slate-500">{t("common.size")}</dt>
                 <dd className="font-medium text-slate-900">{result.size} bytes</dd>
               </div>
               <div className="flex justify-between py-1">
-                <dt className="text-slate-500">Type</dt>
+                <dt className="text-slate-500">{t("common.type")}</dt>
                 <dd className="font-medium text-slate-900">{result.blob.type || 'binary'}</dd>
               </div>
             </dl>
