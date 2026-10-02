@@ -11,11 +11,11 @@ export function MissionDetailPage() {
   const timeline = useObserverQuery<TimelineEntry>('timeline.list', { subject_id: id ?? '' });
 
   if (!id) return <Navigate to="/missions" replace />;
-  if (mission.isPending) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (mission.isPending) return <p className="text-sm text-slate-500">{t("common.loading")}</p>;
   if (mission.isError || !mission.data?.data[0]) {
     return (
       <Link className="text-sm text-slate-500 underline underline-offset-4" to="/missions">
-        Mission unavailable — back to missions
+        {t("missions.unavailableBackToMissions")}
       </Link>
     );
   }
@@ -33,26 +33,26 @@ export function MissionDetailPage() {
       </div>
 
       <header>
-        <p className="text-xs uppercase tracking-wide text-slate-500">Mission</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500">{t("missions.singular")}</p>
         <h2 className="text-xl font-semibold text-slate-900">{name}</h2>
         {summary ? <p className="mt-1 text-sm text-slate-700">{summary}</p> : null}
       </header>
 
       <dl className="grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-4">
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Owner</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.owner")}</dt>
           <dd className="text-sm font-medium text-slate-900">{owner}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Priority</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.priority")}</dt>
           <dd className="text-sm font-medium text-slate-900">{priority}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Progress</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("missions.progress")}</dt>
           <dd className="text-sm font-medium text-slate-900">{progress}%</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Version</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.version")}</dt>
           <dd className="text-sm font-medium text-slate-900">{version}</dd>
         </div>
       </dl>
@@ -61,12 +61,12 @@ export function MissionDetailPage() {
         <div className="h-2 rounded bg-slate-900" style={{ width: `${progress}%` }} />
       </div>
 
-      <section aria-label="Timeline">
-        <h3 className="mb-3 text-base font-semibold text-slate-900">Timeline</h3>
+      <section aria-label={t("missions.timeline")}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900"{t("missions.timeline")}</h3>
         {timeline.isPending ? (
-          <p className="text-sm text-slate-500">Loading…</p>
+          <p className="text-sm text-slate-500">{t("common.loading")}</p>
         ) : entries.length === 0 ? (
-          <p className="text-sm text-slate-500">No timeline entries in this projection.</p>
+          <p className="text-sm text-slate-500"{t("missions.noTimelineEntries")}</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {entries.map((item) => (
