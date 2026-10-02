@@ -164,7 +164,6 @@ impl Connection for QuicConnection {
                 .await
                 .map_err(|_| TransportError::ConnectionLost)?;
             send.finish()
-                .await
                 .map_err(|_| TransportError::ConnectionLost)?;
 
             let response = recv
@@ -190,7 +189,6 @@ impl Connection for QuicConnection {
             .await
             .map_err(|_| TransportError::ConnectionLost)?;
         send.finish()
-            .await
             .map_err(|_| TransportError::ConnectionLost)?;
         Ok(())
     }
