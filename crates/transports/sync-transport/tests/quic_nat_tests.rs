@@ -11,7 +11,10 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-fn server_config() -> (quinn::ServerConfig, rustls::pki_types::CertificateDer<'static>) {
+fn server_config() -> (
+    quinn::ServerConfig,
+    rustls::pki_types::CertificateDer<'static>,
+) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let cert_der = cert.cert.der().clone();
     let priv_key = rustls::pki_types::PrivateKeyDer::Pkcs8(
