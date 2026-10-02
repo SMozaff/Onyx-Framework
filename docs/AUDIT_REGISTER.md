@@ -494,7 +494,7 @@ state is tracked here as the current remediation index.
 | M-04 | **CLOSED** — web-ui/package-lock.json is committed and CI uses npm ci. | Final npm audit policy verification pending. |
 | M-05 | **PARTIALLY REMEDIATED** — AppState blob-store initialization is fallible and no longer panics the desktop/mobile startup path. Remaining non-test panic sites still require targeted triage. | Final workspace clippy/test pass pending. |
 | M-06 | **IMPLEMENTED** — desktop/GTK requirements and platform-specific CI isolation have been addressed in the workflow/scaffold remediation. | Final GitHub Actions verification pending. |
-| L-01 | **PARTIALLY REMEDIATED** — RGA ordering/traversal now converges independently of merge order, with regression coverage. Broader law-based property coverage remains to be expanded. | Final CRDT property suite run pending. |
+| L-01 | **SUBSTANTIALLY REMEDIATED** — RGA ordering/traversal, OR-Set tag storage, MV-Register ordering, and append-only-log ordering are now deterministic; a new law-based property suite covers merge convergence/idempotence across the CRDT family. | Final CRDT property suite run pending; broader randomized histories remain future coverage. |
 
 ### 12. Remediation change log — current pass
 
