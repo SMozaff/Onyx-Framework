@@ -1,9 +1,13 @@
-use opentelemetry::{global, trace::TracerProvider as _ , KeyValue};
+use std::sync::OnceLock;
+
+use opentelemetry::{global, trace::TracerProvider as _, KeyValue};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{trace as sdktrace, Resource};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use crate::CanonicalJsonLayer;
+
+static TRACER_PROVIDER: OnceLock<sdktrace::SdkTracerProvider> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 pub struct ObservabilityConfig {
@@ -38,6 +42,7 @@ pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
         .with_resource(resource)
         .build();
     let tracer = provider.tracer("onyx-observability");
+    let _ = TRACER_PROVIDER.set(provider.clone());
     global::set_tracer_provider(provider);
 
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -51,7 +56,7 @@ pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
 }
 
 pub fn shutdown_observability() {
-    // OpenTelemetry 0.31 owns tracer-provider shutdown explicitly. The
-    // global provider is intentionally configured once during process start;
-    // process teardown closes outstanding spans through the SDK provider.
+    if let Some(provider) = TRACER_PROVIDER.get() {
+        let _ = provider.shutdown();
+    }
 }
