@@ -3,17 +3,19 @@ import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
 import { OfflineBanner } from './OfflineBanner';
 import { LanguageSwitcher } from '../i18n/LanguageSwitcher';
+import { useI18n } from '../i18n/I18nContext';
 
 const NAV_ITEMS = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/missions', label: 'Missions' },
-  { to: '/tasks', label: 'Tasks' },
-  { to: '/notifications', label: 'Notifications' },
-  { to: '/approvals', label: 'Approvals' },
-  { to: '/reports', label: 'Reports' },
+  { to: '/dashboard', label: 'dashboard.title' },
+  { to: '/missions', label: 'nav.missions' },
+  { to: '/tasks', label: 'nav.tasks' },
+  { to: '/notifications', label: 'nav.notifications' },
+  { to: '/approvals', label: 'nav.approvals' },
+  { to: '/reports', label: 'nav.reports' },
 ];
 
 export function ObserverLayout() {
+  const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
   const { logout, isPending } = useAuth();
 
@@ -23,7 +25,7 @@ export function ObserverLayout() {
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <div className="flex items-baseline gap-3">
             <span className="font-bold tracking-wide">ONYX Observer</span>
-            <span className="text-xs text-slate-300">read-only</span>
+            <span className="text-xs text-slate-300"">{t("common.readOnly")}</span>
           </div>
           <div className="flex items-center gap-3">
             <LanguageSwitcher />
@@ -34,11 +36,11 @@ export function ObserverLayout() {
               onClick={() => logout()}
               disabled={isPending}
             >
-              Sign out
+              {t("auth.signOut")}
             </button>
           </div>
         </div>
-        <nav className="mx-auto max-w-3xl overflow-x-auto px-4 pb-2" aria-label="Primary">
+        <nav className="mx-auto max-w-3xl overflow-x-auto px-4 pb-2" aria-label={t("nav.primary")}>
           <ul className="flex gap-4 text-sm">
             {NAV_ITEMS.map((item) => (
               <li key={item.to}>
@@ -50,7 +52,7 @@ export function ObserverLayout() {
                     }`
                   }
                 >
-                  {item.label}
+                  {t(item.label)}
                 </NavLink>
               </li>
             ))}
