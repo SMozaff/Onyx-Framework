@@ -474,3 +474,40 @@ stays the accurate index of what is still open:
 **Status:** H-01, H-02, H-03 CLOSED; M-01 CLOSED for the relay transport
 specifically (WebSocket events endpoint unverified); H-04, M-02 through
 M-06, and L-01 remain OPEN.
+
+## 11. Current remediation status — 2026-10-03
+
+The historical evidence above is preserved for audit provenance. The live repository
+state is tracked here as the current remediation index.
+
+| Finding | Current state | Verification state |
+|---|---|---|
+| C-01 | **CLOSED** — stale duplicate handlers module was removed. | Verified in prior GitHub-backed remediation sessions. |
+| C-02 | **CLOSED** — E2E ownership/borrow issue was fixed. | Verified in prior remediation sessions. |
+| H-01 | **CLOSED** — real user store, Argon2id password hashing, constant-time verification, and production bootstrap gating are present. | Final full CI rerun pending. |
+| H-02 | **IMPLEMENTED** — durable revocation plus user revocation watermark are present, and SQLx/network TLS dependencies have been modernized. | Final security audit + full CI rerun pending. |
+| H-03 | **IMPLEMENTED** — production CORS requires an explicit environment-driven allow-list. | Final full CI rerun pending. |
+| H-04 | **IMPLEMENTED** — SQLx, rustls, Quinn, Reqwest, and Tungstenite have been modernized; the lockfile was regenerated through GitHub work. | cargo audit/cargo deny and final CI verification pending. |
+| M-01 | **CLOSED** — relay authentication uses short-lived target-scoped single-use tickets; event WebSocket authentication now uses Sec-WebSocket-Protocol instead of a URL query token. | Final server/web integration run pending. |
+| M-02 | **IMPLEMENTED** — protected API routes are behind centralized authentication middleware; /api/events remains self-authenticating because it uses the WebSocket subprotocol handshake. | Final CI verification pending. |
+| M-03 | **IMPLEMENTED** — client-driven fault injection is compiled only under the explicit test-endpoints feature. | Final CI verification pending. |
+| M-04 | **CLOSED** — web-ui/package-lock.json is committed and CI uses npm ci. | Final npm audit policy verification pending. |
+| M-05 | **PARTIALLY REMEDIATED** — AppState blob-store initialization is fallible and no longer panics the desktop/mobile startup path. Remaining non-test panic sites still require targeted triage. | Final workspace clippy/test pass pending. |
+| M-06 | **IMPLEMENTED** — desktop/GTK requirements and platform-specific CI isolation have been addressed in the workflow/scaffold remediation. | Final GitHub Actions verification pending. |
+| L-01 | **PARTIALLY REMEDIATED** — RGA ordering/traversal now converges independently of merge order, with regression coverage. Broader law-based property coverage remains to be expanded. | Final CRDT property suite run pending. |
+
+### 12. Remediation change log — current pass
+
+| # | Change | Rationale | Status |
+|---|---|---|---|
+| 26 | Central protected-router authentication middleware with authenticated principal injection | Close M-02's latent unauthenticated-route failure mode | IMPLEMENTED |
+| 27 | WebSocket event authentication migrated from query-string bearer token to Sec-WebSocket-Protocol | Close M-01 credential leakage through URI/log/history surfaces | IMPLEMENTED |
+| 28 | Event WebSocket explicitly excluded from standard bearer-header middleware because it authenticates during its own handshake | Preserve the new M-01 contract while retaining centralized auth for ordinary HTTP routes | IMPLEMENTED |
+| 29 | test-endpoints Cargo feature gates ONYX_TEST_MODE fault injection | Close M-03 in production binaries by construction | IMPLEMENTED |
+| 30 | AppState::new propagates blob-store initialization failures instead of panicking | Reduce M-05 startup panic surface | IMPLEMENTED |
+| 31 | RGA deterministic sibling ordering and depth-first branch traversal | Fix a concrete convergence defect discovered while addressing L-01 | IMPLEMENTED |
+| 32 | Audit register updated to reflect live remediation state | Prevent historical findings from being mistaken for current open defects | IMPLEMENTED |
+
+> **Verification rule:** no item above is marked fully verified merely because it was
+> edited. Final closure still requires the GitHub Actions build/test/security pass
+> performed at the end of the fixation program.
