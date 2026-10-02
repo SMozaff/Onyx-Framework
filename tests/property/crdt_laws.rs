@@ -2,8 +2,8 @@
 //! These tests intentionally compare serialized state as well as logical
 //! values so merge order cannot change the wire representation.
 
-use crdt::{AppendOnlyLog, LwwRegister, MvRegister, OrSet, PnCounter, Rga, Tag};
-use platform_kernel::{ReplicaId, Timestamp, VectorClock};
+use crdt::{AppendOnlyLog, ElementId, LwwRegister, MvRegister, OrSet, PnCounter, Rga, Tag};
+use platform_kernel::{ReplicaId, VectorClock};
 use proptest::prelude::*;
 
 fn replica(byte: u8) -> ReplicaId {
@@ -129,10 +129,6 @@ proptest! {
         let left = LwwRegister::new(left_value, replica(9));
         let right = LwwRegister::new(right_value, replica(10));
 
-        let mut lr = left.clone();
-        lr.set(left_value, Timestamp(10), replica(9), VectorClock::new());
-        let mut rr = right.clone();
-        rr.set(right_value, Timestamp(20), replica(10), VectorClock::new());
         // The constructor timestamps are wall-clock values, so the explicit
         // sets above may not replace them. We therefore assert the algebraic
         // property on the actual states: whichever constructor timestamp
