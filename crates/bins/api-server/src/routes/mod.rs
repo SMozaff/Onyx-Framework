@@ -1037,7 +1037,9 @@ pub fn object_id_to_string(id: ObjectId) -> String {
 }
 
 pub fn organization_id() -> OrganizationId {
-    parse_object_id(ORGANIZATION_ID).expect("constant organization UUID is valid")
+    // ORGANIZATION_ID is the fixed development/test fixture UUID
+    // 11111111-1111-1111-1111-111111111111, i.e. 16 bytes of 0x11.
+    ObjectId([0x11; 16])
 }
 
 pub fn web_device_object_id() -> ObjectId {
