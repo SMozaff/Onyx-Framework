@@ -488,17 +488,15 @@ async fn readiness(State(state): State<ApiState>) -> StatusCode {
 }
 
 pub fn router(state: ApiState) -> Router {
-    let command_route = post(command::command_route).route_layer(middleware::from_fn_with_state(
-        state.clone(),
-        crate::middleware::rate_limit::rate_limit_command,
-    ));
+    let command_route =
+        post(command::command_route).route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::rate_limit::rate_limit_command,
+        ));
+
     // H4(a): PUT added -- /api/admin/mobile-access and /api/admin/profiles
-    // are both real, currently-registered PUT routes (see below); neither
-    // was in the previous allow-list, so a browser-based caller failed
-    // CORS preflight on either. Audited every other `.route(...)` call in
-    // this router for its actual registered methods: GET/POST cover the
-    // remaining routes except DELETE (`/api/push/subscriptions/:id`,
-    // MIGRATION_PLAN Phase 1.2), which is why DELETE is included here.
+    // are both real, currently-registered PUT routes. DELETE is required for
+    // /api/push/subscriptions/:subscription_id.
     let cors_methods = [
         Method::GET,
         Method::POST,
@@ -516,27 +514,15 @@ pub fn router(state: ApiState) -> Router {
             .allow_headers(tower_http::cors::Any)
             .allow_methods(cors_methods),
     };
-    Router::new()
-        .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
-        .route("/ready", get(readiness))
-        .route("/api/auth/login", post(auth::login))
-        // Redeems a still-valid refresh token for a new access token —
-        // see `auth::refresh`'s own doc comment for the real,
-        // pre-existing gap this closes (no client in this codebase
-        // ever had a way to renew an access token short of a full
-        // login again).
-        .route("/api/auth/refresh", post(auth::refresh))
-        // Lightweight active-user identities for ordinary authenticated
-        // assignment and staff-loan pickers. Unlike `/api/admin/users`,
-        // this route intentionally returns no privilege or hierarchy data.
+
+    // Public bootstrap/authentication surface. Everything below is explicitly
+    // placed in the protected router unless it has its own independent
+    // credential (the relay ticket route).
+    let protected_routes = Router::new()
+        // Ordinary authenticated identity pickers.
         .route("/api/users", get(admin::list_picker_users))
-        // {id, parent_user_id, is_admin} only — for desktop-shell's local
-        // Task/Mission approval-authority cache (no local UserStore
-        // exists there). See admin::list_hierarchy_users's doc comment.
         .route("/api/users/hierarchy", get(admin::list_hierarchy_users))
-        // Bootstrap is intentionally unauthenticated; it self-closes once any
-        // user exists and requires ONYX_BOOTSTRAP_TOKEN. See routes::admin.
-        .route("/api/admin/bootstrap", post(admin::bootstrap))
+        // Admin/user-management surface.
         .route(
             "/api/admin/users",
             post(admin::create_user).get(admin::list_users),
@@ -550,25 +536,14 @@ pub fn router(state: ApiState) -> Router {
             "/api/admin/users/:id/password",
             post(admin::set_user_password),
         )
-        // Phase 1 (Desktop & Web Completion): admin-only Manager-role
-        // grant/revoke. See admin::set_manager's doc comment for why this
-        // stays admin-only rather than manager-or-admin.
         .route("/api/admin/users/:id/manager", post(admin::set_manager))
-        // Phase A (User Hierarchy): admin-only class + reporting-line
-        // assignment. Supersedes /manager above — see admin::set_class's
-        // and admin::set_parent's doc comments.
         .route("/api/admin/users/:id/class", post(admin::set_class))
         .route("/api/admin/users/:id/parent", post(admin::set_parent))
-        // Class-based mobile access control: admin-only read/replace of
-        // the caller's organization's mobile-access grant list. See
-        // `admin::get_mobile_access`/`set_mobile_access` doc comments.
         .route(
             "/api/admin/mobile-access",
             get(admin::get_mobile_access).put(admin::set_mobile_access),
         )
-        // Staff profiles (2026-08-13): public view/list, admin-only
-        // upsert and batch import/export. See routes::profiles for the
-        // confirmed visibility/editing rules.
+        // Staff profiles.
         .route("/api/profiles", get(profiles::list_profiles))
         .route("/api/profiles/:owner_id", get(profiles::get_profile))
         .route("/api/admin/profiles", put(profiles::upsert_profile_route))
@@ -580,49 +555,58 @@ pub fn router(state: ApiState) -> Router {
             "/api/admin/profiles/export",
             get(profiles::batch::export_profiles),
         )
-        // Policy/LegalHold creation (2026-08-14) — see
-        // routes::policy_admin's module doc comment for why these need
-        // their own routes rather than going through /api/command.
+        // Policy and legal holds.
         .route("/api/admin/policies", post(policy_admin::create_policy))
         .route(
             "/api/admin/legal-holds",
             post(policy_admin::apply_legal_hold),
         )
-        // TodoList/TargetList/StaffLoan creation (2026-08-16) — see
-        // routes::todo_admin's module doc comment for why these need
-        // their own routes (create()-routed commands) and why they are
-        // not admin-gated the way the Policy/LegalHold routes above
-        // are.
+        // Todo/Target/StaffLoan APIs.
         .route("/api/todo/lists", post(todo_admin::create_todo_list))
         .route("/api/todo/targets", post(todo_admin::create_target_list))
         .route(
             "/api/todo/staff-loans",
             post(todo_admin::request_staff_loan),
         )
+        // Authenticated session and data APIs.
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/command", command_route)
         .route("/api/query", get(query::query_route))
         .route("/api/events", get(events::websocket_route))
-        // Cloud Relay (Part II §8.2). The path segment is the replica being
-        // dialled, matching the URL CloudRelayTransport::connect builds.
-        .route("/api/relay/:target_id", get(relay::relay_route))
-        // Mints the short-lived relay ticket relay_route above requires
-        // (H4(b)) -- deliberately a sibling of /api/relay rather than a
-        // child path (`/api/relay/ticket`), so the dedicated relay
-        // Deployment's `/api/relay` Ingress prefix rule cannot also catch
-        // this route; see routes::relay::issue_ticket's doc comment.
+        // Relay ticket issuance uses the caller's ordinary access token.
         .route("/api/relay-ticket", post(relay::issue_ticket))
-        // Content-addressed file download for the PWA ObserverClient and
-        // other HTTP clients (MIGRATION_PLAN Phase 1.2) -- see
-        // routes::files for the capability gate and scoping notes.
+        // File and Web Push APIs.
         .route("/api/files/:content_hash", get(files::download_file))
-        // Web Push subscription registration/unregistration for the PWA
-        // ObserverClient (MIGRATION_PLAN Phase 1.2) -- see routes::push.
         .route("/api/push/subscriptions", post(push::register_subscription))
         .route(
             "/api/push/subscriptions/:subscription_id",
             delete(push::unregister_subscription),
         )
+        // M-02: central route-layer authentication. This is the fail-safe
+        // boundary for future protected routes. Existing handlers can retain
+        // their narrower capability/tenant checks during the incremental
+        // migration to Extension<AuthenticatedUser>.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::auth::authenticate_request,
+        ));
+
+    Router::new()
+        .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
+        .route("/ready", get(readiness))
+        .route("/api/auth/login", post(auth::login))
+        // Refresh consumes a refresh token rather than an access token, so it
+        // intentionally remains outside the standard access-auth layer.
+        .route("/api/auth/refresh", post(auth::refresh))
+        // Bootstrap self-closes after the first user and requires the
+        // explicit bootstrap token. It cannot be placed behind access auth
+        // because its purpose is to create the first authenticated user.
+        .route("/api/admin/bootstrap", post(admin::bootstrap))
+        .merge(protected_routes)
+        // The relay WebSocket authenticates with its own short-lived,
+        // single-use, target-scoped ticket; it must not require an access
+        // bearer token as well.
+        .route("/api/relay/:target_id", get(relay::relay_route))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::rate_limit::observe_request,
@@ -975,6 +959,10 @@ pub async fn validate_token(
     Ok(claims)
 }
 
+/// Deterministic fault injection used only by the explicit test-endpoints
+/// feature. The non-feature implementation is a no-op, so production binaries
+/// contain neither the environment switch nor the client-controlled header path.
+#[cfg(feature = "test-endpoints")]
 pub fn test_mode_error(headers: &HeaderMap, correlation_id: &str) -> Option<ApiError> {
     if std::env::var("ONYX_TEST_MODE").ok().as_deref() != Some("1") {
         return None;
@@ -999,6 +987,11 @@ pub fn test_mode_error(headers: &HeaderMap, correlation_id: &str) -> Option<ApiE
         )),
         _ => None,
     }
+}
+
+#[cfg(not(feature = "test-endpoints"))]
+pub fn test_mode_error(_headers: &HeaderMap, _correlation_id: &str) -> Option<ApiError> {
+    None
 }
 
 pub async fn authenticate_headers(

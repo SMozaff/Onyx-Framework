@@ -12,6 +12,11 @@ path = "src/lib.rs"
 name = "api-server"
 path = "src/main.rs"
 
+[features]
+# Deliberately opt-in: fault-injection endpoints must never be compiled into
+# the production API binary unless the operator explicitly enables this test feature.
+test-endpoints = []
+
 [dependencies]
 platform-kernel.workspace = true
 platform-contracts.workspace = true

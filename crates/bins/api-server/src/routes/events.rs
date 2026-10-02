@@ -1,28 +1,68 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State,
+        State,
+    },
+    http::{
+        header::SEC_WEBSOCKET_PROTOCOL,
+        HeaderMap, StatusCode,
     },
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
 use serde_json::Value;
 
 use super::{validate_token, ApiError, ApiState};
 
-#[derive(Debug, Deserialize)]
-pub struct WebSocketAuth {
-    pub token: String,
+/// Fixed WebSocket subprotocol negotiated for the authenticated event stream.
+///
+/// The access token is carried as a second requested subprotocol rather than
+/// in the URL query string. The server only echoes this fixed protocol, so the
+/// bearer token is not copied into the upgrade response.
+const WS_AUTH_PROTOCOL: &str = "onyx-bearer";
+
+fn bearer_token_from_protocols(headers: &HeaderMap) -> Option<&str> {
+    let mut found_auth_protocol = false;
+    let mut token = None;
+
+    for header_value in headers.get_all(SEC_WEBSOCKET_PROTOCOL).iter() {
+        let protocols = header_value.to_str().ok()?.split(',');
+        for protocol in protocols.map(str::trim).filter(|p| !p.is_empty()) {
+            if protocol == WS_AUTH_PROTOCOL {
+                found_auth_protocol = true;
+            } else if token.is_none() {
+                token = Some(protocol);
+            }
+        }
+    }
+
+    found_auth_protocol.then_some(token?).filter(|value| !value.is_empty())
 }
 
 pub async fn websocket_route(
     ws: WebSocketUpgrade,
-    Query(params): Query<WebSocketAuth>,
+    headers: HeaderMap,
     State(state): State<ApiState>,
 ) -> Result<Response, ApiError> {
-    let claims = validate_token(&state, &params.token, "access").await?;
-    Ok(ws.on_upgrade(move |socket| serve_socket(socket, state, claims.organization_id)))
+    let correlation_id = uuid::Uuid::new_v4().to_string();
+    let token = bearer_token_from_protocols(&headers)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                "AUTHORITY",
+                "NON_RETRYABLE",
+                correlation_id.clone(),
+                serde_json::json!({
+                    "message": "WebSocket authentication requires the onyx-bearer subprotocol and access token"
+                }),
+            )
+        })?;
+    let claims = validate_token(&state, token, "access").await?;
+
+    Ok(ws
+        .protocols([WS_AUTH_PROTOCOL])
+        .on_upgrade(move |socket| serve_socket(socket, state, claims.organization_id)))
 }
 
 #[derive(Debug, Default)]

@@ -4,7 +4,7 @@ import { EventStream } from '../../src/api/events';
 class FakeWebSocket extends EventTarget {
   static instances: FakeWebSocket[] = [];
   sent: string[] = [];
-  constructor(public readonly url: string) { super(); FakeWebSocket.instances.push(this); }
+  constructor(public readonly url: string, public readonly protocols: string | string[] = []) { super(); FakeWebSocket.instances.push(this); }
   send(value: string) { this.sent.push(value); }
   close() { this.dispatchEvent(new CloseEvent('close')); }
   open() { this.dispatchEvent(new Event('open')); }
@@ -13,11 +13,12 @@ class FakeWebSocket extends EventTarget {
 
 describe('WebSocket event stream', () => {
   afterEach(() => { vi.useRealTimers(); FakeWebSocket.instances = []; });
-  it('authenticates in the URL and sends a subscription', () => {
+  it('authenticates with WebSocket subprotocols and sends a subscription', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
-    const stream = new EventStream({ token: 'access token', filter: { organization_id: 'org' }, onEvent: vi.fn() });
+    const stream = new EventStream({ token: 'access.token', filter: { organization_id: 'org' }, onEvent: vi.fn() });
     stream.connect(); const socket = FakeWebSocket.instances[0]; socket.open();
-    expect(socket.url).toContain('token=access%20token');
+    expect(socket.url).not.toContain('token=');
+    expect(socket.protocols).toEqual(['onyx-bearer', 'access.token']);
     expect(JSON.parse(socket.sent[0])).toEqual({ type: 'subscribe', filter: { organization_id: 'org' } });
     stream.close();
   });

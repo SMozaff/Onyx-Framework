@@ -1632,7 +1632,7 @@ cargo test --workspace --release                         # 274 tests, 0 failures
 | T6-R3 | Team Prompt 6 TypeScript DTOs are canonical. | Implemented in `web-ui/src/types/`; projection-specific interfaces extend the canonical envelopes. |
 | T6-R4 | Bearer `access_token` JWT is the AuthorityProof. | The browser sends only `Authorization: Bearer`; the API validates and enriches the internal actor/authority context. Body-level `actor` and `authority_proof` remain optional for schema compatibility and are ignored. |
 | T6-R5 | Web device identity is `web-client`. | Public event DTOs expose `device_id: "web-client"`. The Rust kernel requires a 16-byte `ObjectId`, so the internal adapter deterministically derives 16 bytes from SHA-256(`"web-client"`). |
-| T6-R6 | WebSocket token query and exponential reconnect. | `/api/events?token=...`; delays 1s, 2s, 4s, doubling to a 30s ceiling. |
+| T6-R6 | WebSocket subprotocol authentication and exponential reconnect. | `/api/events` negotiates `Sec-WebSocket-Protocol: onyx-bearer, <access_token>`; the bearer token is no longer carried in the URL. Reconnect delays remain 1s, 2s, 4s, doubling to a 30s ceiling. |
 | T6-R7 | Query envelope is base64url(JSON). | `GET /api/query?envelope=...`; no padding required. |
 | T6-R8 | JSON uses snake_case. | Auth and all API DTOs use snake_case fields. |
 | T6-R9 | Deterministic test organization and seed. | `tests/fixtures/seed.sql`; organization `11111111-1111-1111-1111-111111111111`. |

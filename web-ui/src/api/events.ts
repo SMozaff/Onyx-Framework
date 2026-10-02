@@ -21,7 +21,7 @@ export class EventStream {
   connect(): void {
     this.closedByUser = false;
     this.options.onStatus?.('connecting');
-    this.socket = new WebSocket(`${WS_BASE}/api/events?token=${encodeURIComponent(this.options.token)}`);
+    this.socket = new WebSocket(`${WS_BASE}/api/events`, ['onyx-bearer', this.options.token]);
     this.socket.addEventListener('open', () => {
       this.retryDelay = 1_000;
       this.options.onStatus?.('connected');

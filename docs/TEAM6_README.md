@@ -85,4 +85,4 @@ The seven real-server journeys cover authentication, Mission/Task/Notification/A
 npx @apidevtools/swagger-cli validate docs/api/openapi.json
 ```
 
-`GET /api/query` uses `?envelope={base64url(JSON)}`. WebSocket authentication uses `?token={access_token}` as required by ruling T6-R6; default request tracing is intentionally disabled to prevent token leakage through URI logging.
+`GET /api/query` uses `?envelope={base64url(JSON)}`. WebSocket authentication uses the `Sec-WebSocket-Protocol` header (`onyx-bearer`, followed by the access token) rather than a URL query parameter; this keeps the bearer out of request URIs and browser history. Default request tracing remains intentionally disabled for sensitive handshake metadata.

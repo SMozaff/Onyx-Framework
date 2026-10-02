@@ -11,7 +11,10 @@
 use platform_kernel::{ReplicaId, VectorClock};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::{
+    collections::HashSet,
+    fmt::Debug,
+};
 
 use crate::Crdt;
 
@@ -122,43 +125,36 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Rga<E> {
     }
 
     /// Get the ordered sequence of values (skipping tombstones).
+    ///
+    /// RGA siblings are ordered deterministically by ElementId, never by
+    /// the local Vec insertion order. Descendants are traversed depth-first
+    /// so concurrent sibling branches are retained rather than silently
+    /// dropping every branch after the first sibling.
     pub fn to_vec(&self) -> Vec<&E> {
         let mut result = Vec::new();
-        let mut current = None;
-        // Find the root (parent = ElementId::root())
-        for atom in &self.atoms {
-            if atom.parent == ElementId::root() {
-                current = Some(atom.id);
-                break;
-            }
-        }
-        while let Some(id) = current {
-            let mut advanced = false;
-            for atom in &self.atoms {
-                if atom.id == id {
-                    if let Some(ref val) = atom.value {
-                        result.push(val);
-                    }
-                    current = self.find_next_after(id);
-                    advanced = true;
-                    break;
-                }
-            }
-            if !advanced {
-                break;
-            }
-        }
-        result
-    }
+        let mut visited = HashSet::new();
+        let mut stack = vec![ElementId::root()];
 
-    /// Internal: find the atom immediately after the given ID.
-    fn find_next_after(&self, id: ElementId) -> Option<ElementId> {
-        for atom in &self.atoms {
-            if atom.parent == id {
-                return Some(atom.id);
+        while let Some(parent) = stack.pop() {
+            let mut children: Vec<&Atom<E>> = self
+                .atoms
+                .iter()
+                .filter(|atom| atom.parent == parent && visited.insert(atom.id))
+                .collect();
+
+            // The stack is LIFO, so push children in reverse deterministic
+            // order to visit the smallest ElementId first.
+            children.sort_by_key(|atom| atom.id);
+            for atom in children.into_iter().rev() {
+                let id = atom.id;
+                if let Some(value) = atom.value.as_ref() {
+                    result.push(value);
+                }
+                stack.push(id);
             }
         }
-        None
+
+        result
     }
 
     /// The causal context for GC.
@@ -214,5 +210,83 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Crdt for Rga
 
     fn causal_context(&self) -> &VectorClock {
         &self.clock
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn replica(byte: u8) -> ReplicaId {
+        ReplicaId([byte; 16])
+    }
+
+    #[test]
+    fn concurrent_siblings_converge_independently_of_merge_order() {
+        let local = replica(1);
+        let remote = replica(2);
+        let root = ElementId::root();
+
+        let mut left = Rga::new();
+        let left_id = left.insert_after(
+            root,
+            "left",
+            VectorClock::new(),
+            local,
+        );
+
+        let mut right = Rga::new();
+        let right_id = right.insert_after(
+            root,
+            "right",
+            VectorClock::new(),
+            remote,
+        );
+
+        assert_ne!(left_id, right_id);
+
+        let mut left_then_right = left.clone();
+        left_then_right.merge(&right);
+
+        let mut right_then_left = right.clone();
+        right_then_left.merge(&left);
+
+        assert_eq!(left_then_right.to_vec(), right_then_left.to_vec());
+        assert_eq!(left_then_right.to_vec(), vec![&"left", &"right"]);
+    }
+
+    #[test]
+    fn descendants_of_sibling_branches_are_not_dropped() {
+        let first = replica(1);
+        let second = replica(2);
+        let root = ElementId::root();
+
+        let mut a = Rga::new();
+        let a_id = a.insert_after(
+            root,
+            "a",
+            VectorClock::new(),
+            first,
+        );
+        a.insert_after(
+            a_id,
+            "a-child",
+            VectorClock::new(),
+            first,
+        );
+
+        let mut b = Rga::new();
+        b.insert_after(
+            root,
+            "b",
+            VectorClock::new(),
+            second,
+        );
+
+        let mut merged = a.clone();
+        merged.merge(&b);
+
+        assert_eq!(merged.to_vec(), vec![&"a", &"a-child", &"b"]);
     }
 }
