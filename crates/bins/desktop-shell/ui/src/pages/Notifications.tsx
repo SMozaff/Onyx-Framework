@@ -89,7 +89,7 @@ export default function Notifications() {
         }
       } catch {
         // The inbox is still usable with its initial query and explicit
-        // {t("common.refresh")} control if IPC subscription setup is temporarily unavailable.
+        // Refresh control if IPC subscription setup is temporarily unavailable.
       }
     }
 
