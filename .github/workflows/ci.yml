@@ -93,7 +93,10 @@ jobs:
             exit 1
           fi
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # Compile the explicit test-only fault-injection feature as part of the
+        # verification surface, while the release build below remains default-feature
+        # only and therefore excludes client-driven fault injection.
+        run: cargo clippy --workspace --all-targets --features api-server/test-endpoints -- -D warnings
       - name: Build
         run: cargo build --workspace --release
       # Several integration test suites (e.g.
@@ -138,7 +141,10 @@ jobs:
           echo "GNOME_KEYRING_CONTROL=$GNOME_KEYRING_CONTROL" >> "$GITHUB_ENV"
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
       - name: Test
-        run: cargo test --workspace --release -- --test-threads=1
+        # The API integration/E2E tests intentionally exercise the deterministic
+        # 429/500 fault-injection contract. It is enabled only for this test invocation;
+        # production/default release builds above do not enable it.
+        run: cargo test --workspace --release --features api-server/test-endpoints -- --test-threads=1
       - name: Docs
         run: cargo doc --workspace --no-deps
       - name: Migration idempotency and rollback
@@ -150,6 +156,22 @@ jobs:
           cargo run --package migration-tool -- up
       - name: Contract verification
         run: bash scripts/verify/verify_team7.sh && bash scripts/verify/verify_team8.sh
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: RustSec advisory audit
+        run: cargo audit
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: cargo-deny advisory audit
+        run: cargo deny check advisories
 
   # Localization contract gate.
   #
@@ -263,6 +285,8 @@ jobs:
         run: npm run lint
       - name: Type check
         run: npm run type-check
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
       - name: Unit and integration tests
         run: npm test
       - name: Accessibility component tests
