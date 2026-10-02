@@ -17,7 +17,7 @@ impl ObservabilityConfig {
         Self {
             service_name: service_name.into(),
             otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| "http://jaeger-collector:4317".to_string()),
+                .unwrap_or_else(|_| "http://jaeger-collector:4318/v1/traces".to_string()),
             log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
         }
     }
@@ -29,7 +29,7 @@ pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
             .tracing()
             .with_exporter(
                 opentelemetry_otlp::new_exporter()
-                    .tonic()
+                    .http()
                     .with_endpoint(config.otlp_endpoint.clone()),
             )
             .with_trace_config(sdktrace::config().with_resource(Resource::new(vec![
