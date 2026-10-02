@@ -112,7 +112,7 @@ test('observer login authenticates with the observer client class', async ({ pag
     password: 'secret',
     client_type: 'mobile_observer',
   });
-  await expect(page.getByText('read-only', { exact: true })).toBeVisible();
+  await expect(page.getByText('Read-only', { exact: true })).toBeVisible();
 });
 
 test('seeded observer session renders missions list and links to detail', async ({ page }) => {
@@ -146,7 +146,7 @@ test('file download carries the bearer token and reports bytes', async ({ page }
   const downloads = await captureRequests(page, `/api/files/${hash}`, {}, 200);
 
   await page.goto(`/files/${hash}`);
-  await expect(page.getByRole('button', { name: 'Download file' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download a file' })).toBeVisible();
   await page.getByRole('button', { name: 'Download file' }).click();
 
   await expect(page.getByText(/bytes/)).toBeVisible();
