@@ -51,7 +51,7 @@ decision, busy, onCancel, onConfirm }: Props) {
           <>
             <fieldset style={{ border: 0, padding: 0, margin: '12px 0' }}>
               <legend className="muted" style={{ fontSize: 13 }}>
-                Outcome
+                {t('common.outcome')}
               </legend>
               <label style={{ display: 'block', marginTop: 6 }}>
                 <input
