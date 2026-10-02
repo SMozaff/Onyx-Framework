@@ -129,8 +129,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <label className="block text-xs font-bold text-onyx-text">
-          Username
-          <input
+          {t("auth.username")}\n          <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder={t("auth.username")}
@@ -138,8 +137,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
           />
         </label>
         <label className="block text-xs font-bold text-onyx-text">
-          Initial password
-          <input
+          {t("auth.initialPassword")}\n          <input
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             type="password"
@@ -148,8 +146,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
           />
         </label>
         <label className="block text-xs font-bold text-onyx-text">
-          Operational class
-          <select
+          {t("common.operationalClass")}\n          <select
             value={userClass}
             onChange={(e) => setUserClass(e.target.value)}
             className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
@@ -164,7 +161,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         </label>
         <label className="mt-6 flex items-center gap-2 rounded-lg border border-onyx-border bg-slate-50 px-3 py-2.5 text-sm font-semibold text-onyx-text">
           <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
-          Grant administrator access
+          {t("common.grantAdministratorAccess")}
         </label>
       </div>
       {error && <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-onyx-status-blocked" role="alert">{error}</p>}
