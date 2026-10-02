@@ -8,6 +8,13 @@ on:
     branches: [ main ]
   workflow_dispatch: {}
 
+# Keep only the newest verification run for a given branch/PR. This prevents
+# every corrective commit in a hardening pass from occupying the runner queue
+# after a newer commit has already superseded it.
+concurrency:
+  group: onyx-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
