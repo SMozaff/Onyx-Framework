@@ -391,6 +391,7 @@
   "tasks.staffWorkflow": "گردش کار پرسنل",
   "tasks.title": "وظایف",
   "tasks.titlePlaceholder": "عنوان وظیفه",
+  "tasks.unavailableBackToTasks": "وظیفه در دسترس نیست — بازگشت به وظایف",
   "notifications.acknowledge": "تأیید دریافت",
   "notifications.acknowledging": "در حال تأیید…",
   "notifications.acknowledgmentNote": "تأیید دریافت فوراً به سرور ارسال می‌شود. دستورهای ناموفق هرگز به‌صورت محلی در صف قرار نمی‌گیرند.",
