@@ -90,7 +90,7 @@ export default function Settings({
         </p>
 
         <label htmlFor="serverAddress" className="mt-5 block text-xs font-medium text-onyx-text-dim">
-          Server address
+          {t("auth.serverAddress")}
         </label>
         <input
           id="serverAddress"
@@ -151,7 +151,7 @@ export default function Settings({
           onClick={() => navigate("/", { replace: true })}
           className="mt-4 rounded-md bg-onyx-surface-hover px-3 py-1.5 text-sm font-medium text-onyx-text"
         >
-          Return to dashboard
+          {t("settings.returnToDashboard")}
         </button>
       </section>
     </div>
