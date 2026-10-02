@@ -24,6 +24,8 @@ pub async fn authenticate_request(
         Err(error) => return error.into_response(),
     };
 
-    request.extensions_mut().insert::<AuthenticatedUser>(authenticated);
+    request
+        .extensions_mut()
+        .insert::<AuthenticatedUser>(authenticated);
     next.run(request).await
 }
