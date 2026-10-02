@@ -88,7 +88,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
 
       {isEscalationTarget ? (
         <p className="muted" style={{ margin: 0 }}>
-          This verification decision was escalated to you.
+          {t('common.decisionEscalatedToYou')}
         </p>
       ) : null}
 
@@ -96,7 +96,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
         <div className="detail-section">
           <h3>{t('common.teamLeaderPreCheck')}</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Optional, informal, and does not gate verification. Only available to Team Leaders.
+            {t('common.preCheckOptional')}
           </p>
           {preCheckOpen ? (
             <div style={{ display: 'grid', gap: 8 }}>
@@ -119,13 +119,13 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
                     )
                   }
                 >
-                  {recordPreCheck.isPending ? 'Recording…' : 'Record pre-check'}
+                  {recordPreCheck.isPending ? t('common.submitting') : t('common.recordPreCheck')}
                 </button>
               </div>
             </div>
           ) : (
             <button className="button-secondary" type="button" onClick={() => setPreCheckOpen(true)}>
-              Record a pre-check
+              {t('common.recordPreCheck')}
             </button>
           )}
         </div>
@@ -148,7 +148,7 @@ list, kind }: { list: ListItem; kind: 'todo_list' | 'target_list' }) {
           {canDecide ? (
             <>
               <button type="button" className="button-primary" onClick={() => setDialog('verify')}>
-                Verify
+                {t('common.verify')}
               </button>
               <button type="button" className="button-secondary" onClick={() => setDialog('escalate')}>{t('common.escalate')}</button>
               <button type="button" className="button-danger" onClick={() => setDialog('reject')}>{t('common.reject')}</button>

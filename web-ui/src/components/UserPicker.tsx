@@ -26,7 +26,7 @@ export default function UserPicker({
   label,
   value,
   onChange,
-  placeholder = 'Choose a person',
+  placeholder,
   disabled = false,
 }: UserPickerProps) {
   const [search, setSearch] = useState('');
@@ -66,7 +66,7 @@ export default function UserPicker({
         aria-label={label}
         disabled={disabled || usersQuery.isLoading || usersQuery.isError}
       >
-        <option value="">{usersQuery.isLoading ? t('common.loadingPeople') : placeholder}</option>
+        <option value="">{usersQuery.isLoading ? t('common.loadingPeople') : placeholder ?? t('common.choosePerson')}</option>
         {selectedUnavailable ? <option value={value}>{t('common.previouslySelectedPerson')}</option> : null}
         {users.map((user) => (
           <option key={user.id} value={user.id}>

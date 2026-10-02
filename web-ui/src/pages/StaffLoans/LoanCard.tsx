@@ -74,7 +74,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
 
         {isEscalationTarget ? (
           <p className="muted" style={{ margin: '10px 0 0' }}>
-            This approval decision was escalated to you.
+            {t('common.decisionEscalatedToYou')}
           </p>
         ) : null}
 
@@ -94,7 +94,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
                   disabled={decide.isPending}
                   onClick={() => setDeclineReason(declineReason === null ? '' : null)}
                 >
-                  Decline
+                  {t('common.decline')}
                 </button>
               </>
             ) : null}
@@ -105,7 +105,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
                 disabled={decide.isPending}
                 onClick={() => setExtending((value) => !value)}
               >
-                Extend
+                {t('common.extend')}
               </button>
             ) : null}
             {canEnd ? (
@@ -115,7 +115,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
                 disabled={decide.isPending}
                 onClick={() => decide.mutate({ loan, decision: 'end' })}
               >
-                End early
+                {t('common.endEarly')}
               </button>
             ) : null}
           </div>
@@ -147,7 +147,7 @@ loan, currentUserId }: { loan: StaffLoanProjection; currentUserId: string | null
           <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
             <label>
               <span className="muted" style={{ fontSize: 13 }}>
-                New end date/time
+                {t('common.newEndDateTime')}
               </span>
               <input type="datetime-local" value={newEndAt} onChange={(e) => setNewEndAt(e.target.value)} />
             </label>

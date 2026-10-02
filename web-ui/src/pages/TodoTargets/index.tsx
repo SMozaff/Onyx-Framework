@@ -59,7 +59,7 @@ export default function TodoTargetsPage() {
               className={kind === 'todo_list' ? 'button-primary' : 'button-secondary'}
               onClick={() => selectKind('todo_list')}
             >
-              Todo lists
+              {t('common.todoLists')}
             </button>
             <button
               type="button"
@@ -68,7 +68,7 @@ export default function TodoTargetsPage() {
               className={kind === 'target_list' ? 'button-primary' : 'button-secondary'}
               onClick={() => selectKind('target_list')}
             >
-              Targets
+              {t('common.targets')}
             </button>
           </div>
           <label className="filter-label">

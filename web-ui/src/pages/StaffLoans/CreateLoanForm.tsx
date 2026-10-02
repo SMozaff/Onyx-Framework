@@ -73,19 +73,19 @@ export default function CreateLoanForm() {
         />
         {realOwnerId && realOwnerId === borrowingManagerId ? (
           <p role="alert" className="muted" style={{ margin: 0 }}>
-            The real owner and borrowing manager must be different people.
+            {t('common.staffLoanOwnersMustDiffer')}
           </p>
         ) : null}
         <div style={{ display: 'flex', gap: 10 }}>
           <label style={{ flex: 1 }}>
             <span className="muted" style={{ fontSize: 13 }}>
-              Loan starts
+              {t('common.loanStarts')}
             </span>
             <input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} />
           </label>
           <label style={{ flex: 1 }}>
             <span className="muted" style={{ fontSize: 13 }}>
-              Loan ends
+              {t('common.loanEnds')}
             </span>
             <input type="datetime-local" value={endAt} onChange={(event) => setEndAt(event.target.value)} />
           </label>

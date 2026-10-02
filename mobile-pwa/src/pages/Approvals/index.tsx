@@ -4,8 +4,10 @@ import { ProjectionStatePanel } from '../../components/ProjectionStatePanel';
 import { deriveProjectionState } from '../../components/ProjectionState';
 import { useObserverQuery } from '../../hooks/useQuery';
 import type { ApprovalProjection } from '../../types/query';
+import { useI18n } from '../../i18n/I18nContext';
 
 export function ApprovalsPage() {
+  const { t } = useI18n();
   const query = useObserverQuery<ApprovalProjection>('approval.list');
   const state = deriveProjectionState(query);
   const approvals = query.data?.data ?? [];
@@ -14,8 +16,8 @@ export function ApprovalsPage() {
     <div className="space-y-6">
       <header className="flex items-start justify-between">
         <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500">Authority workflow</p>
-          <h2 className="text-lg font-semibold text-slate-900">Approvals</h2>
+          <p className="text-xs uppercase tracking-wide text-slate-500">{t('approvals.authorityWorkflow')}</p>
+          <h2 className="text-lg font-semibold text-slate-900">{t('approvals.title')}</h2>
           <p className="text-sm text-slate-600">
             View-only observer scope: approving or rejecting requires the native client or a
             manager session.
@@ -24,10 +26,10 @@ export function ApprovalsPage() {
         <Freshness state={state} />
       </header>
 
-      {state.kind === 'loading' && <p className="text-sm text-slate-500">Loading…</p>}
+      {state.kind === 'loading' && <p className="text-sm text-slate-500">{t('approvals.loading')}</p>}
       {state.kind === 'unavailable' && <ProjectionStatePanel resource="Approvals" state={state} />}
       {state.kind === 'empty' && (
-        <p className="text-sm text-slate-500">No approval projections for your organization.</p>
+        <p className="text-sm text-slate-500">{t('approvals.noApprovalsBody')}</p>
       )}
       {state.kind === 'stale' && <ProjectionStatePanel resource="Approvals" state={state} compact />}
 
@@ -44,15 +46,15 @@ export function ApprovalsPage() {
               ) : null}
               <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500">
                 <div>
-                  <dt className="inline">Requested by </dt>
+                  <dt className="inline">{t('approvals.requestedBy')} </dt>
                   <dd className="inline font-medium text-slate-700">{approval.requested_by}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Target </dt>
+                  <dt className="inline">{t('approvals.target')} </dt>
                   <dd className="inline font-medium text-slate-700">{approval.target_type}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Version </dt>
+                  <dt className="inline">{t('common.version')} </dt>
                   <dd className="inline font-medium text-slate-700">{approval.version}</dd>
                 </div>
               </dl>
