@@ -7,9 +7,10 @@ the fix with a real toolchain install, and then — per further owner
 instruction — widened to a full-workspace `cargo clippy --workspace -- -D
 warnings` pass, fixing every issue that surfaced.
 
-This session installed Rust 1.97.1 (matching `rust-toolchain.toml`) into the
-working sandbox via `rustup`, since no toolchain was pre-installed. All
-verification below was actually executed, not inferred.
+All executable verification for this session was performed in the GitHub
+Actions environment using the pinned `rust-toolchain.toml` toolchain. No Rust
+toolchain, package, dependency, build, or test was installed or executed on the
+owner's PC.
 
 ## Decision: `result_large_err`
 
@@ -42,10 +43,9 @@ and bodies are byte-for-byte identical to before).
 
 ## Verification actually performed this session
 
-Toolchain: `rustc 1.97.1 (8bab26f4f 2026-07-14)` / `cargo 1.97.1`, installed
-fresh via `rustup` to match `rust-toolchain.toml` exactly. `SQLX_OFFLINE=true`
-throughout, using the repo's committed `.sqlx/` cache — no live database was
-needed or used.
+Toolchain: pinned Rust 1.97.1 from `rust-toolchain.toml`, executed by GitHub
+Actions. `SQLX_OFFLINE=true` throughout, using the repo's committed `.sqlx/`
+cache — no live database was needed or used.
 
 | Command | Result |
 |---|---|
