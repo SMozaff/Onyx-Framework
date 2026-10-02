@@ -2,6 +2,7 @@ on:
   push:
     branches:
       - 'hardening/**'
+      - 'fix/**'
 
 permissions:
   contents: write
