@@ -307,7 +307,7 @@ pub unsafe extern "C" fn mobile_core_new(
             ),
         };
 
-        Some(Arc::new(AppState::new(pool, app_config).await))
+        AppState::new(pool, app_config).await.ok().map(Arc::new)
     });
 
     let Some(state) = state else {
