@@ -2846,3 +2846,27 @@ pull); `p2p/P2pChannel.kt` (deferred handshake);
 `p2p/P2pController.kt` + `p2p/P2pViewModel.kt` (new);
 `ui/widgets/P2pCard.kt` (new); `SettingsScreen.kt`/`AppShell.kt`/
 `MainActivity.kt` wiring.
+
+### H8 — Security/audit remainder hardening — 2026-10-03
+
+1. **Protected HTTP routes use centralized authentication.** The ordinary `/api/*`
+   application surface is mounted under an Axum `route_layer` that validates the
+   bearer access token and injects the authenticated principal. This is a fail-safe
+   boundary for future routes. Existing handlers may retain narrower capability or
+   tenant checks while they migrate from direct header parsing to the injected principal.
+2. **The event WebSocket is self-authenticating.** `/api/events` is intentionally
+   outside the ordinary bearer-header route layer because its handshake authenticates
+   with `Sec-WebSocket-Protocol: onyx-bearer, <access_token>`. The server negotiates
+   only the fixed `onyx-bearer` protocol, so the bearer is not copied into the upgrade
+   response or URL.
+3. **Fault injection is compile-time opt-in.** `ONYX_TEST_MODE` and
+   `x-onyx-test-status` behavior is compiled only under the `test-endpoints` Cargo
+   feature. Production/default binaries therefore do not contain the client-driven
+   failure injection path.
+4. **Client composition initialization is fallible.** `AppState::new` propagates local
+   blob-store initialization failure; desktop setup surfaces it as a serializable
+   storage error and mobile FFI returns its documented null initialization sentinel.
+5. **CRDT wire/state order is canonical.** OR-Set tags, MV-Register versions, RGA atoms,
+   and append-only log entries use deterministic ordered storage. RGA traversal orders
+   concurrent siblings by `ElementId` and visits every branch, preventing merge-order
+   dependent loss of sibling subtrees.
