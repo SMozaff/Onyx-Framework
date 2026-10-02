@@ -77,6 +77,21 @@ jobs:
       # fails.
       - name: Verify locked dependency graph
         run: cargo metadata --locked
+      - name: Verify ONYX_ENV access is centralized
+        run: |
+          set -euo pipefail
+          forbidden=$(rg -n 'std::env::var\\("ONYX_ENV"\\)|env::var\\("ONYX_ENV"\\)' crates/bins/api-server/src --glob '*.rs' --glob '!config.rs' || true)
+          if [[ -n "$forbidden" ]]; then
+            echo "::error::ONYX_ENV must be parsed only by crates/bins/api-server/src/config.rs"
+            echo "$forbidden"
+            exit 1
+          fi
+          forbidden_production=$(rg -n '(==|!=)\\s*"production"' crates/bins/api-server/src --glob '*.rs' --glob '!config.rs' || true)
+          if [[ -n "$forbidden_production" ]]; then
+            echo "::error::production posture checks must be centralized in AppConfig"
+            echo "$forbidden_production"
+            exit 1
+          fi
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build

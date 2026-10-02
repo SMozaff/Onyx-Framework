@@ -56,7 +56,7 @@ use sqlx::{
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
-use crate::query_handler::ProjectionPool;
+use crate::{config::AppConfig, query_handler::ProjectionPool};
 
 pub const ORGANIZATION_ID: &str = "11111111-1111-1111-1111-111111111111";
 pub const USER_ID: &str = "22222222-2222-2222-2222-222222222222";
@@ -158,15 +158,17 @@ type StorageBackendHandles = (
 );
 
 impl ApiState {
+    /// Compatibility constructor retained for existing test harnesses and
+    /// integration tests that explicitly provide a database URL.
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
-        let environment = std::env::var("ONYX_ENV").unwrap_or_else(|_| "development".to_string());
-        let postgres_primary =
-            database_url.starts_with("postgres://") || database_url.starts_with("postgresql://");
-        if environment == "production" && !postgres_primary {
-            anyhow::bail!(
-                "production API storage must use PostgreSQL; per-instance SQLite cannot back a scaled deployment"
-            );
-        }
+        let config = AppConfig::for_database(database_url)?;
+        Self::new_with_config(config).await
+    }
+
+    /// Authoritative API composition entry point. All environment-sensitive
+    /// startup policy is parsed and validated by AppConfig before state is built.
+    pub async fn new_with_config(config: AppConfig) -> anyhow::Result<Self> {
+        let postgres_primary = config.database_is_postgres();
 
         let (
             projection_pool,
@@ -185,7 +187,7 @@ impl ApiState {
         ): StorageBackendHandles = if postgres_primary {
             let pool = PgPoolOptions::new()
                 .max_connections(20)
-                .connect(database_url)
+                .connect(config.database_url())
                 .await?;
             sqlx::migrate!("../../../migrations/postgres")
                 .run(&pool)
@@ -206,7 +208,7 @@ impl ApiState {
                 Some(pool),
             )
         } else {
-            let options = SqliteConnectOptions::from_str(database_url)?
+            let options = SqliteConnectOptions::from_str(config.database_url())?
                 .create_if_missing(true)
                 // Phase A fix (User Hierarchy): without this, SQLite
                 // never enforces the FK on users.parent_user_id (or any
@@ -219,7 +221,7 @@ impl ApiState {
                 // be lost once the pool cycles connections.
                 .foreign_keys(true);
             let pool = SqlitePoolOptions::new()
-                .max_connections(if database_url.contains(":memory:") {
+                .max_connections(if config.database_url().contains(":memory:") {
                     1
                 } else {
                     5
@@ -249,7 +251,10 @@ impl ApiState {
         let (events, _) = broadcast::channel(512);
 
         if std::env::var("ONYX_AUTHORITY_SIGNING_KEY").is_err() {
-            if environment == "production" {
+            // Production was rejected by AppConfig when the signing key was
+            // absent. Non-production compositions retain the deterministic
+            // local key that existing tests and local development rely on.
+            if config.is_production() {
                 anyhow::bail!("ONYX_AUTHORITY_SIGNING_KEY is required in production");
             }
             std::env::set_var(
@@ -274,10 +279,7 @@ impl ApiState {
             ))
         };
 
-        let governance_url = std::env::var("ONYX_GOVERNANCE_DATABASE_URL").ok();
-        if environment == "production" && governance_url.is_none() {
-            anyhow::bail!("ONYX_GOVERNANCE_DATABASE_URL is required in production");
-        }
+        let governance_url = config.governance_database_url().map(str::to_owned);
 
         // H-03 / H4(a): explicit CORS origin allow-list, driven by config
         // rather than hardcoded. A concrete origin list cannot honestly be
@@ -293,32 +295,7 @@ impl ApiState {
         // value, not something this code can guess — set
         // `ONYX_CORS_ALLOWED_ORIGINS` (comma-separated) to whatever origin(s)
         // web-ui/admin-shell actually get deployed under once that happens.
-        let cors_allowed_origins = {
-            let configured = std::env::var("ONYX_CORS_ALLOWED_ORIGINS").ok();
-            let parsed = configured
-                .as_deref()
-                .map(|list| {
-                    list.split(',')
-                        .map(str::trim)
-                        .filter(|origin| !origin.is_empty())
-                        .map(HeaderValue::from_str)
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()
-                .map_err(|error| {
-                    anyhow::anyhow!("ONYX_CORS_ALLOWED_ORIGINS contains an invalid origin: {error}")
-                })?
-                .filter(|origins| !origins.is_empty());
-            if environment == "production" && parsed.is_none() {
-                anyhow::bail!(
-                    "ONYX_CORS_ALLOWED_ORIGINS is required in production (audit finding H-03): \
-                     no deployed origin exists yet for web-ui/admin-shell in this repo's \
-                     deploy/ config, so a default cannot be assumed -- set it explicitly to \
-                     the real deployed origin(s) of every trusted browser client"
-                );
-            }
-            parsed
-        };
+        let cors_allowed_origins = config.cors_allowed_origins().map(ToOwned::to_owned);
         let (rate_limiter, audit_writer, token_revocation_store): (
             Arc<dyn RateLimiter>,
             Arc<dyn AuditWriter>,
@@ -427,7 +404,7 @@ impl ApiState {
         // will just correctly refuse to create a second "first" admin once
         // any user exists (`BOOTSTRAP_ALREADY_COMPLETED`), same as it
         // always has.
-        if environment != "production" && user_store.count().await? == 0 {
+        if config.development_seed_enabled() && user_store.count().await? == 0 {
             let password_hash = password_hasher
                 .hash(SEEDED_ADMIN_PASSWORD)
                 .map_err(|e| anyhow::anyhow!("failed to hash seeded admin password: {e}"))?;

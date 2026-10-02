@@ -134,6 +134,7 @@ check("DATABASE_URL" in helm_values and "ONYX_GOVERNANCE_DATABASE_URL" in helm_v
 
 # Scaled API storage and secret-safe readiness contract.
 api_routes = text("crates/bins/api-server/src/routes/mod.rs")
+api_config = text("crates/bins/api-server/src/config.rs")
 api_query = text("crates/bins/api-server/src/query_handler.rs")
 api_main = text("crates/bins/api-server/src/main.rs")
 docker_compose = text("deploy/docker-compose.local.yml")
@@ -141,9 +142,25 @@ api_docker = text("deploy/docker/api-server.Dockerfile")
 for token in [
     "ProjectionPool::Postgres", "PostgresRepository::new",
     "PostgresUnitOfWorkFactory::new", "PostgresIdempotencyStore",
-    "production API storage must use PostgreSQL",
 ]:
     check(token in api_routes, f"production PostgreSQL API composition missing: {token}")
+
+# H-01: the security posture is intentionally centralized in the typed
+# AppConfig/Environment boundary. The verifier must validate that new
+# architecture instead of requiring the previous inline string comparison.
+for token in [
+    "pub enum Environment",
+    "Environment::Production",
+    "production API storage must use PostgreSQL",
+    "ONYX_AUTHORITY_SIGNING_KEY is required in production",
+    "ONYX_GOVERNANCE_DATABASE_URL is required in production",
+    "ONYX_CORS_ALLOWED_ORIGINS is required in production",
+    "pub async fn new_with_config(config: AppConfig)",
+]:
+    check(token in api_config or token in api_routes,
+          f"H-01 typed environment contract missing: {token}")
+check("ApiState::new_with_config(config).await?" in api_main,
+      "API startup does not compose through validated AppConfig")
 check("EXTRACT(EPOCH FROM updated_at)" in api_query,
       "PostgreSQL projection query path missing")
 check('.route("/ready", get(readiness))' in api_routes and 'SELECT 1' in api_routes,
