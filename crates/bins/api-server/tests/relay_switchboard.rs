@@ -138,7 +138,7 @@ async fn relay_forwards_a_frame_between_two_replicas() {
             Some(alice),
             org,
             b"hello-from-bob",
-        )))
+        ).into()))
         .await
         .unwrap();
 
@@ -159,7 +159,7 @@ async fn relay_forwards_a_frame_between_two_replicas() {
             Some(bob),
             org,
             b"hello-from-alice",
-        )))
+        ).into()))
         .await
         .unwrap();
 
@@ -192,7 +192,7 @@ async fn relay_drops_frames_for_an_absent_peer_without_killing_the_sender() {
             Some(ghost),
             org,
             b"into-the-void",
-        )))
+        ).into()))
         .await
         .unwrap();
 
@@ -203,7 +203,7 @@ async fn relay_drops_frames_for_an_absent_peer_without_killing_the_sender() {
             Some(ghost),
             org,
             b"still-alive",
-        )))
+        ).into()))
         .await
         .expect("connection should survive an undeliverable frame");
 
@@ -234,7 +234,7 @@ async fn relay_closes_connection_on_cross_tenant_frame() {
             Some(bob),
             foreign_org,
             b"wrong-tenant",
-        )))
+        ).into()))
         .await
         .unwrap();
 
