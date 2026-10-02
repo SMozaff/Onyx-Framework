@@ -210,12 +210,12 @@ function CreateConversationForm({
         {conversationType === "SubTeam" && (
           <div>
             <label className="block text-xs font-medium text-onyx-text-dim">
-              Parent Supergroup id
+              {t("common.parentSupergroupId")}
             </label>
             <input
               value={parentSupergroupRaw}
               onChange={(e) => setParentSupergroupRaw(e.target.value)}
-              placeholder="[12,34,...]"
+              placeholder={t("common.id16Placeholder")}
               className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
             />
           </div>
@@ -333,7 +333,7 @@ function AddMemberForm({
         <input
           value={userIdRaw}
           onChange={(e) => setUserIdRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <button
@@ -398,12 +398,12 @@ function MessageThread({
 
       <div className="mt-4">
         <label className="block text-xs font-medium text-onyx-text-dim">
-          View a message by id
+          {t("common.viewMessageById")}
         </label>
         <input
           value={messageIdRaw}
           onChange={(e) => setMessageIdRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
       </div>
@@ -715,7 +715,7 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
           <input
             value={recipientRaw}
             onChange={(e) => setRecipientRaw(e.target.value)}
-            placeholder="[12,34,...]"
+            placeholder={t("common.id16Placeholder")}
             className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
           />
           <button
@@ -724,8 +724,7 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
             disabled={sendCmd.loading}
             className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            Send
-          </button>
+            {t("common.send")}\n          </button>
         </div>
         {(sendError ?? sendCmd.error) && (
           <p className="mt-1 text-xs text-onyx-status-blocked">
@@ -741,14 +740,14 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
         <input
           value={requestIdRaw}
           onChange={(e) => setRequestIdRaw(e.target.value)}
-          placeholder="[12,34,...]"
+          placeholder={t("common.id16Placeholder")}
           className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
       </div>
 
       {targetRequestId && (
         <div className="mt-3 rounded-md border border-onyx-border bg-onyx-bg p-3">
-          {loadingRequest && <p className="text-sm text-onyx-text-dim">Loading…</p>}
+          {loadingRequest && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {requestError && <p className="text-sm text-onyx-status-blocked">{requestError.message}</p>}
           {request && (
             <div>
