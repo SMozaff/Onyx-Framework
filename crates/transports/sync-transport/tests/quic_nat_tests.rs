@@ -11,7 +11,10 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-fn server_config() -> (quinn::ServerConfig, rustls::pki_types::CertificateDer<'static>) {
+fn server_config() -> (
+    quinn::ServerConfig,
+    rustls::pki_types::CertificateDer<'static>,
+) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let cert_der = cert.cert.der().clone();
     let priv_key = rustls::pki_types::PrivateKeyDer::Pkcs8(
@@ -68,10 +71,10 @@ async fn quic_survives_ip_change() {
 
     // 3. Simulate a network change: rebind the CLIENT ENDPOINT's local UDP
     // socket to a new ephemeral port. Rebinding is a method on
-    // `quinn::Endpoint`, not `quinn::Connection` — verified against the
-    // Quinn's connection handle is unaffected by endpoint rebinding; QUIC
-    // connection IDs keep the existing connection usable after the endpoint
-    // changes its local UDP socket.
+    // `quinn::Endpoint`, not `quinn::Connection`. Quinn's connection
+    // handle is unaffected by endpoint rebinding; QUIC connection IDs keep
+    // the existing connection usable after the endpoint changes its local
+    // UDP socket.
     let new_socket = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     client_endpoint
         .rebind(new_socket)

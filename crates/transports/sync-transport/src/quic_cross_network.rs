@@ -163,9 +163,7 @@ impl Connection for QuicConnection {
             send.write_all(&bytes)
                 .await
                 .map_err(|_| TransportError::ConnectionLost)?;
-            send.finish()
-                .await
-                .map_err(|_| TransportError::ConnectionLost)?;
+            send.finish().map_err(|_| TransportError::ConnectionLost)?;
 
             let response = recv
                 .read_to_end(1024 * 1024)
@@ -189,9 +187,7 @@ impl Connection for QuicConnection {
         send.write_all(&bytes)
             .await
             .map_err(|_| TransportError::ConnectionLost)?;
-        send.finish()
-            .await
-            .map_err(|_| TransportError::ConnectionLost)?;
+        send.finish().map_err(|_| TransportError::ConnectionLost)?;
         Ok(())
     }
 
