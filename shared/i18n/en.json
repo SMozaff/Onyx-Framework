@@ -214,6 +214,7 @@
   "common.pageNotFound": "Page not found",
   "common.parent": "Parent",
   "common.parentDisplayName": "Parent display name",
+  "common.parentSupergroupId": "Parent Supergroup id",
   "common.parentSupergroupMember": "This user is already a member of the parent Supergroup",
   "common.pending": "pending",
   "common.peopleLoadFailed": "People could not be loaded. Try again shortly.",
