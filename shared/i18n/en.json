@@ -391,6 +391,7 @@
   "tasks.staffWorkflow": "Staff workflow",
   "tasks.title": "Tasks",
   "tasks.titlePlaceholder": "Task title",
+  "tasks.unavailableBackToTasks": "Task unavailable — back to tasks",
   "notifications.acknowledge": "Acknowledge",
   "notifications.acknowledging": "Acknowledging…",
   "notifications.acknowledgmentNote": "Acknowledgment is sent to the server immediately. Failed commands are never queued locally.",
