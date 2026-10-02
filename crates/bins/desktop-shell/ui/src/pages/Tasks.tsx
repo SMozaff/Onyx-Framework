@@ -79,7 +79,7 @@ export default function Tasks() {
                   onClick={() => void refetch()}
                   className="rounded-md bg-onyx-surface-hover px-3 py-1.5 text-xs text-onyx-text"
                 >
-                  Refresh
+                  {t("common.refresh")}
                 </button>
               </div>
 
@@ -140,7 +140,7 @@ function IdLookup({ onLookup }: { onLookup: (id: Id16) => void }) {
           onClick={submit}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          View
+          {t("common.view")}
         </button>
       </div>
       {parseError && <p className="mt-1 text-xs text-onyx-status-blocked">{parseError}</p>}

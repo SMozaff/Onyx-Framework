@@ -135,7 +135,7 @@ export default function Notifications() {
           onClick={() => void refetch()}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
