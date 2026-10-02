@@ -214,6 +214,7 @@
   "common.pageNotFound": "صفحه پیدا نشد",
   "common.parent": "سرپرست",
   "common.parentDisplayName": "نام نمایشی سرپرست",
+  "common.parentSupergroupId": "شناسه ابرگروه والد",
   "common.parentSupergroupMember": "این کاربر از قبل عضو ابرگروه والد است",
   "common.pending": "در انتظار",
   "common.peopleLoadFailed": "بارگذاری افراد ممکن نشد. کمی بعد دوباره تلاش کنید.",
