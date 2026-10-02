@@ -43,11 +43,11 @@ export function DashboardPage() {
       </section>
 
       <section aria-label={t("dashboard.recentMissions")}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900"{t("dashboard.recentMissions")}</h3>
+        <h3 className="mb-3 text-base font-semibold text-slate-900">{t("dashboard.recentMissions")}</h3>
         {missions.isPending ? (
-          <p className="text-sm text-slate-500"{t("common.loading")}</p>
+          <p className="text-sm text-slate-500">{t("common.loading")}</p>
         ) : missionList.length === 0 ? (
-          <p className="text-sm text-slate-500"{t("dashboard.noMissionsVisible")}</p>
+          <p className="text-sm text-slate-500">{t("dashboard.noMissionsVisible")}</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {missionList.map((mission) => (
@@ -64,9 +64,9 @@ export function DashboardPage() {
       </section>
 
       <section aria-label={t("dashboard.recentActivity")}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900"{t("dashboard.recentActivity")}</h3>
+        <h3 className="mb-3 text-base font-semibold text-slate-900">{t("dashboard.recentActivity")}</h3>
         {activity.length === 0 ? (
-          <p className="text-sm text-slate-500"{t("dashboard.noActivity")}</p>
+          <p className="text-sm text-slate-500">{t("dashboard.noActivity")}</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {activity.map((item) => (
@@ -86,7 +86,7 @@ export function DashboardPage() {
 
       {approvalList.length > 0 ? (
         <section aria-label={t("dashboard.pendingApprovals")}>
-          <h3 className="mb-3 text-base font-semibold text-slate-900"{t("dashboard.pendingApprovals")}</h3>
+          <h3 className="mb-3 text-base font-semibold text-slate-900">{t("dashboard.pendingApprovals")}</h3>
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {approvalList.map((approval) => (
               <li key={approval.id} className="px-4 py-3">
