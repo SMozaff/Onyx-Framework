@@ -47,7 +47,7 @@ function AdminOnlyLayout() {
             onClick={() => useAuthStore.getState().logout()}
             className="mt-4 rounded-md bg-onyx-surface-hover px-3 py-1.5 text-sm text-onyx-text"
           >
-            Log out
+            {t("auth.logOut")}
           </button>
         </div>
       </div>
@@ -57,11 +57,12 @@ function AdminOnlyLayout() {
 }
 
 export default function App() {
+  const { t } = useI18n();
   return (
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center text-onyx-text-dim">
-          Loading ONYX Admin…
+          {t("common.loadingAdmin")}
         </div>
       }
     >
