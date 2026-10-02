@@ -168,3 +168,59 @@ fn matches_filter(event: &Value, filter: &SubscriptionFilter) -> bool {
     }
     true
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn extracts_access_token_from_websocket_subprotocols() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer, access.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), Some("access.token"));
+    }
+
+    #[test]
+    fn rejects_missing_authentication_protocol() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("access.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), None);
+    }
+
+    #[test]
+    fn rejects_empty_token_after_authentication_protocol() {
+        let mut headers = HeaderMap::new();
+        headers.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("onyx-bearer"));
+
+        assert_eq!(bearer_token_from_protocols(&headers), None);
+    }
+
+    #[test]
+    fn handles_multiple_websocket_protocol_header_values() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("chat"),
+        );
+        headers.append(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer"),
+        );
+        headers.append(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("access.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), Some("chat"));
+    }
+}
