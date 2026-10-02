@@ -24,3 +24,9 @@ harness = true
 name = "tombstone_gc"
 path = "../../../tests/integration/tombstone_gc_tests.rs"
 harness = true
+
+
+[[test]]
+name = "laws"
+path = "../../../tests/property/crdt_laws.rs"
+harness = true
