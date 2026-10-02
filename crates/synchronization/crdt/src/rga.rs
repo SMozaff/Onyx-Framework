@@ -108,6 +108,7 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Rga<E> {
             clock: clock.clone(),
         });
         self.clock = self.clock.merge(&clock);
+        self.atoms.sort_unstable_by_key(|atom| atom.id);
         id
     }
 
@@ -204,6 +205,7 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Crdt for Rga
             self.summary_clock = new_summary;
             changed = true;
         }
+        self.atoms.sort_unstable_by_key(|atom| atom.id);
 
         changed
     }
