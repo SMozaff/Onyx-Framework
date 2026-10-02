@@ -307,7 +307,6 @@ jobs:
 
   native-ui-evidence:
     runs-on: ubuntu-latest
-    needs: web
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -447,3 +446,55 @@ jobs:
         with:
           name: onyx-mobile-android-kotlin-release-r8
           path: mobile-android/app/build/outputs/apk/release/app-release.apk
+# Phase 0 merge-control gate.
+  #
+  # This job is intentionally an aggregate gate rather than a build/test job.
+  # It waits for every independent verification dimension and converts any
+  # failure, cancellation, or upstream skip into one deterministic failing
+  # status. Configure ONLY this job as the required pull-request status check
+  # after verifying the repository's branch protection/ruleset settings.
+  #
+  # `always()` is essential: without it, a dependency failure causes this job
+  # itself to be skipped, which can make the aggregate gate non-actionable.
+  merge-gate:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs:
+      - check
+      - i18n
+      - deploy-check
+      - web
+      - mobile-pwa
+      - native-ui-evidence
+      - load-smoke
+      - mobile-android-kotlin
+    steps:
+      - name: Report upstream gate results
+        run: |
+          echo "check=${{ needs.check.result }}"
+          echo "i18n=${{ needs.i18n.result }}"
+          echo "deploy-check=${{ needs.deploy-check.result }}"
+          echo "web=${{ needs.web.result }}"
+          echo "mobile-pwa=${{ needs.mobile-pwa.result }}"
+          echo "native-ui-evidence=${{ needs.native-ui-evidence.result }}"
+          echo "load-smoke=${{ needs.load-smoke.result }}"
+          echo "mobile-android-kotlin=${{ needs.mobile-android-kotlin.result }}"
+
+      - name: Fail unless every required gate passed
+        if: >-
+          ${{
+            needs.check.result != 'success' ||
+            needs.i18n.result != 'success' ||
+            needs.deploy-check.result != 'success' ||
+            needs.web.result != 'success' ||
+            needs.mobile-pwa.result != 'success' ||
+            needs.native-ui-evidence.result != 'success' ||
+            needs.load-smoke.result != 'success' ||
+            needs.mobile-android-kotlin.result != 'success'
+          }}
+        run: |
+          echo "::error::Phase 0 merge gate blocked: one or more required verification jobs did not pass."
+          exit 1
+
+      - name: All required CI gates passed
+        run: echo "Phase 0 merge gate passed."
