@@ -23,15 +23,20 @@ const WS_AUTH_PROTOCOL: &str = "onyx-bearer";
 
 fn bearer_token_from_protocols(headers: &HeaderMap) -> Option<&str> {
     let mut found_auth_protocol = false;
-    let mut token = None;
+    let mut token: Option<&str> = None;
 
     for header_value in headers.get_all(SEC_WEBSOCKET_PROTOCOL).iter() {
-        let protocols = header_value.to_str().ok()?.split(',');
-        for protocol in protocols.map(str::trim).filter(|p| !p.is_empty()) {
+        for protocol in header_value.to_str().ok()?.split(',').map(str::trim).filter(|p| !p.is_empty()) {
             if protocol == WS_AUTH_PROTOCOL {
+                if found_auth_protocol {
+                    return None;
+                }
                 found_auth_protocol = true;
-            } else if token.is_none() {
-                token = Some(protocol);
+            } else if token.replace(protocol).is_some() {
+                // Exactly one non-ONYX protocol is the bearer token. Reject
+                // additional values rather than guessing which one is the
+                // credential if a future application subprotocol is added.
+                return None;
             }
         }
     }
@@ -206,12 +211,8 @@ mod tests {
     }
 
     #[test]
-    fn handles_multiple_websocket_protocol_header_values() {
+    fn handles_split_authentication_header_values() {
         let mut headers = HeaderMap::new();
-        headers.append(
-            SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("chat"),
-        );
         headers.append(
             SEC_WEBSOCKET_PROTOCOL,
             HeaderValue::from_static("onyx-bearer"),
@@ -221,6 +222,17 @@ mod tests {
             HeaderValue::from_static("access.token"),
         );
 
-        assert_eq!(bearer_token_from_protocols(&headers), Some("chat"));
+        assert_eq!(bearer_token_from_protocols(&headers), Some("access.token"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_multiple_credential_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer, access.token, other.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), None);
     }
 }
