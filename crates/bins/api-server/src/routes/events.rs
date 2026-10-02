@@ -3,10 +3,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    http::{
-        header::SEC_WEBSOCKET_PROTOCOL,
-        HeaderMap, StatusCode,
-    },
+    http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderMap, StatusCode},
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -26,7 +23,13 @@ fn bearer_token_from_protocols(headers: &HeaderMap) -> Option<&str> {
     let mut token: Option<&str> = None;
 
     for header_value in headers.get_all(SEC_WEBSOCKET_PROTOCOL).iter() {
-        for protocol in header_value.to_str().ok()?.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        for protocol in header_value
+            .to_str()
+            .ok()?
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
             if protocol == WS_AUTH_PROTOCOL {
                 if found_auth_protocol {
                     return None;
@@ -41,7 +44,9 @@ fn bearer_token_from_protocols(headers: &HeaderMap) -> Option<&str> {
         }
     }
 
-    found_auth_protocol.then_some(token?).filter(|value| !value.is_empty())
+    found_auth_protocol
+        .then_some(token?)
+        .filter(|value| !value.is_empty())
 }
 
 pub async fn websocket_route(
@@ -174,7 +179,6 @@ fn matches_filter(event: &Value, filter: &SubscriptionFilter) -> bool {
     true
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,7 +209,10 @@ mod tests {
     #[test]
     fn rejects_empty_token_after_authentication_protocol() {
         let mut headers = HeaderMap::new();
-        headers.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("onyx-bearer"));
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer"),
+        );
 
         assert_eq!(bearer_token_from_protocols(&headers), None);
     }
