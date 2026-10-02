@@ -277,7 +277,7 @@ function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
   return (
     <div className="mt-4">
       <label className="block text-xs font-medium text-onyx-text-dim">
-        Look up by policy id (UUID)
+        {t("settings.lookupPolicyById")}
       </label>
       <div className="mt-1 flex gap-2">
         <input
@@ -291,7 +291,7 @@ function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
           onClick={() => raw && onLookup(raw)}
           className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
         >
-          Open
+          {t("common.open")}
         </button>
       </div>
     </div>
@@ -604,7 +604,7 @@ function PolicyActions({
           }
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
-          Evaluate
+          {t("common.evaluate")}
         </button>
       </div>
       {evaluateResult && <span className="text-xs text-onyx-text-dim">{evaluateResult}</span>}
@@ -720,7 +720,7 @@ function LegalHoldPanel() {
               }
               className="mt-2 rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
             >
-              Release
+              {t("settings.release")}
             </button>
           )}
           {releaseCmd.error && (
