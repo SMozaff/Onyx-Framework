@@ -17,6 +17,43 @@ permissions:
   packages: read
 
 jobs:
+  # Temporary H-02 lockfile bootstrap. This job exists only on the
+  # completion branch and commits Cargo.lock generated from the exact
+  # modernized manifest. It is excluded from merge-gate and is removed
+  # before the final H-02 merge.
+  dependency-lock-resolution:
+    if: ${{ github.head_ref == 'phase-2/h02-completion' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - name: Resolve dependency graph
+        run: cargo update
+      - name: Commit generated Cargo.lock
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore(deps): regenerate Cargo.lock for H-02"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
+      - name: Upload lockfile evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: h02-generated-cargo-lock-${{ github.sha }}
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 2
   # Temporary H-02 dependency-resolution evidence job.
   # This exists only while H-02 is converting Cargo.lock to the modern
   # dependency graph. It deliberately runs without --locked so the generated
