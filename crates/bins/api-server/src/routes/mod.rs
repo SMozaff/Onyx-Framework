@@ -272,11 +272,10 @@ impl ApiState {
         let user_store: Arc<dyn UserStore> = if let Some(pool) = primary_postgres_pool.clone() {
             Arc::new(PostgresUserStore::new(pool))
         } else {
-            Arc::new(SqliteUserStore::new(
-                sqlite_pool
-                    .clone()
-                    .expect("one of the primary pools must exist"),
-            ))
+            let pool = sqlite_pool
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("no primary database pool available"))?;
+            Arc::new(SqliteUserStore::new(pool))
         };
 
         let governance_url = config.governance_database_url().map(str::to_owned);
@@ -322,7 +321,8 @@ impl ApiState {
                 Arc::new(PostgresTokenRevocationStore::new(pool)),
             )
         } else {
-            let pool = sqlite_pool.expect("SQLite composition must retain its pool");
+            let pool = sqlite_pool
+                .ok_or_else(|| anyhow::anyhow!("SQLite composition must retain its pool"))?;
             (
                 Arc::new(InMemorySlidingWindowRateLimiter::default()),
                 Arc::new(HashChainAuditWriter::sqlite(pool)),
