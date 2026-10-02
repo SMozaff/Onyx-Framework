@@ -9,7 +9,6 @@
 //! `cargo test --package sync-transport --test quic_nat_tests -- --ignored --nocapture`
 
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
 
 fn server_config() -> (
     quinn::ServerConfig,
@@ -28,7 +27,7 @@ fn server_config() -> (
 fn client_config(cert_der: rustls::pki_types::CertificateDer<'static>) -> quinn::ClientConfig {
     let mut roots = rustls::RootCertStore::empty();
     roots.add(cert_der).unwrap();
-    quinn::ClientConfig::with_root_certificates(roots).unwrap()
+    quinn::ClientConfig::with_root_certificates(roots.into()).unwrap()
 }
 
 #[tokio::test]
@@ -47,7 +46,7 @@ async fn quic_survives_ip_change() {
         let (mut send, mut recv) = conn.accept_bi().await.expect("no bi stream");
         let data = recv.read_to_end(1024).await.expect("read failed");
         send.write_all(&data).await.expect("write failed");
-        send.finish().await.expect("finish failed");
+        send.finish().expect("finish failed");
         // Hold the connection open briefly so the client can rebind.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         conn
@@ -65,7 +64,7 @@ async fn quic_survives_ip_change() {
 
     let (mut send, mut recv) = conn.open_bi().await.expect("open_bi failed");
     send.write_all(b"hello-before-rebind").await.unwrap();
-    send.finish().await.unwrap();
+    send.finish().unwrap();
     let echoed = recv.read_to_end(1024).await.unwrap();
     assert_eq!(echoed, b"hello-before-rebind");
 
@@ -82,7 +81,7 @@ async fn quic_survives_ip_change() {
 
     let (mut send2, recv2) = conn.open_bi().await.expect("open_bi after rebind failed");
     send2.write_all(b"hello-after-rebind").await.unwrap();
-    send2.finish().await.unwrap();
+    send2.finish().unwrap();
 
     // The server task already exited after one exchange in this minimal
     // test; a fuller test would loop the server to answer a second
