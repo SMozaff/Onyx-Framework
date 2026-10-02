@@ -50,7 +50,9 @@ pub struct MvRegister<V: Clone + Debug + Serialize + DeserializeOwned> {
 impl<V: Clone + Debug + Serialize + DeserializeOwned> MvRegister<V> {
     fn canonicalize(&mut self) {
         self.values.sort_unstable_by(|(left, _), (right, _)| {
-            left.entries.cmp(&right.entries)
+            let left_bytes = serde_json::to_vec(left).unwrap_or_default();
+            let right_bytes = serde_json::to_vec(right).unwrap_or_default();
+            left_bytes.cmp(&right_bytes)
         });
     }
 
