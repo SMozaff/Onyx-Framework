@@ -543,9 +543,11 @@ async fn build_app_state(
         }),
     };
 
-    let state = Arc::new(AppState::new(pool, config).await.map_err(|e| {
-        ShellError::Storage(format!("failed to initialize blob store: {e}"))
-    })?);
+    let state = Arc::new(
+        AppState::new(pool, config)
+            .await
+            .map_err(|e| ShellError::Storage(format!("failed to initialize blob store: {e}")))?,
+    );
     let sync_agent = Arc::clone(&state.sync_agent);
     tauri::async_runtime::spawn(async move {
         sync_agent.run().await;
