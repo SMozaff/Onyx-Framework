@@ -10,7 +10,7 @@
 use platform_kernel::{ReplicaId, VectorClock};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -23,9 +23,9 @@ use crate::Crdt;
 #[serde(bound(serialize = "T: Serialize", deserialize = "T: DeserializeOwned"))]
 pub struct OrSet<T: Ord + Hash + Eq + Clone + Debug + Serialize + DeserializeOwned> {
     /// Map from element to set of add tags.
-    adds: BTreeMap<T, HashSet<Tag>>,
+    adds: BTreeMap<T, BTreeSet<Tag>>,
     /// Map from element to set of remove tags.
-    removes: BTreeMap<T, HashSet<Tag>>,
+    removes: BTreeMap<T, BTreeSet<Tag>>,
     /// Causal context for GC.
     clock: VectorClock,
 }
@@ -33,7 +33,7 @@ pub struct OrSet<T: Ord + Hash + Eq + Clone + Debug + Serialize + DeserializeOwn
 /// A unique, per-operation tag distinguishing one add (or remove) from
 /// another, so concurrent adds/removes of the same element can be told
 /// apart.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Tag {
     /// The replica that performed this operation.
     pub replica_id: ReplicaId,
