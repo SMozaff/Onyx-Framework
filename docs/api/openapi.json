@@ -185,7 +185,7 @@
     "/api/events": {
       "get": {
         "operationId": "subscribeEvents",
-        "description": "WebSocket upgrade endpoint. Connect with ws(s)://host/api/events?token={access_token}, then send the EventSubscription message.",
+        "description": "WebSocket upgrade endpoint. Connect to ws(s)://host/api/events with the Sec-WebSocket-Protocol header containing `onyx-bearer` and the access token as the second protocol, then send the EventSubscription message.",
         "parameters": [
           {
             "name": "token",
