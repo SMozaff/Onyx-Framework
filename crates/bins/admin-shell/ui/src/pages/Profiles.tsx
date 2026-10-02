@@ -205,7 +205,7 @@ function EditProfileDialog({
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4">
       <div className="w-full max-w-lg rounded-lg border border-onyx-border bg-onyx-surface p-5">
         <h2 className="text-base font-medium text-onyx-text">
-          {profile ? "{t("common.editProfile")}" : t("common.newProfile")}
+          {profile ? t("common.editProfile") : t("common.newProfile")}
         </h2>
         {!profile && (
           <p className="mt-1 text-xs text-onyx-text-dim">
