@@ -24,7 +24,7 @@ export function ObserverLayout() {
       <header className="sticky top-0 z-10 border-b border-slate-800 bg-[#0a1e3d] text-white">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <div className="flex items-baseline gap-3">
-            <span className="font-bold tracking-wide">ONYX Observer</span>
+            <span className="font-bold tracking-wide">{t("app.observer")}</span>
             <span className="text-xs text-slate-300">{t("common.readOnly")}</span>
           </div>
           <div className="flex items-center gap-3">
