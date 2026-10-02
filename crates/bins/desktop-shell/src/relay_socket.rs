@@ -185,7 +185,7 @@ struct TungsteniteRelaySocket {
 impl RelaySocket for TungsteniteRelaySocket {
     async fn send_binary(&mut self, bytes: Vec<u8>) -> Result<(), TransportError> {
         self.stream
-            .send(Message::Binary(bytes))
+            .send(Message::Binary(bytes.into()))
             .await
             .map_err(|_| TransportError::ConnectionLost)
     }
@@ -197,7 +197,7 @@ impl RelaySocket for TungsteniteRelaySocket {
         // down a healthy connection over ordinary keepalive traffic.
         loop {
             match self.stream.next().await {
-                Some(Ok(Message::Binary(bytes))) => return Ok(bytes),
+                Some(Ok(Message::Binary(bytes))) => return Ok(bytes.to_vec()),
                 Some(Ok(Message::Close(_))) | None => return Err(TransportError::ConnectionLost),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) => return Err(TransportError::ConnectionLost),
