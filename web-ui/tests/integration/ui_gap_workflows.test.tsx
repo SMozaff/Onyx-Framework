@@ -156,7 +156,7 @@ describe('remaining web-ui workflows', () => {
 
     expect(await screen.findByText('1 shown')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Loan (escalated to you)' })).toBeInTheDocument();
-    expect(screen.getByText('This approval decision was escalated to you.')).toBeInTheDocument();
+    expect(screen.getByText('This verification decision was escalated to you.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Decline' })).toBeInTheDocument();
   });
