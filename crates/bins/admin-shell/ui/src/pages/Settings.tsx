@@ -273,6 +273,7 @@ function ServerConnectionSettings() {
 }
 
 function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
+  const { t } = useI18n();
   const [raw, setRaw] = useState("");
   return (
     <div className="mt-4">
