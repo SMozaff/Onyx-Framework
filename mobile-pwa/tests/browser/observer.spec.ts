@@ -147,7 +147,7 @@ test('file download carries the bearer token and reports bytes', async ({ page }
 
   await page.goto(`/files/${hash}`);
   await expect(page.getByRole('button', { name: 'Download a file' })).toBeVisible();
-  await page.getByRole('button', { name: 'Download file' }).click();
+  await page.getByRole('button', { name: 'Download a file' }).click();
 
   await expect(page.getByText(/bytes/)).toBeVisible();
   expect(downloads.length).toBeGreaterThanOrEqual(1);
