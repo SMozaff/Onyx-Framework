@@ -14,7 +14,7 @@ export function TaskDetailPage() {
   if (task.isError || !task.data?.data[0]) {
     return (
       <Link className="text-sm text-slate-500 underline underline-offset-4" to="/tasks">
-        Task unavailable — back to tasks
+        {t("tasks.unavailableBackToTasks")}
       </Link>
     );
   }
@@ -31,33 +31,33 @@ export function TaskDetailPage() {
       </div>
 
       <header>
-        <p className="text-xs uppercase tracking-wide text-slate-500">Task</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500">{t("tasks.singular")}</p>
         <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
       </header>
 
       <dl className="grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-4">
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Owner</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.owner")}</dt>
           <dd className="text-sm font-medium text-slate-900">{owner}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Priority</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.priority")}</dt>
           <dd className="text-sm font-medium text-slate-900">{priority}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Due</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.due")}</dt>
           <dd className="text-sm font-medium text-slate-900">{new Date(due_at).toLocaleString()}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Version</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.version")}</dt>
           <dd className="text-sm font-medium text-slate-900">{version}</dd>
         </div>
         <div className="col-span-2">
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Mission</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("missions.singular")}</dt>
           <dd className="break-all text-sm font-medium text-slate-900">{mission_id}</dd>
         </div>
         <div className="col-span-2">
-          <dt className="text-xs uppercase tracking-wide text-slate-500">Updated</dt>
+          <dt className="text-xs uppercase tracking-wide text-slate-500">{t("common.updated")}</dt>
           <dd className="text-sm font-medium text-slate-900">
             {new Date(updated_at).toLocaleString()}
           </dd>
