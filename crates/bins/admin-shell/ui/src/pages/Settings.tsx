@@ -32,7 +32,7 @@ import {
  * goes through `/api/command` via `useCommand`.
  */
 const POLICY_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
-const SERVER_ADDRESS_PLACEHOLDER = "{t("settings.lanAddress")}";
+const SERVER_ADDRESS_PLACEHOLDER = "http://192.168.0.250:3000";
 
 export default function Settings() {
   const { t } = useI18n();
@@ -235,7 +235,7 @@ function ServerConnectionSettings() {
       <p className="mt-1 text-xs text-onyx-text-dim">
         The address of the ONYX backend this app talks to. Change this if you're running
         the Admin app on a different computer than the server — e.g. a LAN address like{" "}
-        <code className="rounded bg-onyx-bg px-1 py-0.5">http://192.168.0.250:3000</code>{" "}
+        <code className="rounded bg-onyx-bg px-1 py-0.5">{t("settings.lanAddress")}</code>{" "}
         instead of <code className="rounded bg-onyx-bg px-1 py-0.5">{t("settings.localhostAddress")}</code>.
       </p>
 
@@ -545,7 +545,7 @@ function PolicyActions({
   const publishCmd = useCommand();
   const retireCmd = useCommand();
   const evaluateCmd = useCommand();
-  const [evaluateKey, set{t("common.evaluate")}Key] = useState("");
+  const [evaluateKey, setEvaluateKey] = useState("");
   const [evaluateResult, setEvaluateResult] = useState<string | null>(null);
   const organizationId = useAuthStore((s) => s.user?.organization_id) ?? "";
 
