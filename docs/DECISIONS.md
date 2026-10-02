@@ -1695,13 +1695,13 @@ The delivered generic command pipeline accepted an `IdempotencyStore` for lookup
 
 Increment 7 rate governance and production fault injection are not implemented in the delivered repository, but Team 6 acceptance requires real-backend verification of 429 and 500 handling.
 
-**Ruling:** when and only when `ONYX_TEST_MODE=1`, authenticated command/query routes recognize `x-onyx-test-status: 429|500` and return canonical deterministic errors. The behavior is absent when test mode is not explicitly enabled. Natural backend paths provide 401 (missing/expired bearer token), 403 (policy-restricted web approval), and 409 (version/epoch/state conflict).
+**Ruling:** the deterministic fault-injection implementation is compiled only when the `test-endpoints` Cargo feature is explicitly enabled. With that feature and `ONYX_TEST_MODE=1`, authenticated command/query routes recognize `x-onyx-test-status: 429|500` and return canonical deterministic errors. Normal production binaries contain no client-driven fault-injection path.
 
 ### T6-D11 — WebSocket token redaction from HTTP tracing
 
-Ruling T6-R6 places the access token in the WebSocket query string. The default Tower HTTP trace span includes the request URI and could therefore log bearer material.
+The original T6-R6 design placed the access token in the WebSocket query string. That design is superseded by the current event-stream contract.
 
-**Ruling:** the Team 6 router does not install the default `TraceLayer`. Application startup and non-secret operational events may still be logged through `tracing`, but request URIs containing `?token=` are not emitted by the default HTTP trace middleware. A future structured observability adapter must explicitly redact this parameter.
+**Ruling:** `/api/events` authenticates using `Sec-WebSocket-Protocol: onyx-bearer, <access_token>`. The server echoes only the fixed `onyx-bearer` protocol and never copies the bearer into the upgrade response. The relay path separately uses its short-lived, single-use target-scoped relay ticket. The router still avoids the default `TraceLayer` for sensitive request metadata.
 
 ### T6-D12 — React Query network mode is explicit
 
