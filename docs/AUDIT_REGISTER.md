@@ -494,7 +494,7 @@ state is tracked here as the current remediation index.
 | M-04 | **CLOSED** — web-ui/package-lock.json is committed and CI uses npm ci. | Final npm audit policy verification pending. |
 | M-05 | **PARTIALLY REMEDIATED** — AppState blob-store initialization is fallible and no longer panics the desktop/mobile startup path. Remaining non-test panic sites still require targeted triage. | Final workspace clippy/test pass pending. |
 | M-06 | **IMPLEMENTED** — desktop/GTK requirements and platform-specific CI isolation have been addressed in the workflow/scaffold remediation. | Final GitHub Actions verification pending. |
-| L-01 | **SUBSTANTIALLY REMEDIATED** — RGA ordering/traversal, OR-Set tag storage, MV-Register ordering, and append-only-log ordering are now deterministic; a new law-based property suite covers merge convergence/idempotence across the CRDT family. | Final CRDT property suite run pending; broader randomized histories remain future coverage. |
+| L-01 | **SUBSTANTIALLY REMEDIATED** — RGA ordering/traversal, OR-Set tag storage, MV-Register ordering, and append-only-log ordering are now deterministic; the law-based property suite covers merge convergence/idempotence across the CRDT family. | Final GitHub CRDT/property run pending; broader randomized histories remain future coverage. |
 
 ### 12. Remediation change log — current pass
 
@@ -507,6 +507,8 @@ state is tracked here as the current remediation index.
 | 30 | AppState::new propagates blob-store initialization failures instead of panicking | Reduce M-05 startup panic surface | IMPLEMENTED |
 | 31 | RGA deterministic sibling ordering and depth-first branch traversal | Fix a concrete convergence defect discovered while addressing L-01 | IMPLEMENTED |
 | 32 | Audit register updated to reflect live remediation state | Prevent historical findings from being mistaken for current open defects | IMPLEMENTED |
+| 33 | GitHub-only verification policy and Session 7 provenance corrected | Ensure repository documentation does not instruct or imply local toolchain/package installation | IMPLEMENTED |
+| 34 | Session 7 workspace lint carry-forwards reconciled with live code | Keep the current register aligned with already-landed lint fixes | IMPLEMENTED |
 
 > **Verification rule:** no item above is marked fully verified merely because it was
 > edited. Final closure still requires the GitHub Actions build/test/security pass
