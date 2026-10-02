@@ -60,7 +60,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "uuid", "chrono", "json", "migrate"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "sqlite", "uuid", "chrono", "json", "migrate"] }
 chrono = { version = "0.4", features = ["serde"] }
 axum = { version = "0.7", features = ["ws", "multipart"] }
 base64 = "0.21"
@@ -129,18 +129,18 @@ anyhow = "1"
 # Not previously in the workspace; added here rather than duplicated as
 # non-workspace deps in sync-transport's own Cargo.toml, matching the
 # existing convention (all shared deps centralized at workspace level).
-quinn = "0.10"
-rustls = "0.21"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json", "multipart"] }
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring", "platform-verifier", "aws-lc-rs"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "multipart"] }
 url = "2"
 # WebPush delivery (RFC 8291/8292): ECDH P-256, AES-128-GCM, ES256 VAPID JWT,
 # and RFC 6090 key import — supplied by BoringSSL-derived `ring`.
 ring = "0.17"
-tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 libc = "0.2"
 objc = "0.2"
 jni = "0.21"
-rcgen = "0.11"
+rcgen = "0.14"
 
 # --- Password hashing (Audit fix H-01) ---
 # Argon2id is the OWASP-recommended password KDF. `password-hash` supplies the
