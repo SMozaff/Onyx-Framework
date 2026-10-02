@@ -38,9 +38,7 @@ pub struct LogEntry<E> {
 impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> AppendOnlyLog<E> {
     fn canonicalize(&mut self) {
         self.entries.sort_unstable_by(|left, right| {
-            let left_bytes = serde_json::to_vec(&left.clock).unwrap_or_default();
-            let right_bytes = serde_json::to_vec(&right.clock).unwrap_or_default();
-            left_bytes.cmp(&right_bytes)
+            left.clock.entries.iter().cmp(right.clock.entries.iter())
         });
     }
 
