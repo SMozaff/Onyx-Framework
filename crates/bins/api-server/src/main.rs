@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::from_env()?;
     let storage_backend = config.storage_backend();
     let metrics_bind = config.metrics_bind();
-    let bind = config.bind();
+    let bind = config.bind().to_owned();
     let state = ApiState::new_with_config(config).await?;
     let metrics_task = tokio::spawn(serve_metrics(state.metrics.clone(), metrics_bind));
     let app = router(state);
