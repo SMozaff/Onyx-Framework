@@ -95,7 +95,7 @@ export default function Profiles() {
                       onClick={() => setEditing(p)}
                       className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover"
                     >
-                      Edit
+                      {t("common.edit")}
                     </button>
                   </td>
                 </tr>
@@ -239,7 +239,7 @@ function EditProfileDialog({
             onClick={onClose}
             className="rounded-md bg-onyx-surface px-3 py-1.5 text-sm text-onyx-text hover:bg-onyx-surface-hover"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
