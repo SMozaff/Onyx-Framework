@@ -5,8 +5,10 @@ import { ProjectionStatePanel } from '../../components/ProjectionStatePanel';
 import { deriveProjectionState } from '../../components/ProjectionState';
 import { useObserverQuery } from '../../hooks/useQuery';
 import type { MissionSummary } from '../../types/query';
+import { useI18n } from '../../i18n/I18nContext';
 
 export function MissionsPage() {
+  const { t } = useI18n();
   const query = useObserverQuery<MissionSummary>('mission.list');
   const state = deriveProjectionState(query);
   const missions = query.data?.data ?? [];
@@ -15,19 +17,19 @@ export function MissionsPage() {
     <div className="space-y-6">
       <header className="flex items-start justify-between">
         <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500">Read-only projection</p>
-          <h2 className="text-lg font-semibold text-slate-900">Missions</h2>
+          <p className="text-xs uppercase tracking-wide text-slate-500">{t("common.readOnlyProjection")}</p>
+          <h2 className="text-lg font-semibold text-slate-900">{t("missions.title")}</h2>
           <p className="text-sm text-slate-600">
-            Review purpose, ownership, lifecycle status, and temporal constraints.
+            {t("missions.reviewPurposeOwnership")}
           </p>
         </div>
         <Freshness state={state} />
       </header>
 
-      {state.kind === 'loading' && <p className="text-sm text-slate-500">Loading…</p>}
+      {state.kind === 'loading' && <p className="text-sm text-slate-500">{t("common.loading")}</p>}
       {state.kind === 'unavailable' && <ProjectionStatePanel resource="Missions" state={state} />}
       {state.kind === 'empty' && (
-        <p className="text-sm text-slate-500">No missions visible to your account.</p>
+        <p className="text-sm text-slate-500">{t("dashboard.noMissionsVisible")}</p>
       )}
       {state.kind === 'stale' && <ProjectionStatePanel resource="Missions" state={state} compact />}
 

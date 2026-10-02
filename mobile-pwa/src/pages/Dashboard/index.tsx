@@ -1,4 +1,5 @@
 import { useObserverQuery } from '../../hooks/useQuery';
+import { useI18n } from '../../i18n/I18nContext';
 import type {
   DashboardProjection,
   MissionSummary,
@@ -15,6 +16,7 @@ function StatCard({ label, value }: { label: string; value: number }) {
 }
 
 export function DashboardPage() {
+  const { t } = useI18n();
   const dashboard = useObserverQuery<DashboardProjection>('dashboard.summary');
   const missions = useObserverQuery<MissionSummary>('mission.list', {}, { select(data) { return { ...data, data: data.data.slice(0, 5) }; } });
   const approvals = useObserverQuery<ApprovalProjection>('approval.list', { status: 'pending' }, { select(data) { return { ...data, data: data.data.slice(0, 3) }; } });
@@ -27,25 +29,25 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <header>
-        <p className="text-xs uppercase tracking-wide text-slate-500">Read-only projection</p>
-        <h2 className="text-lg font-semibold text-slate-900">Dashboard</h2>
+        <p className="text-xs uppercase tracking-wide text-slate-500">{t("common.readOnlyProjection")}</p>
+        <h2 className="text-lg font-semibold text-slate-900">{t("dashboard.title")}</h2>
       </header>
 
-      <section aria-label="Overview">
+      <section aria-label={t("nav.overview")}>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Missions" value={summary?.missions ?? missionList.length} />
-          <StatCard label="Active" value={summary?.active_missions ?? 0} />
-          <StatCard label="Unread" value={summary?.unread_notifications ?? 0} />
-          <StatCard label="Approvals" value={summary?.pending_approvals ?? approvalList.length} />
+          <StatCard label={t("nav.missions")} value={summary?.missions ?? missionList.length} />
+          <StatCard label={t("status.active")} value={summary?.active_missions ?? 0} />
+          <StatCard label={t("dashboard.unreadNotifications")} value={summary?.unread_notifications ?? 0} />
+          <StatCard label={t("nav.approvals")} value={summary?.pending_approvals ?? approvalList.length} />
         </div>
       </section>
 
-      <section aria-label="Recent missions">
-        <h3 className="mb-3 text-base font-semibold text-slate-900">Recent missions</h3>
+      <section aria-label={t("dashboard.recentMissions")}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900">{t("dashboard.recentMissions")}</h3>
         {missions.isPending ? (
-          <p className="text-sm text-slate-500">Loading…</p>
+          <p className="text-sm text-slate-500">{t("common.loading")}</p>
         ) : missionList.length === 0 ? (
-          <p className="text-sm text-slate-500">No missions visible to your account.</p>
+          <p className="text-sm text-slate-500">{t("dashboard.noMissionsVisible")}</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {missionList.map((mission) => (
@@ -61,10 +63,10 @@ export function DashboardPage() {
         )}
       </section>
 
-      <section aria-label="Recent activity">
-        <h3 className="mb-3 text-base font-semibold text-slate-900">Recent activity</h3>
+      <section aria-label={t("dashboard.recentActivity")}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900">{t("dashboard.recentActivity")}</h3>
         {activity.length === 0 ? (
-          <p className="text-sm text-slate-500">No activity recorded yet.</p>
+          <p className="text-sm text-slate-500">{t("dashboard.noActivity")}</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {activity.map((item) => (
@@ -83,13 +85,13 @@ export function DashboardPage() {
       </section>
 
       {approvalList.length > 0 ? (
-        <section aria-label="Pending approvals">
-          <h3 className="mb-3 text-base font-semibold text-slate-900">Pending approvals</h3>
+        <section aria-label={t("dashboard.pendingApprovals")}>
+          <h3 className="mb-3 text-base font-semibold text-slate-900">{t("dashboard.pendingApprovals")}</h3>
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {approvalList.map((approval) => (
               <li key={approval.id} className="px-4 py-3">
                 <p className="font-medium text-slate-900">{approval.title}</p>
-                <p className="text-xs text-slate-500">Requested by {approval.requested_by}</p>
+                <p className="text-xs text-slate-500">{t("approvals.requestedBy")} {approval.requested_by}</p>
               </li>
             ))}
           </ul>

@@ -3,8 +3,10 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { LanguageSwitcher } from '../../i18n/LanguageSwitcher';
 import { normalizeError } from '../../utils/errorHandler';
+import { useI18n } from '../../i18n/I18nContext';
 
 export function LoginPage() {
+  const { t } = useI18n();
   const { login, isAuthenticated, isPending } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -25,7 +27,7 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0a1e3d] px-4">
       <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-lg">
-        <h1 className="mb-1 text-xl font-bold text-slate-900">ONYX Observer</h1>
+        <h1 className="mb-1 text-xl font-bold text-slate-900">{t("app.observer")}</h1>
         <p className="mb-6 text-sm text-slate-600">
           A read-only view into your organization&apos;s missions. Your account must be granted
           observer access by an administrator.
@@ -35,7 +37,7 @@ export function LoginPage() {
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Username</span>
+            <span className="text-sm font-medium text-slate-700">{t("auth.username")}</span>
             <input
               autoComplete="username"
               className="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-slate-900"
@@ -45,7 +47,7 @@ export function LoginPage() {
             />
           </label>
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Password</span>
+            <span className="text-sm font-medium text-slate-700">{t("auth.password")}</span>
             <input
               type="password"
               autoComplete="current-password"

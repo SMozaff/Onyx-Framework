@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { usePushStore } from '../stores/pushStore';
+import { useI18n } from '../i18n/I18nContext';
 
 /**
  * Web Push opt-in/opt-out card (MIGRATION_PLAN Phase 3.2). Rendered on the
@@ -7,6 +8,7 @@ import { usePushStore } from '../stores/pushStore';
  * a subscription — it performs no command and cannot deliver anything.
  */
 export function PushNotificationsCard() {
+  const { t } = useI18n();
   const { status, endpoint, pending, message, boot, enable, disable } = usePushStore();
 
   useEffect(() => {
@@ -18,12 +20,12 @@ export function PushNotificationsCard() {
 
   return (
     <section
-      aria-label="Push notifications"
+      aria-label={t("notifications.pushNotifications")}
       className="rounded-lg border border-slate-200 bg-white p-4 text-sm"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-medium text-slate-900">Web Push delivery</p>
+          <p className="font-medium text-slate-900">{t("notifications.webPushDelivery")}</p>
           {subscribed && endpoint ? (
             <p className="truncate text-xs text-slate-500">{endpoint}</p>
           ) : null}
@@ -35,7 +37,7 @@ export function PushNotificationsCard() {
             onClick={() => void disable()}
             disabled={pending}
           >
-            {pending ? 'Disabling…' : 'Disable'}
+            {pending ? t("common.disabling") : t("common.disable")}
           </button>
         ) : (
           <button
@@ -44,24 +46,24 @@ export function PushNotificationsCard() {
             onClick={() => void enable()}
             disabled={pending || !actionable}
           >
-            {pending ? 'Enabling…' : 'Enable notifications'}
+            {pending ? t("common.enabling") : t("notifications.enable")}
           </button>
         )}
       </div>
 
       {status === 'unsupported' && (
         <p className="mt-2 text-xs text-slate-500">
-          Push notifications are not supported in this browser.
+          {t("notifications.pushUnsupported")}
         </p>
       )}
       {status === 'unconfigured' && (
         <p className="mt-2 text-xs text-slate-500">
-          The server has not published a VAPID public key, so push delivery cannot be set up yet.
+          {t("notifications.pushUnconfigured")}
         </p>
       )}
       {status === 'denied' && (
         <p className="mt-2 text-xs text-slate-500">
-          Permission was denied — allow notifications for this site in your browser settings.
+          {t("notifications.pushDenied")}
         </p>
       )}
       {status === 'error' && message ? (
@@ -71,7 +73,7 @@ export function PushNotificationsCard() {
       ) : null}
 
       <p className="mt-2 text-xs text-slate-400">
-        Observer notifications are delivered read-only; this client never sends commands.
+        {t("notifications.pushReadOnlyNote")}
       </p>
     </section>
   );
