@@ -724,7 +724,8 @@ function ConnectionsPanel({ session }: { session: ReturnType<typeof useSession> 
             disabled={sendCmd.loading}
             className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            {t("common.send")}\n          </button>
+            {t("common.send")}
+          </button>
         </div>
         {(sendError ?? sendCmd.error) && (
           <p className="mt-1 text-xs text-onyx-status-blocked">
