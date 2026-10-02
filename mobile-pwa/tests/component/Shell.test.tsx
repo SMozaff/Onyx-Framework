@@ -34,7 +34,7 @@ describe('protected shell', () => {
     authenticate();
     renderWithProviders(<AppRoutes />, '/dashboard');
     expect(screen.getByText('ONYX Observer')).toBeInTheDocument();
-    expect(screen.getByText('read-only')).toBeInTheDocument();
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { name: 'Dashboard' }).length).toBeGreaterThan(0);
   });
 
