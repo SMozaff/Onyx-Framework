@@ -2,7 +2,7 @@
 //! These tests intentionally compare serialized state as well as logical
 //! values so merge order cannot change the wire representation.
 
-use crdt::{AppendOnlyLog, ElementId, LwwRegister, MvRegister, OrSet, PnCounter, Rga, Tag};
+use crdt::{AppendOnlyLog, Crdt, ElementId, LwwRegister, MvRegister, OrSet, PnCounter, Rga, Tag};
 use platform_kernel::{ReplicaId, VectorClock};
 use proptest::prelude::*;
 
