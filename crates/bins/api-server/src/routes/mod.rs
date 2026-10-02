@@ -56,7 +56,7 @@ use sqlx::{
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
-use crate::query_handler::ProjectionPool;
+use crate::{config::AppConfig, query_handler::ProjectionPool};
 
 pub const ORGANIZATION_ID: &str = "11111111-1111-1111-1111-111111111111";
 pub const USER_ID: &str = "22222222-2222-2222-2222-222222222222";
@@ -158,15 +158,17 @@ type StorageBackendHandles = (
 );
 
 impl ApiState {
+    /// Compatibility constructor retained for existing test harnesses and
+    /// integration tests that explicitly provide a database URL.
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
-        let environment = std::env::var("ONYX_ENV").unwrap_or_else(|_| "development".to_string());
-        let postgres_primary =
-            database_url.starts_with("postgres://") || database_url.starts_with("postgresql://");
-        if environment == "production" && !postgres_primary {
-            anyhow::bail!(
-                "production API storage must use PostgreSQL; per-instance SQLite cannot back a scaled deployment"
-            );
-        }
+        let config = AppConfig::for_database(database_url)?;
+        Self::new_with_config(config).await
+    }
+
+    /// Authoritative API composition entry point. All environment-sensitive
+    /// startup policy is parsed and validated by AppConfig before state is built.
+    pub async fn new_with_config(config: AppConfig) -> anyhow::Result<Self> {
+        let postgres_primary = config.database_is_postgres();
 
         let (
             projection_pool,
@@ -185,7 +187,7 @@ impl ApiState {
         ): StorageBackendHandles = if postgres_primary {
             let pool = PgPoolOptions::new()
                 .max_connections(20)
-                .connect(database_url)
+                .connect(config.database_url())
                 .await?;
             sqlx::migrate!("../../../migrations/postgres")
                 .run(&pool)
@@ -249,7 +251,10 @@ impl ApiState {
         let (events, _) = broadcast::channel(512);
 
         if std::env::var("ONYX_AUTHORITY_SIGNING_KEY").is_err() {
-            if environment == "production" {
+            // Production was rejected by AppConfig when the signing key was
+            // absent. Non-production compositions retain the deterministic
+            // local key that existing tests and local development rely on.
+            if config.is_production() {
                 anyhow::bail!("ONYX_AUTHORITY_SIGNING_KEY is required in production");
             }
             std::env::set_var(
@@ -274,10 +279,7 @@ impl ApiState {
             ))
         };
 
-        let governance_url = std::env::var("ONYX_GOVERNANCE_DATABASE_URL").ok();
-        if environment == "production" && governance_url.is_none() {
-            anyhow::bail!("ONYX_GOVERNANCE_DATABASE_URL is required in production");
-        }
+        let governance_url = config.governance_database_url().map(str::to_owned);
 
         // H-03 / H4(a): explicit CORS origin allow-list, driven by config
         // rather than hardcoded. A concrete origin list cannot honestly be
@@ -293,32 +295,7 @@ impl ApiState {
         // value, not something this code can guess — set
         // `ONYX_CORS_ALLOWED_ORIGINS` (comma-separated) to whatever origin(s)
         // web-ui/admin-shell actually get deployed under once that happens.
-        let cors_allowed_origins = {
-            let configured = std::env::var("ONYX_CORS_ALLOWED_ORIGINS").ok();
-            let parsed = configured
-                .as_deref()
-                .map(|list| {
-                    list.split(',')
-                        .map(str::trim)
-                        .filter(|origin| !origin.is_empty())
-                        .map(HeaderValue::from_str)
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()
-                .map_err(|error| {
-                    anyhow::anyhow!("ONYX_CORS_ALLOWED_ORIGINS contains an invalid origin: {error}")
-                })?
-                .filter(|origins| !origins.is_empty());
-            if environment == "production" && parsed.is_none() {
-                anyhow::bail!(
-                    "ONYX_CORS_ALLOWED_ORIGINS is required in production (audit finding H-03): \
-                     no deployed origin exists yet for web-ui/admin-shell in this repo's \
-                     deploy/ config, so a default cannot be assumed -- set it explicitly to \
-                     the real deployed origin(s) of every trusted browser client"
-                );
-            }
-            parsed
-        };
+        let cors_allowed_origins = config.cors_allowed_origins().map(ToOwned::to_owned);
         let (rate_limiter, audit_writer, token_revocation_store): (
             Arc<dyn RateLimiter>,
             Arc<dyn AuditWriter>,
@@ -427,7 +404,7 @@ impl ApiState {
         // will just correctly refuse to create a second "first" admin once
         // any user exists (`BOOTSTRAP_ALREADY_COMPLETED`), same as it
         // always has.
-        if environment != "production" && user_store.count().await? == 0 {
+        if config.development_seed_enabled() && user_store.count().await? == 0 {
             let password_hash = password_hasher
                 .hash(SEEDED_ADMIN_PASSWORD)
                 .map_err(|e| anyhow::anyhow!("failed to hash seeded admin password: {e}"))?;
@@ -1198,107 +1175,3 @@ async fn seed_if_empty(pool: &SqlitePool) -> anyhow::Result<()> {
             }),
             3,
             2,
-            1,
-        ),
-        (
-            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
-            "task",
-            json!({
-                "public_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1","mission_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1","title":"Validate emergency communications","status":"active","owner":"Field Coordinator","priority":"high","due_at":"2026-08-06T16:00:00Z","version":5,"lifecycle_epoch":1,"authority_epoch":1,"updated_at":"2026-08-05T11:50:00Z"
-            }),
-            5,
-            1,
-            1,
-        ),
-        (
-            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
-            "task",
-            json!({
-                "public_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2","mission_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2","title":"Verify restoration evidence","status":"blocked","owner":"Evidence Reviewer","priority":"critical","due_at":"2026-08-05T18:00:00Z","version":2,"lifecycle_epoch":1,"authority_epoch":1,"updated_at":"2026-08-05T10:35:00Z"
-            }),
-            2,
-            1,
-            1,
-        ),
-        (
-            "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
-            "timeline",
-            json!({
-                "public_id":"cccccccc-cccc-4ccc-8ccc-ccccccccccc1","subject_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1","subject_type":"mission","label":"Readiness checkpoint","kind":"critical_marker","at":"2026-08-06T12:00:00Z","status":"upcoming","version":1,"lifecycle_epoch":0,"authority_epoch":0,"updated_at":"2026-08-05T11:00:00Z"
-            }),
-            1,
-            0,
-            0,
-        ),
-        (
-            "dddddddd-dddd-4ddd-8ddd-ddddddddddd1",
-            "notification",
-            json!({
-                "public_id":"dddddddd-dddd-4ddd-8ddd-ddddddddddd1","title":"Critical marker approaching","message":"Coastal Response Readiness reaches its critical marker tomorrow.","priority":"high","status":"unacknowledged","source_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1","source_type":"mission","created_at":"2026-08-05T11:30:00Z","acknowledged_at":null,"version":1,"lifecycle_epoch":0,"authority_epoch":0
-            }),
-            1,
-            0,
-            0,
-        ),
-        (
-            "dddddddd-dddd-4ddd-8ddd-ddddddddddd2",
-            "notification",
-            json!({
-                "public_id":"dddddddd-dddd-4ddd-8ddd-ddddddddddd2","title":"Task blocked","message":"Verify restoration evidence is blocked and requires attention.","priority":"critical","status":"unacknowledged","source_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2","source_type":"task","created_at":"2026-08-05T10:40:00Z","acknowledged_at":null,"version":1,"lifecycle_epoch":0,"authority_epoch":0
-            }),
-            1,
-            0,
-            0,
-        ),
-        (
-            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1",
-            "approval",
-            json!({
-                "public_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1","title":"Approve task completion evidence","description":"Review the submitted evidence package for emergency communications.","status":"pending","requested_by":"Field Coordinator","target_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1","target_type":"task","created_at":"2026-08-05T11:35:00Z","decided_at":null,"decision_reason":null,"web_action_permitted":true,"version":1,"lifecycle_epoch":0,"authority_epoch":0
-            }),
-            1,
-            0,
-            0,
-        ),
-        (
-            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2",
-            "approval",
-            json!({
-                "public_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2","title":"Restricted policy exception","description":"This decision requires a native client and senior authority.","status":"pending","requested_by":"Recovery Manager","target_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2","target_type":"mission","created_at":"2026-08-05T09:00:00Z","decided_at":null,"decision_reason":null,"web_action_permitted":false,"version":1,"lifecycle_epoch":0,"authority_epoch":0
-            }),
-            1,
-            0,
-            0,
-        ),
-        (
-            "ffffffff-ffff-4fff-8fff-fffffffffff1",
-            "report",
-            json!({
-                "public_id":"ffffffff-ffff-4fff-8fff-fffffffffff1","title":"Readiness Status Report","status":"approved","subject_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1","subject_type":"mission","author":"Operations Analyst","submitted_at":"2026-08-05T08:30:00Z","summary":"Readiness is progressing with one communications dependency under review.","evidence":[{"label":"Field checklist","file_name":"field-checklist.pdf"}],"version":2,"lifecycle_epoch":0,"authority_epoch":0,"updated_at":"2026-08-05T09:15:00Z"
-            }),
-            2,
-            0,
-            0,
-        ),
-    ];
-
-    for (id_str, aggregate_type, mut state, version, lifecycle_epoch, authority_epoch) in fixtures {
-        let id = uuid::Uuid::parse_str(id_str)?;
-        state["id"] = serde_json::to_value(id.as_bytes())?;
-        state["version"] = json!(version);
-        state["lifecycle_epoch"] = json!(lifecycle_epoch);
-        state["authority_epoch"] = json!(authority_epoch);
-        sqlx::query("INSERT INTO aggregates (id, aggregate_type, version, lifecycle_epoch, authority_epoch, state, updated_at, organization_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(id.as_bytes().to_vec())
-            .bind(aggregate_type)
-            .bind(version)
-            .bind(lifecycle_epoch)
-            .bind(authority_epoch)
-            .bind(state.to_string())
-            .bind(now)
-            .bind(org.as_bytes().to_vec())
-            .execute(pool)
-            .await?;
-    }
-    Ok(())
-}
