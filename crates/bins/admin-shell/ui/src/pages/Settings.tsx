@@ -32,7 +32,7 @@ import {
  * goes through `/api/command` via `useCommand`.
  */
 const POLICY_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
-const SERVER_ADDRESS_PLACEHOLDER = "http://192.168.0.250:3000";
+const SERVER_ADDRESS_PLACEHOLDER = "{t("settings.lanAddress")}";
 
 export default function Settings() {
   const { t } = useI18n();
@@ -51,7 +51,7 @@ export default function Settings() {
     <div className="max-w-3xl">
       <h1 className="text-xl font-semibold text-onyx-text">{t("common.policySettings")}</h1>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Organization policy: feature availability, limits, retention, and legal holds.
+        {t("settings.organizationPolicyDescription")}
       </p>
 
       <ServerConnectionSettings />
@@ -236,7 +236,7 @@ function ServerConnectionSettings() {
         The address of the ONYX backend this app talks to. Change this if you're running
         the Admin app on a different computer than the server — e.g. a LAN address like{" "}
         <code className="rounded bg-onyx-bg px-1 py-0.5">http://192.168.0.250:3000</code>{" "}
-        instead of <code className="rounded bg-onyx-bg px-1 py-0.5">http://127.0.0.1:3000</code>.
+        instead of <code className="rounded bg-onyx-bg px-1 py-0.5">{t("settings.localhostAddress")}</code>.
       </p>
 
       <div className="mt-3 flex gap-2">
@@ -545,7 +545,7 @@ function PolicyActions({
   const publishCmd = useCommand();
   const retireCmd = useCommand();
   const evaluateCmd = useCommand();
-  const [evaluateKey, setEvaluateKey] = useState("");
+  const [evaluateKey, set{t("common.evaluate")}Key] = useState("");
   const [evaluateResult, setEvaluateResult] = useState<string | null>(null);
   const organizationId = useAuthStore((s) => s.user?.organization_id) ?? "";
 
@@ -565,7 +565,7 @@ function PolicyActions({
         }
         className="rounded-md bg-onyx-status-approved/15 px-3 py-1.5 text-xs text-onyx-status-approved hover:bg-onyx-status-approved/25 disabled:opacity-50"
       >
-        Publish draft
+        {t("settings.publishDraft")}
       </button>
       <button
         type="button"
@@ -581,7 +581,7 @@ function PolicyActions({
         }
         className="rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
       >
-        Retire policy
+        {t("settings.retirePolicy")}
       </button>
       <div className="flex items-center gap-2">
         <input
