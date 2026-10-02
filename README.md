@@ -6,7 +6,7 @@
 
 **A local-first, authority-aware mission operations platform built for offline collaboration and secure multi-device synchronization.**
 
-🌐 **Live Demo**: https://onyxcase-bxl5ndbk.manus.space
+🌐 **Website**: [https://ox-workflow.github.io/]
 
 ---
 
