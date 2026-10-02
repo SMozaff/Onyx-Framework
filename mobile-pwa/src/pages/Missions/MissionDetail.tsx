@@ -62,11 +62,11 @@ export function MissionDetailPage() {
       </div>
 
       <section aria-label={t("missions.timeline")}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900"{t("missions.timeline")}</h3>
+        <h3 className="mb-3 text-base font-semibold text-slate-900">{t("missions.timeline")}</h3>
         {timeline.isPending ? (
           <p className="text-sm text-slate-500">{t("common.loading")}</p>
         ) : entries.length === 0 ? (
-          <p className="text-sm text-slate-500"{t("missions.noTimelineEntries")}</p>
+          <p className="text-sm text-slate-500">{t("missions.noTimelineEntries")}</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {entries.map((item) => (
