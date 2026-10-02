@@ -1279,4 +1279,3 @@ async fn seed_if_empty(pool: &SqlitePool) -> anyhow::Result<()> {
     }
     Ok(())
 }
-
