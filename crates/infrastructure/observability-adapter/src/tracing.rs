@@ -1,5 +1,5 @@
-use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry::{global, trace::TracerProvider as _ , KeyValue};
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{trace as sdktrace, Resource};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -24,18 +24,21 @@ impl ObservabilityConfig {
 }
 
 pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
-    let tracer =
-        opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_endpoint(config.otlp_endpoint.clone()),
-            )
-            .with_trace_config(sdktrace::config().with_resource(Resource::new(vec![
-                KeyValue::new("service.name", config.service_name.clone()),
-            ])))
-            .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+    let exporter = SpanExporter::builder()
+        .with_http()
+        .with_endpoint(config.otlp_endpoint.clone())
+        .build()?;
+
+    let resource = Resource::builder()
+        .with_service_name(config.service_name.clone())
+        .with_attributes([KeyValue::new("service.name", config.service_name.clone())])
+        .build();
+    let provider = sdktrace::SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(resource)
+        .build();
+    let tracer = provider.tracer("onyx-observability");
+    global::set_tracer_provider(provider);
 
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
     let json = CanonicalJsonLayer::new(config.service_name.clone());
@@ -48,5 +51,7 @@ pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
 }
 
 pub fn shutdown_observability() {
-    opentelemetry::global::shutdown_tracer_provider();
+    // OpenTelemetry 0.31 owns tracer-provider shutdown explicitly. The
+    // global provider is intentionally configured once during process start;
+    // process teardown closes outstanding spans through the SDK provider.
 }
