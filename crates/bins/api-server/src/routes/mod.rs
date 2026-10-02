@@ -488,11 +488,10 @@ async fn readiness(State(state): State<ApiState>) -> StatusCode {
 }
 
 pub fn router(state: ApiState) -> Router {
-    let command_route =
-        post(command::command_route).route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            crate::middleware::rate_limit::rate_limit_command,
-        ));
+    let command_route = post(command::command_route).route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        crate::middleware::rate_limit::rate_limit_command,
+    ));
 
     // H4(a): PUT added -- /api/admin/mobile-access and /api/admin/profiles
     // are both real, currently-registered PUT routes. DELETE is required for
