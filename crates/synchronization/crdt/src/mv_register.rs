@@ -48,6 +48,12 @@ pub struct MvRegister<V: Clone + Debug + Serialize + DeserializeOwned> {
 }
 
 impl<V: Clone + Debug + Serialize + DeserializeOwned> MvRegister<V> {
+    fn canonicalize(&mut self) {
+        self.values.sort_unstable_by(|(left, _), (right, _)| {
+            left.entries.cmp(&right.entries)
+        });
+    }
+
     /// See module doc comment: `replica` is an explicit parameter, not
     /// silently randomized.
     pub fn new(value: V, replica: ReplicaId) -> Self {
@@ -68,6 +74,7 @@ impl<V: Clone + Debug + Serialize + DeserializeOwned> MvRegister<V> {
             self.values.push((clock.clone(), value));
         }
         self.clock = self.clock.merge(&clock);
+        self.canonicalize();
     }
 
     /// Get all concurrent values.
@@ -124,6 +131,7 @@ impl<V: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Crdt for MvR
             self.clock = new_clock;
             changed = true;
         }
+        self.canonicalize();
 
         changed
     }
