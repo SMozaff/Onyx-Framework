@@ -11,36 +11,21 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-fn server_config() -> quinn::ServerConfig {
+fn server_config() -> (quinn::ServerConfig, rustls::pki_types::CertificateDer<'static>) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let cert_der = cert.serialize_der().unwrap();
-    let priv_key = cert.serialize_private_key_der();
-    let priv_key = rustls::PrivateKey(priv_key);
-    let cert_chain = vec![rustls::Certificate(cert_der)];
-    quinn::ServerConfig::with_single_cert(cert_chain, priv_key).unwrap()
+    let cert_der = cert.cert.der().clone();
+    let priv_key = rustls::pki_types::PrivateKeyDer::Pkcs8(
+        rustls::pki_types::PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()),
+    );
+    let server_config =
+        quinn::ServerConfig::with_single_cert(vec![cert_der.clone()], priv_key).unwrap();
+    (server_config, cert_der)
 }
 
-fn client_config_insecure() -> quinn::ClientConfig {
-    // Test-only: skip cert verification to talk to our self-signed server.
-    struct SkipVerify;
-    impl rustls::client::ServerCertVerifier for SkipVerify {
-        fn verify_server_cert(
-            &self,
-            _end_entity: &rustls::Certificate,
-            _intermediates: &[rustls::Certificate],
-            _server_name: &rustls::ServerName,
-            _scts: &mut dyn Iterator<Item = &[u8]>,
-            _ocsp_response: &[u8],
-            _now: std::time::SystemTime,
-        ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-            Ok(rustls::client::ServerCertVerified::assertion())
-        }
-    }
-    let crypto = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_custom_certificate_verifier(Arc::new(SkipVerify))
-        .with_no_client_auth();
-    quinn::ClientConfig::new(Arc::new(crypto))
+fn client_config(cert_der: rustls::pki_types::CertificateDer<'static>) -> quinn::ClientConfig {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(cert_der).unwrap();
+    quinn::ClientConfig::with_root_certificates(roots).unwrap()
 }
 
 #[tokio::test]
@@ -48,7 +33,7 @@ fn client_config_insecure() -> quinn::ClientConfig {
 async fn quic_survives_ip_change() {
     // 1. Start a server endpoint.
     let server_addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
-    let server_config = server_config();
+    let (server_config, server_cert) = server_config();
     let endpoint = quinn::Endpoint::server(server_config, server_addr).unwrap();
     let actual_server_addr = endpoint.local_addr().unwrap();
 
@@ -68,7 +53,7 @@ async fn quic_survives_ip_change() {
     // 2. Client connects from an initial local port.
     let mut client_endpoint =
         quinn::Endpoint::client(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
-    client_endpoint.set_default_client_config(client_config_insecure());
+    client_endpoint.set_default_client_config(client_config(server_cert));
 
     let connecting = client_endpoint
         .connect(actual_server_addr, "localhost")
@@ -84,11 +69,9 @@ async fn quic_survives_ip_change() {
     // 3. Simulate a network change: rebind the CLIENT ENDPOINT's local UDP
     // socket to a new ephemeral port. Rebinding is a method on
     // `quinn::Endpoint`, not `quinn::Connection` — verified against the
-    // quinn 0.10.2 docs (docs.rs/quinn/0.10.2), since an earlier draft of
-    // this test called a non-existent `Connection::rebind_socket`. The
-    // `Connection` handle itself is unaffected by the endpoint rebind;
-    // quinn's connection-ID-based migration keeps the existing
-    // `conn` usable once the endpoint's socket has moved.
+    // Quinn's connection handle is unaffected by endpoint rebinding; QUIC
+    // connection IDs keep the existing connection usable after the endpoint
+    // changes its local UDP socket.
     let new_socket = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     client_endpoint
         .rebind(new_socket)
