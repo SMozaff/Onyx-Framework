@@ -10,7 +10,7 @@ export function TaskDetailPage() {
   const task = useObserverQuery<TaskSummary>('task.detail', { id: id ?? '' });
 
   if (!id) return <Navigate to="/tasks" replace />;
-  if (task.isPending) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (task.isPending) return <p className="text-sm text-slate-500">{t("tasks.loading")}</p>;
   if (task.isError || !task.data?.data[0]) {
     return (
       <Link className="text-sm text-slate-500 underline underline-offset-4" to="/tasks">
