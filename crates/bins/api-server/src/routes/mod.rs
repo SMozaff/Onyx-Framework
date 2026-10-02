@@ -56,7 +56,7 @@ use sqlx::{
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
-use crate::query_handler::ProjectionPool;
+use crate::{config::AppConfig, query_handler::ProjectionPool};
 
 pub const ORGANIZATION_ID: &str = "11111111-1111-1111-1111-111111111111";
 pub const USER_ID: &str = "22222222-2222-2222-2222-222222222222";
