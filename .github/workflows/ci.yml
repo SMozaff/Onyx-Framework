@@ -521,7 +521,7 @@ jobs:
           echo "check=${{ needs.check.result }}"
           echo "i18n=${{ needs.i18n.result }}"
           echo "deploy-check=${{ needs.deploy-check.result }}"
-          echo "web=${{ needs.web.result }}"
+          echo "web=${{ needs.web.result }}""
           echo "mobile-pwa=${{ needs.mobile-pwa.result }}"
           echo "native-ui-evidence=${{ needs.native-ui-evidence.result }}"
           echo "load-smoke=${{ needs.load-smoke.result }}"
@@ -542,8 +542,8 @@ jobs:
             needs.security-audit.result != 'success'
           }}
         run: |
-          echo "::error::Phase 0 merge gate blocked: one or more required verification jobs did not pass."
+          echo "::error::Merge gate blocked: one or more required verification jobs did not pass."
           exit 1
 
       - name: All required CI gates passed
-        run: echo "Phase 0 merge gate passed."
+        run: echo "Merge gate passed: all required verification jobs succeeded."
