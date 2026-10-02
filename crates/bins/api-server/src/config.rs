@@ -5,7 +5,7 @@
 //! then all production-sensitive invariants are validated before application
 //! state is assembled.
 
-use std::{env, net::SocketAddr, str::FromStr};
+use std::{env, net::SocketAddr};
 
 use axum::http::HeaderValue;
 
@@ -205,9 +205,15 @@ mod tests {
 
     #[test]
     fn supported_environments_are_closed_and_exact() {
-        assert_eq!(Environment::parse("development").unwrap(), Environment::Development);
+        assert_eq!(
+            Environment::parse("development").unwrap(),
+            Environment::Development
+        );
         assert_eq!(Environment::parse("test").unwrap(), Environment::Test);
-        assert_eq!(Environment::parse("production").unwrap(), Environment::Production);
+        assert_eq!(
+            Environment::parse("production").unwrap(),
+            Environment::Production
+        );
 
         assert!(Environment::parse("prod").is_err());
         assert!(Environment::parse("staging").is_err());
@@ -217,20 +223,40 @@ mod tests {
 
     #[test]
     fn production_invariants_require_all_security_prerequisites() {
-        let missing_everything =
-            Environment::validate_invariants(Environment::Production, "sqlite::memory:", false, false, false);
+        let missing_everything = Environment::validate_invariants(
+            Environment::Production,
+            "sqlite::memory:",
+            false,
+            false,
+            false,
+        );
         assert!(missing_everything.is_err());
 
-        let missing_governance =
-            Environment::validate_invariants(Environment::Production, "postgres://db", false, true, true);
+        let missing_governance = Environment::validate_invariants(
+            Environment::Production,
+            "postgres://db",
+            false,
+            true,
+            true,
+        );
         assert!(missing_governance.is_err());
 
-        let missing_signing_key =
-            Environment::validate_invariants(Environment::Production, "postgres://db", true, false, true);
+        let missing_signing_key = Environment::validate_invariants(
+            Environment::Production,
+            "postgres://db",
+            true,
+            false,
+            true,
+        );
         assert!(missing_signing_key.is_err());
 
-        let missing_cors =
-            Environment::validate_invariants(Environment::Production, "postgres://db", true, true, false);
+        let missing_cors = Environment::validate_invariants(
+            Environment::Production,
+            "postgres://db",
+            true,
+            true,
+            false,
+        );
         assert!(missing_cors.is_err());
 
         assert!(Environment::validate_invariants(
