@@ -5,8 +5,10 @@ import { PushNotificationsCard } from '../../components/PushNotificationsCard';
 import { deriveProjectionState } from '../../components/ProjectionState';
 import { useObserverQuery } from '../../hooks/useQuery';
 import type { NotificationProjection } from '../../types/query';
+import { useI18n } from '../../i18n/I18nContext';
 
 export function NotificationsPage() {
+  const { t } = useI18n();
   const query = useObserverQuery<NotificationProjection>('notification.list');
   const state = deriveProjectionState(query);
   const notifications = query.data?.data ?? [];
@@ -16,8 +18,8 @@ export function NotificationsPage() {
     <div className="space-y-6">
       <header className="flex items-start justify-between">
         <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500">Delivery center</p>
-          <h2 className="text-lg font-semibold text-slate-900">Notifications</h2>
+          <p className="text-xs uppercase tracking-wide text-slate-500">{t("notifications.deliveryCenter")}</p>
+          <h2 className="text-lg font-semibold text-slate-900">{t("notifications.title")}</h2>
           <p className="text-sm text-slate-600">
             Observer notifications are ack-only via Web Push installments; this client never
             acknowledges on your behalf.
@@ -26,12 +28,12 @@ export function NotificationsPage() {
         <Freshness state={state} />
       </header>
 
-      {state.kind === 'loading' && <p className="text-sm text-slate-500">Loading…</p>}
+      {state.kind === 'loading' && <p className="text-sm text-slate-500">{t("notifications.loading")}</p>}
       {state.kind === 'unavailable' && (
         <ProjectionStatePanel resource="Notifications" state={state} />
       )}
       {state.kind === 'empty' && (
-        <p className="text-sm text-slate-500">No notifications for your organization.</p>
+        <p className="text-sm text-slate-500">{t("notifications.noNotificationsBody")}</p>
       )}
       {state.kind === 'stale' && (
         <ProjectionStatePanel resource="Notifications" state={state} compact />
