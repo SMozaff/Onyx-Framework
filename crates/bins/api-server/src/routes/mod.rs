@@ -572,7 +572,6 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/command", command_route)
         .route("/api/query", get(query::query_route))
-        .route("/api/events", get(events::websocket_route))
         // Relay ticket issuance uses the caller's ordinary access token.
         .route("/api/relay-ticket", post(relay::issue_ticket))
         // File and Web Push APIs.
@@ -602,6 +601,10 @@ pub fn router(state: ApiState) -> Router {
         // explicit bootstrap token. It cannot be placed behind access auth
         // because its purpose is to create the first authenticated user.
         .route("/api/admin/bootstrap", post(admin::bootstrap))
+        // /api/events performs its own authentication from the
+        // WebSocket subprotocol header; it therefore must not be wrapped
+        // by the standard Authorization-header middleware above.
+        .route("/api/events", get(events::websocket_route))
         .merge(protected_routes)
         // The relay WebSocket authenticates with its own short-lived,
         // single-use, target-scoped ticket; it must not require an access
