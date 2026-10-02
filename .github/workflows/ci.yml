@@ -507,6 +507,7 @@ jobs:
       - native-ui-evidence
       - load-smoke
       - mobile-android-kotlin
+      - security-audit
     steps:
       - name: Report upstream gate results
         run: |
@@ -518,6 +519,7 @@ jobs:
           echo "native-ui-evidence=${{ needs.native-ui-evidence.result }}"
           echo "load-smoke=${{ needs.load-smoke.result }}"
           echo "mobile-android-kotlin=${{ needs.mobile-android-kotlin.result }}"
+          echo "security-audit=${{ needs.security-audit.result }}"
 
       - name: Fail unless every required gate passed
         if: >-
@@ -529,7 +531,8 @@ jobs:
             needs.mobile-pwa.result != 'success' ||
             needs.native-ui-evidence.result != 'success' ||
             needs.load-smoke.result != 'success' ||
-            needs.mobile-android-kotlin.result != 'success'
+            needs.mobile-android-kotlin.result != 'success' ||
+            needs.security-audit.result != 'success'
           }}
         run: |
           echo "::error::Phase 0 merge gate blocked: one or more required verification jobs did not pass."
