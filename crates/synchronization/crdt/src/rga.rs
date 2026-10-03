@@ -132,33 +132,56 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Rga<E> {
         self.clock = self.clock.merge(&clock);
     }
 
+    /// Direct children of `parent`, ascending by [`ElementId`].
+    fn children_of(&self, parent: ElementId) -> Vec<ElementId> {
+        let mut children: Vec<ElementId> = self
+            .atoms
+            .iter()
+            .filter(|atom| atom.parent == parent)
+            .map(|atom| atom.id)
+            .collect();
+        children.sort_unstable();
+        children
+    }
+
     /// Get the ordered sequence of values (skipping tombstones).
     ///
     /// RGA siblings are ordered deterministically by ElementId, never by
-    /// the local Vec insertion order. Descendants are traversed depth-first
-    /// so concurrent sibling branches are retained rather than silently
-    /// dropping every branch after the first sibling.
+    /// the local Vec insertion order, and each atom is emitted immediately
+    /// before its own subtree is traversed: a strict pre-order depth-first
+    /// walk, so a value inserted after an earlier sibling still precedes
+    /// that sibling's descendants on every replica.
+    ///
+    /// Both properties are load-bearing for convergence. Collecting a
+    /// parent's children and pushing their values in one pass while the
+    /// traversal continues from the ids emitted siblings in *descending*
+    /// ElementId order and interleaved whole branches with descendants —
+    /// making the result depend on the order replicas happened to merge in,
+    /// which is exactly what a CRDT must not do.
     pub fn to_vec(&self) -> Vec<&E> {
         let mut result = Vec::new();
         let mut visited = HashSet::new();
-        let mut stack = vec![ElementId::root()];
+        let mut stack = Vec::new();
+        // The stack is LIFO, so push in reverse (descending) order to visit
+        // the smallest ElementId of each sibling group first.
+        for child in self.children_of(ElementId::root()).into_iter().rev() {
+            stack.push(child);
+        }
 
-        while let Some(parent) = stack.pop() {
-            let mut children: Vec<&Atom<E>> = self
-                .atoms
-                .iter()
-                .filter(|atom| atom.parent == parent && visited.insert(atom.id))
-                .collect();
-
-            // The stack is LIFO, so push children in reverse deterministic
-            // order to visit the smallest ElementId first.
-            children.sort_by_key(|atom| atom.id);
-            for atom in children.into_iter().rev() {
-                let id = atom.id;
-                if let Some(value) = atom.value.as_ref() {
-                    result.push(value);
-                }
-                stack.push(id);
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+            let Some(atom) = self.atoms.iter().find(|atom| atom.id == id) else {
+                continue;
+            };
+            // Tombstones carry no value but are still traversed, so their
+            // descendants keep their place in the sequence.
+            if let Some(value) = atom.value.as_ref() {
+                result.push(value);
+            }
+            for child in self.children_of(id).into_iter().rev() {
+                stack.push(child);
             }
         }
 
