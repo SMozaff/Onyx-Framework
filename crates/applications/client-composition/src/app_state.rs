@@ -307,9 +307,8 @@ impl AppState {
             Arc::new(InMemoryIdempotencyStore::new());
 
         // Phase 1 (Desktop & Web Completion) addition.
-        let blob_store: Arc<dyn query_application::BlobStore> = Arc::new(
-            local_blob_storage::LocalBlobStore::open(&config.blob_store_root).await?,
-        );
+        let blob_store: Arc<dyn query_application::BlobStore> =
+            Arc::new(local_blob_storage::LocalBlobStore::open(&config.blob_store_root).await?);
         let file_upload_coordinator = Arc::new(FileUploadCoordinator::new(
             Arc::clone(&file_asset_repo),
             Arc::clone(&upload_session_repo),
