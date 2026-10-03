@@ -28,7 +28,7 @@
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.30.6",
     "recharts": "^2.8.0",
-    "zustand": "^4.4.0"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
