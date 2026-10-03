@@ -3,6 +3,7 @@ name = "platform-contracts"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "ONYX envelope and trait contracts: CommandEnvelope, DomainEventEnvelope, AggregateRoot, DomainError."
 
 [dependencies]
