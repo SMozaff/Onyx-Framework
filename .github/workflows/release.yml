@@ -196,7 +196,7 @@ jobs:
         # `target/${{ matrix.target }}/release/...` from the repo root.
         # The "Locate bundle output" step below relies on that same
         # workspace-root path.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # `${{ secrets.X }}` evaluates to an empty string, not unset,
@@ -328,7 +328,7 @@ jobs:
         # Omitting tagName/releaseName/releaseId makes tauri-action build only.
         # `publish` below remains the one release-assembly owner. Cargo output
         # is at workspace-root target/, not inside crates/bins/admin-shell.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # `${{ secrets.X }}` evaluates to an empty string, not unset,

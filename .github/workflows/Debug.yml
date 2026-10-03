@@ -68,7 +68,7 @@ jobs:
         # this is an internal debug build, not a release.
         # tauriScript matches release.yml's confirmed-working fix for
         # tauri-action's npx resolution problem on Windows.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -114,7 +114,7 @@ jobs:
         working-directory: crates/bins/admin-shell/ui
         run: npm ci
       - name: Build Admin desktop app (debug, unsigned)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
