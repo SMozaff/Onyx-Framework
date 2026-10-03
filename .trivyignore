@@ -1,0 +1,9 @@
+# Trivy ignores — each entry must name the CVE, why it is accepted, and who
+# re-reviews it. Unfixed-but-shipped CVEs belong here (not under
+# ignore-unfixed=true, which would also hide future fixable CVEs).
+#
+# CVE-2026-84782: libssl3 (DTLS handshake retransmission info disclosure)
+#   ships in gcr.io/distroless/cc-debian12 with no upstream fixed version.
+#   Accepted until the distroless base image carries a patched libssl3;
+#   re-validate on the next base-image bump.
+CVE-2026-84782
