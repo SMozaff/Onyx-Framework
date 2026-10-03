@@ -132,7 +132,7 @@ anyhow = "1"
 # existing convention (all shared deps centralized at workspace level).
 quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring", "platform-verifier", "aws-lc-rs"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "multipart", "url"] }
 url = "2"
 # WebPush delivery (RFC 8291/8292): ECDH P-256, AES-128-GCM, ES256 VAPID JWT,
 # and RFC 6090 key import — supplied by BoringSSL-derived `ring`.
