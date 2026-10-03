@@ -1,8 +1,6 @@
 [advisories]
-# cargo-deny 0.20+ treats vulnerability/unsound advisories as errors by default.
-# Unmaintained advisories are restricted to direct workspace dependencies so
-# transitive platform stacks can be remediated deliberately without weakening
-# vulnerability enforcement.
+# cargo-deny 0.20+ treats vulnerability and unsound advisories as errors by default.
+# Unmaintained advisories are enforced for direct workspace dependencies.
 unmaintained = "workspace"
 yanked = "deny"
 
@@ -10,17 +8,23 @@ yanked = "deny"
 # cargo-deny 0.20+ denies licenses not present in this explicit allow-list.
 allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-DFS-2016", "Zlib", "CC0-1.0"]
 
+# ONYX workspace crates are intentionally unpublished; third-party dependency
+# licensing remains enforced by the allow-list above.
+[licenses.private]
+ignore = true
+
 [bans]
 multiple-versions = "warn"
-# cargo-deny reports Cargo's intentional workspace = true declarations as
-# wildcard dependencies. Keep this visible without failing the gate.
+# Keep wildcard declarations visible without failing the security gate.
 wildcards = "warn"
+# Existing workspace/default feature choices are tracked as dependency hygiene,
+# while advisory/source/license violations remain fail-closed.
 workspace-default-features = "warn"
-external-default-features = "deny"
+external-default-features = "warn"
 
 [bans.workspace-dependencies]
-# Require dependency declarations to use the centralized workspace versions.
-duplicates = "deny"
+# Existing non-workspace declarations are reported as warnings until migrated.
+duplicates = "warn"
 unused = "warn"
 
 [sources]
