@@ -1,0 +1,70 @@
+name: Security
+
+on:
+  push:
+    branches: [ main, 'feature/**', 'fix/**', 'hardening/**' ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  rust-advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: RustSec audit
+        run: cargo audit
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Advisory and source-policy audit
+        run: cargo deny check advisories bans licenses sources
+
+  frontend-audit:
+    name: Frontend audit (${{ matrix.name }} )
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: web-ui, path: web-ui }
+          - { name: mobile-pwa, path: mobile-pwa }
+          - { name: desktop-shell-ui, path: crates/bins/desktop-shell/ui }
+          - { name: admin-shell-ui, path: crates/bins/admin-shell/ui }
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.path }}/package-lock.json
+      - run: test -f package-lock.json
+      - run: npm ci
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+  dependency-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify dependency control-plane artifacts
+        run: |
+          test -f docs/DEPENDENCY_POLICY.md
+          test -f .deny.toml
+          test -f .github/dependabot.yml
+          test -f web-ui/package-lock.json
+          test -f mobile-pwa/package-lock.json
+          test -f crates/bins/desktop-shell/ui/package-lock.json
+          test -f crates/bins/admin-shell/ui/package-lock.json
