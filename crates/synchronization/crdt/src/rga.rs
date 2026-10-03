@@ -220,17 +220,31 @@ mod tests {
         ReplicaId([byte; 16])
     }
 
+    /// `Rga<E>` requires `E: DeserializeOwned`, so tests must use an owned
+    /// element type. `&'static str` literals would infer `E = &str`, which
+    /// violates that bound (and makes rustc report it as an opaque
+    /// "Deserialize is not general enough" error rather than a bound
+    /// violation), so the sequences under test carry `String` elements and
+    /// this helper projects them back to `&str` for readable assertions.
+    fn texts(sequence: &Rga<String>) -> Vec<&str> {
+        sequence
+            .to_vec()
+            .into_iter()
+            .map(String::as_str)
+            .collect()
+    }
+
     #[test]
     fn concurrent_siblings_converge_independently_of_merge_order() {
         let local = replica(1);
         let remote = replica(2);
         let root = ElementId::root();
 
-        let mut left = Rga::new();
-        let left_id = left.insert_after(root, "left", VectorClock::new(), local);
+        let mut left: Rga<String> = Rga::new();
+        let left_id = left.insert_after(root, "left".to_string(), VectorClock::new(), local);
 
-        let mut right = Rga::new();
-        let right_id = right.insert_after(root, "right", VectorClock::new(), remote);
+        let mut right: Rga<String> = Rga::new();
+        let right_id = right.insert_after(root, "right".to_string(), VectorClock::new(), remote);
 
         assert_ne!(left_id, right_id);
 
@@ -240,8 +254,8 @@ mod tests {
         let mut right_then_left = right.clone();
         right_then_left.merge(&left);
 
-        assert_eq!(left_then_right.to_vec(), right_then_left.to_vec());
-        assert_eq!(left_then_right.to_vec(), vec![&"left", &"right"]);
+        assert_eq!(texts(&left_then_right), texts(&right_then_left));
+        assert_eq!(texts(&left_then_right), vec!["left", "right"]);
     }
 
     #[test]
@@ -250,16 +264,16 @@ mod tests {
         let second = replica(2);
         let root = ElementId::root();
 
-        let mut a = Rga::new();
-        let a_id = a.insert_after(root, "a", VectorClock::new(), first);
-        a.insert_after(a_id, "a-child", VectorClock::new(), first);
+        let mut a: Rga<String> = Rga::new();
+        let a_id = a.insert_after(root, "a".to_string(), VectorClock::new(), first);
+        a.insert_after(a_id, "a-child".to_string(), VectorClock::new(), first);
 
-        let mut b = Rga::new();
-        b.insert_after(root, "b", VectorClock::new(), second);
+        let mut b: Rga<String> = Rga::new();
+        b.insert_after(root, "b".to_string(), VectorClock::new(), second);
 
         let mut merged = a.clone();
         merged.merge(&b);
 
-        assert_eq!(merged.to_vec(), vec![&"a", &"a-child", &"b"]);
+        assert_eq!(texts(&merged), vec!["a", "a-child", "b"]);
     }
 }
