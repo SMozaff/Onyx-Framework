@@ -21,15 +21,20 @@ impl ObservabilityConfig {
         Self {
             service_name: service_name.into(),
             otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| "http://jaeger-collector:4318/v1/traces".to_string()),
+                .unwrap_or_else(|_| "http://jaeger-collector:4317".to_string()),
             log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
         }
     }
 }
 
 pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
+    // OTLP/gRPC, not OTLP/HTTP: every deployment manifest (deploy/helm/*,
+    // deploy/docker-compose.local.yml) points OTEL_EXPORTER_OTLP_ENDPOINT at
+    // the collector's gRPC port 4317, and docker-compose publishes only 4317.
+    // An HTTP exporter here silently exported to a port nothing listens on,
+    // dropping every span batch while looking healthy.
     let exporter = SpanExporter::builder()
-        .with_http()
+        .with_tonic()
         .with_endpoint(config.otlp_endpoint.clone())
         .build()?;
 
