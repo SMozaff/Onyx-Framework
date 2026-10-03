@@ -5,12 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config ca-c
 COPY . .
 RUN cargo build --locked --release -p worker
 
-FROM debian:13-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --uid 10001 --create-home onyx
+FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 COPY --from=builder /workspace/target/release/worker /usr/local/bin/worker
-USER 10001
+USER nonroot
 EXPOSE 9090
 ENV ONYX_METRICS_BIND=0.0.0.0:9090 ONYX_ENV=production
-ENTRYPOINT ["/usr/bin/tini","--"]
-CMD ["/usr/local/bin/worker"]
+ENTRYPOINT ["/usr/local/bin/worker"]
