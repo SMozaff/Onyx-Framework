@@ -2,7 +2,7 @@
 name = "audit-application"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 
 [dependencies]
 async-trait.workspace = true
