@@ -87,13 +87,13 @@ jobs:
       - name: Verify ONYX_ENV access is centralized
         run: |
           set -euo pipefail
-          forbidden=$(rg -n 'std::env::var\\("ONYX_ENV"\\)|env::var\\("ONYX_ENV"\\)' crates/bins/api-server/src --glob '*.rs' --glob '!config.rs' || true)
+          forbidden=$(grep -RInE 'std::env::var\\("ONYX_ENV"\\)|env::var\\("ONYX_ENV"\\)' crates/bins/api-server/src --include='*.rs' --exclude='config.rs' || true)
           if [[ -n "$forbidden" ]]; then
             echo "::error::ONYX_ENV must be parsed only by crates/bins/api-server/src/config.rs"
             echo "$forbidden"
             exit 1
           fi
-          forbidden_production=$(rg -n '(==|!=)\\s*"production"' crates/bins/api-server/src --glob '*.rs' --glob '!config.rs' || true)
+          forbidden_production=$(grep -RInE '(==|!=)[[:space:]]*"production"' crates/bins/api-server/src --include='*.rs' --exclude='config.rs' || true)
           if [[ -n "$forbidden_production" ]]; then
             echo "::error::production posture checks must be centralized in AppConfig"
             echo "$forbidden_production"
