@@ -68,3 +68,39 @@ jobs:
           test -f mobile-pwa/package-lock.json
           test -f crates/bins/desktop-shell/ui/package-lock.json
           test -f crates/bins/admin-shell/ui/package-lock.json
+
+  container-security:
+    name: Container security (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api-server, dockerfile: deploy/docker/api-server.Dockerfile }
+          - { name: worker, dockerfile: deploy/docker/worker.Dockerfile }
+          - { name: sync-agent, dockerfile: deploy/docker/sync-agent.Dockerfile }
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image for security scanning
+        run: docker build --file ${{ matrix.dockerfile }} --tag onyx-security:${{ matrix.name }} .
+      - name: Scan image for HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: onyx-security:${{ matrix.name }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
+
+  sbom:
+    name: Software bill of materials
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Generate repository SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: onyx-sbom-${{ github.sha }}

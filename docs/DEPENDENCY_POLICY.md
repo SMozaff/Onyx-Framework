@@ -38,3 +38,11 @@ Every exception records the affected component/version, advisory or CVE, remedia
 
 ## Review cadence
 Dependency posture is reviewed for every release candidate and by the automated security workflow on every push/PR plus a scheduled weekly run.
+
+## Container scanning and SBOM control
+
+Container images under `deploy/docker/` are security-scanned in the Security workflow on pull requests, pushes to protected development branches, and the weekly scheduled scan. The scan builds each maintained ONYX image and fails on unfixed HIGH or CRITICAL vulnerabilities.
+
+The same Security workflow generates an SPDX JSON software bill of materials for the repository at each verification run and retains it as a workflow artifact. Release processes should promote the SBOM associated with the exact candidate commit rather than regenerating it from a different source tree.
+
+Container base-image changes are managed through the Docker Dependabot update stream and must pass the container-security gate before integration.
