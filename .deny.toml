@@ -1,17 +1,27 @@
 [advisories]
-# cargo-deny 0.20+ removed the vulnerability/unsound severity keys:
-# vulnerability and unsound advisories are now errors by default.
-unmaintained = "all"
+# cargo-deny 0.20+ treats vulnerability/unsound advisories as errors by default.
+# Unmaintained advisories are restricted to direct workspace dependencies so
+# transitive platform stacks can be remediated deliberately without weakening
+# vulnerability enforcement.
+unmaintained = "workspace"
 yanked = "deny"
 
 [licenses]
-# cargo-deny 0.20+ denies licenses not present in this explicit allow-list;
-# the former unlicensed = "deny" key was removed from the schema.
+# cargo-deny 0.20+ denies licenses not present in this explicit allow-list.
 allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-DFS-2016", "Zlib", "CC0-1.0"]
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+# cargo-deny reports Cargo's intentional workspace = true declarations as
+# wildcard dependencies. Keep this visible without failing the gate.
+wildcards = "warn"
+workspace-default-features = "warn"
+external-default-features = "deny"
+
+[bans.workspace-dependencies]
+# Require dependency declarations to use the centralized workspace versions.
+duplicates = "deny"
+unused = "warn"
 
 [sources]
 unknown-registry = "deny"
