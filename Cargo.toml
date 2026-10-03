@@ -78,7 +78,7 @@ prometheus = "0.14"
 opentelemetry = "0.31"
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["grpc-tonic", "trace"] }
-tracing-opentelemetry = "0.32"
+tracing-opentelemetry = "0.34"
 
 # --- Team 8 (Release, E2E, Chaos) ---
 testcontainers-modules = { version = "0.15", features = ["postgres", "blocking"] }
