@@ -1,0 +1,10 @@
+# cargo-deny policy for the ONYX workspace.
+#
+# RUSTSEC-2024-0370 is currently unavoidable: proc-macro-error 1.0.4
+# enters through the GTK/Tauri desktop stack and RustSec reports no safe
+# upgrade. Keep the advisory visible as an ignored finding rather than
+# weakening the rest of the advisory gate.
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "Unavoidable transitive dependency of the current GTK/Tauri desktop stack; RustSec reports no safe upgrade." },
+]
