@@ -3,6 +3,7 @@ name = "synchronization-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "SynchronizationSession lifecycle, MergeStrategy dispatcher, ConflictRecord aggregate, and event-sourced escalation. Depends on Team 1's real platform-kernel/platform-contracts (Architectural Ruling Q1) plus the local platform-contracts-ext extension (Ruling Q2)."
 
 [dependencies]

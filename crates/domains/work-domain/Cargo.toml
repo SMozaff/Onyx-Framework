@@ -3,6 +3,7 @@ name = "work-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "ONYX Task aggregate: pure domain logic for task lifecycle."
 
 [dependencies]

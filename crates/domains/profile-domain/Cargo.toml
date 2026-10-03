@@ -3,6 +3,7 @@ name = "profile-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "ONYX StaffProfile aggregate: pure domain logic for staff profile identity, org info, and work-stats visibility gating."
 
 [dependencies]
