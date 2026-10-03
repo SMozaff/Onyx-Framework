@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config ca-c
 COPY . .
 RUN cargo build --locked --release -p api-server
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:13-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home onyx
 COPY --from=builder /workspace/target/release/api-server /usr/local/bin/api-server
