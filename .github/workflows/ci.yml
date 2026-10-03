@@ -521,7 +521,7 @@ jobs:
           echo "check=${{ needs.check.result }}"
           echo "i18n=${{ needs.i18n.result }}"
           echo "deploy-check=${{ needs.deploy-check.result }}"
-          echo "web=${{ needs.web.result }}""
+          echo "web=${{ needs.web.result }}"
           echo "mobile-pwa=${{ needs.mobile-pwa.result }}"
           echo "native-ui-evidence=${{ needs.native-ui-evidence.result }}"
           echo "load-smoke=${{ needs.load-smoke.result }}"
