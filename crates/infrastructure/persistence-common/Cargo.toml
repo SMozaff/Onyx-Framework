@@ -2,7 +2,7 @@
 name = "persistence-common"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 description = "Shared conversion helpers for persistence adapters: Timestamp<->millis, Uuid<->BLOB, JSON helpers. Per Architectural Ruling 'Add persistence-common Crate' (DECISIONS.md C1)."
 
 [dependencies]
