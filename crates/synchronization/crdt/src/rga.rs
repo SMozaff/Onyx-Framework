@@ -227,11 +227,7 @@ mod tests {
     /// violation), so the sequences under test carry `String` elements and
     /// this helper projects them back to `&str` for readable assertions.
     fn texts(sequence: &Rga<String>) -> Vec<&str> {
-        sequence
-            .to_vec()
-            .into_iter()
-            .map(String::as_str)
-            .collect()
+        sequence.to_vec().into_iter().map(String::as_str).collect()
     }
 
     #[test]
