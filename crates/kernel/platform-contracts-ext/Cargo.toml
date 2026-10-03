@@ -9,4 +9,4 @@ description = "Local Team-3 copy of platform-contracts, additively extended with
 platform-kernel = { path = "../platform-kernel" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
