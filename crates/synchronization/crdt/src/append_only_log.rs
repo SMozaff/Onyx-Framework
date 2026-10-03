@@ -36,6 +36,12 @@ pub struct LogEntry<E> {
 }
 
 impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> AppendOnlyLog<E> {
+    fn canonicalize(&mut self) {
+        self.entries.sort_unstable_by(|left, right| {
+            left.clock.entries.iter().cmp(right.clock.entries.iter())
+        });
+    }
+
     /// Create an empty log.
     pub fn new() -> Self {
         Self {
@@ -51,6 +57,7 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> AppendOnlyLo
             clock: clock.clone(),
         });
         self.clock = self.clock.merge(&clock);
+        self.canonicalize();
     }
 
     /// Get all entries.
@@ -75,6 +82,7 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> AppendOnlyLo
             self.clock = new_clock;
             changed = true;
         }
+        self.canonicalize();
 
         changed
     }

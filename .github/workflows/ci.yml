@@ -8,6 +8,13 @@ on:
     branches: [ main ]
   workflow_dispatch: {}
 
+# Keep only the newest verification run for a given branch/PR. This prevents
+# every corrective commit in a hardening pass from occupying the runner queue
+# after a newer commit has already superseded it.
+concurrency:
+  group: onyx-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
@@ -93,7 +100,10 @@ jobs:
             exit 1
           fi
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # Compile the explicit test-only fault-injection feature as part of the
+        # verification surface, while the release build below remains default-feature
+        # only and therefore excludes client-driven fault injection.
+        run: cargo clippy --workspace --all-targets --features api-server/test-endpoints -- -D warnings
       - name: Build
         run: cargo build --workspace --release
       # Several integration test suites (e.g.
@@ -138,7 +148,10 @@ jobs:
           echo "GNOME_KEYRING_CONTROL=$GNOME_KEYRING_CONTROL" >> "$GITHUB_ENV"
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
       - name: Test
-        run: cargo test --workspace --release -- --test-threads=1
+        # The API integration/E2E tests intentionally exercise the deterministic
+        # 429/500 fault-injection contract. It is enabled only for this test invocation;
+        # production/default release builds above do not enable it.
+        run: cargo test --workspace --release --features api-server/test-endpoints -- --test-threads=1
       - name: Docs
         run: cargo doc --workspace --no-deps
       - name: Migration idempotency and rollback
@@ -150,6 +163,22 @@ jobs:
           cargo run --package migration-tool -- up
       - name: Contract verification
         run: bash scripts/verify/verify_team7.sh && bash scripts/verify/verify_team8.sh
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: RustSec advisory audit
+        run: cargo audit
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: cargo-deny advisory audit
+        run: cargo deny check advisories
 
   # Localization contract gate.
   #
@@ -263,6 +292,8 @@ jobs:
         run: npm run lint
       - name: Type check
         run: npm run type-check
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
       - name: Unit and integration tests
         run: npm test
       - name: Accessibility component tests
@@ -483,17 +514,19 @@ jobs:
       - native-ui-evidence
       - load-smoke
       - mobile-android-kotlin
+      - security-audit
     steps:
       - name: Report upstream gate results
         run: |
           echo "check=${{ needs.check.result }}"
           echo "i18n=${{ needs.i18n.result }}"
           echo "deploy-check=${{ needs.deploy-check.result }}"
-          echo "web=${{ needs.web.result }}"
+          echo "web=${{ needs.web.result }}""
           echo "mobile-pwa=${{ needs.mobile-pwa.result }}"
           echo "native-ui-evidence=${{ needs.native-ui-evidence.result }}"
           echo "load-smoke=${{ needs.load-smoke.result }}"
           echo "mobile-android-kotlin=${{ needs.mobile-android-kotlin.result }}"
+          echo "security-audit=${{ needs.security-audit.result }}"
 
       - name: Fail unless every required gate passed
         if: >-
@@ -505,11 +538,12 @@ jobs:
             needs.mobile-pwa.result != 'success' ||
             needs.native-ui-evidence.result != 'success' ||
             needs.load-smoke.result != 'success' ||
-            needs.mobile-android-kotlin.result != 'success'
+            needs.mobile-android-kotlin.result != 'success' ||
+            needs.security-audit.result != 'success'
           }}
         run: |
-          echo "::error::Phase 0 merge gate blocked: one or more required verification jobs did not pass."
+          echo "::error::Merge gate blocked: one or more required verification jobs did not pass."
           exit 1
 
       - name: All required CI gates passed
-        run: echo "Phase 0 merge gate passed."
+        run: echo "Merge gate passed: all required verification jobs succeeded."

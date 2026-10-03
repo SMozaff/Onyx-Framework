@@ -274,8 +274,12 @@ impl AppState {
     /// this crate's own tests) already runs inside an async context
     /// (Tauri commands, `#[tokio::test]`), so this is a straightforward
     /// `.await` addition at each call site, not a structural change to
-    /// how `AppState` is used.
-    pub async fn new(pool: SqlitePool, config: AppStateConfig) -> Self {
+    /// how `AppState` is used. Construction now also propagates blob-store
+    /// initialization failure instead of panicking during client startup.
+    pub async fn new(
+        pool: SqlitePool,
+        config: AppStateConfig,
+    ) -> Result<Self, query_application::BlobStoreError> {
         let mission_repo: Arc<dyn query_application::Repository> =
             Arc::new(SqliteRepository::new(pool.clone(), "mission"));
         let task_repo: Arc<dyn query_application::Repository> =
@@ -304,13 +308,7 @@ impl AppState {
 
         // Phase 1 (Desktop & Web Completion) addition.
         let blob_store: Arc<dyn query_application::BlobStore> = Arc::new(
-            local_blob_storage::LocalBlobStore::open(&config.blob_store_root)
-                .await
-                .expect(
-                    "blob store root must be creatable; a client that cannot write to its own \
-                     configured data directory has a deeper problem than this constructor can \
-                     recover from",
-                ),
+            local_blob_storage::LocalBlobStore::open(&config.blob_store_root).await?,
         );
         let file_upload_coordinator = Arc::new(FileUploadCoordinator::new(
             Arc::clone(&file_asset_repo),
@@ -569,14 +567,14 @@ impl AppState {
             config.sync_agent_config,
         ));
 
-        Self {
+        Ok(Self {
             command_registry: Arc::new(command_registry),
             query_registry: Arc::new(query_registry),
             event_bus,
             sync_agent,
             file_upload_coordinator,
             pool,
-        }
+        })
     }
 }
 

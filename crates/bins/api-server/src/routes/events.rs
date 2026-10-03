@@ -3,10 +3,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    http::{
-        header::SEC_WEBSOCKET_PROTOCOL,
-        HeaderMap, StatusCode,
-    },
+    http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderMap, StatusCode},
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -23,20 +20,33 @@ const WS_AUTH_PROTOCOL: &str = "onyx-bearer";
 
 fn bearer_token_from_protocols(headers: &HeaderMap) -> Option<&str> {
     let mut found_auth_protocol = false;
-    let mut token = None;
+    let mut token: Option<&str> = None;
 
     for header_value in headers.get_all(SEC_WEBSOCKET_PROTOCOL).iter() {
-        let protocols = header_value.to_str().ok()?.split(',');
-        for protocol in protocols.map(str::trim).filter(|p| !p.is_empty()) {
+        for protocol in header_value
+            .to_str()
+            .ok()?
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
             if protocol == WS_AUTH_PROTOCOL {
+                if found_auth_protocol {
+                    return None;
+                }
                 found_auth_protocol = true;
-            } else if token.is_none() {
-                token = Some(protocol);
+            } else if token.replace(protocol).is_some() {
+                // Exactly one non-ONYX protocol is the bearer token. Reject
+                // additional values rather than guessing which one is the
+                // credential if a future application subprotocol is added.
+                return None;
             }
         }
     }
 
-    found_auth_protocol.then_some(token?).filter(|value| !value.is_empty())
+    found_auth_protocol
+        .then_some(token?)
+        .filter(|value| !value.is_empty())
 }
 
 pub async fn websocket_route(
@@ -167,4 +177,69 @@ fn matches_filter(event: &Value, filter: &SubscriptionFilter) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn extracts_access_token_from_websocket_subprotocols() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer, access.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), Some("access.token"));
+    }
+
+    #[test]
+    fn rejects_missing_authentication_protocol() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("access.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), None);
+    }
+
+    #[test]
+    fn rejects_empty_token_after_authentication_protocol() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), None);
+    }
+
+    #[test]
+    fn handles_split_authentication_header_values() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer"),
+        );
+        headers.append(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("access.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), Some("access.token"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_multiple_credential_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("onyx-bearer, access.token, other.token"),
+        );
+
+        assert_eq!(bearer_token_from_protocols(&headers), None);
+    }
 }

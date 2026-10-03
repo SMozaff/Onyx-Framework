@@ -11,10 +11,7 @@
 use platform_kernel::{ReplicaId, VectorClock};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    fmt::Debug,
-};
+use std::{collections::HashSet, fmt::Debug};
 
 use crate::Crdt;
 
@@ -108,6 +105,7 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Rga<E> {
             clock: clock.clone(),
         });
         self.clock = self.clock.merge(&clock);
+        self.atoms.sort_unstable_by_key(|atom| atom.id);
         id
     }
 
@@ -204,6 +202,7 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Crdt for Rga
             self.summary_clock = new_summary;
             changed = true;
         }
+        self.atoms.sort_unstable_by_key(|atom| atom.id);
 
         changed
     }
@@ -229,20 +228,10 @@ mod tests {
         let root = ElementId::root();
 
         let mut left = Rga::new();
-        let left_id = left.insert_after(
-            root,
-            "left",
-            VectorClock::new(),
-            local,
-        );
+        let left_id = left.insert_after(root, "left", VectorClock::new(), local);
 
         let mut right = Rga::new();
-        let right_id = right.insert_after(
-            root,
-            "right",
-            VectorClock::new(),
-            remote,
-        );
+        let right_id = right.insert_after(root, "right", VectorClock::new(), remote);
 
         assert_ne!(left_id, right_id);
 
@@ -263,26 +252,11 @@ mod tests {
         let root = ElementId::root();
 
         let mut a = Rga::new();
-        let a_id = a.insert_after(
-            root,
-            "a",
-            VectorClock::new(),
-            first,
-        );
-        a.insert_after(
-            a_id,
-            "a-child",
-            VectorClock::new(),
-            first,
-        );
+        let a_id = a.insert_after(root, "a", VectorClock::new(), first);
+        a.insert_after(a_id, "a-child", VectorClock::new(), first);
 
         let mut b = Rga::new();
-        b.insert_after(
-            root,
-            "b",
-            VectorClock::new(),
-            second,
-        );
+        b.insert_after(root, "b", VectorClock::new(), second);
 
         let mut merged = a.clone();
         merged.merge(&b);

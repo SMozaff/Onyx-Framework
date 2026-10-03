@@ -1695,13 +1695,13 @@ The delivered generic command pipeline accepted an `IdempotencyStore` for lookup
 
 Increment 7 rate governance and production fault injection are not implemented in the delivered repository, but Team 6 acceptance requires real-backend verification of 429 and 500 handling.
 
-**Ruling:** when and only when `ONYX_TEST_MODE=1`, authenticated command/query routes recognize `x-onyx-test-status: 429|500` and return canonical deterministic errors. The behavior is absent when test mode is not explicitly enabled. Natural backend paths provide 401 (missing/expired bearer token), 403 (policy-restricted web approval), and 409 (version/epoch/state conflict).
+**Ruling:** the deterministic fault-injection implementation is compiled only when the `test-endpoints` Cargo feature is explicitly enabled. With that feature and `ONYX_TEST_MODE=1`, authenticated command/query routes recognize `x-onyx-test-status: 429|500` and return canonical deterministic errors. Normal production binaries contain no client-driven fault-injection path.
 
 ### T6-D11 — WebSocket token redaction from HTTP tracing
 
-Ruling T6-R6 places the access token in the WebSocket query string. The default Tower HTTP trace span includes the request URI and could therefore log bearer material.
+The original T6-R6 design placed the access token in the WebSocket query string. That design is superseded by the current event-stream contract.
 
-**Ruling:** the Team 6 router does not install the default `TraceLayer`. Application startup and non-secret operational events may still be logged through `tracing`, but request URIs containing `?token=` are not emitted by the default HTTP trace middleware. A future structured observability adapter must explicitly redact this parameter.
+**Ruling:** `/api/events` authenticates using `Sec-WebSocket-Protocol: onyx-bearer, <access_token>`. The server echoes only the fixed `onyx-bearer` protocol and never copies the bearer into the upgrade response. The relay path separately uses its short-lived, single-use target-scoped relay ticket. The router still avoids the default `TraceLayer` for sensitive request metadata.
 
 ### T6-D12 — React Query network mode is explicit
 
@@ -2846,3 +2846,27 @@ pull); `p2p/P2pChannel.kt` (deferred handshake);
 `p2p/P2pController.kt` + `p2p/P2pViewModel.kt` (new);
 `ui/widgets/P2pCard.kt` (new); `SettingsScreen.kt`/`AppShell.kt`/
 `MainActivity.kt` wiring.
+
+### H8 — Security/audit remainder hardening — 2026-10-03
+
+1. **Protected HTTP routes use centralized authentication.** The ordinary `/api/*`
+   application surface is mounted under an Axum `route_layer` that validates the
+   bearer access token and injects the authenticated principal. This is a fail-safe
+   boundary for future routes. Existing handlers may retain narrower capability or
+   tenant checks while they migrate from direct header parsing to the injected principal.
+2. **The event WebSocket is self-authenticating.** `/api/events` is intentionally
+   outside the ordinary bearer-header route layer because its handshake authenticates
+   with `Sec-WebSocket-Protocol: onyx-bearer, <access_token>`. The server negotiates
+   only the fixed `onyx-bearer` protocol, so the bearer is not copied into the upgrade
+   response or URL.
+3. **Fault injection is compile-time opt-in.** `ONYX_TEST_MODE` and
+   `x-onyx-test-status` behavior is compiled only under the `test-endpoints` Cargo
+   feature. Production/default binaries therefore do not contain the client-driven
+   failure injection path.
+4. **Client composition initialization is fallible.** `AppState::new` propagates local
+   blob-store initialization failure; desktop setup surfaces it as a serializable
+   storage error and mobile FFI returns its documented null initialization sentinel.
+5. **CRDT wire/state order is canonical.** OR-Set tags, MV-Register versions, RGA atoms,
+   and append-only log entries use deterministic ordered storage. RGA traversal orders
+   concurrent siblings by `ElementId` and visits every branch, preventing merge-order
+   dependent loss of sibling subtrees.

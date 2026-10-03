@@ -1,9 +1,13 @@
-use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
+use std::sync::OnceLock;
+
+use opentelemetry::{global, trace::TracerProvider as _, KeyValue};
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{trace as sdktrace, Resource};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use crate::CanonicalJsonLayer;
+
+static TRACER_PROVIDER: OnceLock<sdktrace::SdkTracerProvider> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 pub struct ObservabilityConfig {
@@ -17,25 +21,29 @@ impl ObservabilityConfig {
         Self {
             service_name: service_name.into(),
             otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| "http://jaeger-collector:4317".to_string()),
+                .unwrap_or_else(|_| "http://jaeger-collector:4318/v1/traces".to_string()),
             log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
         }
     }
 }
 
 pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
-    let tracer =
-        opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_endpoint(config.otlp_endpoint.clone()),
-            )
-            .with_trace_config(sdktrace::config().with_resource(Resource::new(vec![
-                KeyValue::new("service.name", config.service_name.clone()),
-            ])))
-            .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+    let exporter = SpanExporter::builder()
+        .with_http()
+        .with_endpoint(config.otlp_endpoint.clone())
+        .build()?;
+
+    let resource = Resource::builder()
+        .with_service_name(config.service_name.clone())
+        .with_attributes([KeyValue::new("service.name", config.service_name.clone())])
+        .build();
+    let provider = sdktrace::SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(resource)
+        .build();
+    let tracer = provider.tracer("onyx-observability");
+    let _ = TRACER_PROVIDER.set(provider.clone());
+    global::set_tracer_provider(provider);
 
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
     let json = CanonicalJsonLayer::new(config.service_name.clone());
@@ -48,5 +56,7 @@ pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
 }
 
 pub fn shutdown_observability() {
-    opentelemetry::global::shutdown_tracer_provider();
+    if let Some(provider) = TRACER_PROVIDER.get() {
+        let _ = provider.shutdown();
+    }
 }

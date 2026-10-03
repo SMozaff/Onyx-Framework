@@ -149,7 +149,9 @@ async fn app_state_new_wires_a_working_command_registry_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
 
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
 
     let envelope = envelope_for(
         "CreateMission",
@@ -212,7 +214,9 @@ async fn app_state_new_wires_task_commands_independently_of_mission_commands() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
 
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
 
     let mission_id = ObjectId::new_random();
     let envelope = CommandEnvelope {
@@ -254,7 +258,9 @@ async fn app_state_new_wires_task_commands_independently_of_mission_commands() {
 async fn app_state_new_wires_conversation_and_message_commands_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
 
     // 1. Create a conversation.
     let create_conversation = envelope_for(
@@ -399,7 +405,9 @@ async fn app_state_new_wires_conversation_and_message_commands_end_to_end() {
 async fn app_state_new_wires_file_asset_and_upload_session_commands_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
 
     // 1. Create a file asset.
     let file_asset_target = ObjectId::new_random();
@@ -576,7 +584,9 @@ async fn app_state_new_wires_file_asset_and_upload_session_commands_end_to_end()
 async fn app_state_new_wires_policy_commands_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
 
     // 1. Create a policy.
     let create_policy = CommandEnvelope {
@@ -681,7 +691,9 @@ async fn app_state_new_wires_policy_commands_end_to_end() {
 async fn app_state_new_wires_connection_request_commands_end_to_end() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
     let recipient = test_user_id();
 
     // 1. Send a connection request.
@@ -734,7 +746,9 @@ async fn app_state_new_wires_connection_request_commands_end_to_end() {
 async fn file_upload_coordinator_round_trips_real_content() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
 
     let actor = platform_kernel::ActorContext {
         user_id: test_user_id(),
@@ -795,7 +809,9 @@ async fn file_upload_coordinator_round_trips_real_content() {
 async fn file_upload_coordinator_handles_multi_chunk_content() {
     let pool = test_pool().await;
     let organization_id = OrganizationId::new_random();
-    let state = AppState::new(pool, test_config()).await;
+    let state = AppState::new(pool, test_config())
+        .await
+        .expect("AppState must initialize in test fixture");
 
     let actor = platform_kernel::ActorContext {
         user_id: test_user_id(),

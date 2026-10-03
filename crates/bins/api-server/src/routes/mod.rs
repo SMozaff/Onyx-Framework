@@ -272,11 +272,10 @@ impl ApiState {
         let user_store: Arc<dyn UserStore> = if let Some(pool) = primary_postgres_pool.clone() {
             Arc::new(PostgresUserStore::new(pool))
         } else {
-            Arc::new(SqliteUserStore::new(
-                sqlite_pool
-                    .clone()
-                    .expect("one of the primary pools must exist"),
-            ))
+            let pool = sqlite_pool
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("no primary database pool available"))?;
+            Arc::new(SqliteUserStore::new(pool))
         };
 
         let governance_url = config.governance_database_url().map(str::to_owned);
@@ -322,7 +321,8 @@ impl ApiState {
                 Arc::new(PostgresTokenRevocationStore::new(pool)),
             )
         } else {
-            let pool = sqlite_pool.expect("SQLite composition must retain its pool");
+            let pool = sqlite_pool
+                .ok_or_else(|| anyhow::anyhow!("SQLite composition must retain its pool"))?;
             (
                 Arc::new(InMemorySlidingWindowRateLimiter::default()),
                 Arc::new(HashChainAuditWriter::sqlite(pool)),
@@ -488,11 +488,10 @@ async fn readiness(State(state): State<ApiState>) -> StatusCode {
 }
 
 pub fn router(state: ApiState) -> Router {
-    let command_route =
-        post(command::command_route).route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            crate::middleware::rate_limit::rate_limit_command,
-        ));
+    let command_route = post(command::command_route).route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        crate::middleware::rate_limit::rate_limit_command,
+    ));
 
     // H4(a): PUT added -- /api/admin/mobile-access and /api/admin/profiles
     // are both real, currently-registered PUT routes. DELETE is required for
@@ -572,7 +571,6 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/command", command_route)
         .route("/api/query", get(query::query_route))
-        .route("/api/events", get(events::websocket_route))
         // Relay ticket issuance uses the caller's ordinary access token.
         .route("/api/relay-ticket", post(relay::issue_ticket))
         // File and Web Push APIs.
@@ -602,6 +600,10 @@ pub fn router(state: ApiState) -> Router {
         // explicit bootstrap token. It cannot be placed behind access auth
         // because its purpose is to create the first authenticated user.
         .route("/api/admin/bootstrap", post(admin::bootstrap))
+        // /api/events performs its own authentication from the
+        // WebSocket subprotocol header; it therefore must not be wrapped
+        // by the standard Authorization-header middleware above.
+        .route("/api/events", get(events::websocket_route))
         .merge(protected_routes)
         // The relay WebSocket authenticates with its own short-lived,
         // single-use, target-scoped ticket; it must not require an access
@@ -1034,7 +1036,9 @@ pub fn object_id_to_string(id: ObjectId) -> String {
 }
 
 pub fn organization_id() -> OrganizationId {
-    parse_object_id(ORGANIZATION_ID).expect("constant organization UUID is valid")
+    // ORGANIZATION_ID is the fixed development/test fixture UUID
+    // 11111111-1111-1111-1111-111111111111, i.e. 16 bytes of 0x11.
+    ObjectId([0x11; 16])
 }
 
 pub fn web_device_object_id() -> ObjectId {
