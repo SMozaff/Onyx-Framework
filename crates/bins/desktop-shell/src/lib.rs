@@ -702,7 +702,8 @@ pub fn run() {
                 }
 
                 app_handle_for_state.manage::<SharedAppState>(Arc::new(RwLock::new(state)));
-            });
+                Ok::<(), ShellError>(())
+            })?;
 
             Ok(())
         })
