@@ -6,22 +6,46 @@
       {
         "ordinal": 0,
         "name": "state",
-        "type_info": "Jsonb"
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "aggregates",
+            "name": "state"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "version",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "aggregates",
+            "name": "version"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "lifecycle_epoch",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "aggregates",
+            "name": "lifecycle_epoch"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "authority_epoch",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "aggregates",
+            "name": "authority_epoch"
+          }
+        }
       }
     ],
     "parameters": {
