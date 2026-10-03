@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Verify canonical i18n resources
@@ -120,7 +120,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
       # Tauri v2 on Linux links against WebKitGTK; matches ci.yml's own
       # `check` job install list exactly, since that job proved this is
@@ -281,7 +281,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/admin-shell/ui/package-lock.json}
       # Tauri v2 on Linux links against WebKitGTK. This mirrors ci.yml and
       # release-desktop exactly instead of re-deriving a second dependency set.
