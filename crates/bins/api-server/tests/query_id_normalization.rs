@@ -86,7 +86,7 @@ async fn policy_list_query_returns_a_uuid_string_id_not_a_byte_array() {
         "limit": 100,
     });
     let response = http
-        .get(format!("{base}/api/query"))
+        .get(format!("{base}/api/query?envelope={}", encode_envelope(&envelope)))
         .bearer_auth(&token)
         .query(&[("envelope", encode_envelope(&envelope))])
         .send()
