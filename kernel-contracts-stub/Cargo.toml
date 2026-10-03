@@ -2,7 +2,7 @@
 name = "kernel-contracts-stub"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 description = "TEMPORARY stub of Team 1 (Increment 1) kernel/contract types, per Architectural Ruling (Team 2 Kickoff, §1). Replace with real Team 1 crates when delivered."
 
 [dependencies]
