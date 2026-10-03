@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM rust:1.97-slim AS builder
+FROM rust:1.98-slim AS builder
 WORKDIR /workspace
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config ca-certificates libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
