@@ -124,8 +124,13 @@ jobs:
       # built-in cargo subcommand) and, unlike the workspace build itself,
       # a real schema to check queries against -- placed after migrations
       # run above, not before.
+      # Pinned to the workspace's own sqlx version: `sqlx prepare` writes
+      # a per-column `origin` field that older releases don't emit, so an
+      # unpinned install silently invalidates every committed `.sqlx` file
+      # the day sqlx-cli releases a new one. Track the workspace major.minor
+      # here and regenerate `.sqlx` when it moves.
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres,rustls --locked
+        run: cargo install sqlx-cli --version 0.9.0 --no-default-features --features postgres,rustls --locked
       - name: Verify sqlx offline metadata is current
         run: cargo sqlx prepare --check --workspace -- --all-targets
       # desktop-shell's secure_storage tests exercise the real `keyring`
