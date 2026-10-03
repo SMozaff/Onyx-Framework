@@ -65,7 +65,7 @@ chrono = { version = "0.4", features = ["serde"] }
 axum = { version = "0.7", features = ["ws", "multipart"] }
 base64 = "0.21"
 hmac = "0.12"
-sha2 = "0.10"
+sha2 = "0.11"
 csv = "1.3"
 tower-http = { version = "0.6", features = ["cors"] }
 futures-util = "0.3"
