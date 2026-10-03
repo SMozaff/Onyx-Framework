@@ -523,7 +523,7 @@ The repository has now implemented the architectural controls defined by ONYX_CR
 - **H-01:** `AppConfig` provides a closed `Environment` type, rejects unknown `ONYX_ENV` values, centralizes production storage/signing/governance/CORS invariants, and exposes development/test seeding only through the non-production configuration boundary.
 - **H-02:** the workspace uses SQLx 0.9 with regenerated dependency state and committed SQLx offline metadata; network/TLS dependencies were modernized as part of the staged dependency work.
 - **H-03:** all four frontend surfaces have committed lockfiles, Node 22/`npm ci` CI installation, high-severity production dependency audits, explicit dependency lifecycle policy, and Dependabot automation.
-- **H-04:** `docs/DEPENDENCY_POLICY.md`, `.deny.toml`, `.github/dependabot.yml`, and `.github/workflows/security.yml` establish repository-wide Rust/frontend/source-policy/update controls. Docker dependencies are now included in Dependabot lifecycle management. The cargo-deny 0.20 schema migration is in PR #78; final security verification is pending that PR.
+- **H-04:** `docs/DEPENDENCY_POLICY.md`, `.deny.toml`, `.github/dependabot.yml`, and `.github/workflows/security.yml` establish repository-wide Rust/frontend/source-policy/update controls. Docker dependencies are now included in Dependabot lifecycle management. The cargo-deny 0.20 schema migration is merged; final security verification is now being exercised on the current candidate. Container image scanning and SPDX SBOM generation are also enforced by the Security workflow.
 
 ### Remaining external enforcement action
 
