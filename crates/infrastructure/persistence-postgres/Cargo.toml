@@ -2,7 +2,7 @@
 name = "persistence-postgres"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 
 [dependencies]
 platform-kernel.workspace = true
