@@ -3,6 +3,7 @@ name = "communication-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+publish.workspace = true
 description = "ONYX Conversation/Message aggregates: pure domain logic for team messaging."
 
 [dependencies]

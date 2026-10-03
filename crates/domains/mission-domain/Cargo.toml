@@ -3,6 +3,7 @@ name = "mission-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+publish.workspace = true
 description = "ONYX Mission aggregate: pure domain logic for mission lifecycle."
 
 [dependencies]

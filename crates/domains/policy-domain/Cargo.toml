@@ -3,6 +3,7 @@ name = "policy-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+publish.workspace = true
 description = "ONYX Policy/LegalHold aggregates: pure domain logic for governance rules, deterministic policy evaluation, and legal hold."
 
 [dependencies]

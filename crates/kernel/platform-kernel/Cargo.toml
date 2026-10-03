@@ -3,6 +3,7 @@ name = "platform-kernel"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+publish.workspace = true
 description = "ONYX Shared Kernel: identifiers, versioning, causality, authority, time, and domain refs. Infrastructure-free."
 
 [dependencies]
