@@ -513,3 +513,24 @@ state is tracked here as the current remediation index.
 > **Verification rule:** no item above is marked fully verified merely because it was
 > edited. Final closure still requires the GitHub Actions build/test/security pass
 > performed at the end of the fixation program.
+
+
+## 13. Total Critical/High Fix Plan reconciliation — 2026-10-03
+
+The repository has now implemented the architectural controls defined by ONYX_CRITICAL_HIGH_TOTAL_FIX_PLAN.md:
+
+- **C-01:** independent verification jobs plus a fail-closed `merge-gate` are present in `.github/workflows/ci.yml`. The gate covers `check`, `i18n`, `deploy-check`, `web`, `mobile-pwa`, `native-ui-evidence`, `load-smoke`, `mobile-android-kotlin`, and `security-audit`, and explicitly rejects failure, cancellation, or skip.
+- **H-01:** `AppConfig` provides a closed `Environment` type, rejects unknown `ONYX_ENV` values, centralizes production storage/signing/governance/CORS invariants, and exposes development/test seeding only through the non-production configuration boundary.
+- **H-02:** the workspace uses SQLx 0.9 with regenerated dependency state and committed SQLx offline metadata; network/TLS dependencies were modernized as part of the staged dependency work.
+- **H-03:** all four frontend surfaces have committed lockfiles, Node 22/`npm ci` CI installation, high-severity production dependency audits, explicit dependency lifecycle policy, and Dependabot automation.
+- **H-04:** `docs/DEPENDENCY_POLICY.md`, `.deny.toml`, `.github/dependabot.yml`, and `.github/workflows/security.yml` establish repository-wide Rust/frontend/source-policy/update controls. Docker dependencies are now included in Dependabot lifecycle management. The cargo-deny 0.20 schema migration is in PR #78; final security verification is pending that PR.
+
+### Remaining external enforcement action
+
+The GitHub integration can read repository rulesets but cannot administer branch protection/rulesets for this repository. A live ruleset query currently returns no repository rulesets. Therefore the final C-01 acceptance item requiring an enforced protected `main` branch remains an **administrative repository-setting action**, not an unimplemented code change.
+
+Required repository setting: protect `main`, prohibit direct pushes, require the `merge-gate` status check for pull requests, require the branch to be current with the protected base (or use merge queue), and ensure the required check is attached to the exact candidate commit.
+
+### Verification boundary
+
+This reconciliation deliberately does **not** mark the remediation program fully verified. Full CI, security, integration, E2E, deployment, native/Android, browser, and load verification remain the next phase, as specified by the plan. The purpose of this pass is to complete the root-cause control architecture before exercising every test surface.
