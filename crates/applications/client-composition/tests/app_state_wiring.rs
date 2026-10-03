@@ -917,7 +917,7 @@ async fn app_state_wires_notification_inbox_acknowledgement_and_events() {
     let mut config = test_config();
     config.organization_id = organization_id;
     config.sync_agent_config.outbox_poll_interval = std::time::Duration::from_millis(20);
-    let state = Arc::new(AppState::new(pool, config).await);
+    let state = Arc::new(AppState::new(pool, config).await.expect("AppState must initialize in test fixture"));
 
     let inbox = state
         .query_registry
