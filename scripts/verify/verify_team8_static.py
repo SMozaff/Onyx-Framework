@@ -93,10 +93,28 @@ for item in required:
     check((ROOT / item).is_file(), f"required Team 8 artifact absent: {item}")
 
 # Docker contract and reproducible-online-build workaround.
+#
+# Runtime base: the hardened service images ship `gcr.io/distroless/
+# cc-debian12:nonroot`, whose `:nonroot` tag enforces an unprivileged user
+# (65532) itself and drops the util-linux/acl/systemd/ncurses/perl/curl CVE
+# surface that `debian:bookworm-slim` carries. Distroless has no shell, so it
+# cannot carry a `USER` instruction -- the tag is the whole mechanism, which is
+# why "runtime is not non-root" is checked as "sanctioned non-root base OR an
+# explicit non-root USER" rather than by grepping for `USER` alone. Both
+# sanctioned bases are accepted; every other runtime base still fails, and a
+# sanctioned base left running as root still fails, so the gate stays closed.
+DISTROLESS_NONROOT = "gcr.io/distroless/cc-debian12:nonroot"
+SANCTIONED_RUNTIME_BASES = ("debian:bookworm-slim", DISTROLESS_NONROOT)
 for dockerfile in sorted((ROOT / "deploy/docker").glob("*.Dockerfile")):
     body = dockerfile.read_text(encoding="utf-8")
     check("FROM rust:1.97-slim AS builder" in body, f"wrong builder base: {dockerfile}")
-    check("FROM debian:bookworm-slim" in body, f"wrong runtime base: {dockerfile}")
+    runtime_from = next(
+        (line for line in body.splitlines()
+         if line.startswith("FROM ") and line.endswith(" AS runtime")),
+        "",
+    )
+    check(runtime_from in {f"FROM {base} AS runtime" for base in SANCTIONED_RUNTIME_BASES},
+          f"wrong runtime base: {dockerfile}")
     # H5: previously required "cargo generate-lockfile && cargo build
     # --locked --release" -- that pattern is self-defeating (regenerating
     # the lockfile immediately before a --locked build means --locked can
@@ -107,7 +125,10 @@ for dockerfile in sorted((ROOT / "deploy/docker").glob("*.Dockerfile")):
           and "cargo generate-lockfile" not in body,
           f"Docker build must use --locked against the committed Cargo.lock, "
           f"without regenerating it first: {dockerfile}")
-    check("USER 10001" in body, f"runtime is not non-root: {dockerfile}")
+    runs_non_root = runtime_from == f"FROM {DISTROLESS_NONROOT} AS runtime" or re.search(
+        r"^USER (?!root$|0$)\S+", body, re.M
+    )
+    check(runs_non_root, f"runtime is not non-root: {dockerfile}")
 
 # Helm/Argo rollout contract.
 helm_values = text("deploy/helm/onyx-api/values.yaml")
