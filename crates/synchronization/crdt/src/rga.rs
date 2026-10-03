@@ -212,7 +212,6 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Crdt for Rga
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
