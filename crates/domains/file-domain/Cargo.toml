@@ -3,6 +3,7 @@ name = "file-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "ONYX FileAsset/UploadSession aggregates: pure domain logic for team file sharing."
 
 [dependencies]
