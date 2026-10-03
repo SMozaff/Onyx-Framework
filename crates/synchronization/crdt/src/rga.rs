@@ -86,6 +86,15 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Rga<E> {
     /// DECISIONS.md B7: `local_replica` is now an explicit parameter (the
     /// frozen signature's implicit `self.get_local_replica_id()` call had no
     /// backing field to read from).
+    ///
+    /// The local replica's Lamport timestamp is folded in *after* absorbing
+    /// the caller's causal context and *then* incremented, which is what
+    /// keeps `ElementId`s unique. Reading the counter before folding in
+    /// `clock` (and never writing the increment back) let two consecutive
+    /// inserts from one replica both mint `lamport: 1` whenever the caller
+    /// passed a clock that didn't already mention that replica — colliding
+    /// ids that then silently dropped atoms during traversal and made
+    /// merge order observable in `to_vec()`, i.e. a non-convergent CRDT.
     pub fn insert_after(
         &mut self,
         parent: ElementId,
@@ -93,9 +102,11 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Rga<E> {
         clock: VectorClock,
         local_replica: ReplicaId,
     ) -> ElementId {
+        self.clock = self.clock.merge(&clock);
+        self.clock.increment(local_replica);
         let id = ElementId {
             replica: local_replica,
-            lamport: self.clock.get(&local_replica) + 1,
+            lamport: self.clock.get(&local_replica),
         };
         self.atoms.push(Atom {
             id,
@@ -104,7 +115,6 @@ impl<E: Clone + Debug + Send + Sync + Serialize + DeserializeOwned> Rga<E> {
             is_tombstone: false,
             clock: clock.clone(),
         });
-        self.clock = self.clock.merge(&clock);
         self.atoms.sort_unstable_by_key(|atom| atom.id);
         id
     }
