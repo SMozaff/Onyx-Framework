@@ -118,7 +118,7 @@ crdt = { path = "crates/synchronization/crdt" }
 synchronization-domain = { path = "crates/synchronization/synchronization-domain" }
 sync-test-utils = { path = "crates/synchronization/sync-test-utils" }
 lan-discovery = { path = "crates/infrastructure/lan-discovery" }
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 sync-transport = { path = "crates/transports/sync-transport" }
 sync-transport-mobile = { path = "crates/transports/sync-transport-mobile" }
 proptest = "1"
