@@ -41,7 +41,7 @@ jobs:
           mkdir -p artifacts
           cp target/debug/api-server.exe artifacts/
           cp start-backend.ps1 artifacts/ || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: onyx-backend-windows-debug
           path: artifacts/*
@@ -92,7 +92,7 @@ jobs:
             exit 1
           fi
           printf 'Collected %s Staff desktop bundle(s)\n' "${#bundles[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: onyx-desktop-shell-windows-debug
           path: artifacts/*
@@ -138,7 +138,7 @@ jobs:
             exit 1
           fi
           printf 'Collected %s Admin desktop bundle(s)\n' "${#bundles[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: onyx-admin-shell-windows-debug
           path: artifacts/*
