@@ -3,7 +3,7 @@ name = "sync-transport-mobile"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+publish = false
 
 [lib]
 # A C-ABI-exporting cdylib for Team 5's Swift/Kotlin call sites, plus an
