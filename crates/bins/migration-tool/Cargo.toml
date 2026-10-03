@@ -2,7 +2,7 @@
 name = "migration-tool"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 
 [[bin]]
 name = "migration-tool"
