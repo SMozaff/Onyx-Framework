@@ -499,9 +499,6 @@ jobs:
   # failure, cancellation, or upstream skip into one deterministic failing
   # status. Configure ONLY this job as the required pull-request status check
   # after verifying the repository's branch protection/ruleset settings.
-  #
-  # `always()` is essential: without it, a dependency failure causes this job
-  # itself to be skipped, which can make the aggregate gate non-actionable.
   merge-gate:
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -517,33 +514,42 @@ jobs:
       - security-audit
     steps:
       - name: Report upstream gate results
+        env:
+          CHECK_RESULT: ${{ needs.check.result }}
+          I18N_RESULT: ${{ needs.i18n.result }}
+          DEPLOY_CHECK_RESULT: ${{ needs['deploy-check'].result }}
+          WEB_RESULT: ${{ needs.web.result }}
+          MOBILE_PWA_RESULT: ${{ needs['mobile-pwa'].result }}
+          NATIVE_UI_RESULT: ${{ needs['native-ui-evidence'].result }}
+          LOAD_SMOKE_RESULT: ${{ needs['load-smoke'].result }}
+          ANDROID_RESULT: ${{ needs['mobile-android-kotlin'].result }}
+          SECURITY_RESULT: ${{ needs['security-audit'].result }}
         run: |
-          echo "check=${{ needs.check.result }}"
-          echo "i18n=${{ needs.i18n.result }}"
-          echo "deploy-check=${{ needs.deploy-check.result }}"
-          echo "web=${{ needs.web.result }}"
-          echo "mobile-pwa=${{ needs.mobile-pwa.result }}"
-          echo "native-ui-evidence=${{ needs.native-ui-evidence.result }}"
-          echo "load-smoke=${{ needs.load-smoke.result }}"
-          echo "mobile-android-kotlin=${{ needs.mobile-android-kotlin.result }}"
-          echo "security-audit=${{ needs.security-audit.result }}"
-
-      - name: Fail unless every required gate passed
-        if: >-
-          ${{
-            needs.check.result != 'success' ||
-            needs.i18n.result != 'success' ||
-            needs.deploy-check.result != 'success' ||
-            needs.web.result != 'success' ||
-            needs.mobile-pwa.result != 'success' ||
-            needs.native-ui-evidence.result != 'success' ||
-            needs.load-smoke.result != 'success' ||
-            needs.mobile-android-kotlin.result != 'success' ||
-            needs.security-audit.result != 'success'
-          }}
-        run: |
-          echo "::error::Merge gate blocked: one or more required verification jobs did not pass."
-          exit 1
-
-      - name: All required CI gates passed
-        run: echo "Merge gate passed: all required verification jobs succeeded."
+          set -euo pipefail
+          printf '%s\n' \
+            "check=$CHECK_RESULT" \
+            "i18n=$I18N_RESULT" \
+            "deploy-check=$DEPLOY_CHECK_RESULT" \
+            "web=$WEB_RESULT" \
+            "mobile-pwa=$MOBILE_PWA_RESULT" \
+            "native-ui-evidence=$NATIVE_UI_RESULT" \
+            "load-smoke=$LOAD_SMOKE_RESULT" \
+            "mobile-android-kotlin=$ANDROID_RESULT" \
+            "security-audit=$SECURITY_RESULT"
+          for result in \
+            "$CHECK_RESULT" \
+            "$I18N_RESULT" \
+            "$DEPLOY_CHECK_RESULT" \
+            "$WEB_RESULT" \
+            "$MOBILE_PWA_RESULT" \
+            "$NATIVE_UI_RESULT" \
+            "$LOAD_SMOKE_RESULT" \
+            "$ANDROID_RESULT" \
+            "$SECURITY_RESULT"
+          do
+            if [[ "$result" != "success" ]]; then
+              echo "::error::Merge gate blocked: required verification result was $result."
+              exit 1
+            fi
+          done
+          echo "Merge gate passed: all required verification jobs succeeded."
