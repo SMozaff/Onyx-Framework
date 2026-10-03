@@ -2,7 +2,7 @@
 name = "desktop-shell"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 
 [lib]
 name = "desktop_shell_lib"
