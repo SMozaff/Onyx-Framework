@@ -2,7 +2,7 @@
 name = "mobile-android-jni"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 
 [lib]
 name = "mobile_android_jni"
