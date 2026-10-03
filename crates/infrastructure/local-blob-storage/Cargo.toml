@@ -2,7 +2,7 @@
 name = "local-blob-storage"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 
 [dependencies]
 query-application.workspace = true
