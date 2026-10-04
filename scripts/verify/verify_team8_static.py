@@ -299,10 +299,29 @@ for token in ["vus: 100", "duration: '60s'", "p(95)<500"]:
 release_workflow = text(".github/workflows/release.yml")
 release_script = text("scripts/release.sh")
 release = release_workflow + release_script
-for token in ["cosign", "gpg", "spdx-json@2.3", "actions/attest@v4"]:
+for token in ["cosign", "gpg", "spdx-json@2.3"]:
     check(token.lower() in release.lower(), f"release security control missing: {token}")
-check(re.search(r"sigstore/cosign-installer@[0-9a-f]{40}\\s+#\\s*v4(?:\\.[0-9]+)?", release_workflow) is not None, "current Cosign installer major not used or action is not immutably pinned")
-check(re.search(r"crazy-max/ghaction-import-gpg@[0-9a-f]{40}\\s+#\\s*v7", release_workflow) is not None, "current GPG action major not used or action is not immutably pinned")
+check(
+    re.search(
+        r"sigstore/cosign-installer@[0-9a-f]{40}\s+#\s*v4(?:\.[0-9]+)?",
+        release_workflow,
+    ) is not None,
+    "current Cosign installer major not used or action is not immutably pinned",
+)
+check(
+    re.search(
+        r"crazy-max/ghaction-import-gpg@[0-9a-f]{40}\s+#\s*v7",
+        release_workflow,
+    ) is not None,
+    "current GPG action major not used or action is not immutably pinned",
+)
+check(
+    re.search(
+        r"actions/attest@[0-9a-f]{40}\s+#\s*v4",
+        release_workflow,
+    ) is not None,
+    "current attestation action is not immutably pinned",
+)
 check('"${IMAGE}@${DIGEST}"' in release_workflow,
       "container signature is not bound to immutable digest")
 check("subject-digest: ${{ steps.build.outputs.digest }}" in release_workflow,
