@@ -85,8 +85,7 @@ jobs:
             echo "::error::pull_request_target is prohibited by the repository supply-chain policy"
             exit 1
           fi
-      - name: Verify dependency control-plane artifacts
-        run: | actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify dependency control-plane artifacts
         run: |
           test -f docs/DEPENDENCY_POLICY.md
