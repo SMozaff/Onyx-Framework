@@ -25,15 +25,15 @@ jobs:
   i18n:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: Verify canonical i18n resources
         run: node scripts/sync-i18n.mjs --check
       - name: Verify Phase 3 localization baseline
         run: node scripts/verify/i18n-ci.mjs --report=artifacts/i18n-report.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: release-i18n-report-${{ github.sha }}
@@ -58,10 +58,10 @@ jobs:
           - {os: windows-2022, target: x86_64-pc-windows-msvc}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - name: Verify locked dependency graph
         run: cargo metadata --locked
       - run: cargo build --locked --release --target ${{ matrix.target }} -p api-server -p worker -p migration-tool -p sync-agent
@@ -82,14 +82,14 @@ jobs:
       # meant to redistribute as a release asset.
       - name: Import GPG signing key
         if: github.event_name == 'push'
-        uses: crazy-max/ghaction-import-gpg@v7
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
       - name: GPG-sign binary package
         if: github.event_name == 'push'
         shell: bash
         run: gpg --batch --yes --armor --detach-sign "onyx-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: binaries-${{ matrix.target }}
           path: |
@@ -116,12 +116,12 @@ jobs:
           - {os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis"}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: {node-version: "22", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
       # Tauri v2 on Linux links against WebKitGTK; matches ci.yml's own
       # `check` job install list exactly, since that job proved this is
       # the working set on a bare ubuntu-24.04 runner image.
@@ -138,7 +138,7 @@ jobs:
         run: npm ci
       - name: Import Apple signing certificate
         if: matrix.os == 'macos-14'
-        uses: apple-actions/import-codesign-certs@v3
+        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d # v3
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -196,7 +196,7 @@ jobs:
         # `target/${{ matrix.target }}/release/...` from the repo root.
         # The "Locate bundle output" step below relies on that same
         # workspace-root path.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # `${{ secrets.X }}` evaluates to an empty string, not unset,
@@ -244,7 +244,7 @@ jobs:
       # Same manual-run signing exemption as release-binaries above.
       - name: Import GPG signing key
         if: github.event_name == 'push'
-        uses: crazy-max/ghaction-import-gpg@v7
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
       - name: GPG-sign desktop bundles
@@ -256,7 +256,7 @@ jobs:
           for f in *; do
             gpg --batch --yes --armor --detach-sign "$f"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-${{ matrix.target }}
           path: artifacts/*
@@ -277,12 +277,12 @@ jobs:
           - {os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis"}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/admin-shell/ui/package-lock.json}
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: {node-version: "22", cache: "npm", cache-dependency-path: crates/bins/admin-shell/ui/package-lock.json}
       # Tauri v2 on Linux links against WebKitGTK. This mirrors ci.yml and
       # release-desktop exactly instead of re-deriving a second dependency set.
       - name: Install admin-shell native dependencies (Tauri/GTK)
@@ -301,7 +301,7 @@ jobs:
       # successful production code-signing for either app.
       - name: Import Apple signing certificate
         if: matrix.os == 'macos-14'
-        uses: apple-actions/import-codesign-certs@v3
+        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d # v3
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -328,7 +328,7 @@ jobs:
         # Omitting tagName/releaseName/releaseId makes tauri-action build only.
         # `publish` below remains the one release-assembly owner. Cargo output
         # is at workspace-root target/, not inside crates/bins/admin-shell.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # `${{ secrets.X }}` evaluates to an empty string, not unset,
@@ -373,7 +373,7 @@ jobs:
       # Same manual-run signing exemption as the other two jobs above.
       - name: Import GPG signing key
         if: github.event_name == 'push'
-        uses: crazy-max/ghaction-import-gpg@v7
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
       - name: GPG-sign Admin desktop bundles
@@ -385,7 +385,7 @@ jobs:
           for f in *; do
             gpg --batch --yes --armor --detach-sign "$f"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: admin-desktop-${{ matrix.target }}
           path: artifacts/*
@@ -401,17 +401,17 @@ jobs:
     strategy:
       matrix: {service: [api-server, worker, sync-agent, migration-tool]}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Build and push immutable image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/docker/${{ matrix.service }}.Dockerfile
@@ -420,7 +420,7 @@ jobs:
           provenance: true
           sbom: true
       - name: Attest image provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -440,13 +440,13 @@ jobs:
           "${{ steps.syft.outputs.cmd }}" "$IMAGE" -o "spdx-json@2.3=onyx-${{ matrix.service }}.spdx.json"
           test "$(jq -r .spdxVersion onyx-${{ matrix.service }}.spdx.json)" = "SPDX-2.3"
       - name: Attest image SBOM
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/onyx-${{ matrix.service }}
           subject-digest: ${{ steps.build.outputs.digest }}
           sbom-path: onyx-${{ matrix.service }}.spdx.json
           push-to-registry: true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sbom-${{ matrix.service }}
           path: onyx-${{ matrix.service }}.spdx.json
@@ -461,12 +461,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [release-binaries, release-desktop, release-admin-desktop, release-images]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: {path: release-assets, merge-multiple: true}
-      - uses: actions/attest@v4
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with: {subject-path: "release-assets/**"}
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           files: release-assets/**
