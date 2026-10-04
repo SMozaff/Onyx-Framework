@@ -81,7 +81,7 @@ jobs:
             printf '%s\n' "::error::GitHub Actions must use immutable 40-hex commit-SHA references:" "${violations[@]}"
             exit 1
           fi
-          forbidden_event='pull_'"request_target:"\n          if rg -n "^\\s*${forbidden_event}" .github/workflows; then
+          if rg -n '^\\s*pull_' .github/workflows | rg 'request_target:'; then
             echo "::error::pull_request_target is prohibited by the repository supply-chain policy"
             exit 1
           fi
