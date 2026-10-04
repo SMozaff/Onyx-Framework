@@ -45,7 +45,7 @@ The repository security workflow identifies each frontend surface independently,
 Dependabot is the baseline automated update mechanism. Major updates require the full relevant CI surface. Security updates may be expedited, but still require reproducible CI validation.
 
 ## GitHub Actions
-Third-party actions are dependencies and must be tracked. Security-sensitive actions should move toward immutable commit-SHA pinning where operationally practical. Workflows use least privilege and must not execute untrusted PR code in privileged pull_request_target contexts with secrets.
+Third-party actions are dependencies and must be tracked. All GitHub Actions references in repository workflows are immutable commit-SHA pins, with the release tag retained as a comment for auditability. Dependabot tracks the github-actions ecosystem and proposes SHA/tag refreshes; every refresh must pass the complete relevant CI/security surface. Workflows use least privilege and must not execute untrusted PR code in privileged pull_request_target contexts with secrets.
 
 ## Containers and deployment tooling
 Container base images, Helm dependencies, Terraform providers, and deployment actions are dependency surfaces. Scheduled scanning should cover container/base-image vulnerabilities, Rust and Node advisories, Actions versions, and deployment/toolchain versions.
@@ -54,7 +54,7 @@ Container base images, Helm dependencies, Terraform providers, and deployment ac
 Every exception records the affected component/version, advisory or CVE, remediation constraint, compensating control, owner, tracking issue, and expiry date. Expired exceptions fail security review.
 
 ## Review cadence
-Dependency posture is reviewed for every release candidate and by the automated security workflow on every push/PR plus a scheduled weekly run.
+Dependency posture is reviewed for every release candidate and by the automated security workflow on every push/PR plus a scheduled weekly run. Frontend build/release workflows use the repository-wide Node 22 baseline; legacy Node 20 references are prohibited.
 
 ## Container scanning and SBOM control
 
