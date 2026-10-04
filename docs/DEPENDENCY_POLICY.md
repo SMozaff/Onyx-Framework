@@ -22,7 +22,24 @@ ONYX treats dependency security as a lifecycle control, not a one-time upgrade e
 
 ## Frontend / Node
 Frontend surfaces may intentionally use different React/Vite/TypeScript/Vitest generations, but version diversity must not become unmanaged drift.
-Every frontend surface must commit package-lock.json, use Node 22 in CI unless explicitly excepted, use npm ci, run npm audit at the high/critical threshold, validate its normal build/test/lint surface, document intentional major-version deviations, and participate in automated dependency updates.
+
+### Repository baseline
+- Node: 22.x LTS. CI must use Node 22 for every frontend surface.
+- npm: 10.x. CI verifies the npm major before installing dependencies.
+- Install: npm ci only in reproducible CI/dependency-audit jobs.
+- Lockfiles: every frontend commits package-lock.json; lockfile drift must fail npm ci.
+- Security: npm audit --omit=dev --audit-level=high is the enforced production-dependency gate.
+- Updates: Dependabot proposes weekly npm updates for every frontend surface; major updates require the full relevant CI surface.
+- Exceptions: any deviation from the Node/npm baseline or supported toolchain requires a recorded owner, rationale, affected surface/version, compensating validation, and expiry.
+
+### Current intentional toolchain deviations
+The fleet is not forcibly synchronized. The following major-version differences are intentional and are tracked here so they remain auditable:
+- web-ui: React 18, Vite 5, TypeScript 5, Vitest 1, Playwright 1.x. This is the legacy web surface and is upgraded independently from the native shells.
+- mobile-pwa: React 18, Vite 7, TypeScript 5, Vitest 4, Playwright 1.x. It shares the web platform model but has a newer build/test stack.
+- desktop-shell/ui: React 19, Vite 8, TypeScript 6, oxlint 1.x; Tauri 2.x. This is the native Staff UI and deliberately follows the current Tauri toolchain.
+- admin-shell/ui: React 19, Vite 8, TypeScript 6, oxlint 1.x; Tauri 2.x. This is the native Admin UI and follows the same native-shell baseline as desktop-shell/ui.
+
+The repository security workflow identifies each frontend surface independently, runs the same Node/npm baseline check and high-severity audit, and the CI workflow runs the complete build/test/lint surface appropriate to that frontend.
 
 ## Dependency updates
 Dependabot is the baseline automated update mechanism. Major updates require the full relevant CI surface. Security updates may be expedited, but still require reproducible CI validation.
