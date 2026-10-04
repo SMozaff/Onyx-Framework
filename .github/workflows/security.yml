@@ -65,7 +65,28 @@ jobs:
   dependency-manifest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Enforce immutable GitHub Action references
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflows=(.github/workflows/*.yml .github/workflows/*.yaml)
+          violations=()
+          while IFS= read -r line; do
+            ref="$(printf '%s' "$line" | sed -E 's/.*@([^[:space:]]+).*/\1/' | sed 's/#.*//')"
+            if [[ ! "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              violations+=("$line")
+            fi
+          done < <(rg -n '^\s*-\s*uses:' "${workflows[@]}")
+          if ((${#violations[@]})); then
+            printf '%s\n' "::error::GitHub Actions must use immutable 40-hex commit-SHA references:" "${violations[@]}"
+            exit 1
+          fi
+          if rg -n '^\s*pull_request_target:' .github/workflows; then
+            echo "::error::pull_request_target is prohibited by the repository supply-chain policy"
+            exit 1
+          fi
+      - name: Verify dependency control-plane artifacts
+        run: | actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify dependency control-plane artifacts
         run: |
           test -f docs/DEPENDENCY_POLICY.md
