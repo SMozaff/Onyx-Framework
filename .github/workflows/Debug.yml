@@ -21,11 +21,11 @@ jobs:
   backend:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           toolchain: "1.97.1"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - name: Verify locked dependency graph
         run: cargo metadata --locked
       # SQLX_OFFLINE builds against the committed .sqlx/ query cache —
@@ -41,7 +41,7 @@ jobs:
           mkdir -p artifacts
           cp target/debug/api-server.exe artifacts/
           cp start-backend.ps1 artifacts/ || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: onyx-backend-windows-debug
           path: artifacts/*
@@ -50,13 +50,13 @@ jobs:
   desktop-shell:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           toolchain: "1.97.1"
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: {node-version: "22", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
       - name: Verify locked dependency graph
         run: cargo metadata --locked
       - name: Install frontend dependencies
@@ -68,7 +68,7 @@ jobs:
         # this is an internal debug build, not a release.
         # tauriScript matches release.yml's confirmed-working fix for
         # tauri-action's npx resolution problem on Windows.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -92,7 +92,7 @@ jobs:
             exit 1
           fi
           printf 'Collected %s Staff desktop bundle(s)\n' "${#bundles[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: onyx-desktop-shell-windows-debug
           path: artifacts/*
@@ -101,20 +101,20 @@ jobs:
   admin-shell:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           toolchain: "1.97.1"
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with: {node-version: "20", cache: "npm", cache-dependency-path: crates/bins/admin-shell/ui/package-lock.json}
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: {node-version: "22", cache: "npm", cache-dependency-path: crates/bins/admin-shell/ui/package-lock.json}
       - name: Verify locked dependency graph
         run: cargo metadata --locked
       - name: Install frontend dependencies
         working-directory: crates/bins/admin-shell/ui
         run: npm ci
       - name: Build Admin desktop app (debug, unsigned)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -138,7 +138,7 @@ jobs:
             exit 1
           fi
           printf 'Collected %s Admin desktop bundle(s)\n' "${#bundles[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: onyx-admin-shell-windows-debug
           path: artifacts/*
