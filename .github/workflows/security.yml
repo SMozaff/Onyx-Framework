@@ -51,6 +51,13 @@ jobs:
           cache: npm
           cache-dependency-path: ${{ matrix.path }}/package-lock.json
       - run: test -f package-lock.json
+      - name: Verify Node/npm platform baseline
+        run: |
+          set -euo pipefail
+          node_major="$(node -p 'process.versions.node.split(".")[0]')"
+          npm_major="$(npm --version | cut -d. -f1)"
+          test "$node_major" = "22" || { echo "::error::Frontend CI requires Node 22; found $(node --version)"; exit 1; }
+          test "$npm_major" = "10" || { echo "::error::Frontend CI requires npm 10; found $(npm --version)"; exit 1; }
       - run: npm ci
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
