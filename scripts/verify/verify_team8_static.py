@@ -301,8 +301,8 @@ release_script = text("scripts/release.sh")
 release = release_workflow + release_script
 for token in ["cosign", "gpg", "spdx-json@2.3", "actions/attest@v4"]:
     check(token.lower() in release.lower(), f"release security control missing: {token}")
-check("sigstore/cosign-installer@v4" in release_workflow, "current Cosign installer major not used")
-check("crazy-max/ghaction-import-gpg@v7" in release_workflow, "current GPG action major not used")
+check(re.search(r"sigstore/cosign-installer@[0-9a-f]{40}\\s+#\\s*v4(?:\\.[0-9]+)?", release_workflow) is not None, "current Cosign installer major not used or action is not immutably pinned")
+check(re.search(r"crazy-max/ghaction-import-gpg@[0-9a-f]{40}\\s+#\\s*v7", release_workflow) is not None, "current GPG action major not used or action is not immutably pinned")
 check('"${IMAGE}@${DIGEST}"' in release_workflow,
       "container signature is not bound to immutable digest")
 check("subject-digest: ${{ steps.build.outputs.digest }}" in release_workflow,
