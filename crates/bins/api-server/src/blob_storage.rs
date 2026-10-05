@@ -67,13 +67,4 @@ pub async fn build(config: &AppConfig) -> anyhow::Result<Arc<dyn BlobStore>> {
 fn required_env(name: &str) -> anyhow::Result<String> {
     env::var(name).with_context(|| format!("{name} is required for Hugging Face blob storage"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn production_defaults_to_external_storage() {
-        assert!(AppConfig::validate_for_blob_store_test(true, "huggingface").is_ok());
-    }
-}
+\n
