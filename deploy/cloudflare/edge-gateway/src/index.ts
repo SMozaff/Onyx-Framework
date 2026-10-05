@@ -37,6 +37,14 @@ export default {
     origin.search = incoming.search;
 
     const upstream = await fetch(originRequest(request, origin));
+
+    // A 101 response carries the upstream WebSocket endpoint in the Response
+    // object. Return it directly rather than reconstructing the response,
+    // otherwise the WebSocket handoff is lost.
+    if (upstream.status === 101) {
+      return upstream;
+    }
+
     const headers = new Headers(upstream.headers);
 
     for (const header of HOP_BY_HOP_HEADERS) {
