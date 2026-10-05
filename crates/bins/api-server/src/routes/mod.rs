@@ -31,7 +31,6 @@ use axum::{
     routing::{delete, get, post, put},
     Json, Router,
 };
-use local_blob_storage::LocalBlobStore;
 use observability_adapter::{HashChainAuditWriter, Metrics};
 use persistence_postgres::{PostgresRepository, PostgresUnitOfWorkFactory};
 use persistence_sqlite::{SqliteRepository, SqliteUnitOfWorkFactory};
@@ -425,19 +424,7 @@ impl ApiState {
             );
         }
 
-        let blob_store_root = std::env::var("ONYX_BLOB_STORE_ROOT").unwrap_or_else(|_| {
-            std::env::temp_dir()
-                .join("onyx-api-server-blobs")
-                .to_string_lossy()
-                .into_owned()
-        });
-        let blob_store: Arc<dyn BlobStore> = Arc::new(
-            LocalBlobStore::open(&blob_store_root)
-                .await
-                .map_err(|error| {
-                    anyhow::anyhow!("opening blob store at {blob_store_root}: {error}")
-                })?,
-        );
+        let blob_store = crate::blob_storage::build(&config).await?;
 
         Ok(Self {
             projection_pool,
