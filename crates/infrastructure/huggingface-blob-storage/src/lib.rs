@@ -56,12 +56,15 @@ impl HuggingFaceBlobStore {
         }
 
         let bucket = bucket.into();
+        let access_key_id: Arc<str> = access_key_id.into();
+        let secret_access_key: Arc<str> = secret_access_key.into();
+
         if bucket.is_empty() || bucket.contains('/') {
             return Err(BlobStoreError::Io(
                 "HF S3 bucket must be a non-empty bare bucket name".to_string(),
             ));
         }
-        if access_key_id.as_ref().is_empty() || secret_access_key.as_ref().is_empty() {
+        if access_key_id.is_empty() || secret_access_key.is_empty() {
             return Err(BlobStoreError::Io(
                 "HF S3 credentials must not be empty".to_string(),
             ));
@@ -71,8 +74,8 @@ impl HuggingFaceBlobStore {
             client: Client::new(),
             endpoint,
             bucket,
-            access_key_id: access_key_id.into(),
-            secret_access_key: secret_access_key.into(),
+            access_key_id,
+            secret_access_key,
         })
     }
 
