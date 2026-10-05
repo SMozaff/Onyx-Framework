@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "onyx-edge-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-05",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "api.example.com/*",
+      "zone_name": "example.com"
+    }
+  ],
+  "vars": {
+    "ONYX_ORIGIN_URL": "https://origin.example.com"
+  }
+}
