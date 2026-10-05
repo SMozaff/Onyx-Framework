@@ -27,6 +27,7 @@
 //! If `ApiError` later gains large fields *and* becomes hot-path (e.g. bulk validation returning one per item in a loop), revisit this allow instead of assuming it still holds.
 #![allow(clippy::result_large_err)]
 
+pub mod blob_storage;
 pub mod command_handler;
 pub mod config;
 pub mod escalation_resolution;
