@@ -34,7 +34,7 @@ env:
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-collector.observability.svc:4317
   ONYX_BLOB_STORE_BACKEND: huggingface
   ONYX_BLOB_STORE_S3_ENDPOINT: https://s3.hf.co/Arronthemalkavian
-  ONYX_BLOB_STORE_S3_BUCKET: onyx-production
+  ONYX_BLOB_STORE_S3_BUCKET: onyx
 # Reuses onyx-api's own Secret -- this is the same application connecting
 # to the same database, not a separate credential surface.
 secretRef: onyx-api-secrets
