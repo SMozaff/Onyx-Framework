@@ -1,0 +1,18 @@
+name: Temporary HF object-store verification
+on:
+  push:
+    branches:
+      - feat/backend-three-tier-cloudflare-hf-storage
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute production BlobStore PUT GET DELETE cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS -X POST \
+            -H 'x-onyx-blob-verify-token: VERIFY_ONYX_HF_20261006' \
+            'https://onyx-framework.soheil-mozaffari.workers.dev/api/internal/blob-store-verify'
