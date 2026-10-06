@@ -23,7 +23,10 @@ async fn production_env_never_seeds_the_known_admin_account() -> anyhow::Result<
     // ONYX_AUTHORITY_SIGNING_KEY, and a real ONYX_GOVERNANCE_DATABASE_URL
     // -- exercising the same top-of-function gates ApiState::new enforces
     // for any real production deployment, not a shortcut around them.
-    std::env::set_var("ONYX_ENV", "production");
+    std::env::set_var(
+        "ONYX_ENV",
+        "production",
+    );
     std::env::set_var(
         "ONYX_AUTHORITY_SIGNING_KEY",
         "hex:4242424242424242424242424242424242424242424242424242424242424242",
@@ -81,7 +84,7 @@ async fn production_env_never_seeds_the_known_admin_account() -> anyhow::Result<
                 .uri("/api/auth/login")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"username": TEST_ADMIN_USERNAME, "password": TEST_ADMIN_PASSWORD})
+                    json!({ "username": TEST_ADMIN_USERNAME, "password": TEST_ADMIN_PASSWORD })
                         .to_string(),
                 ))?,
         )
