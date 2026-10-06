@@ -563,6 +563,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/relay-ticket", post(relay::issue_ticket))
         // File and Web Push APIs.
         .route("/api/files/:content_hash", get(files::download_file))
+        .route("/api/internal/blob-store-verify", post(blob_verify::verify))
         .route("/api/push/subscriptions", post(push::register_subscription))
         .route(
             "/api/push/subscriptions/:subscription_id",
