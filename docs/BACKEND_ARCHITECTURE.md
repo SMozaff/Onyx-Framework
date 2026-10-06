@@ -80,7 +80,7 @@ ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY=<secret>
 
 The access key and secret are Kubernetes Secret values and are never committed to Git.
 Hugging Face documents the namespace-scoped endpoint, `us-east-1` region, and path-style
-addressing as the required S3 client configuration. citeturn0search0turn0search1
+addressing as the required S3 client configuration.
 
 The adapter does not expose S3/Hugging Face types to application or domain crates.
 
