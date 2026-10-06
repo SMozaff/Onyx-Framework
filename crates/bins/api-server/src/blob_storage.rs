@@ -48,13 +48,10 @@ pub async fn build(config: &AppConfig) -> anyhow::Result<Arc<dyn BlobStore>> {
             let access_key = required_env("ONYX_BLOB_STORE_S3_ACCESS_KEY_ID")?;
             let secret_key = required_env("ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY")?;
 
-            let store = HuggingFaceBlobStore::new(
-                &endpoint,
-                bucket,
-                access_key,
-                secret_key,
-            )
-            .map_err(|error| anyhow::anyhow!("invalid Hugging Face blob-store configuration: {error}"))?;
+            let store =
+                HuggingFaceBlobStore::new(&endpoint, bucket, access_key, secret_key).map_err(
+                    |error| anyhow::anyhow!("invalid Hugging Face blob-store configuration: {error}"),
+                )?;
 
             Ok(Arc::new(store))
         }
