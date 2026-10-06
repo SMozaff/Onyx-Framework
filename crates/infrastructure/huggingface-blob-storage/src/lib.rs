@@ -244,13 +244,9 @@ mod tests {
 
     #[test]
     fn rejects_non_https_or_invalid_bucket() {
-        assert!(HuggingFaceBlobStore::new(
-            "http://s3.hf.co/ns",
-            "bucket",
-            "HFAK",
-            "secret"
-        )
-        .is_err());
+        assert!(
+            HuggingFaceBlobStore::new("http://s3.hf.co/ns", "bucket", "HFAK", "secret").is_err()
+        );
         assert!(HuggingFaceBlobStore::new(
             "https://s3.hf.co/ns",
             "namespace/bucket",
@@ -264,7 +260,7 @@ mod tests {
     fn object_paths_are_namespace_scoped_and_path_style() {
         let store =
             HuggingFaceBlobStore::new("https://s3.hf.co/onyx", "production", "HFAK", "secret")
-        .unwrap();
+                .unwrap();
         let url = store.object_url(&BlobKey::new("aa/bb")).unwrap();
         assert_eq!(url.as_str(), "https://s3.hf.co/onyx/production/aa/bb");
     }
