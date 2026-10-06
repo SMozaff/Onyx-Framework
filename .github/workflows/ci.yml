@@ -68,6 +68,20 @@ jobs:
           shared-key: "release-build"
       - name: Format
         run: cargo fmt --check
+      - name: Capture rustfmt diff on failure
+        if: failure()
+        run: |
+          mkdir -p artifacts/fmt
+          cargo fmt
+          git diff -- tests/end-to-end/production_bootstrap.rs > artifacts/fmt/production_bootstrap.patch
+      - name: Upload rustfmt diff
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: onyx-rustfmt-diff-\${{ github.sha }}
+          path: artifacts/fmt/production_bootstrap.patch
+          if-no-files-found: error
+          retention-days: 1
       # H5: read-only -- fails if Cargo.lock doesn't match Cargo.toml,
       # without writing anything. Every release.yml build job already has
       # this ahead of its own --locked build; ci.yml itself had no
