@@ -7,8 +7,8 @@ domain execution, authorization, PostgreSQL transactions, audit/security policy,
 processing semantics that are not moved into Cloudflare Workers.
 
 Cloudflare is the preferred Tier 1 edge boundary. The repository therefore provides a small
-Cloudflare Worker under `deploy/cloudflare/edge-gateway` that proxies the public API route to
-the native ONYX origin.
+Cloudflare Worker under `deploy/cloudflare/edge-gateway` that proxies the public API route to the
+native ONYX origin.
 
 ## Trust boundaries
 
@@ -58,18 +58,29 @@ The Hugging Face adapter is isolated in
 `crates/infrastructure/huggingface-blob-storage`. It implements the existing
 `BlobStore` contract using AWS Signature Version 4 against the Hugging Face S3 gateway.
 
+The configured ONYX production bucket is:
+
+```text
+namespace: Arronthemalkavian
+bucket: onyx-production
+endpoint: https://s3.hf.co/Arronthemalkavian
+region: us-east-1
+addressing: path
+```
+
 Production configuration:
 
 ```text
 ONYX_BLOB_STORE_BACKEND=huggingface
-ONYX_BLOB_STORE_S3_ENDPOINT=https://s3.hf.co/<namespace>
-ONYX_BLOB_STORE_S3_BUCKET=<bucket>
+ONYX_BLOB_STORE_S3_ENDPOINT=https://s3.hf.co/Arronthemalkavian
+ONYX_BLOB_STORE_S3_BUCKET=onyx-production
 ONYX_BLOB_STORE_S3_ACCESS_KEY_ID=HFAK...
 ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY=<secret>
 ```
 
-The endpoint must be HTTPS. The Hugging Face gateway currently requires the `us-east-1`
-signing region and path-style bucket addressing.
+The access key and secret are Kubernetes Secret values and are never committed to Git.
+Hugging Face documents the namespace-scoped endpoint, `us-east-1` region, and path-style
+addressing as the required S3 client configuration. citeturn0search0turn0search1
 
 The adapter does not expose S3/Hugging Face types to application or domain crates.
 
