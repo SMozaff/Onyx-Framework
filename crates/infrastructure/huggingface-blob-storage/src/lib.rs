@@ -246,15 +246,13 @@ mod tests {
         assert!(
             HuggingFaceBlobStore::new("http://s3.hf.co/ns", "bucket", "HFAK", "secret").is_err()
         );
-        assert!(
-            HuggingFaceBlobStore::new(
-                "https://s3.hf.co/ns",
-                "namespace/bucket",
-                "HFAK",
-                "secret"
-            )
-            .is_err()
-        );
+        assert!(HuggingFaceBlobStore::new(
+            "https://s3.hf.co/ns",
+            "namespace/bucket",
+            "HFAK",
+            "secret"
+        )
+        .is_err());
     }
 
     #[test]
@@ -263,9 +261,6 @@ mod tests {
             HuggingFaceBlobStore::new("https://s3.hf.co/onyx", "production", "HFAK", "secret")
                 .unwrap();
         let url = store.object_url(&BlobKey::new("aa/bb")).unwrap();
-        assert_eq!(
-            url.as_str(),
-            "https://s3.hf.co/onyx/production/aa/bb"
-        );
+        assert_eq!(url.as_str(), "https://s3.hf.co/onyx/production/aa/bb");
     }
 }
