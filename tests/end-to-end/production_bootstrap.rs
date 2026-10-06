@@ -44,10 +44,7 @@ async fn production_env_never_seeds_the_known_admin_account() -> anyhow::Result<
     );
     std::env::set_var("ONYX_BLOB_STORE_S3_BUCKET", "test-bucket");
     std::env::set_var("ONYX_BLOB_STORE_S3_ACCESS_KEY_ID", "test-access-key");
-    std::env::set_var(
-        "ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY",
-        "test-secret-key",
-    );
+    std::env::set_var("ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY", "test-secret-key");
 
     let state_result = ApiState::new(&postgres.database_url).await;
 
