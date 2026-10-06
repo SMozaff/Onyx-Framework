@@ -1721,7 +1721,7 @@ The following rulings implement Team 7 R1–R10 and resolve concrete integration
 
 | ID | Implementation |
 |---|---|
-| **R1** | OTLP/gRPC tracing defaults to `http://jaeger-collector:4317` and reads `OTEL_EXPORTER_OTLP_ENDPOINT`. |
+| **R1** | OTLP/gRPC tracing is opt-in via `OTEL_EXPORTER_OTLP_ENDPOINT`; without a configured collector, structured logging remains active without attempting an unavailable endpoint. |
 | **R2** | Each service exposes Prometheus at `ONYX_METRICS_BIND` (default `0.0.0.0:9090`). Required families: `requests_total`, `request_duration_seconds`, `outbox_pending`, `job_queue_depth`, `sync_conflicts_open`, `audit_entries_total`; self-observability families are also emitted. |
 | **R3** | `StructuredLogEvent` fixes the required JSON fields and security/HTTP boundaries emit through it. Recursive secret-field redaction covers password, token, secret, signature, authorization and private-key keys. |
 | **R4** | PostgreSQL `jobs` table stores status, claimant, lease, attempts, maximum retries, next attempt and deduplication key. Base retry delay doubles from one second and is capped at 300 seconds after ±20% jitter. Maximum retries default to 10. SQLite implements the same contract for local/native tests. |
