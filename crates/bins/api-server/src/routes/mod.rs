@@ -7,7 +7,6 @@ pub mod client_type;
 pub mod command;
 pub mod events;
 pub mod files;
-pub mod blob_verify;
 pub mod policy_admin;
 pub mod profiles;
 pub mod push;
@@ -563,7 +562,6 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/relay-ticket", post(relay::issue_ticket))
         // File and Web Push APIs.
         .route("/api/files/:content_hash", get(files::download_file))
-        .route("/api/internal/blob-store-verify", post(blob_verify::verify))
         .route("/api/push/subscriptions", post(push::register_subscription))
         .route(
             "/api/push/subscriptions/:subscription_id",
