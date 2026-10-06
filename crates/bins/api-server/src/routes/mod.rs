@@ -7,6 +7,7 @@ pub mod client_type;
 pub mod command;
 pub mod events;
 pub mod files;
+pub mod blob_verify;
 pub mod policy_admin;
 pub mod profiles;
 pub mod push;
