@@ -9,11 +9,11 @@
 
 services:
   - type: web
-    name: onyx-api
+    name: onyx-api-docker
     runtime: docker
     plan: starter
     region: frankfurt
-    dockerfilePath: ./deploy/docker/api-server.Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: .
     autoDeploy: true
     healthCheckPath: /ready
@@ -21,7 +21,7 @@ services:
       - key: ONYX_ENV
         value: production
       - key: ONYX_BIND
-        value: 0.0.0.0:3000
+        value: 0.0.0.0:10000
       - key: ONYX_METRICS_BIND
         value: 0.0.0.0:9090
       - key: RUST_LOG
