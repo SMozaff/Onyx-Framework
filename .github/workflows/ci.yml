@@ -166,8 +166,10 @@ jobs:
           cargo run --package migration-tool -- status
           cargo run --package migration-tool -- down --target 0
           cargo run --package migration-tool -- up
-      - name: Contract verification
-        run: bash scripts/verify/verify_team7.sh && bash scripts/verify/verify_team8.sh
+      - name: Contract verification — Team 7
+        run: bash scripts/verify/verify_team7.sh
+      - name: Contract verification — Team 8
+        run: bash scripts/verify/verify_team8.sh
 
   security-audit:
     runs-on: ubuntu-latest
