@@ -62,7 +62,7 @@ The configured ONYX production bucket is:
 
 ```text
 namespace: Arronthemalkavian
-bucket: onyx-production
+bucket: onyx
 endpoint: https://s3.hf.co/Arronthemalkavian
 region: us-east-1
 addressing: path
@@ -73,7 +73,7 @@ Production configuration:
 ```text
 ONYX_BLOB_STORE_BACKEND=huggingface
 ONYX_BLOB_STORE_S3_ENDPOINT=https://s3.hf.co/Arronthemalkavian
-ONYX_BLOB_STORE_S3_BUCKET=onyx-production
+ONYX_BLOB_STORE_S3_BUCKET=onyx
 ONYX_BLOB_STORE_S3_ACCESS_KEY_ID=HFAK...
 ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY=<secret>
 ```
