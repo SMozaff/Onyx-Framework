@@ -12,7 +12,7 @@ permissions:
 jobs:
   live-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Wait for Render deployment and verify origin
         shell: bash
@@ -22,7 +22,7 @@ jobs:
           ORIGIN="https://onyx-api-docker.onrender.com"
           EDGE="https://onyx-framework.soheil-mozaffari.workers.dev"
 
-          for i in {1..60}; do
+          for i in {1..120}; do
             echo "Attempt $i/60"
 
             origin_health="$(curl -fsS --max-time 10 "$ORIGIN/health" || true)"
@@ -34,7 +34,7 @@ jobs:
             fi
 
             if [ "$i" -eq 60 ]; then
-              echo "::error::Render origin did not become healthy within 10 minutes."
+              echo "::error::Render origin did not become healthy within 20 minutes."
               exit 1
             fi
 
