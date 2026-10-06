@@ -119,9 +119,8 @@ impl HuggingFaceBlobStore {
         let date = timestamp.format("%Y%m%d").to_string();
         let host = host_header(&url)?;
 
-        let canonical_headers = format!(
-            "host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
-        );
+        let canonical_headers =
+            format!("host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n");
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
         let canonical_request = format!(
             "{}\n{}\n\n{}\n{}\n{}",
@@ -247,13 +246,15 @@ mod tests {
         assert!(
             HuggingFaceBlobStore::new("http://s3.hf.co/ns", "bucket", "HFAK", "secret").is_err()
         );
-        assert!(HuggingFaceBlobStore::new(
-            "https://s3.hf.co/ns",
-            "namespace/bucket",
-            "HFAK",
-            "secret"
-        )
-        .is_err());
+        assert!(
+            HuggingFaceBlobStore::new(
+                "https://s3.hf.co/ns",
+                "namespace/bucket",
+                "HFAK",
+                "secret"
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -262,6 +263,9 @@ mod tests {
             HuggingFaceBlobStore::new("https://s3.hf.co/onyx", "production", "HFAK", "secret")
                 .unwrap();
         let url = store.object_url(&BlobKey::new("aa/bb")).unwrap();
-        assert_eq!(url.as_str(), "https://s3.hf.co/onyx/production/aa/bb");
+        assert_eq!(
+            url.as_str(),
+            "https://s3.hf.co/onyx/production/aa/bb"
+        );
     }
 }
