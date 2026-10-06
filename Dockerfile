@@ -1,9 +1,12 @@
 # Render's Docker runtime expects the Dockerfile at the repository root.
 # Keep this production image aligned with deploy/docker/api-server.Dockerfile.
 # The application itself remains the existing Rust/Axum api-server binary.
+#
+# Build on Debian 12 as well as run on Debian 12 so the binary does not
+# require a newer glibc than the distroless runtime provides.
 
 # syntax=docker/dockerfile:1.7
-FROM rust:1.97-slim AS builder
+FROM rust:1.97-bookworm AS builder
 WORKDIR /workspace
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config ca-certificates \
