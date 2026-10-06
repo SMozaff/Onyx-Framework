@@ -1,0 +1,33 @@
+name: ONYX E2E Deployment Probe
+
+on:
+  push:
+    branches:
+      - feat/backend-three-tier-cloudflare-hf-storage
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe ONYX through Cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROBE_ID="onyx-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          URL="https://onyx-framework.soheil-mozaffari.workers.dev/ready?probe=${PROBE_ID}"
+
+          echo "Probe ID: ${PROBE_ID}"
+          echo "URL: ${URL}"
+
+          curl --fail-with-body             --silent             --show-error             --retry 3             --retry-delay 2             --connect-timeout 10             --max-time 30             -H "X-ONYX-E2E-Probe: ${PROBE_ID}"             -D /tmp/headers.txt             -o /tmp/body.txt             "${URL}"
+
+          echo "Response headers:"
+          cat /tmp/headers.txt
+
+          echo "Response body:"
+          cat /tmp/body.txt
+
+          STATUS="$(awk 'NR==1 {print $2}' /tmp/headers.txt)"
+          test "${STATUS}" = "200"
