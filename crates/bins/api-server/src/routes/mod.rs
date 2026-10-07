@@ -5,6 +5,7 @@ pub mod admin;
 pub mod auth;
 pub mod client_type;
 pub mod command;
+pub mod clerk;
 pub mod events;
 pub mod files;
 pub mod policy_admin;
@@ -87,6 +88,10 @@ pub struct ApiState {
     /// Identity store backing `/api/auth/login` (audit finding H-01).
     /// Replaces the former `DEFAULT_USERNAME`/`DEFAULT_PASSWORD` constants.
     pub user_store: Arc<dyn UserStore>,
+    /// Optional Clerk identity boundary. Clerk is never the ONYX authorization store;
+    /// this adapter only verifies the external identity and exchanges it for an
+    /// already-provisioned ONYX principal.
+    pub clerk_auth: Option<Arc<clerk::ClerkAuth>>,
     /// Repository for `profile_domain::StaffProfile`. Backs the staff
     /// profile view/edit routes and the batch import/export feature —
     /// see `routes::profiles`.
@@ -424,6 +429,8 @@ impl ApiState {
             );
         }
 
+        let clerk_auth = clerk::ClerkAuth::from_env()? .map(Arc::new);
+
         let blob_store = crate::blob_storage::build(&config).await?;
 
         Ok(Self {
@@ -445,6 +452,7 @@ impl ApiState {
             audit_writer,
             metrics: Metrics::new("onyx_api_server")?,
             user_store,
+            clerk_auth,
             password_hasher,
             relay_registry: relay::RelayRegistry::new(),
             blob_store,
@@ -525,6 +533,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/admin/users/:id/manager", post(admin::set_manager))
         .route("/api/admin/users/:id/class", post(admin::set_class))
         .route("/api/admin/users/:id/parent", post(admin::set_parent))
+        .route("/api/admin/clerk-users", post(clerk::provision))
         .route(
             "/api/admin/mobile-access",
             get(admin::get_mobile_access).put(admin::set_mobile_access),
@@ -580,13 +589,12 @@ pub fn router(state: ApiState) -> Router {
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/ready", get(readiness))
         .route("/api/auth/login", post(auth::login))
+        // Clerk is an external identity credential; the exchange itself is
+        // outside ONYX bearer middleware. It never provisions ordinary users.
+        .route("/api/auth/clerk", post(clerk::login))
         // Refresh consumes a refresh token rather than an access token, so it
         // intentionally remains outside the standard access-auth layer.
         .route("/api/auth/refresh", post(auth::refresh))
-        // Bootstrap self-closes after the first user and requires the
-        // explicit bootstrap token. It cannot be placed behind access auth
-        // because its purpose is to create the first authenticated user.
-        .route("/api/admin/bootstrap", post(admin::bootstrap))
         // /api/events performs its own authentication from the
         // WebSocket subprotocol header; it therefore must not be wrapped
         // by the standard Authorization-header middleware above.
