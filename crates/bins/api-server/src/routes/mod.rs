@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod auth;
+pub mod clerk;
 pub mod client_type;
 pub mod command;
 pub mod events;
@@ -88,6 +89,9 @@ pub struct ApiState {
     /// Identity store backing `/api/auth/login` (audit finding H-01).
     /// Replaces the former `DEFAULT_USERNAME`/`DEFAULT_PASSWORD` constants.
     pub user_store: Arc<dyn UserStore>,
+    /// Optional Clerk verifier and Allfather binding. When absent, the legacy
+    /// ONYX credential flow remains available unchanged.
+    pub clerk_auth: Option<Arc<clerk::ClerkAuth>>,
     /// Repository for `profile_domain::StaffProfile`. Backs the staff
     /// profile view/edit routes and the batch import/export feature —
     /// see `routes::profiles`.
@@ -331,6 +335,7 @@ impl ApiState {
         };
 
         let password_hasher = Arc::new(PasswordHasher::new());
+        let clerk_auth = clerk::ClerkAuth::from_env()?.map(Arc::new);
 
         // --- Fixed seeded admin account: development/test convenience ONLY ---
         //
@@ -458,6 +463,7 @@ impl ApiState {
             audit_writer,
             metrics: Metrics::new("onyx_api_server")?,
             user_store,
+            clerk_auth,
             password_hasher,
             relay_registry: relay::RelayRegistry::new(),
             blob_store,
@@ -596,6 +602,12 @@ pub fn router(state: ApiState) -> Router {
         // Refresh consumes a refresh token rather than an access token, so it
         // intentionally remains outside the standard access-auth layer.
         .route("/api/auth/refresh", post(auth::refresh))
+        // Clerk verifies the external identity before ONYX issues its own
+        // short-lived access/refresh tokens. These routes are intentionally
+        // outside the ONYX bearer middleware because the Clerk bearer is the
+        // credential being presented at this boundary.
+        .route("/api/auth/clerk", post(clerk::exchange))
+        .route("/api/admin/bootstrap-clerk", post(clerk::bootstrap))
         // Bootstrap self-closes after the first user and requires the
         // explicit bootstrap token. It cannot be placed behind access auth
         // because its purpose is to create the first authenticated user.
