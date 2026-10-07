@@ -57,6 +57,7 @@ policy-domain.workspace = true
 todo-domain.workspace = true
 notification-domain.workspace = true
 csv.workspace = true
+jsonwebtoken.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true
