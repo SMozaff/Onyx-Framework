@@ -30,6 +30,15 @@ services:
         sync: false
       - key: ONYX_AUTHORITY_SIGNING_KEY
         sync: false
+      # Clerk is the external identity provider. ONYX remains the account,
+      # role and authorization authority. Allfather is permanently bound to
+      # this Clerk user id; ordinary users must be provisioned by Allfather.
+      - key: CLERK_ISSUER
+        sync: false
+      - key: CLERK_ALLFATHER_USER_ID
+        sync: false
+      - key: CLERK_JWKS_URL
+        sync: false
       - key: ONYX_BLOB_STORE_BACKEND
         value: huggingface
       - key: ONYX_BLOB_STORE_S3_ENDPOINT
