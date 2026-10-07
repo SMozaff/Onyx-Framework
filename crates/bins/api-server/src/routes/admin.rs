@@ -9,11 +9,6 @@ use serde_json::json;
 
 use super::{authenticate_headers, ApiError, ApiState, AuthenticatedUser, ORGANIZATION_ID};
 
-/// Header carrying the one-time bootstrap token.
-pub const BOOTSTRAP_TOKEN_HEADER: &str = "x-onyx-bootstrap-token";
-/// Environment variable holding the expected bootstrap token.
-pub const BOOTSTRAP_TOKEN_ENV: &str = "ONYX_BOOTSTRAP_TOKEN";
-
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
     pub username: String,
