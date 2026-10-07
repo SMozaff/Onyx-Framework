@@ -1,32 +1,8 @@
-//! First-run bootstrap and admin-only user management.
-//!
-//! # Provenance
-//! Audit finding **H-01**. Owner decision: user management is exposed through
-//! admin-only API endpoints.
-//!
-//! # The bootstrap problem
-//! Admin-only endpoints cannot authenticate against an empty `users` table —
-//! there is no admin yet, so no one could ever create the first one. This
-//! module resolves that with a **one-time bootstrap token**:
-//!
-//! * `POST /api/admin/bootstrap` is the only unauthenticated write endpoint.
-//! * It is refused unless the store is **completely empty**. The moment the
-//!   first user exists it is permanently closed, so it cannot be used to add a
-//!   back-door admin to a live system.
-//! * It requires `ONYX_BOOTSTRAP_TOKEN`, compared in constant time. If that
-//!   variable is unset the endpoint is disabled outright rather than
-//!   defaulting to open — this fails **closed**, unlike the `ONYX_TEST_MODE`
-//!   pattern flagged as audit finding M-03.
-//!
-//! The result is that the token is useless the instant it is used once, and
-//! useless on any system that already has users.
-
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
-use security_adapter::constant_time_eq;
 use security_application::{NewUser, UserClass, UserRecord, UserStoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -374,65 +350,6 @@ async fn require_manager_or_admin(
         ));
     }
     Ok(user)
-}
-
-/// `POST /api/admin/bootstrap` — creates the first admin. See module docs.
-pub async fn bootstrap(
-    State(state): State<ApiState>,
-    headers: HeaderMap,
-    Json(payload): Json<CreateUserRequest>,
-) -> Result<(StatusCode, Json<UserDto>), ApiError> {
-    // 1. The endpoint is disabled unless a token is configured (fail closed).
-    let expected = std::env::var(BOOTSTRAP_TOKEN_ENV)
-        .ok()
-        .filter(|token| !token.is_empty());
-    let Some(expected) = expected else {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "BOOTSTRAP_DISABLED",
-            "AUTHORITY",
-            "NON_RETRYABLE",
-            correlation(),
-            json!({"message":"Bootstrap is not enabled"}),
-        ));
-    };
-
-    // 2. Constant-time token comparison.
-    let presented = headers
-        .get(BOOTSTRAP_TOKEN_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    if !constant_time_eq(presented, &expected) {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "BOOTSTRAP_TOKEN_INVALID",
-            "AUTHORITY",
-            "NON_RETRYABLE",
-            correlation(),
-            json!({}),
-        ));
-    }
-
-    // 3. Refuse once ANY user exists. This is what makes the token one-time:
-    //    a second call can never succeed, even with the correct token.
-    if state.user_store.count().await.map_err(store_error)? > 0 {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "BOOTSTRAP_ALREADY_COMPLETED",
-            "VALIDATION",
-            "NON_RETRYABLE",
-            correlation(),
-            json!({"message":"Bootstrap has already been completed"}),
-        ));
-    }
-
-    let created = create_user_record(&state, payload, true).await?;
-    tracing::warn!(
-        user_id = %created.id,
-        username = %created.username,
-        "bootstrap admin created; ONYX_BOOTSTRAP_TOKEN should now be removed from the environment"
-    );
-    Ok((StatusCode::CREATED, Json(created)))
 }
 
 /// `POST /api/admin/users` — admin-only user creation.
