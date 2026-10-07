@@ -63,6 +63,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "sqlite", "uuid", "chrono", "json", "migrate"] }
 chrono = { version = "0.4", features = ["serde"] }
+jsonwebtoken = "9.3"
 axum = { version = "0.7", features = ["ws", "multipart"] }
 base64 = "0.21"
 hmac = "0.12"
