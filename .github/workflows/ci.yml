@@ -445,6 +445,8 @@ jobs:
           ONYX_COMMAND_RATE_LIMIT: "1000000"
           ONYX_BIND: 127.0.0.1:3000
           DATABASE_URL: sqlite://load-test.db?mode=rwc
+          ONYX_TEST_USERNAME: ci-admin
+          ONYX_TEST_PASSWORD: ci-smoke-password-2026
         run: |
           ./target/release/api-server >api.log 2>&1 &
           echo $! > api.pid
