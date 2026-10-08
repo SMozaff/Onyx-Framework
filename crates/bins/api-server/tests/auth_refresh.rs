@@ -11,7 +11,10 @@ use std::net::SocketAddr;
 
 use api_server::routes::TokenClaims;
 use security_adapter::Ed25519JwtCodec;
-use security_application::SecretProvider;
+use security_application::{NewUser, SecretProvider, UserStore};
+
+const TEST_REFRESH_USERNAME: &str = "refresh-test-admin";
+const TEST_REFRESH_PASSWORD: &str = "refresh-test-password";
 
 async fn start_server(db_label: &str) -> (SocketAddr, reqwest::Client) {
     let db_path = std::env::temp_dir().join(format!("onyx-auth-refresh-test-{db_label}.db"));
@@ -21,6 +24,24 @@ async fn start_server(db_label: &str) -> (SocketAddr, reqwest::Client) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: TEST_REFRESH_USERNAME.to_string(),
+            organization_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            password_hash: state
+                .password_hasher
+                .hash(TEST_REFRESH_PASSWORD)
+                .expect("test refresh password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated refresh-test administrator");
+
     let app = api_server::routes::router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -37,15 +58,14 @@ async fn refresh_token_yields_a_working_new_access_token_and_rotates() {
     let (addr, http) = start_server("basic").await;
     let base = format!("http://{addr}");
 
-    // ApiState::new seeds a fixed admin account ("All-Father" /
-    // "passvord0000") on first startup against an empty store -- see
-    // routes/mod.rs's own doc comment; used here the same way
-    // mobile_access_gate.rs's tests already do, to avoid the
-    // token-gated /api/admin/bootstrap flow this seed leaves
-    // permanently closed.
+    // A dedicated test-drive administrator is created by start_server for this
+    // suite. The designated All-Father is passwordless and authenticates through
+    // Clerk, so password-based token-refresh coverage uses an ordinary ONYX
+    // administrator instead.
+
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .json(&serde_json::json!({"username": TEST_REFRESH_USERNAME, "password": TEST_REFRESH_PASSWORD}))
         .send()
         .await
         .unwrap()
