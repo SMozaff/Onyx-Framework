@@ -17,8 +17,8 @@ path = "src/main.rs"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.11", features = [] }
-tauri-plugin-dialog = "2"
+tauri = { version = "=2.12.1", features = [] }
+tauri-plugin-dialog = "=2.8.1"
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
