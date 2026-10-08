@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 
 use api_server::routes::TokenClaims;
 use security_adapter::Ed25519JwtCodec;
-use security_application::{NewUser, SecretProvider, UserStore};
+use security_application::{NewUser, SecretProvider};
 
 const TEST_REFRESH_USERNAME: &str = "refresh-test-admin";
 const TEST_REFRESH_PASSWORD: &str = "refresh-test-password";
