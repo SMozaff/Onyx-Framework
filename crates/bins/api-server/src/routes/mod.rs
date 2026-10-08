@@ -336,16 +336,16 @@ impl ApiState {
 
         let password_hasher = Arc::new(PasswordHasher::new());
 
-        // Clerk is the permanent external identity boundary. When configured,
-        // the configured Allfather Clerk identity is materialized as the single
-        // permanent ONYX master principal if it does not exist yet. This is
-        // deterministic provisioning from configuration, not an HTTP bootstrap
-        // endpoint and not a self-registration flow.
+        // Clerk is the external identity boundary. Allfather is permanently
+        // bound to the designated verified email in clerk.rs; there is no
+        // HTTP bootstrap and no self-registration flow. The canonical
+        // Allfather principal is materialized once so the verified identity
+        // can exchange its Clerk session for an ONYX administrator session.
         let clerk_auth = clerk::ClerkAuth::from_env()?.map(Arc::new);
-        if let Some(clerk) = &clerk_auth {
+        if clerk_auth.is_some() {
             match user_store.find_by_username(clerk::ALLFATHER_USERNAME).await? {
                 Some(existing) if !existing.is_admin || !existing.is_active => {
-                    anyhow::bail!("configured Clerk Allfather identity is not backed by an active ONYX administrator");
+                    anyhow::bail!("configured Allfather principal is not backed by an active ONYX administrator");
                 }
                 Some(_) => {}
                 None => {
@@ -362,7 +362,9 @@ impl ApiState {
                         class: None,
                         parent_user_id: None,
                     }).await?;
-                    tracing::info!("provisioned the configured Clerk Allfather identity as the ONYX master administrator");
+                    tracing::info!(
+                        "provisioned the designated Allfather email identity as the ONYX master administrator"
+                    );
                 }
             }
         }
