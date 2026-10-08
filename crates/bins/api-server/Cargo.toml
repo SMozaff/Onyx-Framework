@@ -61,6 +61,7 @@ csv.workspace = true
 ring.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true
