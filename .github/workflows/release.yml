@@ -390,6 +390,45 @@ jobs:
           name: admin-desktop-${{ matrix.target }}
           path: artifacts/*
 
+  # Native Android field-test/release artifact. This is intentionally a
+  # separate job from CI so a tagged release (or manual run) exposes one
+  # unambiguous APK for real-device field testing.
+  release-android:
+    needs: [i18n]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
+        id: setup-ndk
+        with:
+          ndk-version: r28b
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Build Rust JNI libraries for all supported ABIs
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: bash mobile-android/tool/build_rust_jni.sh
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Verify Android locale resource parity
+        run: node scripts/verify/verify-android-i18n.mjs
+      - name: Assemble Android release APK
+        working-directory: mobile-android
+        run: ./gradlew assembleRelease --stacktrace
+      - name: Verify APK exists
+        run: test -s mobile-android/app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: onyx-android-field-test-apk
+          path: mobile-android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
   # Real container publish: pushes signed, attested images to GHCR.
   # Gated to tag pushes only -- a manual run has no version tag to
   # name an image after, and this project's manual-trigger use case is
@@ -459,7 +498,7 @@ jobs:
   publish:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
-    needs: [release-binaries, release-desktop, release-admin-desktop, release-images]
+    needs: [release-binaries, release-desktop, release-admin-desktop, release-android, release-images]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
