@@ -534,7 +534,7 @@ pub fn router(state: ApiState) -> Router {
     Router::new()
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/ready", get(readiness))
-        .route("/api/auth/login", post(auth::login))
+        // Password login was retired. Clerk/Google is the only identity entry point.
         // Clerk is an external identity credential; the exchange itself is
         // outside ONYX bearer middleware. It never provisions ordinary users.
         .route("/api/auth/clerk", post(clerk::login))
