@@ -1,0 +1,25 @@
+[package]
+name = "admin-shell"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "ONYX Admin platform: a separate, thin-HTTP-client Tauri desktop app for Admin-only capabilities (user management, class/hierarchy assignment, Policy/Settings, staff profile administration and batch import/export). Talks directly to api-server over HTTP — no local database, no sync engine. See DECISIONS.md 'Admin Platform' section for the product decision behind the separation."
+
+[lib]
+name = "admin_shell_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "admin-shell"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = [] }
+tauri-plugin-dialog = "2"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

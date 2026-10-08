@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="ONYX Team 6 static validation" tests="12" failures="0" errors="0" skipped="0">
+  <testsuite name="team6-static" tests="12" failures="0" errors="0" skipped="0">
+    <testcase classname="openapi" name="json_parse"/>
+    <testcase classname="openapi" name="internal_references"/>
+    <testcase classname="openapi" name="typescript_property_parity"/>
+    <testcase classname="seed" name="sqlite_schema_execution"/>
+    <testcase classname="seed" name="aggregate_json"/>
+    <testcase classname="typescript" name="syntax_transpilation"/>
+    <testcase classname="typescript" name="local_import_resolution"/>
+    <testcase classname="architecture" name="excluded_features"/>
+    <testcase classname="architecture" name="session_storage_boundary"/>
+    <testcase classname="architecture" name="no_offline_queue_semantics"/>
+    <testcase classname="rust" name="lexical_structure"/>
+    <testcase classname="cargo" name="manifest_lock_consistency"/>
+  </testsuite>
+</testsuites>

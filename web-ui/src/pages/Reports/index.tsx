@@ -1,0 +1,7 @@
+import { useI18n } from "../../i18n/I18nContext";
+import { useOnyxQuery } from '../../hooks/useQuery';
+import type { ReportProjection } from '../../types/query';
+import StatusBadge from '../../components/StatusBadge';
+
+export default function ReportsPage() {
+  const { t } = useI18n(); const query = useOnyxQuery<ReportProjection>('report.detail'); const report = query.data?.data[0]; return <div className="page-stack"><header className="page-header"><div><p className="eyebrow">{t("reports.evidenceViewer")}</p><h1>{t('nav.reports')}</h1><p>{t('reports.readOnlyAccess')}</p></div></header>{report ? <article className="report-document"><div className="report-heading"><div><p className="eyebrow">{t('reports.operationalReport')}</p><h2>{report.title}</h2><p>Prepared by {report.author} · {new Date(report.submitted_at).toLocaleString()}</p></div><StatusBadge status={report.status} /></div><section><h3>{t('reports.summary')}</h3><p>{report.summary}</p></section><section><h3>{t('reports.evidenceReferences')}</h3><div className="evidence-list">{report.evidence.map((item) => <div className="evidence-item" key={item.file_name}><div><strong>{item.label}</strong><span>{item.file_name}</span></div><span className="read-only-pill">{t('common.viewOnly')}</span></div>)}</div></section><footer>Projection version {report.version} · Updated {new Date(report.updated_at).toLocaleString()}</footer></article> : <div className="empty-state"><h2>{t('reports.noPublishedReport')}</h2><p>{t('reports.noReport')}</p></div>}</div>; }

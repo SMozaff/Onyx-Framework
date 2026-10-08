@@ -1,0 +1,20 @@
+{
+  "name": "ONYX Observer",
+  "short_name": "ONYX Obs",
+  "description": "Read-only mission monitoring for authorized ONYX observers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a1e3d",
+  "theme_color": "#0a1e3d",
+  "orientation": "portrait-primary",
+  "lang": "en",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

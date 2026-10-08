@@ -1,0 +1,13 @@
+[package]
+name = "notification-domain"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+platform-kernel.workspace = true
+platform-contracts.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true

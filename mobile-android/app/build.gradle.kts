@@ -1,0 +1,144 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// `kotlinOptions { jvmTarget = "17" }` (the String-setter form) is a
+// hard error under the Kotlin Gradle plugin version this project
+// resolved -- confirmed directly by running `gradle wrapper` against
+// this exact build script, not assumed from a version-compatibility
+// table. The current, non-deprecated form is the `compilerOptions` DSL.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+// ONYX-MOB-01 §3/§25: namespace/applicationId com.onyx, minSdk 29,
+// Java/Kotlin JVM target 17, jniLibs native delivery, target ABIs
+// arm64-v8a/armeabi-v7a/x86_64.
+android {
+    namespace = "com.onyx"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.onyx"
+        minSdk = 29
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.1.0-a1-skeleton"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    // Native libraries are delivered via jniLibs, built separately by
+    // tool/build_rust_jni.sh (cargo-ndk, mirroring mobile/tool/
+    // build_rust_android.sh's existing pattern) rather than a Gradle
+    // Cargo plugin -- keeps this module's build self-contained and
+    // matches the frozen Flutter app's own existing convention instead
+    // of introducing a second, different native-build mechanism.
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDirs("src/main/jniLibs")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        compose = true
+    }
+
+    buildTypes {
+        // Phase 4.5: real release build — R8 minify + resource shrink so the
+        // release variant is a genuine artifact, not just a debug APK with a
+        // different seed. Signed with the debug keystore for now (AGP always
+        // wires `signingConfigs.debug`); a dedicated release keystore/pipeline
+        // is part of the deferred Phase 6 production-evidence work, and
+        // `assembleRelease` runs in CI from this config so R8 keep-rules are
+        // exercised without a private key.
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    packaging {
+        // mobile-core is a real, sizeable native library shared with
+        // multiple ABIs; no reason yet to strip/compress differently
+        // than Android's own defaults, so nothing overridden here.
+    }
+}
+
+dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2026.03.00")
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
+
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.material3:material3")
+    // material-icons-extended: A4's bottom nav uses Dashboard/Flag/
+    // TaskAlt/Notifications, only some of which ship in the smaller
+    // material-icons-core set bundled with material3 by default.
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    // A5's background sync (WorkManagerService/BackgroundSync.kt). Same
+    // 2.9.1 already used and proven working by the frozen Flutter app's
+    // own Android embedding (mobile/android/app/build.gradle), not an
+    // independently chosen version.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // HTTP client for A3's login/hierarchy/refresh calls, mirroring
+    // Dart's `net/auth.dart` (which uses `dio` for the identical
+    // purpose). OkHttp 4.12.0 -- confirmed via Context7
+    // (square.github.io/okhttp) and Maven Central's own search API that
+    // this is the latest genuinely *stable* release; 5.x exists only as
+    // a long-running alpha series (5.0.0-alpha.16 at time of checking),
+    // not something to depend on for real app code.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // ReLinker deliberately NOT included -- see DECISIONS.md's A1 entry.
+    // Confirmed via current Android NDK docs (developer.android.com/ndk/
+    // guides/jni-tips): ReLinker addresses native-library loading issues
+    // "on older Android versions" and is called out specifically for
+    // "apps targeting Android API levels below 18". This project's real
+    // minimum is API 29 (ONYX-MOB-01 §3), well above that threshold, so
+    // the documented failure mode ReLinker exists for does not apply
+    // here.
+
+    testImplementation("junit:junit:4.13.2")
+    // A4's model classes (LoadedAggregate/CommandEnvelopeFactory) use
+    // org.json.JSONObject. Under `src/test/` (plain JVM unit tests, no
+    // Robolectric), that class resolves to the Android SDK's stub jar,
+    // where every method throws "Stub!" -- a real implementation must
+    // be on the unit-test classpath separately. 20250517 confirmed as
+    // Maven Central's current latest release, not an arbitrary pin.
+    testImplementation("org.json:json:20250517")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // Phase 4.2 (WorkManager scheduling): WorkManagerTestInitHelper for
+    // BackgroundSyncInstrumentedTest. Same 2.9.1 line already used by the
+    // app itself (work-runtime-ktx above), so no version skew.
+    androidTestImplementation("androidx.work:work-testing:2.9.1")
+}

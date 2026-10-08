@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "onyx-api-relay.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "onyx-api-relay.labels" . | nindent 4 }}
+spec:
+  # Hardcoded, not `{{ .Values.replicaCount }}`, and deliberately not
+  # exposed as a value at all (see Chart.yaml / values.yaml). RelayRegistry
+  # (crates/bins/api-server/src/routes/relay.rs) is process-local, in-memory
+  # peer presence -- a second replica of this Deployment would silently
+  # split relay clients across two registries that can never see each
+  # other, recreating exactly the bug (H3) this chart exists to contain.
+  # No values override, environment file, or `helm upgrade --set` can
+  # change this number; changing it requires editing this template and
+  # consciously removing this comment.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "onyx-api-relay.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "onyx-api-relay.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - {name: http, containerPort: 3000}
+            - {name: metrics, containerPort: 9090}
+          envFrom:
+            - secretRef: {name: {{ .Values.secretRef }}}
+          env:
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

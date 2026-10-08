@@ -1,0 +1,42 @@
+import { lazy, Suspense } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import MainLayout from './components/Layout/MainLayout';
+import { useAuthStore } from './stores/authStore';
+import { useI18n } from './i18n/I18nContext';
+
+const LoginPage = lazy(() => import('./pages/Login'));
+const DashboardPage = lazy(() => import('./pages/Dashboard'));
+const MissionsPage = lazy(() => import('./pages/Missions'));
+const TasksPage = lazy(() => import('./pages/Tasks'));
+const TodoTargetsPage = lazy(() => import('./pages/TodoTargets'));
+const StaffLoansPage = lazy(() => import('./pages/StaffLoans'));
+const NotificationsPage = lazy(() => import('./pages/Notifications'));
+const ApprovalsPage = lazy(() => import('./pages/Approvals'));
+const ReportsPage = lazy(() => import('./pages/Reports'));
+
+function ProtectedLayout() {
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
+  return authenticated ? <MainLayout /> : <Navigate to="/login" replace />;
+}
+
+export default function App() {
+  const { t } = useI18n();
+  return (
+    <Suspense fallback={<div className="app-loading" role="status">{t('common.loadingOnyx')}</div>}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<ProtectedLayout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="missions" element={<MissionsPage />} />
+          <Route path="tasks" element={<TasksPage />} />
+          <Route path="todos" element={<TodoTargetsPage />} />
+          <Route path="staff-loans" element={<StaffLoansPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
+          <Route path="approvals" element={<ApprovalsPage />} />
+          <Route path="reports" element={<ReportsPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
+  );
+}

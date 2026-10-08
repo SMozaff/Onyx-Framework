@@ -1,0 +1,32 @@
+name: Devcontainer Check
+
+# Only runs when the devcontainer config itself changes — this build takes
+# several minutes (Flutter + Android SDK + Rust), so it is not worth paying
+# on every PR, only on PRs that could actually break the environment
+# everyone now develops in (per the move to Codespaces-only development).
+on:
+  pull_request:
+    paths:
+      - ".devcontainer/**"
+  push:
+    branches: [main]
+    paths:
+      - ".devcontainer/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build devcontainer and verify toolchains
+        uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3
+        with:
+          runCmd: |
+            set -euo pipefail
+            cargo --version
+            rustc --version
+            flutter --version
+            node --version
+            java -version
+            echo "devcontainer OK"

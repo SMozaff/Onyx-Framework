@@ -1,0 +1,18 @@
+# ONYX Session 7 Change Manifest
+
+Compared against the delivered `Onyx_pitch_ready.zip` archive (post-Session 6).
+A = added, M = modified, D = deleted.
+
+M	crates/bins/api-server/src/lib.rs
+M	crates/bins/api-server/src/query_handler.rs
+M	crates/bins/api-server/src/routes/events.rs
+M	crates/bins/api-server/src/routes/mod.rs
+M	crates/bins/worker/src/scheduler_loop.rs
+M	crates/mobile-core/src/ffi_mobile.rs
+M	docs/AUDIT_REGISTER.md
+A	docs/SESSION7_CHANGED_FILES.txt
+A	docs/SESSION7_README.md
+
+No files deleted. No dependency (Cargo.toml/Cargo.lock) changes. No schema,
+migration, or public API surface changes — all edits are lint/documentation
+fixes with no behavioral change to any endpoint, FFI contract, or data model.

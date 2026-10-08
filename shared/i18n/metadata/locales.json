@@ -1,0 +1,14 @@
+{
+  "en": {
+    "direction": "ltr",
+    "default": true,
+    "displayName": "English",
+    "formatLocale": "en-US"
+  },
+  "fa": {
+    "direction": "rtl",
+    "default": false,
+    "displayName": "فارسی",
+    "formatLocale": "fa-IR"
+  }
+}

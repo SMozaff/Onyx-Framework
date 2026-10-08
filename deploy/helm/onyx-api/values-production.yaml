@@ -1,0 +1,4 @@
+replicaCount: 5
+image: {tag: "1.0.0"}
+ingress: {host: api.onyx.example.com, tlsSecret: onyx-api-tls}
+autoscaling: {minReplicas: 5, maxReplicas: 30, targetCPUUtilizationPercentage: 65}

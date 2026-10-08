@@ -1,0 +1,90 @@
+{
+  "$schemaVersion": "1.0.0",
+  "policy": "Phase 1 inventory only. Every surface starts as unmanaged. A surface may leave unmanaged only through its owning future migration phase.",
+  "defaultStatus": "unmanaged",
+  "surfaces": [
+    {
+      "id": "web-ui",
+      "paths": ["web-ui"],
+      "stack": "React 18 web frontend",
+      "status": "unmanaged",
+      "notes": "Localization provider and switcher are present, but general user-facing strings have not been migrated."
+    },
+    {
+      "id": "mobile-pwa",
+      "paths": ["mobile-pwa"],
+      "stack": "React observer PWA frontend",
+      "status": "unmanaged",
+      "notes": "Localization provider is mounted and the switcher is now reachable, but general user-facing strings have not been migrated."
+    },
+    {
+      "id": "desktop-shell-ui",
+      "paths": ["crates/bins/desktop-shell/ui"],
+      "stack": "React staff desktop frontend in Tauri",
+      "status": "unmanaged",
+      "notes": "Localization provider is mounted and the switcher is now reachable, but general user-facing strings have not been migrated."
+    },
+    {
+      "id": "admin-shell-ui",
+      "paths": ["crates/bins/admin-shell/ui"],
+      "stack": "React admin frontend in Tauri",
+      "status": "unmanaged",
+      "notes": "Localization provider is mounted and the switcher is now reachable, but general user-facing strings have not been migrated."
+    },
+    {
+      "id": "mobile-android",
+      "paths": ["mobile-android/app/src/main"],
+      "stack": "Kotlin/Jetpack Compose operational client",
+      "status": "unmanaged",
+      "notes": "Android catalog generation belongs to Phase 2. This directory was not modified in Phase 1."
+    },
+    {
+      "id": "desktop-shell-native",
+      "paths": ["crates/bins/desktop-shell/src"],
+      "stack": "Rust/Tauri staff desktop host and IPC boundary",
+      "status": "unmanaged",
+      "notes": "Rust localization and ShellError consumer work belong to Phase 8. This directory was not modified in Phase 1."
+    },
+    {
+      "id": "admin-shell-native",
+      "paths": ["crates/bins/admin-shell/src"],
+      "stack": "Rust/Tauri admin host",
+      "status": "unmanaged",
+      "notes": "Rust localization work belongs to a later phase. This directory was not modified in Phase 1."
+    },
+    {
+      "id": "api-server-presentation",
+      "paths": ["crates/bins/api-server/src/routes"],
+      "stack": "Rust HTTP presentation boundary",
+      "status": "unmanaged",
+      "notes": "The OpenAPI error wire contract is frozen. Presentation mapping belongs to a later phase."
+    },
+    {
+      "id": "worker-notification-presentation",
+      "paths": [
+        "crates/bins/worker/src/job_runner.rs",
+        "crates/bins/worker/src/push_delivery.rs"
+      ],
+      "stack": "Rust notification production and delivery boundary",
+      "status": "unmanaged",
+      "notes": "Code-plus-params notification migration belongs to Phase 7. These files were not modified in Phase 1."
+    },
+    {
+      "id": "mobile-ffi-presentation",
+      "paths": [
+        "crates/mobile-core/src",
+        "crates/mobile-android-jni/src"
+      ],
+      "stack": "Rust native-mobile FFI boundary",
+      "status": "unmanaged",
+      "notes": "No error-code vocabulary exists on this boundary. This work belongs to a later phase."
+    },
+    {
+      "id": "migration-tool-cli",
+      "paths": ["crates/bins/migration-tool/src"],
+      "stack": "Rust operator CLI",
+      "status": "unmanaged",
+      "notes": "CLI-output scope belongs to Phase 6. This directory was not modified in Phase 1."
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: onyx
+      POSTGRES_PASSWORD: onyx
+      POSTGRES_DB: onyx
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onyx -d onyx"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686", "4317:4317"]
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/docker/migration-tool.Dockerfile
+    environment:
+      DATABASE_URL: postgres://onyx:onyx@postgres:5432/onyx
+      ONYX_DATABASE_KIND: postgres
+    command: ["up"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/docker/api-server.Dockerfile
+    environment:
+      DATABASE_URL: postgres://onyx:onyx@postgres:5432/onyx
+      ONYX_GOVERNANCE_DATABASE_URL: postgres://onyx:onyx@postgres:5432/onyx
+      ONYX_AUTHORITY_SIGNING_KEY: hex:4242424242424242424242424242424242424242424242424242424242424242
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports: ["3000:3000", "9090:9090"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: postgres://onyx:onyx@postgres:5432/onyx
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      ONYX_METRICS_BIND: 0.0.0.0:9091
+    ports: ["9091:9091"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+volumes:
+  postgres-data: {}

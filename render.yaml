@@ -1,0 +1,67 @@
+# ONYX Render deployment
+#
+# Render provisions the PostgreSQL instance first and injects its private
+# connection string into the API. The API container runs the existing
+# deploy/docker/api-server.Dockerfile unchanged.
+#
+# Secrets are intentionally declared with sync:false so they are entered in
+# Render rather than committed to source control.
+
+services:
+  - type: web
+    name: onyx-api-docker
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeploy: true
+    healthCheckPath: /ready
+    envVars:
+      - key: ONYX_ENV
+        value: production
+      - key: ONYX_BIND
+        value: 0.0.0.0:10000
+      - key: ONYX_METRICS_BIND
+        value: 127.0.0.1:9090
+      - key: RUST_LOG
+        value: info
+      - key: ONYX_CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: ONYX_AUTHORITY_SIGNING_KEY
+        sync: false
+      # Clerk authenticates Google identities. ONYX remains the account,
+      # role and authorization authority. Allfather is bound in source to the
+      # designated verified email: so.muzaff@gmail.com.
+      - key: CLERK_ISSUER
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_JWKS_URL
+        sync: false
+      - key: ONYX_BLOB_STORE_BACKEND
+        value: huggingface
+      - key: ONYX_BLOB_STORE_S3_ENDPOINT
+        value: https://s3.hf.co/Arronthemalkavian
+      - key: ONYX_BLOB_STORE_S3_BUCKET
+        value: onyx
+      - key: ONYX_BLOB_STORE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: onyx-postgres
+          property: connectionString
+      - key: ONYX_GOVERNANCE_DATABASE_URL
+        fromDatabase:
+          name: onyx-postgres
+          property: connectionString
+
+databases:
+  - name: onyx-postgres
+    plan: basic_256mb
+    region: frankfurt
+    postgresMajorVersion: "16"
+    databaseName: onyx
+    user: onyx
