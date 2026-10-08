@@ -1,8 +1,0 @@
-node_modules
-dist
-coverage
-test-reports
-playwright-report
-test-results
-*.tsbuildinfo
-*.log

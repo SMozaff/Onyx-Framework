@@ -154,7 +154,7 @@ export default function Login() {
                 {loading ? t("auth.signingIn") : t("auth.signIn")}
               </button>
               <button type="button" onClick={() => { setError(null); setMode("allfather"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
-                All-Father · Sign in with Google
+                {t("auth.allFatherGoogleSignIn")}
               </button>
             </form>
           ) : (
