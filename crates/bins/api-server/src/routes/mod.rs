@@ -386,28 +386,28 @@ impl ApiState {
                 std::env::var("ONYX_TEST_USERNAME"),
                 std::env::var("ONYX_TEST_PASSWORD"),
             ) {
-                if !username.trim().is_empty() && !password.is_empty() {
-                    if user_store
+                if !username.trim().is_empty()
+                    && !password.is_empty()
+                    && user_store
                         .find_by_username(username.trim())
                         .await?
                         .is_none()
-                    {
-                        let password_hash = password_hasher.hash(&password).map_err(|e| {
-                            anyhow::anyhow!("failed to create test user credential: {e}")
-                        })?;
-                        user_store
-                            .create(security_application::NewUser {
-                                user_id: uuid::Uuid::new_v4().to_string(),
-                                username: username.trim().to_owned(),
-                                organization_id: ORGANIZATION_ID.to_owned(),
-                                password_hash,
-                                is_admin: true,
-                                is_manager: false,
-                                class: None,
-                                parent_user_id: None,
-                            })
-                            .await?;
-                    }
+                {
+                    let password_hash = password_hasher.hash(&password).map_err(|e| {
+                        anyhow::anyhow!("failed to create test user credential: {e}")
+                    })?;
+                    user_store
+                        .create(security_application::NewUser {
+                            user_id: uuid::Uuid::new_v4().to_string(),
+                            username: username.trim().to_owned(),
+                            organization_id: ORGANIZATION_ID.to_owned(),
+                            password_hash,
+                            is_admin: true,
+                            is_manager: false,
+                            class: None,
+                            parent_user_id: None,
+                        })
+                        .await?;
                 }
             }
         }

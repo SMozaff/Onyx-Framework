@@ -156,7 +156,6 @@ pub struct RefreshResponse {
 /// no `client_type` field at all). An observer session therefore cannot
 /// be silently upgraded to unrestricted merely by rotating its token;
 /// it stays `MobileObserver` for as long as it keeps refreshing.
-
 pub async fn login(
     State(state): State<ApiState>,
     Json(payload): Json<LoginRequest>,
