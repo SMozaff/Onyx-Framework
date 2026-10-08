@@ -118,10 +118,10 @@ export default function Login() {
         <div className="onyx-auth-copy">
           <p className="text-[0.72rem] font-extrabold tracking-[0.19em] text-sky-100/90">{t("auth.adminSecureAccess")}</p>
           <h2 id="admin-signin-context" className="mt-4 max-w-md text-4xl font-light leading-[1.03] tracking-[-0.045em] text-white sm:text-5xl">
-            Govern operations with calm, visible control.
+            {t("auth.adminHeroHeadline")}
           </h2>
           <p className="mt-5 max-w-lg text-sm leading-6 text-sky-50/85">
-            Administrators sign in with their ONYX credentials. The designated All-Father uses Google through Clerk.
+            {t("auth.adminCredentialsDescription")}
           </p>
         </div>
         <p className="relative z-10 text-[0.68rem] text-sky-100/75">{t("auth.adminOrganizationAdministration")}</p>
@@ -165,7 +165,7 @@ export default function Login() {
               {!clerkReady && <p className="mt-4 text-xs text-onyx-text-dim">{t("auth.initializingGoogleAuth")}</p>}
               <div ref={signInRef} className="mt-4 min-h-[300px]" />
               <button type="button" onClick={() => { setError(null); setMode("account"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
-                Back to Admin account login
+                {t("auth.backToAdminLogin")}
               </button>
             </div>
           )}
