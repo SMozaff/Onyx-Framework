@@ -1,4 +1,4 @@
-# ONYX — Mission Operations Platform
+# ONYX — Tectosilicate Coordination
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/muzaff-beep/Onyx-Framwork)
 [![CI](https://github.com/muzaff-beep/Onyx-Framwork/actions/workflows/ci.yml/badge.svg)](https://github.com/muzaff-beep/Onyx-Framwork/actions/workflows/ci.yml)
