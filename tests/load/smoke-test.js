@@ -42,7 +42,11 @@ function commandEnvelope() {
 export function setup() {
   const response = http.post(
     `${baseUrl}/api/auth/login`,
-    JSON.stringify({ username: 'All-Father', password: 'passvord0000' }),
+    JSON.stringify({
+      username: __ENV.ONYX_TEST_USERNAME || 'ci-admin',
+      password: __ENV.ONYX_TEST_PASSWORD || 'ci-smoke-password-2026',
+      client_type: 'admin',
+    }),
     { headers: { 'content-type': 'application/json' } },
   );
   if (response.status !== 200) throw new Error(`login failed: ${response.status}`);
