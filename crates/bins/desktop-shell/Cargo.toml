@@ -30,7 +30,7 @@ query-application.workspace = true
 persistence-sqlite.workspace = true
 sync-transport.workspace = true
 lan-discovery.workspace = true
-tauri = { version = "2.11", features = [] }
+tauri = { version = "=2.12.1", features = [] }
 keyring = { version = "4", features = ["v1"] }
 serde.workspace = true
 serde_json.workspace = true
