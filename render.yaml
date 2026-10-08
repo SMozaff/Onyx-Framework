@@ -30,12 +30,12 @@ services:
         sync: false
       - key: ONYX_AUTHORITY_SIGNING_KEY
         sync: false
-      # Clerk is the external identity provider. ONYX remains the account,
-      # role and authorization authority. Allfather is permanently bound to
-      # this Clerk user id; ordinary users must be provisioned by Allfather.
+      # Clerk authenticates Google identities. ONYX remains the account,
+      # role and authorization authority. Allfather is bound in source to the
+      # designated verified email: so.muzaff@gmail.com.
       - key: CLERK_ISSUER
         sync: false
-      - key: CLERK_ALLFATHER_USER_ID
+      - key: CLERK_SECRET_KEY
         sync: false
       - key: CLERK_JWKS_URL
         sync: false
