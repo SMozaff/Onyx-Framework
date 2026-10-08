@@ -58,9 +58,9 @@ policy-domain.workspace = true
 todo-domain.workspace = true
 notification-domain.workspace = true
 csv.workspace = true
+ring.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true
 reqwest.workspace = true
-ring.workspace = true
-rand.workspace = true
