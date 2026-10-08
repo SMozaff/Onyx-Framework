@@ -367,6 +367,16 @@ async fn create_user_record(
     is_admin: bool,
 ) -> Result<UserDto, ApiError> {
     let username = payload.username.trim().to_string();
+    if username.eq_ignore_ascii_case(super::clerk::ALLFATHER_USERNAME) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "RESERVED_USERNAME",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            correlation(),
+            json!({"message":"The designated All-Father identity is reserved for Clerk authentication"}),
+        ));
+    }
     if username.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -708,6 +718,29 @@ pub async fn set_user_password(
     Json(payload): Json<SetPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin_mutation(&state, &headers).await?;
+    let target = state
+        .user_store
+        .find_by_id(&user_id)
+        .await
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::new(
+            StatusCode::NOT_FOUND,
+            "USER_NOT_FOUND",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            correlation(),
+            json!({}),
+        ))?;
+    if target.username.eq_ignore_ascii_case(super::clerk::ALLFATHER_USERNAME) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "RESERVED_IDENTITY",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            correlation(),
+            json!({"message":"The designated All-Father identity is managed exclusively by Clerk"}),
+        ));
+    }
     let hash = state
         .password_hasher
         .hash(&payload.password)
