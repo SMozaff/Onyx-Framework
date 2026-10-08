@@ -466,7 +466,7 @@ jobs:
         with: {path: release-assets, merge-multiple: true}
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with: {subject-path: "release-assets/**"}
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
           files: release-assets/**
