@@ -510,7 +510,6 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/admin/users/:id/manager", post(admin::set_manager))
         .route("/api/admin/users/:id/class", post(admin::set_class))
         .route("/api/admin/users/:id/parent", post(admin::set_parent))
-        .route("/api/admin/clerk-users", post(clerk::provision))
         .route(
             "/api/admin/mobile-access",
             get(admin::get_mobile_access).put(admin::set_mobile_access),
