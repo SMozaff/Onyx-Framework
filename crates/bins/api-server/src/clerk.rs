@@ -17,10 +17,6 @@ use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-
-
-use super::{auth::LoginUser, issue_token, ApiError, ApiState};
-
 pub const ALLFATHER_USERNAME: &str = "allfather";
 pub const ALLFATHER_EMAIL: &str = "so.muzaff@gmail.com";
 
@@ -275,5 +271,4 @@ impl ClerkAuth {
         Ok(self.verified_email_for_subject(subject).await?.as_deref() == Some(ALLFATHER_EMAIL))
     }
 }
-
 
