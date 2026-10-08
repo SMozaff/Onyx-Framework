@@ -5,6 +5,7 @@ pub mod admin;
 pub mod auth;
 pub mod client_type;
 pub mod command;
+#[path = "../clerk.rs"]
 pub mod clerk;
 pub mod events;
 pub mod files;
