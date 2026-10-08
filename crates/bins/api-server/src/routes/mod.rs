@@ -3,10 +3,10 @@
 
 pub mod admin;
 pub mod auth;
-pub mod client_type;
-pub mod command;
 #[path = "../clerk.rs"]
 pub mod clerk;
+pub mod client_type;
+pub mod command;
 pub mod events;
 pub mod files;
 pub mod policy_admin;
@@ -344,7 +344,10 @@ impl ApiState {
         // can exchange its Clerk session for an ONYX administrator session.
         let clerk_auth = clerk::ClerkAuth::from_env()?.map(Arc::new);
         if clerk_auth.is_some() {
-            match user_store.find_by_username(clerk::ALLFATHER_USERNAME).await? {
+            match user_store
+                .find_by_username(clerk::ALLFATHER_USERNAME)
+                .await?
+            {
                 Some(existing) if !existing.is_admin || !existing.is_active => {
                     anyhow::bail!("configured Allfather principal is not backed by an active ONYX administrator");
                 }
@@ -352,17 +355,21 @@ impl ApiState {
                 None => {
                     let password_hash = password_hasher
                         .hash(&format!("onyx-clerk-{}", uuid::Uuid::new_v4()))
-                        .map_err(|e| anyhow::anyhow!("failed to create unusable Allfather credential: {e}"))?;
-                    user_store.create(security_application::NewUser {
-                        user_id: uuid::Uuid::new_v4().to_string(),
-                        username: clerk::ALLFATHER_USERNAME.to_owned(),
-                        organization_id: ORGANIZATION_ID.to_owned(),
-                        password_hash,
-                        is_admin: true,
-                        is_manager: false,
-                        class: None,
-                        parent_user_id: None,
-                    }).await?;
+                        .map_err(|e| {
+                            anyhow::anyhow!("failed to create unusable Allfather credential: {e}")
+                        })?;
+                    user_store
+                        .create(security_application::NewUser {
+                            user_id: uuid::Uuid::new_v4().to_string(),
+                            username: clerk::ALLFATHER_USERNAME.to_owned(),
+                            organization_id: ORGANIZATION_ID.to_owned(),
+                            password_hash,
+                            is_admin: true,
+                            is_manager: false,
+                            class: None,
+                            parent_user_id: None,
+                        })
+                        .await?;
                     tracing::info!(
                         "provisioned the designated Allfather email identity as the ONYX master administrator"
                     );
