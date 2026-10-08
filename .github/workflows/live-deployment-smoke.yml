@@ -1,0 +1,67 @@
+name: Live Deployment Smoke
+
+on:
+  push:
+    branches:
+      - feat/backend-three-tier-cloudflare-hf-storage
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for Render deployment and verify origin
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ORIGIN="https://onyx-api-docker.onrender.com"
+          EDGE="https://onyx-framework.soheil-mozaffari.workers.dev"
+
+          for i in {1..120}; do
+            echo "Attempt $i/60"
+
+            origin_health="$(curl -fsS --max-time 10 "$ORIGIN/health" || true)"
+            origin_ready="$(curl -fsS --max-time 10 "$ORIGIN/ready" || true)"
+
+            if [ "$origin_health" = '{"status":"ok"}' ] && [ -n "$origin_ready" ]; then
+              echo "Render origin is responding."
+              break
+            fi
+
+            if [ "$i" -eq 60 ]; then
+              echo "::error::Render origin did not become healthy within 20 minutes."
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+      - name: Verify origin health contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(curl -fsS --max-time 10 https://onyx-api-docker.onrender.com/health)" = '{"status":"ok"}'
+          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://onyx-api-docker.onrender.com/ready)" = "200"
+
+      - name: Verify Cloudflare edge health and readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(curl -fsS --max-time 10 https://onyx-framework.soheil-mozaffari.workers.dev/health)" = '{"status":"ok"}'
+          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://onyx-framework.soheil-mozaffari.workers.dev/ready)" = "200"
+
+      - name: Verify protected API rejects anonymous access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          origin_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://onyx-api-docker.onrender.com/api/users)"
+          edge_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://onyx-framework.soheil-mozaffari.workers.dev/api/users)"
+
+          test "$origin_status" = "401"
+          test "$edge_status" = "401"

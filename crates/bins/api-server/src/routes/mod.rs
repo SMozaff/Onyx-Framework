@@ -3,6 +3,8 @@
 
 pub mod admin;
 pub mod auth;
+#[path = "../clerk.rs"]
+pub mod clerk;
 pub mod client_type;
 pub mod command;
 pub mod events;
@@ -31,7 +33,6 @@ use axum::{
     routing::{delete, get, post, put},
     Json, Router,
 };
-use local_blob_storage::LocalBlobStore;
 use observability_adapter::{HashChainAuditWriter, Metrics};
 use persistence_postgres::{PostgresRepository, PostgresUnitOfWorkFactory};
 use persistence_sqlite::{SqliteRepository, SqliteUnitOfWorkFactory};
@@ -88,6 +89,10 @@ pub struct ApiState {
     /// Identity store backing `/api/auth/login` (audit finding H-01).
     /// Replaces the former `DEFAULT_USERNAME`/`DEFAULT_PASSWORD` constants.
     pub user_store: Arc<dyn UserStore>,
+    /// Optional Clerk identity boundary. Clerk is never the ONYX authorization store;
+    /// this adapter only verifies the external identity and exchanges it for an
+    /// already-provisioned ONYX principal.
+    pub clerk_auth: Option<Arc<clerk::ClerkAuth>>,
     /// Repository for `profile_domain::StaffProfile`. Backs the staff
     /// profile view/edit routes and the batch import/export feature —
     /// see `routes::profiles`.
@@ -332,112 +337,47 @@ impl ApiState {
 
         let password_hasher = Arc::new(PasswordHasher::new());
 
-        // --- Fixed seeded admin account: development/test convenience ONLY ---
-        //
-        // A deliberately authorized development shortcut currently seeds a
-        // known administrator credential on an empty database. The
-        // implementation clearly documents the tradeoff, so this is not an
-        // undisclosed implementation error. However, the exception is not
-        // sufficiently isolated from production execution and therefore
-        // remains a production release blocker (audit finding H-01
-        // follow-up, hardening track H1) — fixed here.
-        //
-        // Per explicit instruction the session this was added: the one-time
-        // `POST /api/admin/bootstrap` flow (token-gated, see
-        // routes/admin.rs) was blocking a Windows Codex agent run with a
-        // Windows Credential Manager "secret longer than platform limit"
-        // error while it tried to establish admin-shell credentials. Rather
-        // than debug that further, a fixed admin account was seeded
-        // automatically on first startup (when the `users` table is empty),
-        // exactly once, the same way `seed_if_empty` above seeds mission/
-        // task/notification fixtures.
-        //
-        // Username: "All-Father"
-        // Password, as literally requested: "passvord"
-        //
-        // BLOCKING ISSUE FOUND WHILE IMPLEMENTING, disclosed rather than
-        // silently worked around: the shared `PasswordHasher::hash()` used
-        // everywhere else in this codebase enforces a hard 12-character
-        // minimum (`MIN_PASSWORD_LENGTH`, security-adapter/src/password.rs)
-        // before it will hash anything. "passvord" is 8 characters, so
-        // calling it as-is returns `Err` and — because this runs during
-        // server startup, before `Ok(Self { .. })` — that error would abort
-        // the ENTIRE api-server boot via `?`, not just this seed step.
-        // There is no lower-level "hash without policy check" method
-        // exposed to bypass this from here without editing the shared
-        // PasswordHasher itself (used by every other account's password
-        // too — a riskier, broader change than a single seeded login).
-        //
-        // Resolution taken: the stored/actual login password is
-        // "passvord0000" (the literal 8 characters requested, with a fixed,
-        // visible "0000" appended solely to clear the 12-char floor). This
-        // is a deviation from the literal 8-character string given, made
-        // to avoid a startup crash, and is called out here explicitly
-        // rather than silently substituted.
-        const SEEDED_ADMIN_USERNAME: &str = "All-Father";
-        const SEEDED_ADMIN_PASSWORD: &str = "passvord0000";
-        //
-        // SECURITY NOTE, stated plainly and not glossed over: this seed
-        // also removes the fail-closed, token-gated, one-time bootstrap
-        // protection for the *first* admin account specifically — that
-        // account now exists with a fixed, known password the moment the
-        // server starts against an empty database, no token or HTTP call
-        // required. Anyone with a copy of this source or binary knows the
-        // login.
-        //
-        // H1 fix: this is now gated behind an explicit, unambiguous
-        // non-production signal — `ONYX_ENV` being anything other than
-        // literally `"production"` (unset defaults to `"development"`
-        // above) — not merely "the users table happens to be empty",
-        // which is equally true of a fresh production install. A fresh
-        // production database (`ONYX_ENV=production`) NEVER seeds this
-        // account, full stop; the earlier top-of-function checks already
-        // guarantee `ONYX_ENV=production` has a real Postgres primary, a
-        // real `ONYX_AUTHORITY_SIGNING_KEY`, and a real
-        // `ONYX_GOVERNANCE_DATABASE_URL`, so production's *only* path to a
-        // first admin is the pre-existing, untouched, token-gated
-        // `POST /api/admin/bootstrap` flow (`ONYX_BOOTSTRAP_TOKEN`,
-        // routes/admin.rs) — restored to being the authoritative
-        // production path rather than a fallback nothing production-side
-        // ever exercised. `/api/admin/bootstrap` itself is unmodified and
-        // still works exactly as before for any *additional* accounts; it
-        // will just correctly refuse to create a second "first" admin once
-        // any user exists (`BOOTSTRAP_ALREADY_COMPLETED`), same as it
-        // always has.
-        if config.development_seed_enabled() && user_store.count().await? == 0 {
-            let password_hash = password_hasher
-                .hash(SEEDED_ADMIN_PASSWORD)
-                .map_err(|e| anyhow::anyhow!("failed to hash seeded admin password: {e}"))?;
-            user_store
-                .create(security_application::NewUser {
-                    user_id: uuid::Uuid::new_v4().to_string(),
-                    username: SEEDED_ADMIN_USERNAME.to_string(),
-                    organization_id: ORGANIZATION_ID.to_string(),
-                    password_hash,
-                    is_admin: true,
-                    is_manager: false,
-                    class: None,
-                    parent_user_id: None,
-                })
-                .await?;
-            tracing::warn!(
-                "seeded fixed admin account 'All-Father' (development/test only — see routes/mod.rs comment for context/tradeoff)"
-            );
+        // Clerk is the external identity boundary. Allfather is permanently
+        // bound to the designated verified email in clerk.rs; there is no
+        // HTTP bootstrap and no self-registration flow. The canonical
+        // Allfather principal is materialized once so the verified identity
+        // can exchange its Clerk session for an ONYX administrator session.
+        let clerk_auth = clerk::ClerkAuth::from_env()?.map(Arc::new);
+        if clerk_auth.is_some() {
+            match user_store
+                .find_by_username(clerk::ALLFATHER_USERNAME)
+                .await?
+            {
+                Some(existing) if !existing.is_admin || !existing.is_active => {
+                    anyhow::bail!("configured Allfather principal is not backed by an active ONYX administrator");
+                }
+                Some(_) => {}
+                None => {
+                    let password_hash = password_hasher
+                        .hash(&format!("onyx-clerk-{}", uuid::Uuid::new_v4()))
+                        .map_err(|e| {
+                            anyhow::anyhow!("failed to create unusable Allfather credential: {e}")
+                        })?;
+                    user_store
+                        .create(security_application::NewUser {
+                            user_id: uuid::Uuid::new_v4().to_string(),
+                            username: clerk::ALLFATHER_USERNAME.to_owned(),
+                            organization_id: ORGANIZATION_ID.to_owned(),
+                            password_hash,
+                            is_admin: true,
+                            is_manager: false,
+                            class: None,
+                            parent_user_id: None,
+                        })
+                        .await?;
+                    tracing::info!(
+                        "provisioned the designated Allfather email identity as the ONYX master administrator"
+                    );
+                }
+            }
         }
 
-        let blob_store_root = std::env::var("ONYX_BLOB_STORE_ROOT").unwrap_or_else(|_| {
-            std::env::temp_dir()
-                .join("onyx-api-server-blobs")
-                .to_string_lossy()
-                .into_owned()
-        });
-        let blob_store: Arc<dyn BlobStore> = Arc::new(
-            LocalBlobStore::open(&blob_store_root)
-                .await
-                .map_err(|error| {
-                    anyhow::anyhow!("opening blob store at {blob_store_root}: {error}")
-                })?,
-        );
+        let blob_store = crate::blob_storage::build(&config).await?;
 
         Ok(Self {
             projection_pool,
@@ -458,6 +398,7 @@ impl ApiState {
             audit_writer,
             metrics: Metrics::new("onyx_api_server")?,
             user_store,
+            clerk_auth,
             password_hasher,
             relay_registry: relay::RelayRegistry::new(),
             blob_store,
@@ -538,6 +479,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/admin/users/:id/manager", post(admin::set_manager))
         .route("/api/admin/users/:id/class", post(admin::set_class))
         .route("/api/admin/users/:id/parent", post(admin::set_parent))
+        .route("/api/admin/clerk-users", post(clerk::provision))
         .route(
             "/api/admin/mobile-access",
             get(admin::get_mobile_access).put(admin::set_mobile_access),
@@ -593,13 +535,12 @@ pub fn router(state: ApiState) -> Router {
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/ready", get(readiness))
         .route("/api/auth/login", post(auth::login))
+        // Clerk is an external identity credential; the exchange itself is
+        // outside ONYX bearer middleware. It never provisions ordinary users.
+        .route("/api/auth/clerk", post(clerk::login))
         // Refresh consumes a refresh token rather than an access token, so it
         // intentionally remains outside the standard access-auth layer.
         .route("/api/auth/refresh", post(auth::refresh))
-        // Bootstrap self-closes after the first user and requires the
-        // explicit bootstrap token. It cannot be placed behind access auth
-        // because its purpose is to create the first authenticated user.
-        .route("/api/admin/bootstrap", post(admin::bootstrap))
         // /api/events performs its own authentication from the
         // WebSocket subprotocol header; it therefore must not be wrapped
         // by the standard Authorization-header middleware above.

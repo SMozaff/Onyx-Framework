@@ -15,7 +15,7 @@
 | Team 7 schema | PASS | `jobs`, `rate_limit_events`, `audit_entries`, and `aggregate_snapshots`, required columns, constraints, and indexes are created. |
 | Deterministic seed compatibility | PASS | `tests/fixtures/seed.sql` executes after the full migration chain. |
 | SQLite rollback | PASS | Team 7 down migrations remove the four Team 7 tables cleanly. |
-| R1 tracing configuration | PASS | OTLP/gRPC default and environment override are present. |
+| R1 tracing configuration | PASS | OTLP/gRPC export is opt-in through `OTEL_EXPORTER_OTLP_ENDPOINT`; an unset endpoint leaves structured logging active without requiring a collector. |
 | R2 metrics contract | PASS | Exact required metric family names are registered; self-observability counters are also registered. |
 | R3 structured logging contract | PASS | A global `CanonicalJsonLayer` emits every tracing event as one JSON object with every required field and recursively redacted details. |
 | R4 durable jobs source audit | PASS | PostgreSQL uses `FOR UPDATE SKIP LOCKED`; leases, retry count, dead-letter status, exponential jitter, and 300-second cap are encoded. |

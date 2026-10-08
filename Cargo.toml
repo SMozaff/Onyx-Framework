@@ -21,6 +21,7 @@ members = [
     "crates/infrastructure/persistence-postgres",
     "crates/infrastructure/persistence-sqlite",
     "crates/infrastructure/local-blob-storage",
+    "crates/infrastructure/huggingface-blob-storage",
     "crates/infrastructure/messaging-adapter",
     "crates/infrastructure/observability-adapter",
     "crates/infrastructure/security-adapter",
@@ -113,6 +114,7 @@ persistence-common = { path = "crates/infrastructure/persistence-common" }
 persistence-postgres = { path = "crates/infrastructure/persistence-postgres" }
 persistence-sqlite = { path = "crates/infrastructure/persistence-sqlite" }
 local-blob-storage = { path = "crates/infrastructure/local-blob-storage" }
+huggingface-blob-storage = { path = "crates/infrastructure/huggingface-blob-storage" }
 messaging-adapter = { path = "crates/infrastructure/messaging-adapter" }
 platform-contracts-ext = { path = "crates/kernel/platform-contracts-ext" }
 crdt = { path = "crates/synchronization/crdt" }

@@ -20,8 +20,9 @@ impl ObservabilityConfig {
     pub fn from_env(service_name: impl Into<String>) -> Self {
         Self {
             service_name: service_name.into(),
-            otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| "http://jaeger-collector:4317".to_string()),
+            // OTLP export is opt-in. Deployments without a collector must not
+            // resolve a development/Kubernetes hostname such as jaeger-collector.
+            otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_default(),
             log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
         }
     }
@@ -33,30 +34,37 @@ pub fn init_observability(config: &ObservabilityConfig) -> anyhow::Result<()> {
     // the collector's gRPC port 4317, and docker-compose publishes only 4317.
     // An HTTP exporter here silently exported to a port nothing listens on,
     // dropping every span batch while looking healthy.
-    let exporter = SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(config.otlp_endpoint.clone())
-        .build()?;
-
-    let resource = Resource::builder()
-        .with_service_name(config.service_name.clone())
-        .with_attributes([KeyValue::new("service.name", config.service_name.clone())])
-        .build();
-    let provider = sdktrace::SdkTracerProvider::builder()
-        .with_batch_exporter(exporter)
-        .with_resource(resource)
-        .build();
-    let tracer = provider.tracer("onyx-observability");
-    let _ = TRACER_PROVIDER.set(provider.clone());
-    global::set_tracer_provider(provider);
-
-    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
     let json = CanonicalJsonLayer::new(config.service_name.clone());
-    tracing_subscriber::registry()
+    let registry = tracing_subscriber::registry()
         .with(EnvFilter::new(config.log_filter.clone()))
-        .with(telemetry)
-        .with(json)
-        .try_init()?;
+        .with(json);
+
+    if config.otlp_endpoint.trim().is_empty() {
+        // Structured logging remains enabled when no OTLP collector is
+        // configured. This is the expected composition for Render until an
+        // actual managed OTLP endpoint is provisioned.
+        registry.try_init()?;
+    } else {
+        let exporter = SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(config.otlp_endpoint.clone())
+            .build()?;
+
+        let resource = Resource::builder()
+            .with_service_name(config.service_name.clone())
+            .with_attributes([KeyValue::new("service.name", config.service_name.clone())])
+            .build();
+        let provider = sdktrace::SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_resource(resource)
+            .build();
+        let tracer = provider.tracer("onyx-observability");
+        let _ = TRACER_PROVIDER.set(provider.clone());
+        global::set_tracer_provider(provider);
+
+        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        registry.with(telemetry).try_init()?;
+    };
     Ok(())
 }
 

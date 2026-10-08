@@ -17,21 +17,8 @@ export const options = {
   },
 };
 
-export function setup() {
-  const response = http.post(
-    `${baseUrl}/api/auth/login`,
-    JSON.stringify({ username: 'All-Father', password: 'passvord0000' }),
-    { headers: { 'content-type': 'application/json' } },
-  );
-  if (response.status !== 200) throw new Error(`login failed: ${response.status}`);
-  return { token: response.json('access_token') };
-}
-
-export default function (data) {
-  // A fixed operation_id makes the command idempotent after the first
-  // successful acknowledgment, so the benchmark measures the complete
-  // authenticated command path without generating conflicting mutations.
-  const envelope = {
+function commandEnvelope() {
+  return {
     command_id: '88888888-8888-4888-8888-888888888888',
     operation_id: '99999999-9999-4999-8999-999999999999',
     command_type: 'notification.Acknowledge',
@@ -50,6 +37,42 @@ export default function (data) {
     causation_id: null,
     payload: {},
   };
+}
+
+export function setup() {
+  const response = http.post(
+    `${baseUrl}/api/auth/login`,
+    JSON.stringify({ username: 'All-Father', password: 'passvord0000' }),
+    { headers: { 'content-type': 'application/json' } },
+  );
+  if (response.status !== 200) throw new Error(`login failed: ${response.status}`);
+
+  // Warm the fixed operation through one successful mutation before the
+  // concurrent phase. Without this, 100 VUs can all observe the same
+  // operation_id as a cache miss, race on the version-1 notification, and
+  // legitimately produce optimistic-concurrency failures. The sustained
+  // phase therefore measures the authenticated command/idempotency path
+  // under load rather than turning the smoke test into a race detector.
+  const warmup = http.post(
+    `${baseUrl}/api/command`,
+    JSON.stringify(commandEnvelope()),
+    {
+      headers: {
+        authorization: `Bearer ${response.json('access_token')}`,
+        'content-type': 'application/json',
+        'x-correlation-id': '77777777-7777-4777-8777-777777777777',
+      },
+    },
+  );
+  if (warmup.status !== 200) {
+    throw new Error(`command warmup failed: ${warmup.status} ${warmup.body}`);
+  }
+
+  return { token: response.json('access_token') };
+}
+
+export default function (data) {
+  const envelope = commandEnvelope();
   const started = Date.now();
   const response = http.post(`${baseUrl}/api/command`, JSON.stringify(envelope), {
     headers: {

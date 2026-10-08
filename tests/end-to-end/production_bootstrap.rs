@@ -35,6 +35,16 @@ async fn production_env_never_seeds_the_known_admin_account() -> anyhow::Result<
         "ONYX_CORS_ALLOWED_ORIGINS",
         "https://admin.onyx.example.com",
     );
+    // Production configuration also initializes the configured object store.
+    // Use syntactically valid, non-secret test credentials so this test reaches
+    // the production bootstrap invariant without contacting the provider.
+    std::env::set_var(
+        "ONYX_BLOB_STORE_S3_ENDPOINT",
+        "https://s3.hf.co/test-namespace",
+    );
+    std::env::set_var("ONYX_BLOB_STORE_S3_BUCKET", "test-bucket");
+    std::env::set_var("ONYX_BLOB_STORE_S3_ACCESS_KEY_ID", "test-access-key");
+    std::env::set_var("ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY", "test-secret-key");
 
     let state_result = ApiState::new(&postgres.database_url).await;
 
@@ -44,6 +54,10 @@ async fn production_env_never_seeds_the_known_admin_account() -> anyhow::Result<
     std::env::remove_var("ONYX_ENV");
     std::env::remove_var("ONYX_GOVERNANCE_DATABASE_URL");
     std::env::remove_var("ONYX_CORS_ALLOWED_ORIGINS");
+    std::env::remove_var("ONYX_BLOB_STORE_S3_ENDPOINT");
+    std::env::remove_var("ONYX_BLOB_STORE_S3_BUCKET");
+    std::env::remove_var("ONYX_BLOB_STORE_S3_ACCESS_KEY_ID");
+    std::env::remove_var("ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY");
 
     let state = state_result?;
 

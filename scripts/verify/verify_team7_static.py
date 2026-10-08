@@ -194,7 +194,7 @@ with tempfile.NamedTemporaryFile(suffix=".db") as handle:
 # Binding-ruling source assertions.
 source = lambda rel: (ROOT / rel).read_text()
 tracing = source("crates/infrastructure/observability-adapter/src/tracing.rs")
-check("http://jaeger-collector:4317" in tracing, "R1 default OTLP endpoint is frozen")
+check("OTEL_EXPORTER_OTLP_ENDPOINT" in tracing and "unwrap_or_default()" in tracing, "R1 OTLP endpoint is opt-in and environment-configured")
 metrics = source("crates/infrastructure/observability-adapter/src/metrics.rs")
 for family in [
     "requests_total", "request_duration_seconds", "outbox_pending",

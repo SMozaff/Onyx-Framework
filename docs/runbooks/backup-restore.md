@@ -1,65 +1,92 @@
 # ONYX Backup and Restore
 
+## Current production topology
+
+Production currently uses Render Postgres 16 for the primary database.
+
+Current verified database posture:
+
+- Render Postgres: `onyx-postgres`
+- Region: Frankfurt
+- Compute plan: `basic_256mb`
+- Storage: 15 GB
+- High availability: **disabled**
+- Read replicas: **none**
+- Disk autoscaling: **disabled**
+- Connection pool: **none**
+- External IP allow-list: empty; production API uses Render private connectivity.
+
+Do not use the former RDS/AWS recovery commands in this deployment.
+
 ## Recovery contract
+
+The historical ONYX recovery target is:
 
 - **RTO:** less than one hour.
 - **RPO:** less than five minutes.
-- PostgreSQL production runs Multi-AZ with automated backups, point-in-time recovery, retained WAL, encrypted snapshots, and a final snapshot on replacement.
-- Binary file backups and release evidence are versioned and encrypted in S3.
 
-## Backup schedule
+These are **targets, not currently demonstrated production guarantees** for the present Render configuration.
 
-| Asset | Mechanism | Frequency | Retention |
-|---|---|---|---|
-| PostgreSQL | RDS automated backup and continuous transaction logs | Continuous | 35 days |
-| PostgreSQL logical export | `pg_dump --format=custom` | Daily | 35 days, monthly for one year |
-| Kubernetes configuration | Git plus encrypted secret backup | Every change | Repository retention |
-| Release artifacts/SBOM/provenance | Versioned S3/GitHub release | Every release | Indefinite |
-| Audit exports under legal hold | Immutable export | Policy-driven | Legal-hold duration |
+The current database has no Render HA standby or read replica. A production release must not claim HA, sub-minute failover, or a measured RPO/RTO until those capabilities are enabled and exercised.
+
+Render paid Postgres provides continuous point-in-time recovery (PITR). The exact available recovery window depends on the Render workspace plan. Render logical exports can also be created from the database Recovery page and downloaded for independent retention.
 
 ## Pre-restore safety
 
-1. Declare SEV-1 and assign a database recovery owner.
-2. Stop API, worker, and sync-agent writers or route them to maintenance mode.
-3. Record current database endpoint, WAL/LSN, migration status, image digests, and requested recovery timestamp.
-4. Snapshot the failed database before altering it.
-5. Confirm the recovery timestamp is no more than five minutes before the incident where possible.
+1. Declare the incident and assign a database recovery owner.
+2. Freeze production schema changes and application deployments.
+3. Record the current database identifier, migration status, application image/version, and incident timestamp.
+4. Preserve relevant audit and incident evidence.
+5. Confirm the desired recovery timestamp and the actual available Render PITR window.
+6. Do not run destructive SQL or `migration-tool down` against the production database during recovery.
 
-## Point-in-time restore
+## Render point-in-time recovery
 
-```bash
-aws rds restore-db-instance-to-point-in-time \
-  --source-db-instance-identifier onyx-production \
-  --target-db-instance-identifier onyx-production-recovery \
-  --restore-time 2026-08-05T12:00:00Z \
-  --use-latest-restorable-time false
-```
+Use the Render Dashboard database **Recovery** page to create a recovery database at the required point in time.
 
-After the instance becomes available:
+1. Start a PITR recovery into a new database instance.
+2. Validate the recovered database independently.
+3. Run migration status checks and ONYX application verification against the recovery instance.
+4. Verify aggregates, domain events, outbox/jobs, audit entries, snapshots, and rate-limit state.
+5. Verify the audit hash chain.
+6. Run the mandatory backend verification journeys.
+7. Only after validation, repoint the production service to the recovered database and verify readiness.
 
-1. Attach the ONYX database security group and parameter group.
-2. Run `migration-tool status`; never run `down` on production during recovery.
-3. Validate row counts for aggregates, domain events, outbox, audit entries, jobs, snapshots, and rate-limit ledger.
-4. Verify the audit hash chain for each affected organization.
-5. Compare outbox sequence and latest domain-event timestamps against the incident evidence.
-6. Point a staging API/worker deployment to the recovered database and run Journeys 1–4.
-7. Switch production secrets/endpoints, then restore API at 10% canary traffic.
+The recovery process must preserve the original database until the recovered system has been validated.
 
-## Logical restore
+## Logical backup
 
-```bash
-createdb onyx_restore
-pg_restore --clean --if-exists --no-owner --dbname=onyx_restore onyx.dump
-DATABASE_URL=postgres://... ONYX_DATABASE_KIND=postgres migration-tool up
-```
+Create periodic logical exports from Render's Recovery page and retain copies outside the Render service according to the applicable commercial/security retention policy.
+
+A logical export is an additional recovery control; it is not a substitute for testing PITR.
+
+## Object-storage recovery
+
+The ONYX BlobStore is provider-neutral. Production object storage is the private Hugging Face bucket.
+
+The production recovery procedure must document:
+
+- bucket and namespace ownership;
+- credential rotation procedure;
+- object-key/content-addressing strategy;
+- export procedure;
+- retention/deletion semantics;
+- restoration procedure;
+- verification of object integrity against ONYX file metadata.
+
+The actual authenticated Hugging Face PUT/GET/DELETE production cycle remains an open verification item.
 
 ## Post-restore validation
 
-- No open failed migration.
-- Audit chain verifies.
-- RPO measured and recorded.
-- Outbox and job workers drain without duplicate effects.
-- Command p95 remains below 500 ms in the release load profile.
-- Security signs off before full traffic.
+A restore drill is successful only when:
 
-Conduct a restore drill quarterly and retain the measured RTO/RPO in the go-live checklist.
+- migration status is clean;
+- no failed migration remains;
+- audit chain verifies;
+- required domain journeys pass;
+- outbox/job workers recover without duplicate effects;
+- application readiness is healthy;
+- object-storage access is verified;
+- measured RTO/RPO are recorded.
+
+Do not mark the go-live checklist green until a real restore drill has produced evidence for the current Render topology.

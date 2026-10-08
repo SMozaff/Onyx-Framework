@@ -1,187 +1,116 @@
 # ONYX — Tectosilicate Coordination
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/muzaff-beep/Onyx-Framwork)
-[![CI](https://github.com/muzaff-beep/Onyx-Framwork/actions/workflows/ci.yml/badge.svg)](https://github.com/muzaff-beep/Onyx-Framwork/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+**Governed execution for complex, high-accountability operations.**
 
-**A local-first, authority-aware mission operations platform built for offline collaboration and secure multi-device synchronization.**
+> **Operations continue. Accountability remains.**
 
-🌐 **Website**: [https://ox-workflow.github.io/]
+ONYX connects authority, missions, work, decisions, approvals, evidence, policy, synchronization, and audit into one governed operational record.
 
----
+## Product
 
-## 🚀 Overview
+ONYX is designed for environments where execution must be:
 
-ONYX is a production-grade mission operations system designed for environments where connectivity cannot be assumed. Built with Rust at its core, it enables seamless collaboration across web, desktop, and mobile platforms with automatic conflict resolution through CRDT-based synchronization.
+- authorized and scope-aware;
+- stateful and lifecycle-controlled;
+- evidence-backed and auditable;
+- policy-aware;
+- synchronizable across supported native clients;
+- reconstructable after the operation.
 
-### Key Features
+### Core pillars
 
-- **offline-first Architecture**: Full functionality without internet connectivity
-- **🔄 Smart Synchronization**: CRDT-based sync engine with automatic conflict resolution
-- **📡 Multi-Transport P2P**: Wi-Fi Direct, Bluetooth LE, QUIC, and Cloud Relay
-- **🔐 Authority-Aware**: Role-based permissions and secure collaboration
-- **📱 Cross-Platform**: Web (React/TypeScript), Desktop (Tauri), Mobile (Flutter + Rust FFI)
-- **🏗️ Clean Architecture**: 27 crates across 8 domain-driven increments
+| Pillar | Purpose |
+|---|---|
+| **Authority** | The right people act with the right scope. |
+| **Execution** | Missions, work, timelines, and lifecycle remain structured. |
+| **Coordination** | Meetings, decisions, conversations, and actions stay connected. |
+| **Evidence** | Files, approvals, verification, reports, and audit preserve what happened. |
+| **Resilience** | Supported native clients synchronize distributed operational state and surface conflicts explicitly. |
+| **Foresight** | Capacity, forecasting, automation, notifications, and escalation support preparation and response. |
 
----
+## Architecture
 
-## 🛠️ Development Environment
+ONYX uses a native application layer with managed infrastructure around it:
 
-**Development happens exclusively in the devcontainer**, not on bare metal. This ensures consistent tooling across all contributors.
+1. **Cloudflare Edge** — public ingress, TLS, routing, and edge protection.
+2. **ONYX application layer** — Rust/Axum/Tokio API and worker remain authoritative for identity, authorization, domain logic, transactions, jobs, synchronization, policy, and audit.
+3. **Managed persistence** — Render PostgreSQL plus Hugging Face Storage Buckets through provider-neutral application ports.
 
-### Getting Started
+Cloudflare is not the ONYX authorization authority, and the native ONYX runtime is not being rewritten as Workers.
 
-1. **Create a Codespace**: Click the badge above or go to **Code → Codespaces → Create codespace**
-2. **Wait for provisioning**: First boot takes ~5-10 minutes while Flutter, Android SDK, and `cargo-ndk` are installed
-3. **Start developing**: All toolchains are pre-configured to match CI
+## Current deployment
 
-> 💡 **Pro Tip**: Enable [Codespaces prebuilds](https://docs.github.com/en/codespaces/prebuilding-your-codespaces) to reduce wait time after the first build.
+The current production deployment path is:
 
-### Local Development (Advanced)
+**Cloudflare Worker → Render Axum API → Render PostgreSQL + Hugging Face object storage**
 
-For rare cases requiring local execution (e.g., physical device P2P testing), see [`docs/RUN_LOCALLY.md`](docs/RUN_LOCALLY.md).
+- Render API service: `onyx-api-docker`
+- Health/readiness endpoint: `/ready`
+- PostgreSQL: Render PostgreSQL 16
+- Object storage: private Hugging Face Storage Bucket via S3-compatible API
+- Production container port: `10000`
 
----
+The deployment is operationally verified for API readiness and the Cloudflare-to-Render path. The authenticated Hugging Face object PUT/GET/DELETE cycle remains an explicitly pending verification item.
 
-## ⚡ Quick Start
+## Client status
 
-Once inside the Codespace/devcontainer:
+- **Web UI:** online thin client; no local ONYX domain replica or offline domain commands.
+- **Desktop:** native local replica and synchronization support; disconnected commands are not currently presented as guaranteed queued execution.
+- **Android:** native Kotlin/Android is the active Android target.
+- **iOS Observer:** specified in governance documentation but not shipped from the current repository snapshot.
+- **Flutter:** frozen reference/migration material, not the active Android implementation.
 
-```bash
-# Build all workspace crates
-cargo build --workspace --release
+See the application manifest and migration documentation for the authoritative capability boundaries.
 
-# Run full test suite
-cargo test --workspace --release -- --test-threads=1
+## Development and verification
 
-# Lint with strict warnings
-cargo clippy --workspace --all-targets -- -D warnings
+The repository uses:
 
-# Format code
-cargo fmt --all
-```
+- Rust unit, integration, property-based, HTTP, E2E, and chaos tests;
+- frontend lint/type/build/accessibility/browser checks;
+- Android build and instrumentation-oriented checks;
+- SQLx offline metadata and migration verification;
+- dependency/advisory scanning;
+- container security scanning;
+- SPDX SBOM generation;
+- release provenance and signing workflows.
 
----
+Run development work in the repository's documented devcontainer/Codespaces environment. See `docs/RUN_LOCALLY.md` for advanced local execution.
 
-## 🏛️ Architecture
+## Deployment documentation
 
-ONYX follows Clean Architecture principles with Domain-Driven Design:
+- `docs/BACKEND_ARCHITECTURE.md`
+- `docs/RENDER_DEPLOYMENT.md`
+- `deploy/cloudflare/edge-gateway/`
+- `deploy/helm/`
+- `deploy/docker/`
+- `docs/runbooks/`
+- `docs/release/go-live-checklist.md`
 
-### Structure
-- **8 Increments**: Progressive delivery milestones
-- **27 Crates**: Modular, reusable components
-- **6 Binaries**: Deployable applications
-- **8 Domains**: Mission, Work, Communication, File, Policy, Profile, Todo, Notification
+## Commercial and legal status
 
-### Core Components
+ONYX is proprietary software. See `LICENSE.md` and `LEGAL/` for the current ownership and proprietary-status records.
 
-| Component | Technology | Location |
-|-----------|------------|----------|
-| Sync Engine | Rust + CRDTs | `crates/sync-*` |
-| P2P Transports | Wi-Fi Direct, BLE, QUIC | `crates/transport-*` |
-| Web UI | React/TypeScript | `web/` |
-| Desktop App | Tauri | `desktop/` |
-| Mobile App | Flutter + Rust FFI | `mobile/` |
-| Infrastructure | Docker, Helm, Terraform | `deploy/` |
+Third-party dependencies remain governed by their respective licenses. Commercial release still requires completion of the documented licensing, chain-of-title, privacy/DPA, trademark, contract, and release-governance gates.
 
----
+## Contributions
 
-## 📦 Deployment
+ONYX is a proprietary project. Do not assume that submitting code, assets, or other material through GitHub transfers ownership or grants redistribution rights. External contributions or commissioned work require appropriate written terms before acceptance into commercial distributions.
 
-Production-ready deployment configurations:
+## Non-claims
 
-- **Kubernetes**: [`deploy/helm/`](deploy/helm/) - Helm charts for K8s clusters
-- **Containers**: [`deploy/docker/`](deploy/docker/) - Optimized Dockerfiles
-- **Infrastructure as Code**: [`deploy/terraform/`](deploy/terraform/) - Cloud provisioning
-- **Operations**: [`docs/runbooks/`](docs/runbooks/) - Incident response & maintenance
+The repository should not be read as evidence of:
 
----
+- broad AI capability;
+- quantitative enterprise-scale performance;
+- customer production adoption;
+- guaranteed full offline operation across every client;
+- regulatory or compliance certification.
 
-## 📱 Mobile Development
+Those claims require separate evidence.
 
-The Flutter application (`mobile/`) embeds `crates/mobile-core` for native performance.
+## License
 
-### Build Pipeline
+ONYX original materials are proprietary. The repository's proprietary notice is in `LICENSE.md`.
 
-```bash
-# Ensure platform scaffolds
-mobile/tool/ensure_platform_scaffold.sh
-
-# Build Rust libraries for Android
-mobile/tool/build_rust_android.sh
-
-# Full mobile build & test
-cd mobile && flutter pub get && flutter analyze && flutter test && flutter build apk
-```
-
-### Platform Status
-
-See [`MOBILE_STATUS.md`](MOBILE_STATUS.md) for:
-- ✅ iOS build status
-- 🔄 Background sync implementation
-- 📱 P2P device lab setup
-- 🔐 Code signing requirements
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow these guidelines:
-
-### Code Quality Requirements
-
-```bash
-# All PRs must pass:
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --release
-```
-
-### Pull Request Process
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Make changes with tests
-4. Ensure CI passes
-5. Submit PR with clear description
-
-### Documentation
-
-- Update relevant docs in `docs/`
-- Add ADRs for architectural decisions
-- Update runbooks for operational changes
-
----
-
-## 📚 Documentation
-
-| Document | Description |
-|----------|-------------|
-| [`docs/RUN_LOCALLY.md`](docs/RUN_LOCALLY.md) | Local development setup |
-| [`docs/runbooks/`](docs/runbooks/) | Operational procedures |
-| [`MOBILE_STATUS.md`](MOBILE_STATUS.md) | Mobile platform status |
-| `docs/adr/` | Architectural Decision Records |
-
----
-
-## 🧪 Testing Strategy
-
-- **Unit Tests**: Per-crate functionality
-- **Property-Based Tests**: Edge case coverage
-- **Integration Tests**: Cross-crate interactions
-- **E2E Tests**: Full workflow validation
-- **Chaos Tests**: Resilience under failure conditions
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-Built with ❤️ using Rust, Flutter, React, and modern web technologies.
-
-Special thanks to the CRDT, P2P, and offline-first communities for inspiration and research.
+Third-party materials retain their applicable licenses.

@@ -30,6 +30,9 @@ env:
   ONYX_BIND: 0.0.0.0:3000
   ONYX_METRICS_BIND: 0.0.0.0:9090
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-collector.observability.svc:4317
+  ONYX_BLOB_STORE_BACKEND: huggingface
+  ONYX_BLOB_STORE_S3_ENDPOINT: https://s3.hf.co/Arronthemalkavian
+  ONYX_BLOB_STORE_S3_BUCKET: onyx
 secretRef: onyx-api-secrets
 # The referenced Secret must contain these keys. DATABASE_URL must be a
 # PostgreSQL URL because the Rollout runs multiple API replicas.
@@ -38,6 +41,8 @@ secretContract:
     - DATABASE_URL
     - ONYX_GOVERNANCE_DATABASE_URL
     - ONYX_AUTHORITY_SIGNING_KEY
+    - ONYX_BLOB_STORE_S3_ACCESS_KEY_ID
+    - ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 10001
