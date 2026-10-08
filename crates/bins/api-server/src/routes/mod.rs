@@ -387,10 +387,14 @@ impl ApiState {
                 std::env::var("ONYX_TEST_PASSWORD"),
             ) {
                 if !username.trim().is_empty() && !password.is_empty() {
-                    if user_store.find_by_username(username.trim()).await?.is_none() {
-                        let password_hash = password_hasher
-                            .hash(&password)
-                            .map_err(|e| anyhow::anyhow!("failed to create test user credential: {e}"))?;
+                    if user_store
+                        .find_by_username(username.trim())
+                        .await?
+                        .is_none()
+                    {
+                        let password_hash = password_hasher.hash(&password).map_err(|e| {
+                            anyhow::anyhow!("failed to create test user credential: {e}")
+                        })?;
                         user_store
                             .create(security_application::NewUser {
                                 user_id: uuid::Uuid::new_v4().to_string(),
