@@ -25,7 +25,7 @@ use tokio::sync::RwLock;
 
 use security_application::{NewUser, UserClass};
 
-use super::{admin, issue_token, ApiError, ApiState, LoginUser};
+use super::{admin, auth::LoginUser, issue_token, ApiError, ApiState};
 
 pub const ALLFATHER_USERNAME: &str = "allfather";
 pub const ALLFATHER_EMAIL: &str = "so.muzaff@gmail.com";
