@@ -383,13 +383,22 @@ pub async fn login(
         .ok_or_else(|| auth_error("CLERK_NOT_CONFIGURED"))?;
 
     let claims = clerk.verify_bearer(&headers).await?;
-    let is_allfather = clerk.is_allfather(&claims.sub).await?;
+    if !clerk.is_allfather(&claims.sub).await? {
+        // Clerk is deliberately not a general ONYX login provider. The only
+        // external identity allowed through this exchange is the designated
+        // All-Father Google identity. Admin/Staff accounts use /api/auth/login.
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "CLERK_IDENTITY_NOT_AUTHORIZED",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            uuid::Uuid::new_v4().to_string(),
+            json!({"message":"Only the designated All-Father identity may authenticate through Clerk"}),
+        ));
+    }
 
-    let username = if is_allfather {
-        ALLFATHER_USERNAME.to_owned()
-    } else {
-        provisioned_username(&claims.sub)
-    };
+    let is_allfather = true;
+    let username = ALLFATHER_USERNAME.to_owned();
 
     let user = state
         .user_store
