@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/i18n/I18nContext";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
@@ -11,6 +12,7 @@ import { loadClerk } from "@/auth/clerk";
 type LoginMode = "account" | "allfather";
 
 export default function Login() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const signInRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<LoginMode>("account");
@@ -96,7 +98,7 @@ export default function Login() {
         setError(`Could not reach the server at ${getServerAddress()}. Check the connection setup below, or confirm the server is running and reachable.`);
         setShowServerSettings(true);
       } else {
-        setError("Invalid username or password.");
+        setError(t("auth.adminInvalidCredentials"));
       }
     } finally {
       setLoading(false);
@@ -149,7 +151,7 @@ export default function Login() {
                 <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none" />
               </div>
               <button type="submit" disabled={loading} className="mt-5 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
-                {loading ? "Signing in…" : "Sign in"}
+                {loading ? t("auth.signingIn") : t("auth.signIn")}
               </button>
               <button type="button" onClick={() => { setError(null); setMode("allfather"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 All-Father · Sign in with Google
@@ -174,7 +176,7 @@ export default function Login() {
             onClick={() => setShowServerSettings((value) => !value)}
             aria-expanded={showServerSettings}
           >
-            {showServerSettings ? "Hide connection setup" : "Server address / connection settings"}
+            {showServerSettings ? t("auth.hideServerAddress") : t("auth.serverConnectionSettings")}
           </button>
           {showServerSettings && <ConnectionSettings />}
           <p className="mt-3 text-xs text-onyx-text-dim">Current API: {getServerAddress()}</p>
