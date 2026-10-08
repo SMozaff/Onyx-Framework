@@ -377,6 +377,37 @@ impl ApiState {
             }
         }
 
+        // Test-only ordinary account fixture. This is intentionally separate
+        // from the All-Father principal: CI and local integration environments
+        // can exercise the real username/password session path without ever
+        // giving the master identity a password.
+        if config.development_seed_enabled() {
+            if let (Ok(username), Ok(password)) = (
+                std::env::var("ONYX_TEST_USERNAME"),
+                std::env::var("ONYX_TEST_PASSWORD"),
+            ) {
+                if !username.trim().is_empty() && !password.is_empty() {
+                    if user_store.find_by_username(username.trim()).await?.is_none() {
+                        let password_hash = password_hasher
+                            .hash(&password)
+                            .map_err(|e| anyhow::anyhow!("failed to create test user credential: {e}"))?;
+                        user_store
+                            .create(security_application::NewUser {
+                                user_id: uuid::Uuid::new_v4().to_string(),
+                                username: username.trim().to_owned(),
+                                organization_id: ORGANIZATION_ID.to_owned(),
+                                password_hash,
+                                is_admin: true,
+                                is_manager: false,
+                                class: None,
+                                parent_user_id: None,
+                            })
+                            .await?;
+                    }
+                }
+            }
+        }
+
         let blob_store = crate::blob_storage::build(&config).await?;
 
         Ok(Self {
