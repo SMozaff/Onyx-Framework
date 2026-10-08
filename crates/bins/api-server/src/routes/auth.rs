@@ -6,6 +6,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use security_application::UserRecord;
+
 use super::{
     authenticate_headers, client_type::ClientType, issue_token, token_hash, unix_seconds,
     validate_token, ApiError, ApiState,
@@ -154,6 +156,138 @@ pub struct RefreshResponse {
 /// no `client_type` field at all). An observer session therefore cannot
 /// be silently upgraded to unrestricted merely by rotating its token;
 /// it stays `MobileObserver` for as long as it keeps refreshing.
+
+pub async fn login(
+    State(state): State<ApiState>,
+    Json(payload): Json<LoginRequest>,
+) -> Result<Json<LoginResponse>, ApiError> {
+    let candidate = state
+        .user_store
+        .find_by_username(&payload.username)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "user store lookup failed during login");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "USER_STORE_UNAVAILABLE",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
+
+    let user: UserRecord = match candidate {
+        Some(user) if user.is_active => {
+            let matches = state
+                .password_hasher
+                .verify(&payload.password, &user.password_hash)
+                .map_err(|error| {
+                    tracing::error!(error = %error, user_id = %user.user_id, "stored password hash is malformed");
+                    ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "CREDENTIAL_STORE_CORRUPT",
+                        "INFRASTRUCTURE",
+                        "NON_RETRYABLE",
+                        uuid::Uuid::new_v4().to_string(),
+                        json!({}),
+                    )
+                })?;
+            if !matches {
+                return Err(invalid_credentials());
+            }
+            user
+        }
+        _ => {
+            state.password_hasher.verify_dummy(&payload.password);
+            return Err(invalid_credentials());
+        }
+    };
+
+    // The designated All-Father identity is deliberately passwordless.
+    // Its ONYX principal may exist in the ordinary user store so the
+    // Clerk exchange can mint an ONYX session, but it must never acquire
+    // a password-login path through an admin password reset.
+    if user.username == super::clerk::ALLFATHER_USERNAME {
+        return Err(invalid_credentials());
+    }
+
+    if payload.client_type == Some(ClientType::Mobile) && !user.is_admin {
+        let allowed = match &user.class {
+            Some(class) => {
+                let granted = state
+                    .user_store
+                    .list_mobile_access(&user.organization_id)
+                    .await
+                    .map_err(|error| {
+                        tracing::error!(error = %error, "mobile access lookup failed during login");
+                        ApiError::new(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "USER_STORE_UNAVAILABLE",
+                            "INFRASTRUCTURE",
+                            "TRANSIENT",
+                            uuid::Uuid::new_v4().to_string(),
+                            json!({}),
+                        )
+                    })?;
+                granted.iter().any(|c| c == class.as_str())
+            }
+            None => false,
+        };
+        if !allowed {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "MOBILE_ACCESS_RESTRICTED",
+                "AUTHORITY",
+                "NON_RETRYABLE",
+                uuid::Uuid::new_v4().to_string(),
+                json!({"message":"Mobile access is not enabled for this user's class in this organization"}),
+            ));
+        }
+    }
+
+    let client_type = payload
+        .client_type
+        .unwrap_or_else(ClientType::default_on_absence);
+    let access_token = issue_token(&state, &user, "access", 3600, client_type)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "TOKEN_ISSUANCE_FAILED",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
+    let refresh_token = issue_token(&state, &user, "refresh", 7 * 24 * 3600, client_type)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "TOKEN_ISSUANCE_FAILED",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
+
+    Ok(Json(LoginResponse {
+        access_token,
+        refresh_token,
+        expires_in: 3600,
+        user: LoginUser {
+            id: user.user_id,
+            username: user.username,
+            organization_id: user.organization_id,
+            is_admin: user.is_admin,
+            class: user.class.map(|c| c.as_str().to_string()),
+        },
+    }))
+}
+
 pub async fn refresh(
     State(state): State<ApiState>,
     Json(payload): Json<RefreshRequest>,
