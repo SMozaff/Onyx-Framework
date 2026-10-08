@@ -111,12 +111,12 @@ export default function Login() {
         <div className="relative z-10 flex items-center gap-2.5">
           <span className="onyx-brand-mark" aria-hidden="true">O</span>
           <div>
-            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">ONYX</p>
-            <p className="mt-0.5 text-[0.62rem] text-sky-100/70">Administration</p>
+            <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">{t("app.name")}</p>
+            <p className="mt-0.5 text-[0.62rem] text-sky-100/70">{t("common.administration")}</p>
           </div>
         </div>
         <div className="onyx-auth-copy">
-          <p className="text-[0.72rem] font-extrabold tracking-[0.19em] text-sky-100/90">SECURE ADMIN ACCESS</p>
+          <p className="text-[0.72rem] font-extrabold tracking-[0.19em] text-sky-100/90">{t("auth.adminSecureAccess")}</p>
           <h2 id="admin-signin-context" className="mt-4 max-w-md text-4xl font-light leading-[1.03] tracking-[-0.045em] text-white sm:text-5xl">
             Govern operations with calm, visible control.
           </h2>
@@ -124,13 +124,13 @@ export default function Login() {
             Administrators sign in with their ONYX credentials. The designated All-Father uses Google through Clerk.
           </p>
         </div>
-        <p className="relative z-10 text-[0.68rem] text-sky-100/75">Organization-scoped administration · Explicit server verification</p>
+        <p className="relative z-10 text-[0.68rem] text-sky-100/75">{t("auth.adminOrganizationAdministration")}</p>
       </section>
 
       <section className="flex flex-1 items-center justify-center px-5 py-10 sm:px-10 lg:px-16">
         <div className="onyx-auth-card w-full max-w-md p-6 sm:p-7">
           <div className="mb-5 flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-onyx-text">ONYX Admin</h1>
+            <h1 className="text-lg font-semibold text-onyx-text">{t("auth.adminTitleBar")}</h1>
             <LanguageSwitcher />
           </div>
 
@@ -138,16 +138,16 @@ export default function Login() {
 
           {mode === "account" ? (
             <form onSubmit={submit}>
-              <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">ADMINISTRATOR</p>
-              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">Sign in to ONYX</h2>
-              <p className="mt-2 text-sm leading-5 text-onyx-text-dim">Use the username and password assigned to your ONYX account.</p>
+              <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">{t("auth.adminTitle")}</p>
+              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">{t("auth.adminSignIn")}</h2>
+              <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.useAssignedCredentials")}</p>
 
               <div className="mt-6">
-                <label htmlFor="username" className="block text-xs font-bold text-onyx-text">Username</label>
+                <label htmlFor="username" className="block text-xs font-bold text-onyx-text">{t("auth.username")}</label>
                 <input id="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none" />
               </div>
               <div className="mt-4">
-                <label htmlFor="password" className="block text-xs font-bold text-onyx-text">Password</label>
+                <label htmlFor="password" className="block text-xs font-bold text-onyx-text">{t("auth.password")}</label>
                 <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none" />
               </div>
               <button type="submit" disabled={loading} className="mt-5 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
@@ -159,10 +159,10 @@ export default function Login() {
             </form>
           ) : (
             <div>
-              <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">ALL-FATHER AUTHORITY</p>
-              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">Google through Clerk</h2>
-              <p className="mt-2 text-sm leading-5 text-onyx-text-dim">This path is reserved for the designated master identity.</p>
-              {!clerkReady && <p className="mt-4 text-xs text-onyx-text-dim">Initializing secure Google authentication…</p>}
+              <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">{t("auth.allFatherAuthority")}</p>
+              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">{t("auth.googleThroughClerk")}</h2>
+              <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.allFatherReservedPath")}</p>
+              {!clerkReady && <p className="mt-4 text-xs text-onyx-text-dim">{t("auth.initializingGoogleAuth")}</p>}
               <div ref={signInRef} className="mt-4 min-h-[300px]" />
               <button type="button" onClick={() => { setError(null); setMode("account"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 Back to Admin account login

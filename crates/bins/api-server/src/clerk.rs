@@ -11,12 +11,18 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use axum::http::HeaderMap;
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::Json,
+};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio::sync::RwLock;
 
+use super::{auth::LoginUser, issue_token, ApiError, ApiState};
 
 pub const ALLFATHER_USERNAME: &str = "allfather";
 pub const ALLFATHER_EMAIL: &str = "so.muzaff@gmail.com";
@@ -273,3 +279,150 @@ impl ClerkAuth {
     }
 }
 
+
+
+#[derive(Debug, Serialize)]
+pub struct ClerkIdentityResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: u64,
+    pub user: LoginUser,
+}
+
+fn auth_error(code: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::UNAUTHORIZED,
+        code,
+        "AUTHORITY",
+        "NON_RETRYABLE",
+        uuid::Uuid::new_v4().to_string(),
+        json!({}),
+    )
+}
+
+fn rsa_public_key_der(n: &[u8], e: &[u8]) -> Vec<u8> {
+    fn integer(mut value: Vec<u8>) -> Vec<u8> {
+        while value.len() > 1 && value[0] == 0 {
+            value.remove(0);
+        }
+        if value[0] & 0x80 != 0 {
+            value.insert(0, 0);
+        }
+        tlv(0x02, &value)
+    }
+
+    fn length(value: usize) -> Vec<u8> {
+        if value < 128 {
+            vec![value as u8]
+        } else {
+            let mut bytes = Vec::new();
+            let mut remaining = value;
+            while remaining > 0 {
+                bytes.push((remaining & 255) as u8);
+                remaining >>= 8;
+            }
+            bytes.reverse();
+            let mut output = vec![0x80 | bytes.len() as u8];
+            output.extend(bytes);
+            output
+        }
+    }
+
+    fn tlv(tag: u8, value: &[u8]) -> Vec<u8> {
+        let mut output = vec![tag];
+        output.extend(length(value.len()));
+        output.extend(value);
+        output
+    }
+
+    tlv(0x30, &[integer(n.to_vec()), integer(e.to_vec())].concat())
+}
+
+pub async fn login(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Json<ClerkIdentityResponse>, ApiError> {
+    let clerk = state
+        .clerk_auth
+        .as_ref()
+        .ok_or_else(|| auth_error("CLERK_NOT_CONFIGURED"))?;
+
+    let claims = clerk.verify_bearer(&headers).await?;
+    if !clerk.is_allfather(&claims.sub).await? {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "CLERK_IDENTITY_NOT_AUTHORIZED",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            uuid::Uuid::new_v4().to_string(),
+            json!({"message":"Only the designated All-Father identity may authenticate through Clerk"}),
+        ));
+    }
+
+    let username = ALLFATHER_USERNAME.to_owned();
+    let user = state
+        .user_store
+        .find_by_username(&username)
+        .await
+        .map_err(|_| auth_error("USER_STORE_UNAVAILABLE"))?;
+
+    let user = match user {
+        Some(user) if user.is_active => user,
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "ONYX_ACCOUNT_NOT_PROVISIONED",
+                "AUTHORITY",
+                "NON_RETRYABLE",
+                uuid::Uuid::new_v4().to_string(),
+                json!({
+                    "message": "The designated All-Father identity has not been registered in ONYX"
+                }),
+            ));
+        }
+    };
+
+    if !user.is_admin {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "ALLFATHER_NOT_ADMIN",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            uuid::Uuid::new_v4().to_string(),
+            json!({}),
+        ));
+    }
+
+    let access_token = issue_token(
+        &state,
+        &user,
+        "access",
+        3600,
+        super::client_type::ClientType::Web,
+    )
+    .await
+    .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
+
+    let refresh_token = issue_token(
+        &state,
+        &user,
+        "refresh",
+        7 * 24 * 3600,
+        super::client_type::ClientType::Web,
+    )
+    .await
+    .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
+
+    Ok(Json(ClerkIdentityResponse {
+        access_token,
+        refresh_token,
+        expires_in: 3600,
+        user: LoginUser {
+            id: user.user_id,
+            username: user.username,
+            organization_id: user.organization_id,
+            is_admin: user.is_admin,
+            class: user.class.map(|class| class.as_str().to_owned()),
+        },
+    }))
+}
