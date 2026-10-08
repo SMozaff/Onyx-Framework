@@ -17,7 +17,6 @@ use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use crate::routes::auth::LoginUser;
 
 pub const ALLFATHER_USERNAME: &str = "allfather";
 pub const ALLFATHER_EMAIL: &str = "so.muzaff@gmail.com";
