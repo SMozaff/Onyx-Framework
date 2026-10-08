@@ -151,23 +151,14 @@ impl ClerkAuth {
             .ok_or_else(|| auth_error("CLERK_SIGNING_KEY_NOT_FOUND"))?;
 
         let n = URL_SAFE_NO_PAD
-            .decode(
-                jwk.n
-                    .ok_or_else(|| auth_error("CLERK_JWK_INVALID"))?,
-            )
+            .decode(jwk.n.ok_or_else(|| auth_error("CLERK_JWK_INVALID"))?)
             .map_err(|_| auth_error("CLERK_JWK_INVALID"))?;
         let e = URL_SAFE_NO_PAD
-            .decode(
-                jwk.e
-                    .ok_or_else(|| auth_error("CLERK_JWK_INVALID"))?,
-            )
+            .decode(jwk.e.ok_or_else(|| auth_error("CLERK_JWK_INVALID"))?)
             .map_err(|_| auth_error("CLERK_JWK_INVALID"))?;
 
         let der = rsa_public_key_der(&n, &e);
-        self.keys
-            .write()
-            .await
-            .insert(kid.to_owned(), der.clone());
+        self.keys.write().await.insert(kid.to_owned(), der.clone());
 
         Ok(der)
     }
@@ -246,10 +237,7 @@ impl ClerkAuth {
         Ok(claims)
     }
 
-    async fn verified_email_for_subject(
-        &self,
-        subject: &str,
-    ) -> Result<Option<String>, ApiError> {
+    async fn verified_email_for_subject(&self, subject: &str) -> Result<Option<String>, ApiError> {
         let response = self
             .client
             .get(format!("https://api.clerk.com/v1/users/{subject}"))
@@ -290,11 +278,7 @@ impl ClerkAuth {
     }
 
     pub async fn is_allfather(&self, subject: &str) -> Result<bool, ApiError> {
-        Ok(self
-            .verified_email_for_subject(subject)
-            .await?
-            .as_deref()
-            == Some(ALLFATHER_EMAIL))
+        Ok(self.verified_email_for_subject(subject).await?.as_deref() == Some(ALLFATHER_EMAIL))
     }
 }
 
@@ -386,10 +370,7 @@ fn rsa_public_key_der(n: &[u8], e: &[u8]) -> Vec<u8> {
         output
     }
 
-    tlv(
-        0x30,
-        &[integer(n.to_vec()), integer(e.to_vec())].concat(),
-    )
+    tlv(0x30, &[integer(n.to_vec()), integer(e.to_vec())].concat())
 }
 
 pub async fn login(
@@ -538,9 +519,7 @@ pub async fn provision(
         .create(NewUser {
             user_id: uuid::Uuid::new_v4().to_string(),
             username,
-            organization_id: payload
-                .organization_id
-                .unwrap_or(admin.organization_id),
+            organization_id: payload.organization_id.unwrap_or(admin.organization_id),
             password_hash: hash,
             is_admin: payload.is_admin,
             is_manager: payload.is_manager,
