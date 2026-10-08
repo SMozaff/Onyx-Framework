@@ -279,7 +279,6 @@ impl ClerkAuth {
     }
 }
 
-
 #[derive(Debug, Serialize)]
 pub struct ClerkIdentityResponse {
     pub access_token: String,

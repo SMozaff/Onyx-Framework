@@ -723,15 +723,20 @@ pub async fn set_user_password(
         .find_by_id(&user_id)
         .await
         .map_err(store_error)?
-        .ok_or_else(|| ApiError::new(
-            StatusCode::NOT_FOUND,
-            "USER_NOT_FOUND",
-            "AUTHORITY",
-            "NON_RETRYABLE",
-            correlation(),
-            json!({}),
-        ))?;
-    if target.username.eq_ignore_ascii_case(super::clerk::ALLFATHER_USERNAME) {
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "USER_NOT_FOUND",
+                "AUTHORITY",
+                "NON_RETRYABLE",
+                correlation(),
+                json!({}),
+            )
+        })?;
+    if target
+        .username
+        .eq_ignore_ascii_case(super::clerk::ALLFATHER_USERNAME)
+    {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "RESERVED_IDENTITY",
