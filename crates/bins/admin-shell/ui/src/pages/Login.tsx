@@ -115,7 +115,7 @@ export default function Login() {
           <div ref={signInRef} className="min-h-[360px]" />
 
           {showServerSettings && (
-            <ConnectionSettings onSaved={() => setShowServerSettings(false)} />
+            <ConnectionSettings />
           )}
 
           <button
