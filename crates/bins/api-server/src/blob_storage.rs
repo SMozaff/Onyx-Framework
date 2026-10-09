@@ -115,7 +115,10 @@ mod tests {
             "ONYX_BLOB_STORE_S3_ACCESS_KEY_ID",
             "ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY",
         ];
-        assert_eq!(missing_required_env(&required, |_| false), required.to_vec());
+        assert_eq!(
+            missing_required_env(&required, |_| false),
+            required.to_vec()
+        );
     }
 
     #[test]
