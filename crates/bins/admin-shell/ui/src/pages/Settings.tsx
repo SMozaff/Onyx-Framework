@@ -8,6 +8,9 @@ import { useAuthStore } from "@/stores/authStore";
 import { useI18n } from "@/i18n/I18nContext";
 import {
   getServerAddress,
+  getBackendAddress,
+  getBackendEnvironment,
+  setBackendEnvironment,
   setServerAddress,
   isPlausibleServerAddress,
   isSecureEnoughForProduction,
@@ -184,90 +187,61 @@ function MobileAccessPanel() {
  */
 function ServerConnectionSettings() {
   const { t } = useI18n();
-  const [value, setValue] = useState(() => getServerAddress());
+  const [environment, setEnvironment] = useState<"local" | "cloud">(() => getBackendEnvironment());
+  const [value, setValue] = useState(() => getBackendAddress());
   const [status, setStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
 
+  function chooseEnvironment(next: "local" | "cloud") {
+    setEnvironment(next);
+    setValue(getBackendAddress(next));
+    setStatus("idle");
+    setMessage(null);
+  }
+
   async function testConnection(address: string): Promise<boolean> {
     try {
-      const response = await fetch(`${address.replace(/\/+$/, "")}/health`, {
-        signal: AbortSignal.timeout(5_000),
-      });
+      const response = await fetch(`${address.replace(/\\/+$/, "")}/health`, { signal: AbortSignal.timeout(5_000) });
       return response.ok;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 
   async function handleSave() {
     if (!isPlausibleServerAddress(value)) {
-      setStatus("error");
-      setMessage(t("settings.invalidServerAddress"));
-      return;
+      setStatus("error"); setMessage(t("settings.invalidServerAddress")); return;
     }
     if (!isSecureEnoughForProduction(value)) {
       setStatus("error");
-      setMessage(
-        "For security, only https:// addresses (or http://127.0.0.1 on this computer) can be saved.",
-      );
+      setMessage("For security, use https:// for cloud/LAN servers. Plain HTTP is allowed only for loopback local development.");
       return;
     }
-    setStatus("testing");
-    setMessage(null);
+    setStatus("testing"); setMessage(null);
     const reachable = await testConnection(value);
     if (!reachable) {
       setStatus("error");
-      setMessage(
-        "Could not reach a server at this address. The address was NOT saved — " +
-          "double-check the IP/port, that the server is running, and that this PC " +
-          "can reach it on the network before saving.",
-      );
+      setMessage("Could not reach /health. Address was not saved; check the URL, service status, and CORS/network access.");
       return;
     }
+    setBackendEnvironment(environment);
     setServerAddress(value);
     setStatus("ok");
-    setMessage(t("settings.savedAddress"));
+    setMessage(`${environment === "cloud" ? "Cloud" : "Local"} backend reachable and saved. A new sign-in may be required when switching environments.`);
   }
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-semibold text-onyx-text">{t("settings.serverConnection")}</h2>
-      <p className="mt-1 text-xs text-onyx-text-dim">
-        The address of the ONYX backend this app talks to. Change this if you're running
-        the Admin app on a different computer than the server — e.g. a LAN address like{" "}
-        <code className="rounded bg-onyx-bg px-1 py-0.5">{t("settings.lanAddress")}</code>{" "}
-        instead of <code className="rounded bg-onyx-bg px-1 py-0.5">{t("settings.localhostAddress")}</code>.
-      </p>
-
-      <div className="mt-3 flex gap-2">
-        <input
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setStatus("idle");
-          }}
-          placeholder={SERVER_ADDRESS_PLACEHOLDER}
-          className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
-        />
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={status === "testing"}
-          className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {status === "testing" ? t("auth.testing") : t("settings.testAndSave")}
-        </button>
+      <h2 className="text-sm font-semibold text-onyx-text">Backend connection</h2>
+      <p className="mt-1 text-xs text-onyx-text-dim">Choose which backend this Admin shell uses. Local is a development placeholder; Cloud targets the deployed ONYX API.</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Backend environment">
+        <button type="button" aria-pressed={environment === "local"} onClick={() => chooseEnvironment("local")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "local" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Local Backend</button>
+        <button type="button" aria-pressed={environment === "cloud"} onClick={() => chooseEnvironment("cloud")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "cloud" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Cloud Backend</button>
       </div>
-
-      {message && (
-        <p
-          className={`mt-2 text-xs ${
-            status === "error" ? "text-onyx-status-blocked" : "text-onyx-text-dim"
-          }`}
-        >
-          {message}
-        </p>
-      )}
+      <label htmlFor="backend-address" className="mt-3 block text-xs font-medium text-onyx-text-dim">{environment === "cloud" ? "Cloud API URL" : "Local API URL"}</label>
+      <div className="mt-1 flex flex-wrap gap-2">
+        <input id="backend-address" value={value} onChange={(e) => { setValue(e.target.value); setStatus("idle"); setMessage(null); }} placeholder={environment === "cloud" ? "https://onyx-api-docker.onrender.com" : "http://127.0.0.1:3000"} className="min-w-0 flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none" />
+        <button type="button" onClick={() => void handleSave()} disabled={status === "testing"} className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{status === "testing" ? "Checking…" : "Test & Save"}</button>
+      </div>
+      {message && <p role="status" className={`mt-2 text-xs ${status === "error" ? "text-onyx-status-blocked" : "text-onyx-text-dim"}`}>{message}</p>}
     </div>
   );
 }
