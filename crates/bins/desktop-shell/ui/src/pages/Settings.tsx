@@ -12,6 +12,21 @@ const ConnectionStatus = {
 
 type ConnectionStatus = (typeof ConnectionStatus)[keyof typeof ConnectionStatus];
 
+type BackendEnvironment = "local" | "cloud";
+const ENVIRONMENT_KEY = "onyx_staff_backend_environment";
+const LOCAL_ADDRESS_KEY = "onyx_staff_local_backend_address";
+const CLOUD_ADDRESS_KEY = "onyx_staff_cloud_backend_address";
+const LOCAL_DEFAULT = "http://127.0.0.1:3000";
+const CLOUD_DEFAULT = "https://onyx-api-docker.onrender.com";
+
+function readEnvironment(): BackendEnvironment {
+  return localStorage.getItem(ENVIRONMENT_KEY) === "local" ? "local" : "cloud";
+}
+function readAddress(environment: BackendEnvironment, currentAddress: string): string {
+  const key = environment === "local" ? LOCAL_ADDRESS_KEY : CLOUD_ADDRESS_KEY;
+  return localStorage.getItem(key) || (currentAddress.trim() ? currentAddress : environment === "local" ? LOCAL_DEFAULT : CLOUD_DEFAULT);
+}
+
 /**
  * Connection settings for the native Staff client. The server address belongs
  * to the persisted native session alongside server-specific tokens, unlike the
@@ -28,12 +43,20 @@ export default function Settings({
   const session = useSession();
   const { t } = useI18n();
   const navigate = useNavigate();
-  const [serverAddress, setServerAddress] = useState(session.serverAddress);
+  const [environment, setEnvironment] = useState<BackendEnvironment>(() => readEnvironment());
+  const [serverAddress, setServerAddress] = useState(() => readAddress(readEnvironment(), session.serverAddress));
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(ConnectionStatus.Idle);
   const [message, setMessage] = useState<string | null>(null);
   const [endingSession, setEndingSession] = useState(false);
 
   const normalizedAddress = normalizeServerAddress(serverAddress);
+
+  function chooseEnvironment(next: BackendEnvironment) {
+    setEnvironment(next);
+    setServerAddress(readAddress(next, session.serverAddress));
+    setConnectionStatus(ConnectionStatus.Idle);
+    setMessage(null);
+  }
   const changed = normalizedAddress !== session.serverAddress;
 
   async function testConnection(): Promise<boolean> {
@@ -89,8 +112,12 @@ export default function Settings({
           requires a new sign-in rather than reusing credentials from another server.
         </p>
 
-        <label htmlFor="serverAddress" className="mt-5 block text-xs font-medium text-onyx-text-dim">
-          {t("auth.serverAddress")}
+        <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Backend environment">
+          <button type="button" aria-pressed={environment === "local"} onClick={() => chooseEnvironment("local")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "local" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Local Backend</button>
+          <button type="button" aria-pressed={environment === "cloud"} onClick={() => chooseEnvironment("cloud")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "cloud" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Cloud Backend</button>
+        </div>
+        <label htmlFor="serverAddress" className="mt-3 block text-xs font-medium text-onyx-text-dim">
+          {environment === "cloud" ? "Cloud API URL" : "Local API URL"}
         </label>
         <input
           id="serverAddress"
@@ -100,7 +127,7 @@ export default function Settings({
             setConnectionStatus(ConnectionStatus.Idle);
             setMessage(null);
           }}
-          className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
+          placeholder={environment === "cloud" ? CLOUD_DEFAULT : LOCAL_DEFAULT}\n          className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <p className="mt-2 text-xs text-onyx-text-dim">
           {t("auth.serverAddressExample")}
