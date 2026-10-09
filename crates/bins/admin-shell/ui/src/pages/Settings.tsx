@@ -201,7 +201,7 @@ function ServerConnectionSettings() {
 
   async function testConnection(address: string): Promise<boolean> {
     try {
-      const response = await fetch(`${address.replace(/\\/+$/, "")}/health`, { signal: AbortSignal.timeout(5_000) });
+      const response = await fetch(`${address.replace(/\/+$/, "")}/health, { signal: AbortSignal.timeout(5_000) });
       return response.ok;
     } catch { return false; }
   }
