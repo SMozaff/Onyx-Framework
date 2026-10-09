@@ -197,11 +197,23 @@ function ServerConnectionSettings() {
     setMessage(null);
   }
 
-  async function testConnection(address: string): Promise<boolean> {
+  async function testConnection(address: string): Promise<{ ok: boolean; message?: string }> {
+    const endpoint = `${address.trim().replace(/\/+$/, "")}/health`;
     try {
-      const response = await fetch(`${address.replace(/\/+$/, "")}/health`, { signal: AbortSignal.timeout(5_000) });
-      return response.ok;
-    } catch { return false; }
+      const response = await fetch(endpoint, { signal: AbortSignal.timeout(8_000), mode: "cors" });
+      if (!response.ok) {
+        return { ok: false, message: `Health endpoint returned HTTP ${response.status}. Check the deployed API and its health route.` };
+      }
+      return { ok: true };
+    } catch (error) {
+      const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+      return {
+        ok: false,
+        message: timedOut
+          ? "The health check timed out after 8 seconds."
+          : "The API may be running, but this app could not read its health response. Check CORS: ONYX_CORS_ALLOWED_ORIGINS must include this app's exact origin. DNS, TLS, or network failures can produce the same browser error.",
+      };
+    }
   }
 
   async function handleSave() {
@@ -214,10 +226,10 @@ function ServerConnectionSettings() {
       return;
     }
     setStatus("testing"); setMessage(null);
-    const reachable = await testConnection(value);
-    if (!reachable) {
+    const result = await testConnection(value);
+    if (!result.ok) {
       setStatus("error");
-      setMessage(t("settings.backendUnreachable"));
+      setMessage(result.message ?? t("settings.backendUnreachable"));
       return;
     }
     setBackendEnvironment(environment);
