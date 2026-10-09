@@ -1,60 +1,68 @@
+import { Container } from "@cloudflare/containers";
+
 interface Env {
-  ONYX_ORIGIN_URL: string;
+  ONYX_API: DurableObjectNamespace<OnyxApiContainer>;
+  DATABASE_URL: string;
+  ONYX_GOVERNANCE_DATABASE_URL: string;
+  ONYX_AUTHORITY_SIGNING_KEY: string;
+  ONYX_CORS_ALLOWED_ORIGINS: string;
+  CLERK_ISSUER: string;
+  CLERK_SECRET_KEY: string;
+  CLERK_JWKS_URL: string;
+  ONYX_BLOB_STORE_S3_ACCESS_KEY_ID: string;
+  ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY: string;
 }
 
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-]);
+const CONTAINER_ENV_KEYS = [
+  "DATABASE_URL",
+  "ONYX_GOVERNANCE_DATABASE_URL",
+  "ONYX_AUTHORITY_SIGNING_KEY",
+  "ONYX_CORS_ALLOWED_ORIGINS",
+  "CLERK_ISSUER",
+  "CLERK_SECRET_KEY",
+  "CLERK_JWKS_URL",
+  "ONYX_BLOB_STORE_S3_ACCESS_KEY_ID",
+  "ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY",
+] as const;
 
-function originRequest(request: Request, origin: URL): Request {
-  const headers = new Headers(request.headers);
-  headers.delete("host");
+type ContainerEnv = Record<string, string>;
 
-  return new Request(origin, {
-    method: request.method,
-    headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
-    redirect: "manual",
-  });
+export class OnyxApiContainer extends Container {
+  defaultPort = 10000;
+  sleepAfter = "30m";
+  enableInternet = true;
+  pingEndpoint = "container/ready";
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+
+    const containerEnv: ContainerEnv = {
+      ONYX_ENV: "production",
+      ONYX_BIND: "0.0.0.0:10000",
+      ONYX_METRICS_BIND: "127.0.0.1:9090",
+      RUST_LOG: "info",
+      ONYX_BLOB_STORE_BACKEND: "huggingface",
+      ONYX_BLOB_STORE_S3_ENDPOINT: "https://s3.hf.co/Arronthemalkavian",
+      ONYX_BLOB_STORE_S3_BUCKET: "onyx",
+    };
+
+    for (const key of CONTAINER_ENV_KEYS) {
+      const value = env[key];
+      if (value) {
+        containerEnv[key] = value;
+      }
+    }
+
+    this.envVars = containerEnv;
+  }
+
+  override onError(error: unknown): void {
+    console.error("ONYX API container error", error);
+  }
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const origin = new URL(env.ONYX_ORIGIN_URL);
-    const incoming = new URL(request.url);
-
-    if (origin.protocol !== "https:") {
-      return new Response("ONYX_ORIGIN_URL must use https", { status: 500 });
-    }
-
-    origin.pathname = incoming.pathname;
-    origin.search = incoming.search;
-
-    const upstream = await fetch(originRequest(request, origin));
-
-    // A 101 response carries the upstream WebSocket endpoint in the Response
-    // object. Return it directly rather than reconstructing the response,
-    // otherwise the WebSocket handoff is lost.
-    if (upstream.status === 101) {
-      return upstream;
-    }
-
-    const headers = new Headers(upstream.headers);
-
-    for (const header of HOP_BY_HOP_HEADERS) {
-      headers.delete(header);
-    }
-
-    return new Response(upstream.body, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers,
-    });
+    return env.ONYX_API.getByName("production").fetch(request);
   },
-};
+} satisfies ExportedHandler<Env>;
