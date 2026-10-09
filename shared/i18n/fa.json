@@ -528,6 +528,7 @@
   "settings.returnToDashboard": "بازگشت به داشبورد",
   "settings.savedAddress": "ذخیره شد. این برنامه اکنون از این نشانی برای همه درخواست‌ها استفاده می‌کند.",
   "settings.serverConnection": "اتصال سرور",
+  "settings.signingOut": "در حال خروج…",
   "settings.testAndSave": "آزمون و ذخیره",
   "settings.testConnection": "آزمایش اتصال",
   "settings.testConnectionAndSave": "آزمون اتصال و ذخیره",
