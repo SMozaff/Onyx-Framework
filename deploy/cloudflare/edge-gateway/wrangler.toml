@@ -1,15 +1,10 @@
 name = "onyx-framework"
 main = "src/index.ts"
 compatibility_date = "2026-10-09"
+workers_dev = true
 
-# No ONYX_ORIGIN_URL is used. This Worker is the application boundary.
-# Create the free D1 database with `npm run d1:create`, then replace the
-# placeholder below with the database_id returned by Wrangler.
-#
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "onyx-free-db"
-# database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+# The deployment workflow materializes the D1 database_id at deploy time.
+# This Worker has no Render origin and does not use Cloudflare Containers.
 
 [observability]
 enabled = true
