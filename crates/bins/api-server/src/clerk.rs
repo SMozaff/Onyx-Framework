@@ -425,7 +425,6 @@ pub async fn login(
     }))
 }
 
-
 fn normalize_issuer(issuer: &str) -> String {
     issuer.trim().trim_end_matches('/').to_owned()
 }
