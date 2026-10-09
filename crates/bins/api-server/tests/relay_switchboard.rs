@@ -12,6 +12,7 @@ use futures_util::{SinkExt, StreamExt};
 use platform_kernel::{ObjectId, ReplicaId, SchemaVersion, Timestamp};
 use sync_transport::{message::MessageId, SyncMessage, SyncMessageType};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use security_application::NewUser;
 
 /// Boots an api-server on an ephemeral port against a throwaway SQLite file
 /// and authenticates its intentionally seeded test-drive administrator.
@@ -25,6 +26,28 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+
+    // The All-Father authority is now passwordless and authenticates through
+    // the external identity provider. Integration tests must provision their
+    // own deterministic password account instead of depending on that flow.
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: "onyx-relay-test-admin".to_string(),
+            organization_id: api_server::routes::ORGANIZATION_ID.to_string(),
+            password_hash: state
+                .password_hasher
+                .hash("onyx-relay-test-password")
+                .expect("test admin password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated relay test administrator");
+
     let app = api_server::routes::router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -38,7 +61,7 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
 
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .json(&serde_json::json!({"username": "onyx-relay-test-admin", "password": "onyx-relay-test-password"}))
         .send()
         .await
         .expect("login request")
