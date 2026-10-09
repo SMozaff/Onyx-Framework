@@ -24,7 +24,9 @@ function readEnvironment(): BackendEnvironment {
 }
 function readAddress(environment: BackendEnvironment, currentAddress: string): string {
   const key = environment === "local" ? LOCAL_ADDRESS_KEY : CLOUD_ADDRESS_KEY;
-  return localStorage.getItem(key) || (currentAddress.trim() ? currentAddress : environment === "local" ? LOCAL_DEFAULT : CLOUD_DEFAULT);
+  const savedEnvironment = readEnvironment();
+  const canReuseCurrentAddress = environment === savedEnvironment && currentAddress.trim().length > 0;
+  return localStorage.getItem(key) || (canReuseCurrentAddress ? currentAddress : environment === "local" ? LOCAL_DEFAULT : CLOUD_DEFAULT);
 }
 
 /**

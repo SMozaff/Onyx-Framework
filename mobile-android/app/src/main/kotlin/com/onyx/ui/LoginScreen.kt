@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,7 +43,12 @@ fun LoginScreen(
     errorMessage: String?,
     onLogin: (serverAddress: String, username: String, password: String) -> Unit,
 ) {
-    var serverAddress by remember { mutableStateOf(defaultServerAddress) }
+    val cloudDefault = "https://onyx-api-docker.onrender.com"
+    val localDefault = "http://10.0.2.2:3000"
+    var environment by remember { mutableStateOf(if (defaultServerAddress.startsWith("https://") || defaultServerAddress.isBlank()) "cloud" else "local") }
+    var localAddress by remember { mutableStateOf(if (defaultServerAddress.startsWith("https://") || defaultServerAddress.isBlank()) localDefault else defaultServerAddress) }
+    var cloudAddress by remember { mutableStateOf(if (defaultServerAddress.startsWith("https://") || defaultServerAddress.isBlank()) defaultServerAddress.ifBlank { cloudDefault } else cloudDefault) }
+    var serverAddress by remember { mutableStateOf(defaultServerAddress.ifBlank { cloudDefault }) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
@@ -68,10 +74,33 @@ fun LoginScreen(
                 androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
             }
 
+            androidx.compose.foundation.layout.Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        environment = "local"
+                        serverAddress = localAddress
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(if (environment == "local") "✓ Local Backend" else "Local Backend") }
+                OutlinedButton(
+                    onClick = {
+                        environment = "cloud"
+                        serverAddress = cloudAddress
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(if (environment == "cloud") "✓ Cloud Backend" else "Cloud Backend") }
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(4.dp))
             OutlinedTextField(
                 value = serverAddress,
-                onValueChange = { serverAddress = it },
-                label = { Text("Server address") },
+                onValueChange = {
+                    serverAddress = it
+                    if (environment == "local") localAddress = it else cloudAddress = it
+                },
+                label = { Text(if (environment == "cloud") "Cloud API URL" else "Local API URL (emulator uses 10.0.2.2)") },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 singleLine = true,
