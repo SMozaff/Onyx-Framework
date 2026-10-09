@@ -46,7 +46,6 @@ jobs:
           test -n "${CLOUDFLARE_ACCOUNT_ID}" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
           test -n "${CLOUDFLARE_API_TOKEN}" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "${CLERK_ISSUER}" || { echo "Missing CLERK_ISSUER"; exit 1; }
-          test -n "${CLERK_JWKS_URL}" || { echo "Missing CLERK_JWKS_URL"; exit 1; }
           test -n "${CLERK_SECRET_KEY}" || { echo "Missing CLERK_SECRET_KEY"; exit 1; }
 
       - name: Setup Node
