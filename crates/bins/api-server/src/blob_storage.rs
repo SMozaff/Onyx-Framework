@@ -44,6 +44,30 @@ pub async fn build(config: &AppConfig) -> anyhow::Result<Arc<dyn BlobStore>> {
             Ok(Arc::new(store))
         }
         "huggingface" | "huggingface_s3" => {
+            let required = [
+                "ONYX_BLOB_STORE_S3_ENDPOINT",
+                "ONYX_BLOB_STORE_S3_BUCKET",
+                "ONYX_BLOB_STORE_S3_ACCESS_KEY_ID",
+                "ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY",
+            ];
+            let missing = required
+                .iter()
+                .filter(|name| env::var(name).map(|value| value.trim().is_empty()).unwrap_or(true))
+                .copied()
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                anyhow::bail!(
+                    "{}",
+                    missing
+                        .iter()
+                        .map(|name| format!(
+                            "{name} is required for Hugging Face blob storage — set this in your deployment secrets (Render dashboard: Environment → Secret Files, or Helm secretRef: onyx-api-secrets)"
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                );
+            }
+
             let endpoint = required_env("ONYX_BLOB_STORE_S3_ENDPOINT")?;
             let bucket = required_env("ONYX_BLOB_STORE_S3_BUCKET")?;
             let access_key = required_env("ONYX_BLOB_STORE_S3_ACCESS_KEY_ID")?;
@@ -63,5 +87,7 @@ pub async fn build(config: &AppConfig) -> anyhow::Result<Arc<dyn BlobStore>> {
 }
 
 fn required_env(name: &str) -> anyhow::Result<String> {
-    env::var(name).with_context(|| format!("{name} is required for Hugging Face blob storage"))
+    env::var(name).with_context(|| format!(
+        "{name} is required for Hugging Face blob storage — set this in your deployment secrets (Render dashboard: Environment → Secret Files, or Helm secretRef: onyx-api-secrets)"
+    ))
 }
