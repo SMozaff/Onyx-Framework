@@ -15,19 +15,22 @@ concurrency:
   group: onyx-cloudflare-worker-production
   cancel-in-progress: false
 
+env:
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  ONYX_JWT_SECRET: ${{ secrets.ONYX_JWT_SECRET }}
+  HF_S3_ACCESS_KEY_ID: ${{ secrets.HF_S3_ACCESS_KEY_ID }}
+  HF_S3_SECRET_ACCESS_KEY: ${{ secrets.HF_S3_SECRET_ACCESS_KEY }}
+  ONYX_WORKER_URL: https://onyx-framework.soheil-mozaffari.workers.dev
+
 jobs:
   deploy:
     name: Deploy ONYX Cloudflare Worker + D1
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: deploy/cloudflare/edge-gateway
-    env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      ONYX_JWT_SECRET: ${{ secrets.ONYX_JWT_SECRET }}
-      HF_S3_ACCESS_KEY_ID: ${{ secrets.HF_S3_ACCESS_KEY_ID }}
-      HF_S3_SECRET_ACCESS_KEY: ${{ secrets.HF_S3_SECRET_ACCESS_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -48,6 +51,9 @@ jobs:
 
       - name: Install Worker dependencies
         run: npm install
+
+      - name: Validate Worker bundle
+        run: npm run check
 
       - name: Ensure free D1 database exists
         id: d1
@@ -111,14 +117,29 @@ jobs:
       - name: Deploy Worker
         run: npx wrangler deploy --config wrangler.deploy.toml
 
-      - name: Verify Worker deployment
+      - name: Verify live Worker health and D1 readiness
         shell: bash
-        env:
-          CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}
         run: |
           set -euo pipefail
-          if [ -n "${CLOUDFLARE_WORKERS_SUBDOMAIN}" ]; then
-            curl --fail --retry 3 --retry-delay 2 --max-time 30 "https://onyx-framework.${CLOUDFLARE_WORKERS_SUBDOMAIN}.workers.dev/ready"
-          else
-            echo "CLOUDFLARE_WORKERS_SUBDOMAIN not configured; deployment completed without external smoke URL."
-          fi
+          for i in {1..30}; do
+            health="$(curl -fsS --max-time 10 "${ONYX_WORKER_URL}/health" || true)"
+            ready="$(curl -sS -o /tmp/onyx-ready.json -w '%{http_code}' --max-time 10 "${ONYX_WORKER_URL}/ready" || true)"
+            if printf '%s' "$health" | jq -e '.status == "ok" and .runtime == "cloudflare-workers-free"' >/dev/null 2>&1 && [ "$ready" = "200" ]; then
+              echo "Cloudflare Worker is healthy and D1 is ready."
+              cat /tmp/onyx-ready.json
+              exit 0
+            fi
+            echo "Attempt $i/30: health=$health ready=$ready"
+            sleep 10
+          done
+          echo "::error::Cloudflare Worker did not become healthy within 5 minutes."
+          cat /tmp/onyx-ready.json 2>/dev/null || true
+          exit 1
+
+      - name: Verify protected API rejects anonymous access
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -o /tmp/onyx-api-error.json -w '%{http_code}' --max-time 10 "${ONYX_WORKER_URL}/api/users/hierarchy")"
+          test "$status" = "401"
+          cat /tmp/onyx-api-error.json
