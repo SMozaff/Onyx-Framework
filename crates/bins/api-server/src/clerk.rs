@@ -92,7 +92,7 @@ impl ClerkAuth {
             .ok()
             .filter(|value| !value.trim().is_empty())
         {
-            Some(value) => value.trim_end_matches('/').to_owned(),
+            Some(value) => normalize_issuer(&value),
             None => return Ok(None),
         };
 
@@ -423,4 +423,25 @@ pub async fn login(
             class: user.class.map(|class| class.as_str().to_owned()),
         },
     }))
+}
+
+
+fn normalize_issuer(issuer: &str) -> String {
+    issuer.trim().trim_end_matches('/').to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_issuer;
+
+    #[test]
+    fn issuer_trailing_slash_is_removed_before_jwks_fallback_derivation() {
+        let issuer = normalize_issuer("https://example.clerk.accounts.dev/");
+        let jwks_url = format!("{issuer}/.well-known/jwks.json");
+        assert_eq!(issuer, "https://example.clerk.accounts.dev");
+        assert_eq!(
+            jwks_url,
+            "https://example.clerk.accounts.dev/.well-known/jwks.json"
+        );
+    }
 }
