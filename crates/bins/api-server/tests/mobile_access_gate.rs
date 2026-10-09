@@ -79,7 +79,8 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
 
     // Use the dedicated administrator created by start_server; the
     // All-Father identity is passwordless and reserved for Clerk login.
-    let admin_login_resp = login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, None).await;
+    let admin_login_resp =
+        login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, None).await;
     assert_eq!(
         admin_login_resp.status(),
         200,
@@ -91,8 +92,14 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
     // Admin logging in with client_type "mobile" must succeed even
     // though no mobile_class_access row exists yet -- Admin bypasses
     // this gate entirely.
-    let admin_mobile_login =
-        login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, Some("mobile")).await;
+    let admin_mobile_login = login(
+        &http,
+        &base,
+        TEST_ADMIN_USERNAME,
+        TEST_ADMIN_PASSWORD,
+        Some("mobile"),
+    )
+    .await;
     assert_eq!(
         admin_mobile_login.status(),
         200,
@@ -218,11 +225,12 @@ async fn excluded_class_denied_on_mobile_allowed_on_desktop_granted_class_allowe
     let (addr, http) = start_server("gate-two-classes").await;
     let base = format!("http://{addr}");
 
-    let admin_login: serde_json::Value = login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, None)
-        .await
-        .json()
-        .await
-        .unwrap();
+    let admin_login: serde_json::Value =
+        login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, None)
+            .await
+            .json()
+            .await
+            .unwrap();
     let admin_token = admin_login["access_token"].as_str().unwrap().to_string();
 
     // Grant only "supervisor" mobile access up front; "staff" is never
