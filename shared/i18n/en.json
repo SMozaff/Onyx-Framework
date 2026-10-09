@@ -528,6 +528,7 @@
   "settings.returnToDashboard": "Return to dashboard",
   "settings.savedAddress": "Saved. This app will now use this address for all requests.",
   "settings.serverConnection": "Server connection",
+  "settings.signingOut": "Signing out…",
   "settings.testAndSave": "Test & Save",
   "settings.testConnection": "Test connection",
   "settings.testConnectionAndSave": "Test connection and save",
