@@ -1,0 +1,10 @@
+name = "onyx-framework"
+main = "src/index.ts"
+compatibility_date = "2026-10-09"
+workers_dev = true
+
+# The deployment workflow materializes the D1 database_id at deploy time.
+# This Worker has no Render origin and does not use Cloudflare Containers.
+
+[observability]
+enabled = true

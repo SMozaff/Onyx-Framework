@@ -3,7 +3,7 @@ const LOCAL_ADDRESS_KEY = "onyx_local_backend_address";
 const CLOUD_ADDRESS_KEY = "onyx_cloud_backend_address";
 const LEGACY_ADDRESS_KEY = "onyx_admin_server_address";
 const LOCAL_DEFAULT = "http://127.0.0.1:3000";
-const CLOUD_DEFAULT = "https://onyx-api-docker.onrender.com";
+const CLOUD_DEFAULT = "https://onyx-framework.soheil-mozaffari.workers.dev";
 export type BackendEnvironment = "local" | "cloud";
 
 export function getBackendEnvironment(): BackendEnvironment {
@@ -23,9 +23,7 @@ export function getBackendAddress(environment: BackendEnvironment = getBackendEn
   }
   return import.meta.env.VITE_API_BASE ?? CLOUD_DEFAULT;
 }
-export function getServerAddress(): string {
-  return getBackendAddress();
-}
+export function getServerAddress(): string { return getBackendAddress(); }
 export function setServerAddress(address: string): void {
   const trimmed = address.trim().replace(/\/+$/, "");
   localStorage.setItem(getBackendEnvironment() === "local" ? LOCAL_ADDRESS_KEY : CLOUD_ADDRESS_KEY, trimmed);
@@ -35,17 +33,12 @@ export function hasStoredServerAddress(): boolean {
   return localStorage.getItem(getBackendEnvironment() === "local" ? LOCAL_ADDRESS_KEY : CLOUD_ADDRESS_KEY) !== null;
 }
 export function isPlausibleServerAddress(address: string): boolean {
-  const trimmed = address.trim();
-  if (!trimmed) return false;
-  return /^https?:\/\/.+/i.test(trimmed);
+  const trimmed = address.trim(); if (!trimmed) return false; return /^https?:\/\/.+/i.test(trimmed);
 }
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-}
+function isLoopbackHost(hostname: string): boolean { return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1"; }
 export function isSecureEnoughForProduction(address: string): boolean {
   if (!import.meta.env.PROD) return true;
-  let parsed: URL;
-  try { parsed = new URL(address); } catch { return false; }
+  let parsed: URL; try { parsed = new URL(address); } catch { return false; }
   if (parsed.protocol === "https:") return true;
   return parsed.protocol === "http:" && isLoopbackHost(parsed.hostname);
 }

@@ -1,0 +1,56 @@
+name: Migrate ONYX Worker Clerk auth to Supabase
+
+on:
+  push:
+    branches: [migration/cloudflare-free-worker]
+    paths:
+      - 'scripts/migrate-worker-clerk-to-supabase.py'
+      - 'deploy/cloudflare/edge-gateway/src/supabase.ts'
+      - 'deploy/cloudflare/edge-gateway/src/index.ts'
+      - 'deploy/cloudflare/edge-gateway/migrations/0003_supabase_identity.sql'
+      - '.github/workflows/migrate-worker-to-supabase.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: onyx-supabase-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[supabase-migration]') }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/cloudflare/edge-gateway
+    steps:
+      - name: Checkout migration branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: migration/cloudflare-free-worker
+
+      - name: Apply deterministic Worker source migration
+        working-directory: .
+        run: python3 scripts/migrate-worker-clerk-to-supabase.py
+
+      - name: Install Worker dependencies
+        run: npm install
+
+      - name: Validate migrated Worker bundle
+        run: npm run check
+
+      - name: Commit migrated Worker
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No source changes were required."
+            exit 0
+          fi
+          git config user.name "ONYX Supabase Migration"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/cloudflare/edge-gateway/src/index.ts deploy/cloudflare/edge-gateway/src/supabase.ts deploy/cloudflare/edge-gateway/migrations/0003_supabase_identity.sql scripts/migrate-worker-clerk-to-supabase.py .github/workflows/migrate-worker-to-supabase.yml
+          git commit -m "feat(auth): migrate Cloudflare Worker from Clerk to Supabase [supabase-migration]"
+          git push origin migration/cloudflare-free-worker
