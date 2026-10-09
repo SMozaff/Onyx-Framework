@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use api_server::routes::ApiState;
 use query_application::BlobKey;
+use security_application::NewUser;
 
 /// Starts a real HTTP server, returning `(addr, base, blob_store)` — the
 /// blob store handle is kept so a test can seed content before downloading
@@ -37,6 +38,29 @@ async fn start_server(
     let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
     let state = ApiState::new(&database_url).await.expect("api state");
+
+    // All-Father is passwordless and authenticates through the external
+    // identity provider. These route tests need deterministic password login,
+    // so provision a dedicated test administrator rather than relying on the
+    // production authority principal.
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: "observer-read-test-admin".to_string(),
+            organization_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            password_hash: state
+                .password_hasher
+                .hash("observer-read-test-password")
+                .expect("test admin password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated observer-read test administrator");
+
     let blob_store = state.blob_store.clone();
     let app = api_server::routes::router(state);
 
@@ -104,8 +128,8 @@ async fn observer_can_register_and_delete_a_push_subscription() {
         &http,
         &base,
         "mobile_observer",
-        "All-Father",
-        "passvord0000",
+        "observer-read-test-admin",
+        "observer-read-test-password",
     )
     .await;
 
@@ -263,8 +287,8 @@ async fn observer_can_download_stored_content_and_errors_match() {
         &http,
         &base,
         "mobile_observer",
-        "All-Father",
-        "passvord0000",
+        "observer-read-test-admin",
+        "observer-read-test-password",
     )
     .await;
 
