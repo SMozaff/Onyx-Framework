@@ -1,4 +1,4 @@
-import { argon2Verify } from "hash-wasm";
+import { argon2id, argon2Verify } from "hash-wasm";
 
 type Json = Record<string, unknown>;
 
@@ -6,6 +6,10 @@ interface Env {
   DB: D1Database;
   ONYX_JWT_SECRET?: string;
   ONYX_CORS_ORIGINS?: string;
+  ONYX_ALLFATHER_EMAIL?: string;
+  CLERK_ISSUER?: string;
+  CLERK_JWKS_URL?: string;
+  CLERK_SECRET_KEY?: string;
   HF_S3_ENDPOINT?: string;
   HF_S3_BUCKET?: string;
   HF_S3_ACCESS_KEY_ID?: string;
@@ -18,6 +22,7 @@ interface Session {
   organization_id: string;
   is_admin: boolean;
   class: string | null;
+  role: string;
   client_type: string;
   exp: number;
   jti: string;
@@ -25,6 +30,7 @@ interface Session {
 }
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+const ALLFATHER_EMAIL = "so.muzaff@gmail.com";
 const OBSERVER_QUERIES: Record<string, string> = {
   "mission.list":"mission", "mission.detail":"mission", "task.list":"task", "task.detail":"task",
   "timeline.list":"*", "notification.list":"notification", "approval.list":"approval", "report.detail":"report",
@@ -49,6 +55,9 @@ function b64u(value: Uint8Array | string): string {
 function fromB64u(value: string): Uint8Array {
   const normalized = value.replace(/-/g,"+").replace(/_/g,"/") + "=".repeat((4-(value.length%4))%4);
   const binary = atob(normalized); return Uint8Array.from(binary,(c)=>c.charCodeAt(0));
+}
+function decodeJsonB64u(value: string): Json {
+  return JSON.parse(new TextDecoder().decode(fromB64u(value))) as Json;
 }
 async function hmac(secret:string,data:string):Promise<Uint8Array>{
   const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(secret),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
@@ -80,25 +89,109 @@ async function verifyPassword(password:string,encoded:string):Promise<boolean>{
   if(!encoded.startsWith("$argon2id$")) return false;
   try { return await argon2Verify({password,hash:encoded}); } catch { return false; }
 }
+async function hashPassword(password:string):Promise<string>{
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  return String(await argon2id({password,salt,parallelism:1,iterations:3,memorySize:65536,hashLength:32,outputType:"encoded"}));
+}
 function clientType(payload:Json){return typeof payload.client_type==="string"?payload.client_type:"web";}
+function roleForUser(user:Record<string,unknown>):string{
+  const explicit=typeof user.role==="string"?user.role:"";
+  if(explicit) return explicit;
+  if(String(user.username).toLowerCase()==="allfather") return "ALL_FATHER";
+  return Boolean(user.is_admin) ? "ORGANIZATION_ADMIN" : "STAFF";
+}
 async function issuePair(env:Env,user:Record<string,unknown>,type:string){
-  const base={sub:String(user.id),username:String(user.username),organization_id:String(user.organization_id),is_admin:Boolean(user.is_admin),class:(user.class as string|null)??null,client_type:type};
+  const role=roleForUser(user);
+  const base={sub:String(user.id),username:String(user.username),organization_id:String(user.organization_id),is_admin:Boolean(user.is_admin),class:(user.class as string|null)??null,role,client_type:type};
   const access=await jwtSign(env,{...base,exp:now()+3600,typ:"access"}); const refresh=await jwtSign(env,{...base,exp:now()+7*86400,typ:"refresh"});
-  return {access_token:access,refresh_token:refresh,expires_in:3600,user:{id:user.id,username:user.username,organization_id:user.organization_id,is_admin:Boolean(user.is_admin),class:user.class??null}};
+  return {access_token:access,refresh_token:refresh,expires_in:3600,user:{id:user.id,username:user.username,email:user.email??null,organization_id:user.organization_id,is_admin:Boolean(user.is_admin),class:user.class??null,role}};
 }
 async function authLogin(request:Request,env:Env){
   const body=await request.json().catch(()=>null) as Json|null;
-  if(!body||typeof body.username!=="string"||typeof body.password!=="string")return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  const user=await env.DB.prepare("SELECT id,username,organization_id,password_hash,is_admin,is_active,class FROM users WHERE LOWER(username)=LOWER(?) LIMIT 1").bind(body.username).first<Record<string,unknown>>();
-  const valid=Boolean(user?.is_active)&&typeof user?.password_hash==="string"&&await verifyPassword(body.password,String(user.password_hash));
+  const identifier=typeof body?.username==="string"?body.username.trim():"";
+  const password=typeof body?.password==="string"?body.password:"";
+  if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  const user=await env.DB.prepare("SELECT id,username,email,organization_id,password_hash,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
+  const valid=Boolean(user?.is_active)&&roleForUser(user)!=="ALL_FATHER"&&typeof user?.password_hash==="string"&&await verifyPassword(password,String(user.password_hash));
   if(!valid)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   return json(await issuePair(env,user,clientType(body)));
 }
 async function authRefresh(request:Request,env:Env){
   const body=await request.json().catch(()=>null) as Json|null; const token=typeof body?.refresh_token==="string"?body.refresh_token:"";
-  try{const claims=await jwtVerify(env,token);if(claims.typ!=="refresh")throw new Error("wrong token type");const user=await env.DB.prepare("SELECT id,username,organization_id,is_admin,is_active,class FROM users WHERE id=? LIMIT 1").bind(claims.sub).first<Record<string,unknown>>();if(!user?.is_active)throw new Error("inactive");await env.DB.prepare("INSERT OR IGNORE INTO token_revocations(token_hash,revoked_at) VALUES(?,?)").bind(await sha256(token),now()).run();return json(await issuePair(env,user,claims.client_type));}catch{return json({error:"INVALID_REFRESH_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
+  try{const claims=await jwtVerify(env,token);if(claims.typ!=="refresh")throw new Error("wrong token type");const user=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,class,role FROM users WHERE id=? LIMIT 1").bind(claims.sub).first<Record<string,unknown>>();if(!user?.is_active)throw new Error("inactive");await env.DB.prepare("INSERT OR IGNORE INTO token_revocations(token_hash,revoked_at) VALUES(?,?)").bind(await sha256(token),now()).run();return json(await issuePair(env,user,claims.client_type));}catch{return json({error:"INVALID_REFRESH_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
 }
 async function authLogout(request:Request,env:Env){const token=authorization(request);const body=await request.json().catch(()=>({})) as Json;for(const value of [token,typeof body.refresh_token==="string"?body.refresh_token:null].filter((x):x is string=>Boolean(x)))await env.DB.prepare("INSERT OR IGNORE INTO token_revocations(token_hash,revoked_at) VALUES(?,?)").bind(await sha256(value),now()).run();return json({success:true});}
+
+function clerkIssuer(env:Env){return (env.CLERK_ISSUER??"").replace(/\/$/,"");}
+function clerkJwksUrl(env:Env){return env.CLERK_JWKS_URL||`${clerkIssuer(env)}/.well-known/jwks.json`;}
+async function verifyClerkToken(env:Env,token:string):Promise<Json>{
+  if(!token)throw new Error("CLERK_TOKEN_REQUIRED");
+  const parts=token.split(".");if(parts.length!==3)throw new Error("invalid clerk token");
+  const header=decodeJsonB64u(parts[0]);const payload=decodeJsonB64u(parts[1]);
+  if(header.alg!=="RS256"||typeof header.kid!=="string")throw new Error("invalid clerk algorithm");
+  const issuer=clerkIssuer(env);if(!issuer||payload.iss!==issuer)throw new Error("invalid clerk issuer");
+  const exp=Number(payload.exp??0),nbf=Number(payload.nbf??0);if(!payload.sub||!exp||exp<=now()||(nbf&&nbf>now()+30))throw new Error("invalid clerk claims");
+  const response=await fetch(clerkJwksUrl(env),{headers:{"accept":"application/json"}});
+  if(!response.ok)throw new Error("clerk jwks unavailable");
+  const jwks=await response.json() as {keys?:Json[]};const jwk=jwks.keys?.find(key=>key.kid===header.kid);
+  if(!jwk)throw new Error("clerk signing key not found");
+  const key=await crypto.subtle.importKey("jwk",jwk as Json,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["verify"]);
+  const verified=await crypto.subtle.verify("RSASSA-PKCS1-v1_5",key,fromB64u(parts[2]),new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+  if(!verified)throw new Error("invalid clerk signature");
+  return payload;
+}
+async function clerkUserEmail(env:Env,subject:string):Promise<string>{
+  if(!env.CLERK_SECRET_KEY)throw new Error("CLERK_SECRET_KEY is not configured");
+  const response=await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(subject)}`,{headers:{Authorization:`Bearer ${env.CLERK_SECRET_KEY}`,accept:"application/json"}});
+  if(!response.ok)throw new Error("clerk user lookup failed");
+  const user=await response.json() as {primary_email_address_id?:string|null;email_addresses?:Array<{id?:string;email_address?:string;verification?:{status?:string}}>} ;
+  const primary=user.email_addresses?.find(item=>item.id===user.primary_email_address_id&&item.verification?.status==="verified");
+  if(!primary?.email_address)throw new Error("verified primary email required");
+  return primary.email_address.toLowerCase();
+}
+async function authClerkAllFather(request:Request,env:Env){
+  const token=authorization(request);const claims=await verifyClerkToken(env,token??"");const email=await clerkUserEmail(env,String(claims.sub));
+  const expected=(env.ONYX_ALLFATHER_EMAIL||ALLFATHER_EMAIL).trim().toLowerCase();
+  if(email!==expected)return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const user=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER('allfather') LIMIT 1").first<Record<string,unknown>>();
+  if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  return json(await issuePair(env,user,"allfather"));
+}
+
+function requireRole(session:Session,...roles:string[]){if(!roles.includes(session.role))throw new Error("FORBIDDEN_ROLE");}
+function requiredString(body:Json,key:string):string{const value=body[key];if(typeof value!=="string"||!value.trim())throw new Error(`INVALID_${key.toUpperCase()}`);return value.trim();}
+function optionalEmail(body:Json):string|null{const value=typeof body.email==="string"?body.email.trim().toLowerCase():null;return value||null;}
+async function createOrganization(request:Request,env:Env,session:Session){
+  requireRole(session,"ALL_FATHER");const body=await request.json().catch(()=>null) as Json|null;if(!body)throw new Error("INVALID_BODY");
+  const name=requiredString(body,"name");const id=typeof body.id==="string"&&body.id.trim()?body.id.trim():uuid();const timestamp=Date.now();
+  try{await env.DB.prepare("INSERT INTO organizations(id,name,is_active,created_at,updated_at) VALUES(?,?,1,?,?)").bind(id,name,timestamp,timestamp).run();await audit(env,session,"organization.create",id,{name});return json({id,name,is_active:true});}catch{return json({error:"ORGANIZATION_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);}
+}
+async function createUser(request:Request,env:Env,session:Session,targetRole:"ORGANIZATION_ADMIN"|"STAFF"){
+  requireRole(session,targetRole==="ORGANIZATION_ADMIN"?"ALL_FATHER":"ORGANIZATION_ADMIN");
+  const body=await request.json().catch(()=>null) as Json|null;if(!body)throw new Error("INVALID_BODY");
+  const username=requiredString(body,"username"),password=requiredString(body,"password"),email=optionalEmail(body);
+  if(password.length<8)throw new Error("PASSWORD_TOO_SHORT");
+  const organizationId=targetRole==="STAFF"?session.organization_id:requiredString(body,"organization_id");
+  const org=await env.DB.prepare("SELECT id FROM organizations WHERE id=? AND is_active=1 LIMIT 1").bind(organizationId).first();
+  if(!org)throw new Error("ORGANIZATION_NOT_FOUND");
+  const existing=await env.DB.prepare("SELECT id FROM users WHERE LOWER(username)=LOWER(?) OR (? IS NOT NULL AND LOWER(email)=LOWER(?)) LIMIT 1").bind(username,email,email).first();
+  if(existing)return json({error:"USER_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
+  const id=uuid(),timestamp=Date.now(),hash=await hashPassword(password),isAdmin=targetRole==="ORGANIZATION_ADMIN"?1:0,parent=targetRole==="STAFF"?session.sub:"__allfather__";
+  await env.DB.prepare("INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,username,email,organizationId,hash,isAdmin,1,targetRole,targetRole,parent,timestamp,timestamp).run();
+  await audit(env,session,targetRole==="STAFF"?"staff.create":"admin.create",id,{username,email,organization_id:organizationId});
+  return json({id,username,email,organization_id:organizationId,is_admin:Boolean(isAdmin),is_active:true,role:targetRole},201);
+}
+async function deactivateUser(request:Request,env:Env,session:Session,userId:string){
+  const target=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
+  if(!target)return json({error:"USER_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const role=roleForUser(target);
+  if(session.role==="ALL_FATHER"&&role!=="ORGANIZATION_ADMIN")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  if(session.role==="ORGANIZATION_ADMIN"&&(role!=="STAFF"||String(target.organization_id)!==session.organization_id))return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  if(role==="ALL_FATHER")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  await env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=?").bind(Date.now(),userId).run();await audit(env,session,"user.deactivate",userId,{target_role:role});return json({success:true,id:userId,is_active:false});
+}
+async function audit(env:Env,session:Session,action:string,targetId:string,details:Json){await env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id,session.sub,action,uuid(),JSON.stringify({target:targetId,...details}),Date.now()).run();}
+
 function queryEnvelope(raw:string):Json|null{try{return JSON.parse(new TextDecoder().decode(fromB64u(raw))) as Json;}catch{return null;}}
 function safeJson(value:string):unknown{try{return JSON.parse(value);}catch{return value;}}
 async function queryRoute(request:Request,env:Env,session:Session){
@@ -127,9 +220,9 @@ async function commandRoute(request:Request,env:Env,session:Session){
   else {const previous=existing?await env.DB.prepare("SELECT state FROM aggregates WHERE id=?").bind(targetId).first<{state:string}>():null;const merged={...((previous?safeJson(previous.state):{}) as Json),...((payload as Json)),_command_type:envelope.command_type,_updated_by:session.sub};await env.DB.prepare("INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,lifecycle_epoch=excluded.lifecycle_epoch,authority_epoch=excluded.authority_epoch,state=excluded.state,updated_at=excluded.updated_at").bind(targetId,targetType,nextVersion,Number(envelope.expected_lifecycle_epoch??0),Number(envelope.expected_authority_epoch??0),JSON.stringify(merged),Date.now(),session.organization_id).run();}
   const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
   await env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(payload),Date.now(),"{}",String(envelope.operation_id),String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id).run();
-  const result={success:true,operation_id:String(envelope.operation_id),new_version:nextVersion,new_lifecycle_epoch:Number(envelope.expected_lifecycle_epoch??0),new_authority_epoch:Number(envelope.expected_authority_epoch??0),events:[event],result:{id:targetId,type:targetType,state:payload}};await env.DB.prepare("INSERT INTO idempotency(operation_id,result,created_at) VALUES(?,?,?)").bind(envelope.operation_id,JSON.stringify(result),Date.now()).run();await env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id,session.sub,envelope.command_type,String(envelope.correlation_id??envelope.operation_id),JSON.stringify({target:targetId}),Date.now()).run();return json(result);
+  const result={success:true,operation_id:String(envelope.operation_id),new_version:nextVersion,new_lifecycle_epoch:Number(envelope.expected_lifecycle_epoch??0),new_authority_epoch:Number(envelope.expected_authority_epoch??0),events:[event],result:{id:targetId,type:targetType,state:payload}};await env.DB.prepare("INSERT INTO idempotency(operation_id,result,created_at) VALUES(?,?,?)").bind(envelope.operation_id,JSON.stringify(result),Date.now()).run();await audit(env,session,envelope.command_type,targetId,{correlation_id:String(envelope.correlation_id??envelope.operation_id)});return json(result);
 }
-async function hierarchy(env:Env,session:Session){const rows=await env.DB.prepare("SELECT id,username,organization_id,is_admin,is_active,class,parent_user_id FROM users WHERE organization_id=? ORDER BY username").bind(session.organization_id).all();return json({users:rows.results??[]});}
+async function hierarchy(env:Env,session:Session){const rows=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,class,role,parent_user_id FROM users WHERE organization_id=? ORDER BY username").bind(session.organization_id).all();return json({users:rows.results??[]});}
 async function profiles(env:Env,session:Session,ownerId?:string){const rows=ownerId?await env.DB.prepare("SELECT id,state FROM aggregates WHERE organization_id=? AND aggregate_type=? AND id=? LIMIT 1").bind(session.organization_id,"staff_profile",ownerId).all<Record<string,unknown>>():await env.DB.prepare("SELECT id,state FROM aggregates WHERE organization_id=? AND aggregate_type=? ORDER BY updated_at DESC LIMIT 100").bind(session.organization_id,"staff_profile").all<Record<string,unknown>>();return json((rows.results??[]).map(r=>({id:r.id,...(safeJson(String(r.state)) as Json)})));}
 async function pushSubscribe(request:Request,env:Env,session:Session){const body=await request.json().catch(()=>null) as Json|null;if(!body||typeof body.endpoint!=="string"||typeof body.p256dh!=="string"||typeof body.auth!=="string")return json({error:"INVALID_PUSH_SUBSCRIPTION"},400);const id=typeof body.id==="string"?body.id:uuid();await env.DB.prepare("INSERT INTO push_subscriptions(id,user_id,organization_id,endpoint,p256dh,auth,platform,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET endpoint=excluded.endpoint,p256dh=excluded.p256dh,auth=excluded.auth,platform=excluded.platform").bind(id,session.sub,session.organization_id,body.endpoint,body.p256dh,body.auth,String(body.platform??"web"),Date.now()).run();return json({id,success:true});}
 async function pushDelete(env:Env,session:Session,id:string){await env.DB.prepare("DELETE FROM push_subscriptions WHERE id=? AND user_id=? AND organization_id=?").bind(id,session.sub,session.organization_id).run();return json({success:true});}
@@ -144,6 +237,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
   if(url.pathname==="/ready"){try{await env.DB.prepare("SELECT 1").first();return json({status:"ok",service:"onyx-cloudflare-worker",database:"d1"},200,origin);}catch{return json({status:"degraded",database:"unavailable"},503,origin);}}
   try{
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return authLogin(request,env);
+    if(url.pathname==="/api/auth/clerk"&&request.method==="POST")return authClerkAllFather(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return authRefresh(request,env);
     if(url.pathname==="/api/auth/logout"&&request.method==="POST")return authLogout(request,env);
     const session=await requireSession(request,env);
@@ -156,7 +250,11 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname.startsWith("/api/push/subscriptions/")&&request.method==="DELETE")return pushDelete(env,session,url.pathname.split("/").pop()!);
     if(url.pathname.startsWith("/api/files/")&&request.method==="GET")return fileDownload(env,session,url.pathname.split("/").pop()!);
     if(url.pathname==="/api/events"&&request.method==="GET"){const rows=await env.DB.prepare("SELECT event_id,aggregate_id,event_type,payload,occurred_at,organization_id FROM domain_events WHERE organization_id=? ORDER BY occurred_at DESC LIMIT 100").bind(session.organization_id).all();return json(rows.results??[],200,origin);}
+    if(url.pathname==="/api/allfather/organizations"&&request.method==="POST")return createOrganization(request,env,session);
+    if(url.pathname==="/api/allfather/admins"&&request.method==="POST")return createUser(request,env,session,"ORGANIZATION_ADMIN");
+    if(url.pathname==="/api/admin/staff"&&request.method==="POST")return createUser(request,env,session,"STAFF");
+    if(url.pathname.startsWith("/api/admin/users/")&&request.method==="DELETE")return deactivateUser(request,env,session,url.pathname.split("/").pop()!);
     return json({error:"ROUTE_NOT_MIGRATED",route:url.pathname,message:"The route exists in the Axum reference service but has not yet been ported with equivalent Cloudflare semantics."},501,origin);
-  }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);console.error(error);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
+  }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);if(message==="FORBIDDEN_ROLE")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403,origin);if(message.startsWith("INVALID_")||message==="PASSWORD_TOO_SHORT"||message==="ORGANIZATION_NOT_FOUND")return json({error:message,category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);console.error(error);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
 }
 export default {fetch:dispatch};
