@@ -496,6 +496,7 @@
   "settings.testConnection": "آزمایش اتصال",
   "settings.testConnectionAndSave": "آزمون اتصال و ذخیره",
   "settings.title": "تنظیمات",
+  "settings.useServerAndSignInAgain": "استفاده از این سرور و ورود دوباره",
   "status.acknowledged": "تأیید دریافت شده",
   "status.active": "فعال",
   "status.approved": "تأیید شده",
