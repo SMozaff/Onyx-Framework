@@ -55,16 +55,16 @@ jobs:
         run: |
           set -euo pipefail
           databases="$(npx wrangler d1 list --json)"
-          db_id="$(printf '%s' "$databases" | jq -r '.[] | select(.name == "onyx-free-db") | .uuid // .database_id' | head -n1)"
+          db_id="$(printf '%s' "$databases" | jq -r '(.result // .)[] | select(.name == "onyx-free-db") | .uuid // .database_id' | head -n1)"
           if [ -z "$db_id" ] || [ "$db_id" = "null" ]; then
             created="$(npx wrangler d1 create onyx-free-db --json)"
-            db_id="$(printf '%s' "$created" | jq -r '.database_id // .uuid')"
+            db_id="$(printf '%s' "$created" | jq -r '(.d1_databases // .result // .)[]? | .database_id // .uuid' | head -n1)"
           fi
           test -n "$db_id" && test "$db_id" != "null"
           echo "database_id=$db_id" >> "$GITHUB_OUTPUT"
 
       - name: Apply D1 schema
-        run: npx wrangler d1 execute onyx-free-db --remote --file=./d1/0001_foundation.sql
+        run: npx wrangler d1 execute onyx-free-db --remote --file=./d1/0001_foundation.sql --yes
 
       - name: Materialize deployment config
         shell: bash
@@ -113,11 +113,12 @@ jobs:
 
       - name: Verify Worker deployment
         shell: bash
+        env:
+          CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}
         run: |
           set -euo pipefail
-          url="https://onyx-framework.${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}.workers.dev/ready"
-          if [ -n "${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}" ]; then
-            curl --fail --retry 3 --retry-delay 2 --max-time 30 "$url"
+          if [ -n "${CLOUDFLARE_WORKERS_SUBDOMAIN}" ]; then
+            curl --fail --retry 3 --retry-delay 2 --max-time 30 "https://onyx-framework.${CLOUDFLARE_WORKERS_SUBDOMAIN}.workers.dev/ready"
           else
             echo "CLOUDFLARE_WORKERS_SUBDOMAIN not configured; deployment completed without external smoke URL."
           fi
