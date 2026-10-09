@@ -10,8 +10,8 @@ use std::{net::SocketAddr, time::Duration};
 
 use futures_util::{SinkExt, StreamExt};
 use platform_kernel::{ObjectId, ReplicaId, SchemaVersion, Timestamp};
-use sync_transport::{message::MessageId, SyncMessage, SyncMessageType};
 use security_application::NewUser;
+use sync_transport::{message::MessageId, SyncMessage, SyncMessageType};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// Boots an api-server on an ephemeral port against a throwaway SQLite file
