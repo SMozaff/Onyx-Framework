@@ -154,7 +154,7 @@ async fn refresh_rejects_a_bogus_token_and_an_access_token_used_as_a_refresh_tok
     // accepting any well-signed token regardless of its `token_type`.
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .json(&serde_json::json!({"username": TEST_REFRESH_USERNAME, "password": TEST_REFRESH_PASSWORD}))
         .send()
         .await
         .unwrap()
@@ -209,7 +209,7 @@ async fn access_token_that_has_actually_expired_is_rejected_and_refresh_recovers
 
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .json(&serde_json::json!({"username": TEST_REFRESH_USERNAME, "password": TEST_REFRESH_PASSWORD}))
         .send()
         .await
         .unwrap()
