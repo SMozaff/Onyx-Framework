@@ -72,7 +72,8 @@ async fn login_as(
     base: &str,
     client_type: Option<&str>,
 ) -> (String, String) {
-    let mut body = serde_json::json!({"username": TEST_ADMIN_USERNAME, "password": TEST_ADMIN_PASSWORD});
+    let mut body =
+        serde_json::json!({"username": TEST_ADMIN_USERNAME, "password": TEST_ADMIN_PASSWORD});
     if let Some(ct) = client_type {
         body["client_type"] = serde_json::json!(ct);
     }
