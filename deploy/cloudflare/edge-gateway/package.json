@@ -1,13 +1,17 @@
 {
   "private": true,
   "name": "@onyx/cloudflare-edge-gateway",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
+    "check": "wrangler deploy --dry-run",
     "d1:create": "wrangler d1 create onyx-free-db",
     "d1:local": "wrangler d1 execute onyx-free-db --local --file=./d1/0001_foundation.sql",
     "d1:remote": "wrangler d1 execute onyx-free-db --remote --file=./d1/0001_foundation.sql"
+  },
+  "dependencies": {
+    "hash-wasm": "^4.12.0"
   },
   "devDependencies": {
     "wrangler": "^4.46.0"
