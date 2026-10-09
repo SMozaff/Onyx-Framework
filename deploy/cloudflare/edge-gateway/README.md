@@ -1,73 +1,73 @@
-# ONYX Cloudflare Edge Gateway
+# ONYX Cloudflare Worker migration
 
-This Worker is Tier 1 only. It is an ingress/proxy boundary in front of the
-existing Rust/Axum ONYX API server. It does not authenticate users, authorize
-commands, access PostgreSQL, or access object storage.
+This directory is now the start of the ONYX backend migration to Cloudflare's free Workers platform. It no longer proxies requests to Render or any other Axum/container origin.
 
-## Domain-free deployment
-
-The Worker uses Cloudflare's free `workers.dev` endpoint. No custom domain or
-Cloudflare DNS zone is required.
-
-The repository Worker name is `onyx-framework`, matching the currently
-deployed Cloudflare Worker.
-
-The Worker requires `ONYX_ORIGIN_URL`, which must be the public HTTPS origin
-of the native ONYX API. The Worker deliberately rejects non-HTTPS origins.
-
-For development, a Cloudflare Quick Tunnel can provide a temporary
-`trycloudflare.com` origin:
+The target architecture is:
 
 ```text
-cloudflared tunnel --url http://localhost:3000
+Mobile / Admin / Staff
+        |
+        v
+Cloudflare Worker (free workers.dev)
+        |
+        +---- D1 (free SQLite-compatible database)
+        |
+        +---- Clerk / existing identity boundary
+        |
+        +---- Hugging Face object storage for existing blob data
 ```
 
-Then use the generated HTTPS URL as `ONYX_ORIGIN_URL`. Quick Tunnels are
-intended for development/testing and their hostname changes when the tunnel is
-restarted.
+Cloudflare Workers Free is the runtime boundary. No custom domain is required: the `workers.dev` hostname is sufficient. The migration deliberately does not use Cloudflare Containers, Workers Paid, Render, or another paid/container-only service.
 
-For a stable production deployment, use a managed/public HTTPS origin for the
-native ONYX API. A custom domain for the Worker itself is optional and can be
-added later.
+## Current state
 
-## Direct local deployment
+Phase 1 has converted the Worker from an origin proxy into an origin-free application boundary:
 
-From this directory:
+- `/health` is implemented locally in the Worker.
+- `/ready` checks the D1 binding when it is configured.
+- There is no `ONYX_ORIGIN_URL` and no upstream `fetch()` to Render.
+- A first D1 foundation migration mirrors the existing SQLite `users` contract.
+- Unported ONYX API routes return `501 API_MIGRATION_IN_PROGRESS` rather than silently routing traffic to the unreachable legacy backend.
+
+This is intentional. The Worker is not claimed to be a complete replacement until each API contract has been ported and verified.
+
+## Bootstrap the free D1 database
+
+From this directory, after authenticating Wrangler to the Cloudflare account:
 
 ```bash
 npm install
-npx wrangler deploy --var ONYX_ORIGIN_URL:https://<your-onyx-api-origin>
+npm run d1:create
 ```
 
-Wrangler will deploy to the Worker's `workers.dev` hostname.
+Wrangler will print the D1 `database_id`. Add that ID to `wrangler.toml` by enabling the `[[d1_databases]]` block and replacing the placeholder.
 
-## GitHub deployment
+For local development:
 
-A manual GitHub Actions workflow is provided at
-`.github/workflows/deploy-cloudflare-edge.yml`.
+```bash
+npm run d1:local
+npm run dev
+```
 
-Configure these GitHub repository/environment secrets before running it:
+For the remote D1 database:
 
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`
-- `ONYX_ORIGIN_URL`
+```bash
+npm run d1:remote
+npm run deploy
+```
 
-The Cloudflare API token must have permission to deploy Workers in the target
-account. `ONYX_ORIGIN_URL` must be an HTTPS URL; do not commit it to source
-control.
+The Cloudflare account must be the user's existing account. The repository does not contain or require a Cloudflare API credential.
 
-## Architecture boundary
+## Migration rule
 
-The native ONYX runtime remains responsible for JWT authentication and token
-revocation, capability/command authorization, PostgreSQL transactions and
-migrations, audit/security policy, and background jobs, outbox relay, scheduler,
-and retry semantics.
+The Rust/Axum API remains the reference implementation while individual contracts are ported. We do not rewrite the whole service blindly. For every route, the migration must preserve:
 
-WebSocket upgrades are intentionally preserved by the request proxy so the
-existing Axum WebSocket routes remain the application authority.
+1. request and response JSON contracts;
+2. authentication and capability checks;
+3. tenant/organization isolation;
+4. idempotency and audit semantics where applicable;
+5. existing D1-compatible persistence behavior;
+6. client compatibility for Mobile, Admin, and Staff shells;
+7. automated tests before the route is switched from `501` to live behavior.
 
-## Production DNS
-
-A custom domain is not required for this architecture to work. If a domain is
-later acquired, use a Cloudflare Worker Route in front of the existing ONYX
-origin rather than moving the native Axum runtime into Workers.
+Only after all required routes are live and verified will the legacy Render deployment/configuration be removed.
