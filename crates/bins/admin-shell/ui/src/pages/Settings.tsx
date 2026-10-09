@@ -194,7 +194,6 @@ function ServerConnectionSettings() {
 
   function chooseEnvironment(next: "local" | "cloud") {
     setEnvironment(next);
-    setBackendEnvironment(next);
     setValue(getBackendAddress(next));
     setStatus("idle");
     setMessage(null);
@@ -223,6 +222,7 @@ function ServerConnectionSettings() {
       setMessage("Could not reach /health. Address was not saved; check the URL, service status, and CORS/network access.");
       return;
     }
+    setBackendEnvironment(environment);
     setServerAddress(value);
     setStatus("ok");
     setMessage(`${environment === "cloud" ? "Cloud" : "Local"} backend reachable and saved. A new sign-in may be required when switching environments.`);
