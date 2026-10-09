@@ -24,18 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.onyx.session.SessionPreferences
 
-/**
- * Real login screen for A3, Kotlin's equivalent of Dart's
- * `ffi_login_screen.dart`: a real `POST /api/auth/login` against
- * `api-server`, not a locally-invented identity. Field layout
- * (server address / username / password) and the specific
- * `MOBILE_ACCESS_RESTRICTED` vs. generic-failure error distinction
- * mirror that screen precisely -- see `OnyxSessionViewModel.login`'s
- * own doc comment for the exact persistence sequence this triggers on
- * success.
- */
+/** Real login screen using the Cloudflare-hosted ONYX API by default. */
 @Composable
 fun LoginScreen(
     defaultServerAddress: String,
@@ -43,7 +33,7 @@ fun LoginScreen(
     errorMessage: String?,
     onLogin: (serverAddress: String, username: String, password: String) -> Unit,
 ) {
-    val cloudDefault = "https://onyx-api-docker.onrender.com"
+    val cloudDefault = "https://onyx-framework.soheil-mozaffari.workers.dev"
     val localDefault = "http://10.0.2.2:3000"
     var environment by remember { mutableStateOf(if (defaultServerAddress.startsWith("https://") || defaultServerAddress.isBlank()) "cloud" else "local") }
     var localAddress by remember { mutableStateOf(if (defaultServerAddress.startsWith("https://") || defaultServerAddress.isBlank()) localDefault else defaultServerAddress) }
@@ -54,91 +44,30 @@ fun LoginScreen(
 
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-                .widthIn(max = 420.dp),
+            modifier = Modifier.fillMaxSize().padding(24.dp).widthIn(max = 420.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("ONYX — Sign in", style = MaterialTheme.typography.headlineSmall)
             androidx.compose.foundation.layout.Spacer(Modifier.padding(4.dp))
-            Text(
-                "Sign in with your real ONYX credentials to confirm your identity and organization.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Text("Sign in with your real ONYX credentials.", style = MaterialTheme.typography.bodySmall)
             androidx.compose.foundation.layout.Spacer(Modifier.padding(12.dp))
-
-            errorMessage?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
-            }
-
-            androidx.compose.foundation.layout.Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        environment = "local"
-                        serverAddress = localAddress
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text(if (environment == "local") "✓ Local Backend" else "Local Backend") }
-                OutlinedButton(
-                    onClick = {
-                        environment = "cloud"
-                        serverAddress = cloudAddress
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text(if (environment == "cloud") "✓ Cloud Backend" else "Cloud Backend") }
+            errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
+            androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { environment = "local"; serverAddress = localAddress }, modifier = Modifier.weight(1f)) { Text(if (environment == "local") "✓ Local Backend" else "Local Backend") }
+                OutlinedButton(onClick = { environment = "cloud"; serverAddress = cloudAddress }, modifier = Modifier.weight(1f)) { Text(if (environment == "cloud") "✓ Cloud Backend" else "Cloud Backend") }
             }
             androidx.compose.foundation.layout.Spacer(Modifier.padding(4.dp))
-            OutlinedTextField(
-                value = serverAddress,
-                onValueChange = {
-                    serverAddress = it
-                    if (environment == "local") localAddress = it else cloudAddress = it
-                },
-                label = { Text(if (environment == "cloud") "Cloud API URL" else "Local API URL (emulator uses 10.0.2.2)") },
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                singleLine = true,
-            )
+            OutlinedTextField(value = serverAddress, onValueChange = { serverAddress = it; if (environment == "local") localAddress = it else cloudAddress = it }, label = { Text(if (environment == "cloud") "Cloud API URL" else "Local API URL (emulator uses 10.0.2.2)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), singleLine = true)
             androidx.compose.foundation.layout.Spacer(Modifier.padding(6.dp))
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text("Username") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
+            OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("Username") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             androidx.compose.foundation.layout.Spacer(Modifier.padding(6.dp))
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Password") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-            )
+            OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, modifier = Modifier.fillMaxWidth(), singleLine = true, visualTransformation = PasswordVisualTransformation())
             androidx.compose.foundation.layout.Spacer(Modifier.padding(12.dp))
-
-            Button(
-                onClick = { onLogin(serverAddress.trim(), username.trim(), password) },
-                enabled = !isLoggingIn && username.isNotBlank() && password.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (isLoggingIn) {
-                    CircularProgressIndicator(modifier = Modifier.padding(2.dp))
-                } else {
-                    Text("Sign in")
-                }
+            Button(onClick = { onLogin(serverAddress.trim(), username.trim(), password) }, enabled = !isLoggingIn && username.isNotBlank() && password.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                if (isLoggingIn) CircularProgressIndicator(modifier = Modifier.padding(2.dp)) else Text("Sign in")
             }
         }
     }
 }
-
-/** Convenience default used by [com.onyx.MainActivity] so the field starts pre-filled, mirroring Dart's identical behavior. */
-fun defaultServerAddressFor(prefs: SessionPreferences): String = prefs.serverAddress
-    .ifBlank { SessionPreferences.DEFAULT_SERVER_ADDRESS }
