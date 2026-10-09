@@ -212,34 +212,34 @@ function ServerConnectionSettings() {
     }
     if (!isSecureEnoughForProduction(value)) {
       setStatus("error");
-      setMessage("For security, use https:// for cloud/LAN servers. Plain HTTP is allowed only for loopback local development.");
+      setMessage(t("settings.cloudSecurityRequirement"));
       return;
     }
     setStatus("testing"); setMessage(null);
     const reachable = await testConnection(value);
     if (!reachable) {
       setStatus("error");
-      setMessage("Could not reach /health. Address was not saved; check the URL, service status, and CORS/network access.");
+      setMessage(t("settings.backendUnreachable"));
       return;
     }
     setBackendEnvironment(environment);
     setServerAddress(value);
     setStatus("ok");
-    setMessage(`${environment === "cloud" ? "Cloud" : "Local"} backend reachable and saved. A new sign-in may be required when switching environments.`);
+    setMessage(t("settings.backendSaved", { environment: environment === "cloud" ? "Cloud" : "Local" }));
   }
 
   return (
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-semibold text-onyx-text">Backend connection</h2>
-      <p className="mt-1 text-xs text-onyx-text-dim">Choose which backend this Admin shell uses. Local is a development placeholder; Cloud targets the deployed ONYX API.</p>
-      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Backend environment">
-        <button type="button" aria-pressed={environment === "local"} onClick={() => chooseEnvironment("local")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "local" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Local Backend</button>
-        <button type="button" aria-pressed={environment === "cloud"} onClick={() => chooseEnvironment("cloud")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "cloud" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Cloud Backend</button>
+      <h2 className="text-sm font-semibold text-onyx-text">{t("settings.backendConnection")}</h2>
+      <p className="mt-1 text-xs text-onyx-text-dim">{t("settings.backendConnectionDescription")}</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t("settings.backendEnvironment")}>
+        <button type="button" aria-pressed={environment === "local"} onClick={() => chooseEnvironment("local")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "local" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>{t("settings.localBackend")}</button>
+        <button type="button" aria-pressed={environment === "cloud"} onClick={() => chooseEnvironment("cloud")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "cloud" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>{t("settings.cloudBackend")}</button>
       </div>
-      <label htmlFor="backend-address" className="mt-3 block text-xs font-medium text-onyx-text-dim">{environment === "cloud" ? "Cloud API URL" : "Local API URL"}</label>
+      <label htmlFor="backend-address" className="mt-3 block text-xs font-medium text-onyx-text-dim">{environment === "cloud" ? t("settings.cloudApiUrl") : t("settings.localApiUrl")}</label>
       <div className="mt-1 flex flex-wrap gap-2">
         <input id="backend-address" value={value} onChange={(e) => { setValue(e.target.value); setStatus("idle"); setMessage(null); }} placeholder={environment === "cloud" ? "https://onyx-api-docker.onrender.com" : "http://127.0.0.1:3000"} className="min-w-0 flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none" />
-        <button type="button" onClick={() => void handleSave()} disabled={status === "testing"} className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{status === "testing" ? "Checking…" : "Test & Save"}</button>
+        <button type="button" onClick={() => void handleSave()} disabled={status === "testing"} className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{status === "testing" ? t("settings.checking") : t("settings.testAndSave")}</button>
       </div>
       {message && <p role="status" className={`mt-2 text-xs ${status === "error" ? "text-onyx-status-blocked" : "text-onyx-text-dim"}`}>{message}</p>}
     </div>
