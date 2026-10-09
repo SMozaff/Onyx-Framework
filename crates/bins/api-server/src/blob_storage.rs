@@ -92,7 +92,6 @@ fn required_env(name: &str) -> anyhow::Result<String> {
     ))
 }
 
-
 fn missing_required_env<'a>(
     required: &'a [&'a str],
     is_set: impl Fn(&str) -> bool,
@@ -122,7 +121,8 @@ mod tests {
     #[test]
     fn hugging_face_preflight_omits_configured_settings() {
         let required = ["ENDPOINT", "BUCKET", "ACCESS_KEY", "SECRET_KEY"];
-        let missing = missing_required_env(&required, |name| name == "ENDPOINT" || name == "BUCKET");
+        let missing =
+            missing_required_env(&required, |name| name == "ENDPOINT" || name == "BUCKET");
         assert_eq!(missing, vec!["ACCESS_KEY", "SECRET_KEY"]);
     }
 }
