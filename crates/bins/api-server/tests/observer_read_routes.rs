@@ -191,7 +191,14 @@ async fn observer_can_register_and_delete_a_push_subscription() {
     // The seeded DB has a single user; create a second one through the
     // admin route, register its subscription under its own (web) session,
     // then try to remove it with the original observer session.
-    let web_admin = login_as(&http, &base, "web", "All-Father", "passvord0000").await;
+    let web_admin = login_as(
+        &http,
+        &base,
+        "web",
+        "observer-read-test-admin",
+        "observer-read-test-password",
+    )
+    .await;
     let created = http
         .post(format!("{base}/api/admin/users"))
         .bearer_auth(&web_admin)
