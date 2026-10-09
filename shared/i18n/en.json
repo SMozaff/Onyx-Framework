@@ -496,6 +496,7 @@
   "settings.testConnection": "Test connection",
   "settings.testConnectionAndSave": "Test connection and save",
   "settings.title": "Settings",
+  "settings.useServerAndSignInAgain": "Use this server and sign in again",
   "status.acknowledged": "Acknowledged",
   "status.active": "Active",
   "status.approved": "Approved",
