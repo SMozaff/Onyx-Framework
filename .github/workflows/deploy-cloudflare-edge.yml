@@ -74,12 +74,6 @@ jobs:
           test -n "$db_id" && test "$db_id" != "null"
           echo "database_id=$db_id" >> "$GITHUB_OUTPUT"
 
-      - name: Apply D1 foundation schema
-        run: npx wrangler d1 execute onyx-free-db --remote --file=./d1/0001_foundation.sql --yes
-
-      - name: Apply D1 authentication hierarchy schema
-        run: npx wrangler d1 execute onyx-free-db --remote --file=./d1/0002_auth_hierarchy.sql --yes
-
       - name: Materialize deployment config
         shell: bash
         run: |
@@ -97,6 +91,7 @@ jobs:
           binding = "DB"
           database_name = "onyx-free-db"
           database_id = "${{ steps.d1.outputs.database_id }}"
+          migrations_dir = "migrations"
 
           [vars]
           ONYX_CORS_ORIGINS = "*"
@@ -106,6 +101,9 @@ jobs:
           HF_S3_ENDPOINT = "https://s3.hf.co/Arronthemalkavian"
           HF_S3_BUCKET = "onyx"
           EOF
+
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply onyx-free-db --remote --config wrangler.deploy.toml
 
       - name: Configure JWT secret
         shell: bash
