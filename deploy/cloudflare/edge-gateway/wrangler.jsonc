@@ -2,6 +2,45 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "onyx-framework",
   "main": "src/index.ts",
-  "compatibility_date": "2026-10-05",
-  "workers_dev": true
+  "compatibility_date": "2026-10-09",
+  "workers_dev": true,
+  "containers": [
+    {
+      "class_name": "OnyxApiContainer",
+      "image": "../../../Dockerfile",
+      "image_build_context": "../../../",
+      "instance_type": "basic",
+      "max_instances": 3,
+      "observability": {
+        "enabled": true
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ONYX_API",
+        "class_name": "OnyxApiContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["OnyxApiContainer"]
+    }
+  ],
+  "secrets": {
+    "required": [
+      "DATABASE_URL",
+      "ONYX_GOVERNANCE_DATABASE_URL",
+      "ONYX_AUTHORITY_SIGNING_KEY",
+      "ONYX_CORS_ALLOWED_ORIGINS",
+      "CLERK_ISSUER",
+      "CLERK_SECRET_KEY",
+      "CLERK_JWKS_URL",
+      "ONYX_BLOB_STORE_S3_ACCESS_KEY_ID",
+      "ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY"
+    ]
+  }
 }
