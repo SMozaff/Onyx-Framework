@@ -7,6 +7,7 @@
 use std::net::SocketAddr;
 
 use reqwest::StatusCode;
+use security_application::NewUser;
 
 const ORG_ID: &str = "11111111-1111-1111-1111-111111111111";
 
@@ -19,6 +20,28 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+
+    // All-Father is passwordless and authenticates through the external identity
+    // provider. Provision a dedicated password-based test administrator so these
+    // tests exercise staff-loan authorization rather than the Clerk login flow.
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: "staff-loan-test-admin".to_string(),
+            organization_id: ORG_ID.to_string(),
+            password_hash: state
+                .password_hasher
+                .hash("staff-loan-test-password")
+                .expect("test admin password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated staff-loan test administrator");
+
     let app = api_server::routes::router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -35,8 +58,8 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
         .json(&serde_json::json!({
-            "username": "All-Father",
-            "password": "passvord0000",
+            "username": "staff-loan-test-admin",
+            "password": "staff-loan-test-password",
         }))
         .send()
         .await
