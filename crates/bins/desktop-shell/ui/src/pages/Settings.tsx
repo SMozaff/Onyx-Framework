@@ -114,12 +114,12 @@ export default function Settings({
           requires a new sign-in rather than reusing credentials from another server.
         </p>
 
-        <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Backend environment">
-          <button type="button" aria-pressed={environment === "local"} onClick={() => chooseEnvironment("local")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "local" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Local Backend</button>
-          <button type="button" aria-pressed={environment === "cloud"} onClick={() => chooseEnvironment("cloud")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "cloud" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>Cloud Backend</button>
+        <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label={t("settings.backendEnvironment")}>
+          <button type="button" aria-pressed={environment === "local"} onClick={() => chooseEnvironment("local")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "local" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>{t("settings.localBackend")}</button>
+          <button type="button" aria-pressed={environment === "cloud"} onClick={() => chooseEnvironment("cloud")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "cloud" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>{t("settings.cloudBackend")}</button>
         </div>
         <label htmlFor="serverAddress" className="mt-3 block text-xs font-medium text-onyx-text-dim">
-          {environment === "cloud" ? "Cloud API URL" : "Local API URL"}
+          {environment === "cloud" ? t("settings.cloudApiUrl") : t("settings.localApiUrl")}
         </label>
         <input
           id="serverAddress"
@@ -164,7 +164,7 @@ export default function Settings({
               disabled={endingSession || connectionStatus === ConnectionStatus.Testing}
               className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {endingSession ? "Signing out…" : "Use this server and sign in again"}
+              {endingSession ? t("auth.signingOut") : t("settings.useServerAndSignInAgain")}
             </button>
           )}
         </div>
