@@ -11,6 +11,8 @@
 
 use std::net::SocketAddr;
 
+use security_application::NewUser;
+
 async fn start_server(db_label: &str) -> (SocketAddr, String, String) {
     let db_path = std::env::temp_dir().join(format!("onyx-query-id-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
@@ -19,6 +21,30 @@ async fn start_server(db_label: &str) -> (SocketAddr, String, String) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+
+    // All-Father is now passwordless and authenticates through the external
+    // identity provider. Keep this integration test independent of that
+    // bootstrap identity by creating a dedicated password-based test admin.
+    const TEST_USERNAME: &str = "query-id-test-admin";
+    const TEST_PASSWORD: &str = "query-id-test-password";
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: TEST_USERNAME.to_string(),
+            organization_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            password_hash: state
+                .password_hasher
+                .hash(TEST_PASSWORD)
+                .expect("test password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated query-id test administrator");
+
     let app = api_server::routes::router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -35,7 +61,7 @@ async fn start_server(db_label: &str) -> (SocketAddr, String, String) {
     // intentional test-drive account instead of ignoring a bootstrap conflict.
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .json(&serde_json::json!({"username": "query-id-test-admin", "password": "query-id-test-password"}))
         .send()
         .await
         .expect("login request")
