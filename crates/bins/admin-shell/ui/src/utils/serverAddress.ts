@@ -29,7 +29,7 @@ export function getServerAddress(): string {
 export function setServerAddress(address: string): void {
   const trimmed = address.trim().replace(/\/+$/, "");
   localStorage.setItem(getBackendEnvironment() === "local" ? LOCAL_ADDRESS_KEY : CLOUD_ADDRESS_KEY, trimmed);
-  localStorage.setItem(LEGACY_ADDRESS_KEY, trimmed);
+  if (getBackendEnvironment() === "local") localStorage.setItem(LEGACY_ADDRESS_KEY, trimmed);
 }
 export function hasStoredServerAddress(): boolean {
   return localStorage.getItem(getBackendEnvironment() === "local" ? LOCAL_ADDRESS_KEY : CLOUD_ADDRESS_KEY) !== null;
