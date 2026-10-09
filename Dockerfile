@@ -16,6 +16,6 @@ RUN cargo build --locked --release -p api-server
 
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 COPY --from=builder /workspace/target/release/api-server /usr/local/bin/api-server
-EXPOSE 3000 9090
-ENV ONYX_BIND=0.0.0.0:3000 ONYX_METRICS_BIND=0.0.0.0:9090 ONYX_ENV=production
+EXPOSE 10000 9090
+ENV ONYX_BIND=0.0.0.0:10000 ONYX_METRICS_BIND=127.0.0.1:9090 ONYX_ENV=production
 CMD ["/usr/local/bin/api-server"]
