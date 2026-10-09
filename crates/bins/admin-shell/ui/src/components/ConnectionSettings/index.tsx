@@ -35,12 +35,12 @@ export default function ConnectionSettings() {
     const normalized = value.trim().replace(/\/+$/, "");
     if (!isPlausibleServerAddress(normalized)) {
       setStatus("error");
-      setMessage("Enter a full address including http:// or https://.");
+      setMessage(t("settings.fullAddressRequired"));
       return;
     }
     if (!isSecureEnoughForProduction(normalized)) {
       setStatus("error");
-      setMessage("For security, only https:// addresses (or http://127.0.0.1 on this computer) can be saved.");
+      setMessage(t("settings.connectionSecurityRequirement"));
       return;
     }
     setStatus("testing");
