@@ -16,6 +16,11 @@
 
 use std::net::SocketAddr;
 
+use security_application::NewUser;
+
+const TEST_ADMIN_USERNAME: &str = "mobile-observer-admin";
+const TEST_ADMIN_PASSWORD: &str = "mobile-observer-admin-password";
+
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let db_path = std::env::temp_dir().join(format!("onyx-mobile-observer-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
@@ -24,6 +29,28 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+
+    // All-Father is passwordless and authenticates through Clerk. Seed a
+    // dedicated password-authenticated administrator for this HTTP test so
+    // the observer-capability assertions exercise the intended client gate.
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: TEST_ADMIN_USERNAME.to_string(),
+            organization_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            password_hash: state
+                .password_hasher
+                .hash(TEST_ADMIN_PASSWORD)
+                .expect("test admin password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated mobile-observer test administrator");
+
     let app = api_server::routes::router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -37,7 +64,7 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     (addr, format!("http://{addr}"))
 }
 
-/// Logs in the seeded test-drive admin with a given `client_type` (or
+/// Logs in the dedicated test administrator with a given `client_type` (or
 /// none, when `client_type` is `None`), returning `(access_token,
 /// refresh_token)`.
 async fn login_as(
@@ -45,7 +72,7 @@ async fn login_as(
     base: &str,
     client_type: Option<&str>,
 ) -> (String, String) {
-    let mut body = serde_json::json!({"username": "All-Father", "password": "passvord0000"});
+    let mut body = serde_json::json!({"username": TEST_ADMIN_USERNAME, "password": TEST_ADMIN_PASSWORD});
     if let Some(ct) = client_type {
         body["client_type"] = serde_json::json!(ct);
     }
