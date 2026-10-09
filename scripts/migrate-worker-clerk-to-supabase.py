@@ -23,8 +23,14 @@ auth_login = r'''async function authLogin(request:Request,env:Env){
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
   if(!user?.is_active||roleForUser(user)==="ALL_FATHER"||typeof user?.email!=="string")return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  try{await passwordSignIn(env,String(user.email),password);}catch{return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
-  if(!user.supabase_user_id)return json({error:"AUTH_ACCOUNT_NOT_LINKED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},409);
+  let supabaseSession:{access_token:string;refresh_token:string;user:Json};
+  try{supabaseSession=await passwordSignIn(env,String(user.email),password);}catch{return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
+  const supabaseUserId=typeof supabaseSession.user.id==="string"?supabaseSession.user.id:"";
+  if(!supabaseUserId)return json({error:"AUTH_ACCOUNT_INVALID",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  if(String(user.supabase_user_id||"")!==supabaseUserId){
+    await env.DB.prepare("UPDATE users SET supabase_user_id=?,updated_at=? WHERE id=?").bind(supabaseUserId,Date.now(),String(user.id)).run();
+    user.supabase_user_id=supabaseUserId;
+  }
   return json(await issuePair(env,user,clientType(body)));
 }
 '''
