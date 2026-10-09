@@ -72,17 +72,25 @@ export default function Settings({
     setMessage(null);
     try {
       const response = await fetch(`${normalizedAddress}/health`, {
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(8_000),
+        mode: "cors",
       });
       if (!response.ok) {
-        throw new Error(`server returned HTTP ${response.status}`);
+        setConnectionStatus(ConnectionStatus.Unreachable);
+        setMessage(`Health endpoint returned HTTP ${response.status}. Check the deployed API and its health route.`);
+        return false;
       }
       setConnectionStatus(ConnectionStatus.Reachable);
       setMessage("Server reachable.");
       return true;
-    } catch {
+    } catch (error) {
+      const timedOut = error instanceof DOMException && error.name === "TimeoutError";
       setConnectionStatus(ConnectionStatus.Unreachable);
-      setMessage("Could not reach a server at this address. Your current session is unchanged.");
+      setMessage(
+        timedOut
+          ? "The health check timed out after 8 seconds."
+          : "The API may be running, but this app could not read its health response. Check CORS: ONYX_CORS_ALLOWED_ORIGINS must include this app's exact origin. DNS, TLS, or network failures can produce the same browser error.",
+      );
       return false;
     }
   }
