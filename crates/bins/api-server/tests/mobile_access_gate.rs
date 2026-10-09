@@ -8,6 +8,11 @@
 
 use std::net::SocketAddr;
 
+use security_application::NewUser;
+
+const TEST_ADMIN_USERNAME: &str = "mobile-gate-admin";
+const TEST_ADMIN_PASSWORD: &str = "mobile-gate-admin-password";
+
 async fn start_server(db_label: &str) -> (SocketAddr, reqwest::Client) {
     let db_path = std::env::temp_dir().join(format!("onyx-mobile-access-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
@@ -16,6 +21,28 @@ async fn start_server(db_label: &str) -> (SocketAddr, reqwest::Client) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+
+    // Seed a dedicated password-authenticated administrator. The designated
+    // All-Father identity is passwordless and uses the Clerk boundary; tests
+    // must not rely on a historical development seed being present.
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: TEST_ADMIN_USERNAME.to_string(),
+            organization_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            password_hash: state
+                .password_hasher
+                .hash(TEST_ADMIN_PASSWORD)
+                .expect("test admin password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated mobile-gate test administrator");
+
     let app = api_server::routes::router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -50,14 +77,9 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
     let (addr, http) = start_server("gate").await;
     let base = format!("http://{addr}");
 
-    // ApiState::new seeds a fixed admin account ("All-Father" /
-    // "passvord0000", see that seed's own doc comment in routes/mod.rs)
-    // the moment the users table is empty, which it is for this
-    // fresh-per-test database -- use that rather than the token-gated
-    // `/api/admin/bootstrap` flow, which the seed leaves permanently
-    // closed (`BOOTSTRAP_ALREADY_COMPLETED`) from the instant the
-    // server starts against an empty store.
-    let admin_login_resp = login(&http, &base, "All-Father", "passvord0000", None).await;
+    // Use the dedicated administrator created by start_server; the
+    // All-Father identity is passwordless and reserved for Clerk login.
+    let admin_login_resp = login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, None).await;
     assert_eq!(
         admin_login_resp.status(),
         200,
@@ -70,7 +92,7 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
     // though no mobile_class_access row exists yet -- Admin bypasses
     // this gate entirely.
     let admin_mobile_login =
-        login(&http, &base, "All-Father", "passvord0000", Some("mobile")).await;
+        login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, Some("mobile")).await;
     assert_eq!(
         admin_mobile_login.status(),
         200,
@@ -196,7 +218,7 @@ async fn excluded_class_denied_on_mobile_allowed_on_desktop_granted_class_allowe
     let (addr, http) = start_server("gate-two-classes").await;
     let base = format!("http://{addr}");
 
-    let admin_login: serde_json::Value = login(&http, &base, "All-Father", "passvord0000", None)
+    let admin_login: serde_json::Value = login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, None)
         .await
         .json()
         .await
