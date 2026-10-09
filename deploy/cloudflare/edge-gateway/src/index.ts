@@ -1,4 +1,5 @@
 import { argon2id, argon2Verify } from "hash-wasm";
+import { adminCreateUser, adminSetUserBanned, passwordSignIn, verifySupabaseJwt } from "./supabase";
 
 type Json = Record<string, unknown>;
 
@@ -7,9 +8,10 @@ interface Env {
   ONYX_JWT_SECRET?: string;
   ONYX_CORS_ORIGINS?: string;
   ONYX_ALLFATHER_EMAIL?: string;
-  CLERK_ISSUER?: string;
-  CLERK_JWKS_URL?: string;
-  CLERK_SECRET_KEY?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_JWKS_URL?: string;
+  SUPABASE_PUBLISHABLE_KEY?: string;
+  SUPABASE_SECRET_KEY?: string;
   HF_S3_ENDPOINT?: string;
   HF_S3_BUCKET?: string;
   HF_S3_ACCESS_KEY_ID?: string;
@@ -111,9 +113,16 @@ async function authLogin(request:Request,env:Env){
   const identifier=typeof body?.username==="string"?body.username.trim():"";
   const password=typeof body?.password==="string"?body.password:"";
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  const user=await env.DB.prepare("SELECT id,username,email,organization_id,password_hash,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
-  const valid=Boolean(user?.is_active)&&roleForUser(user)!=="ALL_FATHER"&&typeof user?.password_hash==="string"&&await verifyPassword(password,String(user.password_hash));
-  if(!valid)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
+  if(!user?.is_active||roleForUser(user)==="ALL_FATHER"||typeof user?.email!=="string")return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  let supabaseSession:{access_token:string;refresh_token:string;user:Json};
+  try{supabaseSession=await passwordSignIn(env,String(user.email),password);}catch{return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
+  const supabaseUserId=typeof supabaseSession.user.id==="string"?supabaseSession.user.id:"";
+  if(!supabaseUserId)return json({error:"AUTH_ACCOUNT_INVALID",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  if(String(user.supabase_user_id||"")!==supabaseUserId){
+    await env.DB.prepare("UPDATE users SET supabase_user_id=?,updated_at=? WHERE id=?").bind(supabaseUserId,Date.now(),String(user.id)).run();
+    user.supabase_user_id=supabaseUserId;
+  }
   return json(await issuePair(env,user,clientType(body)));
 }
 async function authRefresh(request:Request,env:Env){
@@ -122,42 +131,27 @@ async function authRefresh(request:Request,env:Env){
 }
 async function authLogout(request:Request,env:Env){const token=authorization(request);const body=await request.json().catch(()=>({})) as Json;for(const value of [token,typeof body.refresh_token==="string"?body.refresh_token:null].filter((x):x is string=>Boolean(x)))await env.DB.prepare("INSERT OR IGNORE INTO token_revocations(token_hash,revoked_at) VALUES(?,?)").bind(await sha256(value),now()).run();return json({success:true});}
 
-function clerkIssuer(env:Env){return (env.CLERK_ISSUER??"").replace(/\/$/,"");}
-function clerkJwksUrl(env:Env){return env.CLERK_JWKS_URL||`${clerkIssuer(env)}/.well-known/jwks.json`;}
-async function verifyClerkToken(env:Env,token:string):Promise<Json>{
-  if(!token)throw new Error("CLERK_TOKEN_REQUIRED");
-  const parts=token.split(".");if(parts.length!==3)throw new Error("invalid clerk token");
-  const header=decodeJsonB64u(parts[0]);const payload=decodeJsonB64u(parts[1]);
-  if(header.alg!=="RS256"||typeof header.kid!=="string")throw new Error("invalid clerk algorithm");
-  const issuer=clerkIssuer(env);if(!issuer||payload.iss!==issuer)throw new Error("invalid clerk issuer");
-  const exp=Number(payload.exp??0),nbf=Number(payload.nbf??0);if(!payload.sub||!exp||exp<=now()||(nbf&&nbf>now()+30))throw new Error("invalid clerk claims");
-  const response=await fetch(clerkJwksUrl(env),{headers:{"accept":"application/json"}});
-  if(!response.ok)throw new Error("clerk jwks unavailable");
-  const jwks=await response.json() as {keys?:Json[]};const jwk=jwks.keys?.find(key=>key.kid===header.kid);
-  if(!jwk)throw new Error("clerk signing key not found");
-  const key=await crypto.subtle.importKey("jwk",jwk as Json,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["verify"]);
-  const verified=await crypto.subtle.verify("RSASSA-PKCS1-v1_5",key,fromB64u(parts[2]),new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
-  if(!verified)throw new Error("invalid clerk signature");
-  return payload;
+async function authSupabaseAllFather(request:Request,env:Env){
+  const token=authorization(request);
+  if(!token)return json({error:"AUTH_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  try{
+    const claims=await verifySupabaseJwt(env,token);
+    const email=typeof claims.email==="string"?claims.email.trim().toLowerCase():"";
+    const verified=claims.email_verified;
+    const expected=(env.ONYX_ALLFATHER_EMAIL||ALLFATHER_EMAIL).trim().toLowerCase();
+    if(!email||verified===false||email!==expected)return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER('allfather') LIMIT 1").first<Record<string,unknown>>();
+    if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(String(user.supabase_user_id||"")!==String(claims.sub)){
+      await env.DB.prepare("UPDATE users SET supabase_user_id=?,updated_at=? WHERE id=?").bind(String(claims.sub),Date.now(),String(user.id)).run();
+      user.supabase_user_id=String(claims.sub);
+    }
+    return json(await issuePair(env,user,"allfather"));
+  }catch(error){
+    const message=error instanceof Error?error.message:"invalid token";
+    return json({error:message,category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  }
 }
-async function clerkUserEmail(env:Env,subject:string):Promise<string>{
-  if(!env.CLERK_SECRET_KEY)throw new Error("CLERK_SECRET_KEY is not configured");
-  const response=await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(subject)}`,{headers:{Authorization:`Bearer ${env.CLERK_SECRET_KEY}`,accept:"application/json"}});
-  if(!response.ok)throw new Error("clerk user lookup failed");
-  const user=await response.json() as {primary_email_address_id?:string|null;email_addresses?:Array<{id?:string;email_address?:string;verification?:{status?:string}}>} ;
-  const primary=user.email_addresses?.find(item=>item.id===user.primary_email_address_id&&item.verification?.status==="verified");
-  if(!primary?.email_address)throw new Error("verified primary email required");
-  return primary.email_address.toLowerCase();
-}
-async function authClerkAllFather(request:Request,env:Env){
-  const token=authorization(request);const claims=await verifyClerkToken(env,token??"");const email=await clerkUserEmail(env,String(claims.sub));
-  const expected=(env.ONYX_ALLFATHER_EMAIL||ALLFATHER_EMAIL).trim().toLowerCase();
-  if(email!==expected)return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-  const user=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER('allfather') LIMIT 1").first<Record<string,unknown>>();
-  if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-  return json(await issuePair(env,user,"allfather"));
-}
-
 function requireRole(session:Session,...roles:string[]){if(!roles.includes(session.role))throw new Error("FORBIDDEN_ROLE");}
 function requiredString(body:Json,key:string):string{const value=body[key];if(typeof value!=="string"||!value.trim())throw new Error(`INVALID_${key.toUpperCase()}`);return value.trim();}
 function optionalEmail(body:Json):string|null{const value=typeof body.email==="string"?body.email.trim().toLowerCase():null;return value||null;}
@@ -171,24 +165,33 @@ async function createUser(request:Request,env:Env,session:Session,targetRole:"OR
   const body=await request.json().catch(()=>null) as Json|null;if(!body)throw new Error("INVALID_BODY");
   const username=requiredString(body,"username"),password=requiredString(body,"password"),email=optionalEmail(body);
   if(password.length<8)throw new Error("PASSWORD_TOO_SHORT");
+  if(!email)throw new Error("EMAIL_REQUIRED");
   const organizationId=targetRole==="STAFF"?session.organization_id:requiredString(body,"organization_id");
   const org=await env.DB.prepare("SELECT id FROM organizations WHERE id=? AND is_active=1 LIMIT 1").bind(organizationId).first();
   if(!org)throw new Error("ORGANIZATION_NOT_FOUND");
   const existing=await env.DB.prepare("SELECT id FROM users WHERE LOWER(username)=LOWER(?) OR (? IS NOT NULL AND LOWER(email)=LOWER(?)) LIMIT 1").bind(username,email,email).first();
   if(existing)return json({error:"USER_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
-  const id=uuid(),timestamp=Date.now(),hash=await hashPassword(password),isAdmin=targetRole==="ORGANIZATION_ADMIN"?1:0,parent=targetRole==="STAFF"?session.sub:"__allfather__";
-  await env.DB.prepare("INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,username,email,organizationId,hash,isAdmin,1,targetRole,targetRole,parent,timestamp,timestamp).run();
-  await audit(env,session,targetRole==="STAFF"?"staff.create":"admin.create",id,{username,email,organization_id:organizationId});
+  let supabaseUserId:string;
+  try{supabaseUserId=await adminCreateUser(env,email,password,{onyx_username:username,onyx_role:targetRole,onyx_organization_id:organizationId});}
+  catch(error){return json({error:error instanceof Error?error.message:"SUPABASE_USER_CREATE_FAILED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},502);}
+  const id=uuid(),timestamp=Date.now(),isAdmin=targetRole==="ORGANIZATION_ADMIN"?1:0,parent=targetRole==="STAFF"?session.sub:"__allfather__";
+  const placeholderHash="$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  try{await env.DB.prepare("INSERT INTO users(id,username,email,supabase_user_id,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,username,email,supabaseUserId,organizationId,placeholderHash,isAdmin,1,targetRole,targetRole,parent,timestamp,timestamp).run();}
+  catch(error){try{await adminSetUserBanned(env,supabaseUserId,true);}catch{} throw error;}
+  await audit(env,session,targetRole==="STAFF"?"staff.create":"admin.create",id,{username,email,organization_id:organizationId,supabase_user_id:supabaseUserId});
   return json({id,username,email,organization_id:organizationId,is_admin:Boolean(isAdmin),is_active:true,role:targetRole},201);
 }
 async function deactivateUser(request:Request,env:Env,session:Session,userId:string){
-  const target=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
+  const target=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
   if(!target)return json({error:"USER_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
   const role=roleForUser(target);
   if(session.role==="ALL_FATHER"&&role!=="ORGANIZATION_ADMIN")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(session.role==="ORGANIZATION_ADMIN"&&(role!=="STAFF"||String(target.organization_id)!==session.organization_id))return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(role==="ALL_FATHER")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-  await env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=?").bind(Date.now(),userId).run();await audit(env,session,"user.deactivate",userId,{target_role:role});return json({success:true,id:userId,is_active:false});
+  if(target.supabase_user_id){try{await adminSetUserBanned(env,String(target.supabase_user_id),true);}catch(error){return json({error:error instanceof Error?error.message:"SUPABASE_USER_DEACTIVATION_FAILED",category:"AUTHORITY",retryability:"RETRYABLE"},502);}}
+  await env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=?").bind(Date.now(),userId).run();
+  await audit(env,session,"user.deactivate",userId,{username:target.username,role});
+  return json({success:true,id:userId,is_active:false});
 }
 async function audit(env:Env,session:Session,action:string,targetId:string,details:Json){await env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id,session.sub,action,uuid(),JSON.stringify({target:targetId,...details}),Date.now()).run();}
 
@@ -237,7 +240,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
   if(url.pathname==="/ready"){try{await env.DB.prepare("SELECT 1").first();return json({status:"ok",service:"onyx-cloudflare-worker",database:"d1"},200,origin);}catch{return json({status:"degraded",database:"unavailable"},503,origin);}}
   try{
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return authLogin(request,env);
-    if(url.pathname==="/api/auth/clerk"&&request.method==="POST")return authClerkAllFather(request,env);
+    if((url.pathname==="/api/auth/supabase"||url.pathname==="/api/auth/clerk")&&request.method==="POST")return authSupabaseAllFather(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return authRefresh(request,env);
     if(url.pathname==="/api/auth/logout"&&request.method==="POST")return authLogout(request,env);
     const session=await requireSession(request,env);
