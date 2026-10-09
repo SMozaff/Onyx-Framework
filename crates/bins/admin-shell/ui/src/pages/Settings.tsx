@@ -7,7 +7,6 @@ import { describeError } from "@/utils/errorHandler";
 import { useAuthStore } from "@/stores/authStore";
 import { useI18n } from "@/i18n/I18nContext";
 import {
-  getServerAddress,
   getBackendAddress,
   getBackendEnvironment,
   setBackendEnvironment,
@@ -35,7 +34,6 @@ import {
  * goes through `/api/command` via `useCommand`.
  */
 const POLICY_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
-const SERVER_ADDRESS_PLACEHOLDER = "http://192.168.0.250:3000";
 
 export default function Settings() {
   const { t } = useI18n();
