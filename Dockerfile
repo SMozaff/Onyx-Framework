@@ -1,9 +1,9 @@
-# Render's Docker runtime expects the Dockerfile at the repository root.
-# Keep this production image aligned with deploy/docker/api-server.Dockerfile.
-# The application itself remains the existing Rust/Axum api-server binary.
+# Production container image for the existing Rust/Axum ONYX API.
+# Cloudflare Workers Containers builds this image and runs the api-server binary
+# behind the ONYX Cloudflare Worker.
 #
-# Build on Debian 12 as well as run on Debian 12 so the binary does not
-# require a newer glibc than the distroless runtime provides.
+# Build and runtime both use Debian 12 so the binary does not require a newer
+# glibc than the distroless runtime provides.
 
 # syntax=docker/dockerfile:1.7
 FROM rust:1.97-bookworm AS builder
@@ -14,7 +14,7 @@ RUN apt-get update \
 COPY . .
 RUN cargo build --locked --release -p api-server
 
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=builder /workspace/target/release/api-server /usr/local/bin/api-server
 EXPOSE 10000 9090
 ENV ONYX_BIND=0.0.0.0:10000 ONYX_METRICS_BIND=127.0.0.1:9090 ONYX_ENV=production
