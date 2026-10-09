@@ -19,6 +19,10 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   ONYX_JWT_SECRET: ${{ secrets.ONYX_JWT_SECRET }}
+  ONYX_ALLFATHER_EMAIL: so.muzaff@gmail.com
+  CLERK_ISSUER: ${{ secrets.CLERK_ISSUER }}
+  CLERK_JWKS_URL: ${{ secrets.CLERK_JWKS_URL }}
+  CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
   HF_S3_ACCESS_KEY_ID: ${{ secrets.HF_S3_ACCESS_KEY_ID }}
   HF_S3_SECRET_ACCESS_KEY: ${{ secrets.HF_S3_SECRET_ACCESS_KEY }}
   ONYX_WORKER_URL: https://onyx-framework.soheil-mozaffari.workers.dev
@@ -35,19 +39,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Validate Cloudflare credentials
+      - name: Validate deployment credentials
         shell: bash
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_ACCOUNT_ID}" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
           test -n "${CLOUDFLARE_API_TOKEN}" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "${CLERK_ISSUER}" || { echo "Missing CLERK_ISSUER"; exit 1; }
+          test -n "${CLERK_JWKS_URL}" || { echo "Missing CLERK_JWKS_URL"; exit 1; }
+          test -n "${CLERK_SECRET_KEY}" || { echo "Missing CLERK_SECRET_KEY"; exit 1; }
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: deploy/cloudflare/edge-gateway/package.json
 
       - name: Install Worker dependencies
         run: npm install
@@ -69,8 +74,11 @@ jobs:
           test -n "$db_id" && test "$db_id" != "null"
           echo "database_id=$db_id" >> "$GITHUB_OUTPUT"
 
-      - name: Apply D1 schema
+      - name: Apply D1 foundation schema
         run: npx wrangler d1 execute onyx-free-db --remote --file=./d1/0001_foundation.sql --yes
+
+      - name: Apply D1 authentication hierarchy schema
+        run: npx wrangler d1 execute onyx-free-db --remote --file=./d1/0002_auth_hierarchy.sql --yes
 
       - name: Materialize deployment config
         shell: bash
@@ -92,6 +100,9 @@ jobs:
 
           [vars]
           ONYX_CORS_ORIGINS = "*"
+          ONYX_ALLFATHER_EMAIL = "so.muzaff@gmail.com"
+          CLERK_ISSUER = "${CLERK_ISSUER}"
+          CLERK_JWKS_URL = "${CLERK_JWKS_URL}"
           HF_S3_ENDPOINT = "https://s3.hf.co/Arronthemalkavian"
           HF_S3_BUCKET = "onyx"
           EOF
@@ -106,6 +117,10 @@ jobs:
             if [ -z "$secret" ]; then secret="$(openssl rand -hex 32)"; fi
             printf '%s' "$secret" | npx wrangler secret put ONYX_JWT_SECRET
           fi
+
+      - name: Configure Clerk secret
+        shell: bash
+        run: printf '%s' "${CLERK_SECRET_KEY}" | npx wrangler secret put CLERK_SECRET_KEY
 
       - name: Configure optional Hugging Face S3 credentials
         shell: bash
