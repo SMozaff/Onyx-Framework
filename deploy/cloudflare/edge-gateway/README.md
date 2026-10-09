@@ -1,73 +1,90 @@
-# ONYX Cloudflare Edge Gateway
+# ONYX Cloudflare Container API
 
-This Worker is Tier 1 only. It is an ingress/proxy boundary in front of the
-existing Rust/Axum ONYX API server. It does not authenticate users, authorize
-commands, access PostgreSQL, or access object storage.
+Phase 1 moves the existing Rust/Axum ONYX API into a Cloudflare Container and
+uses a Cloudflare Worker as its public ingress. The application code remains
+the existing `api-server` binary; this is a hosting migration, not an API
+rewrite.
 
-## Domain-free deployment
-
-The Worker uses Cloudflare's free `workers.dev` endpoint. No custom domain or
-Cloudflare DNS zone is required.
-
-The repository Worker name is `onyx-framework`, matching the currently
-deployed Cloudflare Worker.
-
-The Worker requires `ONYX_ORIGIN_URL`, which must be the public HTTPS origin
-of the native ONYX API. The Worker deliberately rejects non-HTTPS origins.
-
-For development, a Cloudflare Quick Tunnel can provide a temporary
-`trycloudflare.com` origin:
+## Architecture
 
 ```text
-cloudflared tunnel --url http://localhost:3000
+Mobile / Admin / Staff
+          |
+          v
+Cloudflare Worker (`onyx-framework`)
+          |
+          v
+Cloudflare Container (`OnyxApiContainer`)
+          |
+          v
+Rust/Axum `api-server` :10000
+          |
+          +--> Clerk
+          +--> PostgreSQL
+          +--> Hugging Face S3 blob storage
 ```
 
-Then use the generated HTTPS URL as `ONYX_ORIGIN_URL`. Quick Tunnels are
-intended for development/testing and their hostname changes when the tunnel is
-restarted.
+The Worker routes requests directly to the singleton `production` Container.
+The Container class preserves WebSocket forwarding by using the Container
+`fetch()` path rather than `containerFetch()`.
 
-For a stable production deployment, use a managed/public HTTPS origin for the
-native ONYX API. A custom domain for the Worker itself is optional and can be
-added later.
+## Container image
 
-## Direct local deployment
+Wrangler builds the repository-root `Dockerfile` using the repository root as
+the Docker build context. The existing production image remains the source of
+the Axum API; no Render-specific runtime behavior is required.
 
-From this directory:
+The API listens on `0.0.0.0:10000`. Cloudflare's Container binding uses port
+10000 as its default port and checks `/ready` during startup.
+
+## Runtime configuration
+
+The Worker passes the ONYX production runtime configuration into the Container.
+Sensitive values are Cloudflare Worker secrets and are never stored in this
+repository.
+
+Required Cloudflare secrets:
+
+- `DATABASE_URL`
+- `ONYX_GOVERNANCE_DATABASE_URL`
+- `ONYX_AUTHORITY_SIGNING_KEY`
+- `ONYX_CORS_ALLOWED_ORIGINS`
+- `CLERK_ISSUER`
+- `CLERK_SECRET_KEY`
+- `CLERK_JWKS_URL`
+- `ONYX_BLOB_STORE_S3_ACCESS_KEY_ID`
+- `ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY`
+
+The non-secret blob configuration remains:
+
+- `ONYX_BLOB_STORE_BACKEND=huggingface`
+- `ONYX_BLOB_STORE_S3_ENDPOINT=https://s3.hf.co/Arronthemalkavian`
+- `ONYX_BLOB_STORE_S3_BUCKET=onyx`
+
+The GitHub Actions deployment workflow expects the corresponding GitHub
+repository secrets. It validates them and syncs them to Cloudflare with
+`wrangler secret put` before deploying the Worker and Container.
+
+## Deployment
+
+Cloudflare Containers are available on the Workers Paid plan. From this
+directory, with Docker available locally and a Cloudflare API token configured:
 
 ```bash
 npm install
-npx wrangler deploy --var ONYX_ORIGIN_URL:https://<your-onyx-api-origin>
+npx wrangler deploy
 ```
 
-Wrangler will deploy to the Worker's `workers.dev` hostname.
+For GitHub Actions, run the `Deploy ONYX Cloudflare Container` workflow after
+configuring the Cloudflare account/API-token secrets and the ONYX runtime
+secrets listed above.
 
-## GitHub deployment
+The Worker is configured for its `workers.dev` hostname. A custom domain can
+be attached later without changing the Axum application.
 
-A manual GitHub Actions workflow is provided at
-`.github/workflows/deploy-cloudflare-edge.yml`.
+## Phase 1 boundary
 
-Configure these GitHub repository/environment secrets before running it:
-
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`
-- `ONYX_ORIGIN_URL`
-
-The Cloudflare API token must have permission to deploy Workers in the target
-account. `ONYX_ORIGIN_URL` must be an HTTPS URL; do not commit it to source
-control.
-
-## Architecture boundary
-
-The native ONYX runtime remains responsible for JWT authentication and token
-revocation, capability/command authorization, PostgreSQL transactions and
-migrations, audit/security policy, and background jobs, outbox relay, scheduler,
-and retry semantics.
-
-WebSocket upgrades are intentionally preserved by the request proxy so the
-existing Axum WebSocket routes remain the application authority.
-
-## Production DNS
-
-A custom domain is not required for this architecture to work. If a domain is
-later acquired, use a Cloudflare Worker Route in front of the existing ONYX
-origin rather than moving the native Axum runtime into Workers.
+This phase deliberately does not rewrite Axum, move PostgreSQL, replace Clerk,
+or replace the working Hugging Face blob store. It establishes Cloudflare as
+the compute and ingress layer first so the application can be verified before
+those independent migrations are considered.
