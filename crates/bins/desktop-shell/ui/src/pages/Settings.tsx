@@ -129,7 +129,8 @@ export default function Settings({
             setConnectionStatus(ConnectionStatus.Idle);
             setMessage(null);
           }}
-          placeholder={environment === "cloud" ? CLOUD_DEFAULT : LOCAL_DEFAULT}\n          className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
+          placeholder={environment === "cloud" ? CLOUD_DEFAULT : LOCAL_DEFAULT}
+          className="mt-1 w-full rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <p className="mt-2 text-xs text-onyx-text-dim">
           {t("auth.serverAddressExample")}
