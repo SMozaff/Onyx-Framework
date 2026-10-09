@@ -200,10 +200,6 @@ async fn refresh_rejects_a_bogus_token_and_an_access_token_used_as_a_refresh_tok
 /// a mock that could pass for a reason unrelated to expiry.
 #[tokio::test]
 async fn access_token_that_has_actually_expired_is_rejected_and_refresh_recovers() {
-    const SIGNING_KEY: &str =
-        "hex:4242424242424242424242424242424242424242424242424242424242424242";
-    std::env::set_var("ONYX_AUTHORITY_SIGNING_KEY", SIGNING_KEY);
-
     let (addr, http) = start_server("expiry").await;
     let base = format!("http://{addr}");
 
