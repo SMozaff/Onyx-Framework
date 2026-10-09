@@ -7,8 +7,8 @@
     "dev": "wrangler dev",
     "check": "wrangler deploy --dry-run",
     "d1:create": "wrangler d1 create onyx-free-db",
-    "d1:local": "wrangler d1 execute onyx-free-db --local --file=./d1/0001_foundation.sql",
-    "d1:remote": "wrangler d1 execute onyx-free-db --remote --file=./d1/0001_foundation.sql"
+    "d1:local": "wrangler d1 migrations apply onyx-free-db --local",
+    "d1:remote": "wrangler d1 migrations apply onyx-free-db --remote"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0"
