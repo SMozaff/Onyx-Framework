@@ -33,6 +33,7 @@ services:
       # Clerk authenticates Google identities. ONYX remains the account,
       # role and authorization authority. Allfather is bound in source to the
       # designated verified email: so.muzaff@gmail.com.
+      # Must be the Clerk Frontend API URL, e.g. https://<instance>.clerk.accounts.dev — no trailing slash
       - key: CLERK_ISSUER
         sync: false
       - key: CLERK_SECRET_KEY

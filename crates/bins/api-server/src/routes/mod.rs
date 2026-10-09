@@ -305,6 +305,7 @@ impl ApiState {
             Arc<dyn AuditWriter>,
             Arc<dyn TokenRevocationStore>,
         ) = if let Some(url) = governance_url {
+            // governance pool is intentionally separate from the primary pool even when pointing at the same database, so audit/rate-limit writes do not contend with primary traffic
             let governance_pool = PgPoolOptions::new()
                 .max_connections(10)
                 .connect(&url)
@@ -320,6 +321,7 @@ impl ApiState {
                 Arc::new(PostgresTokenRevocationStore::new(governance_pool)),
             )
         } else if let Some(pool) = primary_postgres_pool {
+            tracing::warn!("ONYX_GOVERNANCE_DATABASE_URL is not set; governance writes will share the primary connection pool — this is not recommended for production");
             (
                 Arc::new(PostgresSlidingWindowRateLimiter::new(pool.clone())),
                 Arc::new(HashChainAuditWriter::postgres(pool.clone())),

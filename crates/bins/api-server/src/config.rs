@@ -60,19 +60,26 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_env() -> anyhow::Result<Self> {
+        let database_url_explicitly_set = env::var("DATABASE_URL").is_ok();
+        let environment = Environment::parse(
+            &env::var("ONYX_ENV").unwrap_or_else(|_| "development".to_string()),
+        )?;
+        if environment.is_production() && !database_url_explicitly_set {
+            anyhow::bail!("DATABASE_URL is required in production");
+        }
         let database_url = env::var("DATABASE_URL")
             .unwrap_or_else(|_| "sqlite://onyx-team7.db?mode=rwc".to_string());
-        Self::load(database_url)
+        Self::load(database_url, database_url_explicitly_set)
     }
 
     /// Build configuration from process environment while replacing only the
     /// database URL. This preserves the existing `ApiState::new(database_url)`
     /// API used by integration tests and explicit test harnesses.
     pub fn for_database(database_url: &str) -> anyhow::Result<Self> {
-        Self::load(database_url.to_owned())
+        Self::load(database_url.to_owned(), true)
     }
 
-    fn load(database_url: String) -> anyhow::Result<Self> {
+    fn load(database_url: String, database_url_explicitly_set: bool) -> anyhow::Result<Self> {
         let environment_raw = env::var("ONYX_ENV").unwrap_or_else(|_| "development".to_string());
         let environment = Environment::parse(&environment_raw)?;
 
@@ -94,6 +101,7 @@ impl AppConfig {
         Self::validate_invariants(
             environment,
             &database_url,
+            database_url_explicitly_set,
             governance_database_url.is_some(),
             signing_key_present,
             cors_allowed_origins.is_some(),
@@ -123,12 +131,17 @@ impl AppConfig {
     fn validate_invariants(
         environment: Environment,
         database_url: &str,
+        database_url_explicitly_set: bool,
         governance_database_configured: bool,
         signing_key_configured: bool,
         cors_configured: bool,
     ) -> anyhow::Result<()> {
         if !environment.is_production() {
             return Ok(());
+        }
+
+        if !database_url_explicitly_set {
+            anyhow::bail!("DATABASE_URL is required in production");
         }
 
         let postgres_primary =
@@ -226,6 +239,7 @@ mod tests {
         let missing_everything = AppConfig::validate_invariants(
             Environment::Production,
             "sqlite::memory:",
+            true,
             false,
             false,
             false,
@@ -235,6 +249,7 @@ mod tests {
         let missing_governance = AppConfig::validate_invariants(
             Environment::Production,
             "postgres://db",
+            true,
             false,
             true,
             true,
@@ -245,6 +260,7 @@ mod tests {
             Environment::Production,
             "postgres://db",
             true,
+            true,
             false,
             true,
         );
@@ -253,6 +269,7 @@ mod tests {
         let missing_cors = AppConfig::validate_invariants(
             Environment::Production,
             "postgres://db",
+            true,
             true,
             true,
             false,
@@ -265,8 +282,23 @@ mod tests {
             true,
             true,
             true,
+            true,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn production_requires_database_url_to_be_explicitly_configured() {
+        let error = AppConfig::validate_invariants(
+            Environment::Production,
+            "sqlite://onyx-team7.db?mode=rwc",
+            false,
+            false,
+            false,
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "DATABASE_URL is required in production");
     }
 
     #[test]
@@ -274,6 +306,7 @@ mod tests {
         assert!(AppConfig::validate_invariants(
             Environment::Development,
             "sqlite::memory:",
+            true,
             false,
             false,
             false,
@@ -282,6 +315,7 @@ mod tests {
         assert!(AppConfig::validate_invariants(
             Environment::Test,
             "sqlite::memory:",
+            true,
             false,
             false,
             false,

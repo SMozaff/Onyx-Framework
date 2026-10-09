@@ -44,6 +44,30 @@ pub async fn build(config: &AppConfig) -> anyhow::Result<Arc<dyn BlobStore>> {
             Ok(Arc::new(store))
         }
         "huggingface" | "huggingface_s3" => {
+            let required = [
+                "ONYX_BLOB_STORE_S3_ENDPOINT",
+                "ONYX_BLOB_STORE_S3_BUCKET",
+                "ONYX_BLOB_STORE_S3_ACCESS_KEY_ID",
+                "ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY",
+            ];
+            let missing = missing_required_env(&required, |name| {
+                env::var(name)
+                    .map(|value| !value.trim().is_empty())
+                    .unwrap_or(false)
+            });
+            if !missing.is_empty() {
+                anyhow::bail!(
+                    "{}",
+                    missing
+                        .iter()
+                        .map(|name| format!(
+                            "{name} is required for Hugging Face blob storage — set this in your deployment secrets (Render dashboard: Environment → Secret Files, or Helm secretRef: onyx-api-secrets)"
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                );
+            }
+
             let endpoint = required_env("ONYX_BLOB_STORE_S3_ENDPOINT")?;
             let bucket = required_env("ONYX_BLOB_STORE_S3_BUCKET")?;
             let access_key = required_env("ONYX_BLOB_STORE_S3_ACCESS_KEY_ID")?;
@@ -63,5 +87,42 @@ pub async fn build(config: &AppConfig) -> anyhow::Result<Arc<dyn BlobStore>> {
 }
 
 fn required_env(name: &str) -> anyhow::Result<String> {
-    env::var(name).with_context(|| format!("{name} is required for Hugging Face blob storage"))
+    env::var(name).with_context(|| format!(
+        "{name} is required for Hugging Face blob storage — set this in your deployment secrets (Render dashboard: Environment → Secret Files, or Helm secretRef: onyx-api-secrets)"
+    ))
+}
+
+
+fn missing_required_env<'a>(
+    required: &'a [&'a str],
+    is_set: impl Fn(&str) -> bool,
+) -> Vec<&'a str> {
+    required
+        .iter()
+        .copied()
+        .filter(|name| !is_set(name))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_required_env;
+
+    #[test]
+    fn hugging_face_preflight_reports_every_missing_setting() {
+        let required = [
+            "ONYX_BLOB_STORE_S3_ENDPOINT",
+            "ONYX_BLOB_STORE_S3_BUCKET",
+            "ONYX_BLOB_STORE_S3_ACCESS_KEY_ID",
+            "ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY",
+        ];
+        assert_eq!(missing_required_env(&required, |_| false), required.to_vec());
+    }
+
+    #[test]
+    fn hugging_face_preflight_omits_configured_settings() {
+        let required = ["ENDPOINT", "BUCKET", "ACCESS_KEY", "SECRET_KEY"];
+        let missing = missing_required_env(&required, |name| name == "ENDPOINT" || name == "BUCKET");
+        assert_eq!(missing, vec!["ACCESS_KEY", "SECRET_KEY"]);
+    }
 }
