@@ -16,11 +16,12 @@ export function getBackendAddress(environment: BackendEnvironment = getBackendEn
   const key = environment === "local" ? LOCAL_ADDRESS_KEY : CLOUD_ADDRESS_KEY;
   const stored = localStorage.getItem(key);
   if (stored?.trim()) return stored;
-  if (environment === "cloud") {
+  if (environment === "local") {
     const legacy = localStorage.getItem(LEGACY_ADDRESS_KEY);
     if (legacy?.trim()) return legacy;
+    return LOCAL_DEFAULT;
   }
-  return environment === "local" ? LOCAL_DEFAULT : (import.meta.env.VITE_API_BASE ?? CLOUD_DEFAULT);
+  return import.meta.env.VITE_API_BASE ?? CLOUD_DEFAULT;
 }
 export function getServerAddress(): string {
   return getBackendAddress();
