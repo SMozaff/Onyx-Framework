@@ -23,22 +23,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42b2d3f6f1d7b2c3f0f8f6f7a1d4a8e6c4b2 # v7
-
       - name: Validate Cloudflare credentials
         shell: bash
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_ACCOUNT_ID}" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
           test -n "${CLOUDFLARE_API_TOKEN}" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
-
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
-
       - name: Install Wrangler and Container SDK
         run: npm install
-
       - name: Validate ONYX runtime secrets
         shell: bash
         env:
@@ -53,19 +49,9 @@ jobs:
           ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY: ${{ secrets.ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          for name in \
-            DATABASE_URL \
-            ONYX_GOVERNANCE_DATABASE_URL \
-            ONYX_AUTHORITY_SIGNING_KEY \
-            ONYX_CORS_ALLOWED_ORIGINS \
-            CLERK_ISSUER \
-            CLERK_SECRET_KEY \
-            CLERK_JWKS_URL \
-            ONYX_BLOB_STORE_S3_ACCESS_KEY_ID \
-            ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY; do
+          for name in DATABASE_URL ONYX_GOVERNANCE_DATABASE_URL ONYX_AUTHORITY_SIGNING_KEY ONYX_CORS_ALLOWED_ORIGINS CLERK_ISSUER CLERK_SECRET_KEY CLERK_JWKS_URL ONYX_BLOB_STORE_S3_ACCESS_KEY_ID ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY; do
             test -n "${!name}" || { echo "Missing GitHub secret for ${name}"; exit 1; }
           done
-
       - name: Sync ONYX runtime secrets to Cloudflare
         shell: bash
         env:
@@ -80,18 +66,8 @@ jobs:
           ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY: ${{ secrets.ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          for name in \
-            DATABASE_URL \
-            ONYX_GOVERNANCE_DATABASE_URL \
-            ONYX_AUTHORITY_SIGNING_KEY \
-            ONYX_CORS_ALLOWED_ORIGINS \
-            CLERK_ISSUER \
-            CLERK_SECRET_KEY \
-            CLERK_JWKS_URL \
-            ONYX_BLOB_STORE_S3_ACCESS_KEY_ID \
-            ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY; do
+          for name in DATABASE_URL ONYX_GOVERNANCE_DATABASE_URL ONYX_AUTHORITY_SIGNING_KEY ONYX_CORS_ALLOWED_ORIGINS CLERK_ISSUER CLERK_SECRET_KEY CLERK_JWKS_URL ONYX_BLOB_STORE_S3_ACCESS_KEY_ID ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY; do
             printf '%s' "${!name}" | npx wrangler secret put "${name}"
           done
-
       - name: Deploy Worker and Axum Container
         run: npx wrangler deploy
