@@ -1,131 +1,259 @@
 # ONYX Authentication Repair — Phase 1 Baseline
 
-**Assessment date:** 2026-10-10  
-**Repository:** [SMozaff/Onyx-Framework](https://github.com/SMozaff/Onyx-Framework)  
-**Branch examined:** `main`  
-**Baseline commit:** `c6dcbca9771206a70429a48ecaee5ebc734dce65`  
-**Commit URL:** https://github.com/SMozaff/Onyx-Framework/commit/c6dcbca9771206a70429a48ecaee5ebc734dce65  
-**Scope:** Read-only baseline investigation, plus this report file only. No production systems were changed.
+**Assessment date:** 2026-10-10 (re-verification revision)
+**Repository:** https://github.com/SMozaff/Onyx-Framework
+**Branch examined:** `main` (local worktree: `freebuff/2aea8dd80399fb79944e189c`, clean, identical SHA)
+**Baseline commit:** `2066216ee08a7222df6bc64f9088a87b3c4791ce`
+**Commit URL:** https://github.com/SMozaff/Onyx-Framework/commit/2066216ee08a7222df6bc64f9088a87b3c4791ce
+**Scope:** Read-only inspection plus this report file only. No production systems, migrations, secrets, Worker settings, or D1 data were changed.
 
-## 1. Repository state and instructions
+> **Revision note.** The original Phase 1 baseline (commit `12b7568`) was recorded against
+> `c6dcbca9771206a70429a48ecaee5ebc734dce65`. `main` has since advanced: PR #172 merged the
+> Phase 2 auth-contract reconciliation, and draft PR #173 (Phase 3) is open. This revision
+> re-verifies every prior observation against the current tree and adds live read-only
+> evidence from the deployed Worker. The prior report remains in Git history at `12b7568`.
 
-- GitHub repository metadata identifies `main` as the default branch; latest commit at inspection was `c6dcbca9771206a70429a48ecaee5ebc734dce65` (2026-10-10 15:16:49 UTC), message `fix(i18n): regenerate dictionaries from canonical catalogs`.
-- No open pull requests were returned by the GitHub API at inspection.
-- The local working-tree state cannot be determined through the repository API; it is **unknown**, not assumed clean.
-- Root `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, and `SECURITY.md` were not found at the examined branch paths. The repository does contain `docs/SECURITY_AUTHENTICATION_MODEL.md`, `docs/Onyx Auth system.md`, `DECISIONS.md`, and the Cloudflare deployment README. No instruction files were confirmed in the inspected tree; nested instruction-file absence was not exhaustively proven.
-- Authoritative model: `docs/SECURITY_AUTHENTICATION_MODEL.md` explicitly says it governs the migration. `docs/Onyx Auth system.md` agrees on the intended three-level model.
+## 1. Repository state, CI, and pull requests
 
-## 2. Locked intended model
+- `main` tip and the examined worktree are both `2066216ee08a7222df6bc64f9088a87b3c4791ce`
+  (merge of PR #172, "docs(auth): reconcile ONYX authentication contract", 2026-10-10 16:46 UTC).
+  Local `git status --porcelain` is empty (clean tree, no stashes).
+- **Open PR:** [#173 (draft) — "docs(auth): record D1 migration repair blocker"](https://github.com/SMozaff/Onyx-Framework/pull/173),
+  branch `auth-repair/03-d1-migrations` at `034b429b894e805b29623d8005dc8dee160c5431`.
+  It adds `reports/auth-repair/03-d1-migrations.md` and is blocked pending owner authorization
+  for read-only D1 ledger/schema inspection. No migration SQL was changed in that PR.
+- CI: [Security run 38069757800](https://github.com/SMozaff/Onyx-Framework/actions/runs/38069757800)
+  for PR #173 was `in_progress` at inspection. Repo history shows 1851 workflow runs total.
+  Security run [38062963607](https://github.com/SMozaff/Onyx-Framework/actions/runs/38062963607)
+  for the earlier baseline commit completed successfully; it is automated validation only and
+  proves nothing about deployed authentication.
 
-- **All-Father:** Google via Supabase Auth only; Worker must verify JWT signature, issuer, expiry and subject, verify the identity through Supabase Auth, require the designated confirmed email, map to a provisioned ONYX principal, and authorize server-side.
-- **Organization Admin and Staff:** ONYX-managed username/email + password; Argon2id hashes and account state in D1.
-- **Provisioning:** All-Father provisions organizations and Admins; Admins manage Staff only within their organization.
-- **Authority source:** D1 is authoritative for ONYX users, roles, active state, organization membership and authorization. UI gates are not security boundaries.
+## 2. Repository instructions and constraints
 
-Evidence: `docs/SECURITY_AUTHENTICATION_MODEL.md`; `docs/Onyx Auth system.md`; `deploy/cloudflare/edge-gateway/README.md`.
+- No `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `SECURITY.md`, or `CODEOWNERS` exists anywhere
+  in the inspected tree. No local-execution prohibition was found; verification is limited by
+  missing dependencies/credentials, not by instruction.
+- Binding documents:
+  - `docs/SECURITY_AUTHENTICATION_MODEL.md` — "authoritative security requirement"; now includes a
+    2026-10-10 "Implementation reconciliation" addendum recording known implementation gaps.
+  - `docs/Onyx Auth system.md` — three-tier identity model (All-Father / Org Admin / Staff).
+  - `deploy/cloudflare/edge-gateway/README.md` — locked model, endpoint contract, and the
+    migration rule that routes may only go live after automated tests exist.
 
-## 3. Confirmed findings
+## 3. Locked intended model (unchanged)
 
-### 3.1 Migration numbering and schema conflicts — confirmed
+- **All-Father:** Google identity `so.muzaff@gmail.com` via Supabase Auth only. Worker must verify
+  JWT signature/issuer/expiry/subject, resolve the token through Supabase Auth, require a confirmed
+  email matching the designated identity, map to a **provisioned** ONYX principal, and authorize
+  server-side. Google authentication alone must never grant All-Father privileges.
+- **Organization Admin / Staff:** ONYX-managed username-or-email + password; Argon2id hashes and
+  account state in D1; no third-party IdP.
+- **D1 is authoritative** for users, roles, active state, organization membership, and all
+  authorization decisions. UI gates are not security boundaries.
+- All-Father provisions organizations and Admins; Admins manage Staff only within their own org.
 
-The current tree contains:
-- `deploy/cloudflare/edge-gateway/migrations/0001_foundation.sql`
-- `deploy/cloudflare/edge-gateway/migrations/0002_auth_hierarchy.sql`
-- `deploy/cloudflare/edge-gateway/migrations/0002_onyx_identity_model.sql`
-- `deploy/cloudflare/edge-gateway/migrations/0003_supabase_identity.sql`
+## 4. Confirmed findings (verified at `2066216`)
 
-Two files share migration prefix `0002`. This is a confirmed naming/ordering conflict whose actual effect depends on the migration runner's discovery and ordering logic; do not assume both apply successfully.
+### 4.1 Duplicate/conflicting `0002` migrations — confirmed
 
-Schema overlap is confirmed by file contents:
-- `0002_auth_hierarchy.sql` adds `email` and `role`, creates `organizations`, and seeds `__allfather__` / `__allfather__` organization.
-- `0002_onyx_identity_model.sql` also adds `email` and `role`, adds `supabase_user_id`, creates `organizations`, and seeds a different `__onyx_allfather__` / `__onyx_root__` principal.
-- `0003_supabase_identity.sql` adds `supabase_user_id` again and creates a differently named unique index.
+`deploy/cloudflare/edge-gateway/migrations/` contains four files with three distinct prefixes:
 
-If both overlapping migrations run on the same database, repeated `ALTER TABLE ADD COLUMN` operations are likely to fail. Exact deployed schema and migration history are **not verified** in this phase.
+- `0001_foundation.sql`
+- `0002_auth_hierarchy.sql` — creates `organizations`, adds `email` + `role`, seeds org
+  `__allfather__` and user `__allfather__`/'allfather'.
+- `0002_onyx_identity_model.sql` — adds `email` + `role` + `supabase_user_id`, creates
+  `organizations`, seeds a **different** org `__onyx_root__` and user `__onyx_allfather__`/'allfather'.
+- `0003_supabase_identity.sql` — adds `supabase_user_id` **again** and creates a differently named
+  unique index (`idx_users_supabase_user_id` vs `idx_users_supabase_user`).
 
-### 3.2 Worker auth routes and readiness — source-confirmed
+Repeated `ALTER TABLE users ADD COLUMN email/role/supabase_user_id` cannot all succeed on one
+database; whichever files the D1 migration ledger does not yet record will fail when applied.
+Which files are recorded in production D1 is **unknown** (blocked on owner-authorized read-only
+ledger access — see draft PR #173).
 
-In `deploy/cloudflare/edge-gateway/src/index.ts`:
-- Routes exist for `POST /api/auth/login`, `POST /api/auth/supabase` (and legacy `/api/auth/clerk` alias), `POST /api/auth/refresh`, and `POST /api/auth/logout` (route dispatch around lines 245–248).
-- `/ready` performs only `SELECT 1` against the D1 binding and reports database availability (around line 243). It does **not** validate required authentication tables or columns.
-- Login queries `users` fields including `email`, `role`, and account status (around line 125); refresh also queries current account state (around line 142 in the current file, verify exact line positions against the baseline commit when modifying).
-- Supabase exchange looks up an All-Father username and references `supabase_user_id`; current source can update that mapping when the presented identity differs (around lines 149–153). The intended model requires explicit provisioned-principal mapping and server-side authorization; the safety and binding behavior needs dedicated review before deployment.
-- `src/supabase.ts` checks token structure, accepted signing algorithm, issuer and expiry, fetches JWKS, and includes a Supabase Auth user lookup path. This source inspection does not establish an end-to-end successful login.
+Additionally, `deploy/cloudflare/edge-gateway/d1/` contains a second, partially duplicated copy of
+the migration set (`0001_foundation.sql`, `0002_auth_hierarchy.sql`). Only `migrations/` is
+referenced by `wrangler.deploy.toml` generation in `.github/workflows/deploy-cloudflare-edge.yml`
+(`migrations_dir = "migrations"`); the `d1/` copies are unreferenced duplicate state that can drift.
 
-### 3.3 Admin Shell login — source-confirmed
+Two seed identities compete for the same lowercase username `allfather` (unique index
+`idx_users_username_lower`): `__allfather__` (org `__allfather__`) and `__onyx_allfather__`
+(org `__onyx_root__`). `INSERT OR IGNORE` does not protect against this: the unique username index
+causes the second insert to be silently ignored, so the surviving principal depends on file order.
 
-`crates/bins/admin-shell/ui/src/pages/Login.tsx` contains an All-Father mode that extracts `access_token` from the URL hash and posts it as a bearer token to `/api/auth/supabase`. The presence of this UI path does not prove OAuth flow correctness or that the deployed Worker accepts it. The code should be reviewed for implicit-flow use; the hash-token callback is consistent with an implicit-style token return, but the complete provider configuration and live redirect behavior are **not verified**.
+### 4.2 Worker auth routes — source-confirmed at current SHA
 
-### 3.4 Deployment and CI wiring — source-confirmed
+`deploy/cloudflare/edge-gateway/src/index.ts`:
 
-- `.github/workflows/deploy-cloudflare-edge.yml` deploys the Worker and has production-affecting behavior. It triggers manually and on pushes to `migration/cloudflare-free-worker` for matching paths, not ordinary `main` pushes.
-- `.github/workflows/cloudflare-worker-check.yml` runs `npm install` and `npm run check` for Worker changes and relevant PRs.
-- `.github/workflows/migrate-worker-to-supabase.yml` runs a deterministic migration script and can commit/push to `migration/cloudflare-free-worker`.
-- Latest visible CI run for the baseline commit: [Security workflow run 38062963607](https://github.com/SMozaff/Onyx-Framework/actions/runs/38062963607), completed successfully. This is not proof that authentication integration or deployment succeeded.
-- A workflow dispatch for [ONYX Signed Release run 38064005600](https://github.com/SMozaff/Onyx-Framework/actions/runs/38064005600) was cancelled. It is not an authentication test result.
-- No open PRs were returned at inspection.
+- Route dispatch (lines 245–248): `POST /api/auth/login`, `POST /api/auth/supabase` (legacy alias
+  `/api/auth/clerk`), `POST /api/auth/refresh`, `POST /api/auth/logout`.
+- `/api/auth/supabase` (lines 135–157) now verifies the Supabase JWT, resolves the bearer token
+  through Supabase Auth (`src/supabase.ts:37–101`: signature via JWKS, algorithm allowlist
+  RS256/ES256, issuer `${SUPABASE_URL}/auth/v1`, expiry, `identity.id === claims.sub`,
+  `email_confirmed_at`, email match against `env.ONYX_ALLFATHER_EMAIL || so.muzaff@gmail.com`
+  at line 35). This is stronger than the Phase 1 snapshot.
+- **Contract gap (confirmed):** lines 151–154 still `UPDATE users SET supabase_user_id=?` when the
+  stored mapping differs from the presented subject. The locked contract addendum in
+  `docs/SECURITY_AUTHENTICATION_MODEL.md` explicitly forbids this ("Login must not create, update,
+  or replace users.supabase_user_id; a subject mismatch must be denied without a database write").
+- **Principal lookup (confirmed):** line 149 selects the principal with
+  `WHERE LOWER(username)=LOWER('allfather')`, i.e. by mutable username rather than a stable
+  provisioned ID; `roleForUser()` (lines 108–113) also infers `ALL_FATHER` from the literal
+  username `allfather`. The two competing seed rows make this lookup order/ledger-dependent.
+- **Raw provider/verifier errors leak to clients:** line 155 returns the caught exception message
+  verbatim in the public JSON error body, contrary to the contract's "stable, generic error codes" rule.
+- `/ready` (line 243) performs only `SELECT 1` and reports `database:"d1"`; it does **not** validate
+  the required auth schema (`organizations`, `users.email`, `users.role`, `users.supabase_user_id`,
+  seeded All-Father principal). Confirmed trivial.
+- ONYX login (lines 120–128) looks up `users` by case-insensitive username or email, verifies
+  Argon2id, rejects inactive accounts and rejects password login for `ALL_FATHER`.
+- Session revalidation (lines 88–96) re-reads `is_active`, `organization_id`, and role from D1 on
+  every protected request; refresh rotates via `token_revocations`. Access token 1 h, refresh 7 d.
+- Unported routes return `501 ROUTE_NOT_MIGRATED` **including** a `message` field (line 263).
 
-## 4. Unknowns and access limitations
+### 4.3 Admin Shell login — source-confirmed
 
-The following were not verified and must remain unknown:
-- Deployed Worker metadata/version and its actual environment/bindings.
-- Whether the deployed Worker is bound to the expected D1 database by database ID/name.
-- Deployed D1 schema, migration history, presence of `organizations`, `users.email`, `users.role`, and `users.supabase_user_id`.
-- Whether the intended All-Father principal exists in deployed D1, and which of the competing seed identities is present.
-- Production authentication outcomes and real authorized end-to-end login.
-- Production OAuth provider settings and whether implicit flow is currently configured.
-- Whether the deploy workflow's most recent production execution applied all migrations successfully.
-- Local working-tree state and uncommitted changes.
+`crates/bins/admin-shell/ui/src/pages/Login.tsx`:
 
-No authorized read-only Cloudflare metadata or SQL access was exercised during this baseline. No production data or secrets were queried.
+- Line 31: extracts `access_token` from the **URL fragment**; lines 40–42 post it to
+  `/api/auth/supabase` as a bearer token.
+- Line 68: `target.searchParams.set("flow_type", "implicit")` — **implicit flow is explicitly
+  requested in source.** Provider-side configuration is not verifiable from the repository.
+- Lines 58–59: Supabase URL/publishable key come from `VITE_SUPABASE_URL` /
+  `VITE_SUPABASE_PUBLISHABLE_KEY`; if unset the UI shows a not-configured message.
+- Legacy Clerk code remains: `crates/bins/admin-shell/ui/src/auth/clerk.ts` contains a hard-coded
+  fallback Clerk publishable key (public-by-design value) and is dead weight against the locked model.
+- Session tokens are stored client-side via `src/utils/auth.ts` / `src/stores/authStore.ts` (localStorage-backed).
 
-## 5. Relevant tests and gaps
+### 4.4 Deployment and CI wiring — source-confirmed
 
-Repository test inventory includes:
-- API server: `crates/bins/api-server/tests/auth_refresh.rs`, `mobile_access_gate.rs`, `mobile_observer_capability.rs`, `observer_read_routes.rs`, plus hierarchy and role-specific authorization tests.
-- Admin Shell UI: `crates/bins/admin-shell/ui/src/pages/Login.tsx`; no directly named Admin Shell login test was identified in the inspected path inventory.
-- Worker: `.github/workflows/cloudflare-worker-check.yml` validates the bundle with `npm run check`; no dedicated Worker auth test file was identified in the inspected Worker tree.
-- PWA/browser auth tests exist under `mobile-pwa/tests` and `web-ui/tests`, but they do not establish the Cloudflare Worker/D1 auth exchange end to end.
-- CI evidence is automated validation only. A real deployed Supabase → Worker → D1 → ONYX session round trip, negative authorization cases, and deployed-schema readiness check remain unverified.
+- `.github/workflows/deploy-cloudflare-edge.yml`:
+  - Triggers: `workflow_dispatch` and pushes to `migration/cloudflare-free-worker` (not `main`).
+  - Creates/reuses D1 DB named `onyx-free-db`, materializes `wrangler.deploy.toml` with binding `DB`
+    and `migrations_dir = "migrations"`, applies migrations `--remote`, sets secrets, deploys, then
+    verifies `/health`, `/ready` (expects 200), and expects **401** from
+    `GET /api/users/hierarchy` anonymously.
+  - `ONYX_ALLFATHER_EMAIL` and the Supabase project URL are hard-coded in the workflow file.
+- `.github/workflows/cloudflare-worker-check.yml`: `npm install` + `npm run check`
+  (`wrangler deploy --dry-run`) only — a bundle validation, **not** a test run.
+- `.github/workflows/live-deployment-smoke.yml`: live `/health` + `/ready` probe on pushes to
+  `migration/cloudflare-free-worker`; also expects 401 from `/api/users`.
+- `.github/workflows/migrate-worker-to-supabase.yml`: deterministic Python source rewrite that
+  commits and pushes to `migration/cloudflare-free-worker` (write-enabled workflow).
+- `deploy/cloudflare/edge-gateway/package.json` defines `d1:local` / `d1:remote` against `migrations/`.
 
-## 6. Files likely to change in later phases
+### 4.5 NEW: live deployed Worker does not match current source — confirmed (read-only probes)
 
-Primary scope:
+Unauthenticated GET requests (no credentials, no state change) against the production URL recorded
+in the workflows, `https://onyx-framework.soheil-mozaffari.workers.dev`:
+
+| Probe | Result |
+|---|---|
+| `GET /health` | `200 {"status":"ok","service":"onyx-cloudflare-worker","runtime":"cloudflare-workers-free"}` |
+| `GET /ready` | `200 {"status":"ok","service":"onyx-cloudflare-worker","database":"d1"}` |
+| `GET /api/users/hierarchy` (anonymous) | **`501 {"error":"ROUTE_NOT_MIGRATED","route":"/api/users/hierarchy"}`** (no `message` field) |
+| `POST /api/auth/supabase` (no token) | **`501 {"error":"ROUTE_NOT_MIGRATED","route":"/api/auth/supabase"}`** |
+
+Interpretation:
+
+- The **deployed Worker is an older build than `2066216`.** Current source implements both routes;
+  an anonymous `GET /api/users/hierarchy` would return `401 UNAUTHORIZED`, and the 501 body in
+  current source always includes a `message` field (index.ts:263). The deployed body has none.
+- The deployed build therefore predates the auth-route implementation and the
+  "Verify protected API rejects anonymous access" gate in the deploy workflow (which would have
+  failed on a 501 where it expects 401) — meaning **the currently deployed Worker was not produced
+  by a successful run of the current deploy workflow**, or was deployed before that gate existed.
+  The exact deployed commit is **unknown** (no Workers version metadata access).
+- `/ready` is live and reports `database:"d1"`, so a D1 binding exists in production, but readiness
+  still validates nothing about the auth schema.
+- `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout` behavior on the deployed build is
+  **unknown** (not probed: probing them would require credential-bearing requests).
+- The Supabase → Worker → D1 → ONYX session exchange has **not** been demonstrated end to end.
+
+## 5. Unknowns / not verifiable with current access
+
+- Deployed Worker version/commit, environment variables, and secret presence (no Cloudflare API
+  credentials are available in this environment; `wrangler` is unauthenticated).
+- Production D1 database ID, migration ledger (`d1_migrations`), and actual auth schema/columns.
+  Whether `organizations`, `users.email`, `users.role`, `users.supabase_user_id` exist in production.
+- Which All-Father seed principal (`__allfather__` vs `__onyx_allfather__`) exists in production, if any.
+- Supabase project OAuth settings (redirect URLs, flow type) — provider console not accessible.
+- Whether any successful production deployment of the current Worker source ever occurred.
+- Whether the last successful deploy workflow run applied all four migrations cleanly.
+- Real end-to-end authentication outcomes for any role. **No login flow is claimed to work.**
+
+## 6. Tests and CI gaps
+
+- Rust API reference: `crates/bins/api-server/tests/` (`auth_refresh.rs`, `mobile_access_gate.rs`,
+  `mobile_observer_capability.rs`, `observer_read_routes.rs`, `staff_loan_authorization.rs`,
+  `team_leader_precheck_authorization.rs`, `user_hierarchy_admin_routes.rs`) — these test the Axum
+  service, not the Cloudflare Worker.
+- Worker: **no test files exist**; `npm run check` only dry-run-bundles. There are no automated
+  tests for `/api/auth/supabase`, `/api/auth/login`, refresh rotation, revocation, tenant isolation,
+  migration application, or readiness schema validation.
+- Admin Shell UI: no automated login test; Playwright specs exist under `web-ui/tests` and
+  `mobile-pwa/tests` but do not cover the Supabase→Worker exchange.
+- CI verifies only that the bundle compiles and (for live smoke) that the worker answers `/health`.
+
+## 7. Files likely to change in later phases
+
 1. `deploy/cloudflare/edge-gateway/migrations/0002_auth_hierarchy.sql`
 2. `deploy/cloudflare/edge-gateway/migrations/0002_onyx_identity_model.sql`
 3. `deploy/cloudflare/edge-gateway/migrations/0003_supabase_identity.sql`
-4. `deploy/cloudflare/edge-gateway/src/index.ts`
-5. `deploy/cloudflare/edge-gateway/src/supabase.ts`
-6. `deploy/cloudflare/edge-gateway/README.md`
-7. `deploy/cloudflare/edge-gateway/wrangler.toml` (only if binding/config declaration changes are needed)
-8. `crates/bins/admin-shell/ui/src/pages/Login.tsx`
-9. `crates/bins/admin-shell/ui/src/auth/clerk.ts` and `crates/bins/admin-shell/ui/src/stores/authStore.ts` if shared auth/session behavior needs correction
-10. `.github/workflows/deploy-cloudflare-edge.yml`
-11. `.github/workflows/cloudflare-worker-check.yml`
-12. `deploy/cloudflare/edge-gateway/package.json` and new focused Worker auth/migration tests if required.
+4. `deploy/cloudflare/edge-gateway/d1/*` (duplicate copies — consolidate or delete)
+5. `deploy/cloudflare/edge-gateway/src/index.ts` (remove `supabase_user_id` auto-bind write;
+   stable principal lookup; generic public errors)
+6. `deploy/cloudflare/edge-gateway/src/supabase.ts`
+7. `crates/bins/admin-shell/ui/src/pages/Login.tsx` (flow type/callback handling)
+8. `crates/bins/admin-shell/ui/src/auth/clerk.ts` (legacy removal)
+9. `.github/workflows/deploy-cloudflare-edge.yml`
+10. `.github/workflows/cloudflare-worker-check.yml` (real Worker auth/migration tests)
+11. `deploy/cloudflare/edge-gateway/package.json` + new Worker test files
+12. `reports/auth-repair/03-d1-migrations.md` (in flight via draft PR #173)
 
-Do not widen this list to unrelated application features or localization work without new evidence.
+## 8. Proposed sequence for phases 2–8 (revised against current state)
 
-## 7. Proposed phases 2–8
+2. ✅ **Done** (PR #172): contract and route matrix reconciled; gaps documented.
+3. **Migration/schema reconciliation (in flight, blocked):** obtain owner-authorized **read-only**
+   D1 ledger + schema evidence, then choose one of the two history-dependent repair paths documented
+   in draft PR #173. Forward-only, additive repair preferred; do not rewrite applied history.
+4. **Supabase identity binding:** remove the `supabase_user_id` write from login (index.ts:151–154),
+   key the principal on a stable ID, resolve the implicit-flow callback decision, delete legacy Clerk code.
+5. **ONYX credential/session path:** refresh-rotation and revocation tests, inactive-account
+   rejection, generic error responses.
+6. **Readiness and observability:** extend `/ready` to verify required auth tables/columns and the
+   provisioned All-Father principal without exposing configuration.
+7. **Automated verification and deployment guardrails:** add Worker-level auth/migration tests;
+   make deploy depend on them; confirm the anonymous-401 gate matches the deployed route set.
+8. **Staged production verification with owner approval:** record pre-state, apply approved
+   forward migrations, redeploy, then verify `/health`, `/ready`, anonymous-401, and a real,
+   authorized Supabase→Worker→D1 session round trip plus negative authorization cases.
 
-2. **Migration/schema reconciliation:** establish a single monotonic migration sequence, determine the deployed schema/history through authorized read-only access, design a forward-only repair and rollback plan. Do not rewrite already-applied migration files without migration-history evidence.
-3. **Supabase identity verification:** verify JWT signature/issuer/expiry/subject and verified user details; remove identity auto-binding or fallback behavior unless explicitly justified by a safe provisioning contract.
-4. **ONYX credential/session path:** audit username/email lookup, Argon2id verification, inactive-account rejection, refresh rotation/revocation, logout and session role revalidation.
-5. **Authorization and tenant boundaries:** test All-Father-only operations, Admin-only provisioning, organization isolation, and denial of privilege escalation.
-6. **Readiness and observability:** make readiness verify required auth schema/columns and safe D1 queries; do not expose sensitive configuration.
-7. **Automated verification and deployment guardrails:** add Worker-level migration/auth tests and negative cases; make deployment dependent on checks and migration validation.
-8. **Staged production verification:** obtain explicit owner approval, take backups/record migration state, apply only approved forward migrations, verify endpoints and authorized end-to-end flows, document rollback triggers.
+Each phase must stop if its acceptance criteria fail.
 
-Each phase should produce evidence and stop before the next phase if its acceptance criteria fail.
+## 9. Safety and owner approvals required
 
-## 8. Safety and owner approvals
+- **No production mutation occurred in this phase.** Only unauthenticated GET requests and one
+  token-less POST (which returned `501 ROUTE_NOT_MIGRATED` without touching the database) were sent
+  to the public Worker URL. No Cloudflare or Supabase credentials are present in this environment.
+- Explicit production-owner approval is required before: applying D1 migrations; changing Worker
+  bindings, config, or secrets; changing Supabase OAuth settings/redirect URLs; deploying a Worker
+  version; creating/modifying/deleting production identities; changing production traffic.
+- Read-only D1 ledger/schema inspection (already requested in draft PR #173) also requires explicit
+  owner authorization and must never select hash, token, or secret values.
+- Never print or include secret values in logs or reports.
 
-- **No production mutation occurred in Phase 1.** This report is the only intended repository write.
-- Explicit production-owner approval is required before applying D1 migrations, changing Worker production bindings/configuration/secrets, changing Supabase OAuth settings/redirect URLs, deploying a Worker version, modifying/deleting production identities, or changing production traffic.
-- Never print or include secret values in logs or reports. Validate secret presence only.
-- Before any production schema mutation, confirm database ID/name, deployed migration history, backup/restore approach, and rollback limits. D1 migrations may not be safely reversible; prefer additive forward repair.
-- Do not claim a login flow works without a real authorized end-to-end verification.
+## 10. Conclusion
 
-## 9. Phase 1 conclusion
+Baseline re-verified at `2066216`. The two most consequential confirmed facts are:
+(1) the migration set still contains conflicting duplicate `0002` files that seed **two different**
+All-Father principals and double-add identity columns, and
+(2) the **deployed production Worker is an older build that does not implement the auth routes at
+all** — `/api/auth/supabase` currently answers `501 ROUTE_NOT_MIGRATED` in production, so no
+Supabase sign-in can work today regardless of the source-level improvements merged in PR #172.
+Implementation is intentionally not started by this phase; the next actionable step is the
+owner-authorized read-only D1 inspection already staged in draft PR #173, followed by a migration
+repair, then a real deployment of the current source with verification gates.
 
-**Baseline captured; implementation intentionally not started.** The most consequential confirmed source defect is conflicting duplicate `0002` migrations that add overlapping columns and seed different All-Father principals. Deployed impact is unknown until the actual D1 binding and migration history are inspected read-only. The next phase should begin with migration-runner semantics and authorized deployed-schema evidence, not by immediately editing production migration files.
+*This report is uncommitted in the local worktree; commit it as `docs(auth)` if it should be
+preserved on a branch.*
