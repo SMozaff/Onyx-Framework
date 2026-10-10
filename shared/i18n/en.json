@@ -535,7 +535,7 @@
   "settings.title": "Settings",
   "settings.useServerAndSignInAgain": "Use this server and sign in again",
   "language.note": "Interface language. Applies instantly and is remembered on this device.",
-  "language.title": "Language"
+  "language.title": "Language",
   "auth.googleThroughSupabase": "Google through Supabase",
   "auth.googleIdentityPrompt": "Continue with your designated Google identity.",
   "auth.checkingGoogleSignIn": "Checking Google sign-in response…",
