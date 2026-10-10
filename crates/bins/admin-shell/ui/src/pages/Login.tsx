@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n/I18nContext";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
@@ -15,7 +15,7 @@ export default function Login() {
   const { t } = useI18n();
   const navigate = useNavigate();
 
-  const [mode, setMode] = useState<LoginMode>("account");
+  const [mode, setMode] = useState<LoginMode>(() => new URLSearchParams(window.location.search).get("auth") === "allfather" ? "allfather" : "account");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
