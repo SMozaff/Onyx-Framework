@@ -75,6 +75,31 @@ export async function verifySupabaseJwt(env: { SUPABASE_URL?: string; SUPABASE_J
   return payload;
 }
 
+export async function getSupabaseUser(
+  env: { SUPABASE_URL?: string; SUPABASE_PUBLISHABLE_KEY?: string },
+  accessToken: string,
+): Promise<{ id: string; email: string | null; email_confirmed_at: string | null }> {
+  const response = await fetch(`${supabaseBase(env)}/auth/v1/user`, {
+    method: "GET",
+    headers: {
+      apikey: publicKey(env),
+      authorization: `Bearer ${accessToken}`,
+      accept: "application/json",
+    },
+  });
+  const body = await response.json().catch(() => ({})) as Json;
+  if (!response.ok || typeof body.id !== "string") {
+    throw new Error("SUPABASE_USER_VERIFICATION_FAILED");
+  }
+  return {
+    id: body.id,
+    email: typeof body.email === "string" ? body.email : null,
+    email_confirmed_at: typeof body.email_confirmed_at === "string"
+      ? body.email_confirmed_at
+      : typeof body.confirmed_at === "string" ? body.confirmed_at : null,
+  };
+}
+
 export async function passwordSignIn(
   env: { SUPABASE_URL?: string; SUPABASE_PUBLISHABLE_KEY?: string },
   email: string,
