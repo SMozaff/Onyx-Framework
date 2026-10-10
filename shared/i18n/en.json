@@ -536,4 +536,9 @@
   "settings.useServerAndSignInAgain": "Use this server and sign in again",
   "language.note": "Interface language. Applies instantly and is remembered on this device.",
   "language.title": "Language"
+  "auth.googleThroughSupabase": "Google through Supabase",
+  "auth.googleIdentityPrompt": "Continue with your designated Google identity.",
+  "auth.checkingGoogleSignIn": "Checking Google sign-in response…",
+  "auth.continueWithGoogle": "Continue with Google",
+  "auth.googleSignInNotConfigured": "Google sign-in is not configured in this build. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the Admin shell."
 }
