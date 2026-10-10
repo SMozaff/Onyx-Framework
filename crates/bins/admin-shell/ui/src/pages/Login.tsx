@@ -55,10 +55,10 @@ export default function Login() {
   }, [mode, navigate]);
 
   function beginGoogleSignIn() {
-    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\\/$/, "");
+    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, "");
     const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
     if (!supabaseUrl || !publishableKey) {
-      setError("Google sign-in is not configured in this build. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the Admin shell.");
+      setError(t("auth.googleSignInNotConfigured"));
       return;
     }
     const redirectTo = window.location.origin + window.location.pathname + "?auth=allfather";
@@ -149,10 +149,10 @@ export default function Login() {
           ) : (
             <div>
               <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">{t("auth.allFatherAuthority")}</p>
-              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">Google through Supabase</h2>
+              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">{t("auth.googleThroughSupabase")}</h2>
               <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.allFatherReservedPath")}</p>
-              <p className="mt-4 text-xs text-onyx-text-dim">{googleAuthReady ? "Continue with your designated Google identity." : "Checking Google sign-in response…"}</p>
-              <button type="button" onClick={beginGoogleSignIn} disabled={loading} className="mt-4 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50">{loading ? "Signing in…" : "Continue with Google"}</button>
+              <p className="mt-4 text-xs text-onyx-text-dim">{googleAuthReady ? t("auth.googleIdentityPrompt") : t("auth.checkingGoogleSignIn")}</p>
+              <button type="button" onClick={beginGoogleSignIn} disabled={loading} className="mt-4 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50">{loading ? t("auth.signingIn") : t("auth.continueWithGoogle")}</button>
               <button type="button" onClick={() => { setError(null); setMode("account"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 {t("auth.backToAdminLogin")}
               </button>
