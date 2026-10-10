@@ -110,7 +110,7 @@ async function issuePair(env:Env,user:Record<string,unknown>,type:string){
 }
 async function authLogin(request:Request,env:Env){
   const body=await request.json().catch(()=>null) as Json|null;
-  const identifier=typeof body?.username==="string"?body.username.trim():"";
+  const identifier=typeof body?.username==="string"?body.username.trim():typeof body?.email==="string"?body.email.trim():"";
   const password=typeof body?.password==="string"?body.password:"";
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const user=await env.DB.prepare("SELECT id,username,email,organization_id,password_hash,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
@@ -175,6 +175,7 @@ async function createUser(request:Request,env:Env,session:Session,targetRole:"OR
   return json({id,username,email,organization_id:organizationId,is_admin:Boolean(isAdmin),is_active:true,role:targetRole},201);
 }
 async function deactivateUser(request:Request,env:Env,session:Session,userId:string){
+  requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");
   const target=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
   if(!target)return json({error:"USER_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
   const role=roleForUser(target);
