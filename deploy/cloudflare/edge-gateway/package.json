@@ -8,12 +8,14 @@
     "check": "wrangler deploy --dry-run",
     "d1:create": "wrangler d1 create onyx-free-db",
     "d1:local": "wrangler d1 migrations apply onyx-free-db --local",
-    "d1:remote": "wrangler d1 migrations apply onyx-free-db --remote"
+    "d1:remote": "wrangler d1 migrations apply onyx-free-db --remote",
+    "test": "vitest run"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0"
   },
   "devDependencies": {
+    "vitest": "^1.6.1",
     "wrangler": "^4.46.0"
   }
 }

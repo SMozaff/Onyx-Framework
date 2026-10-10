@@ -148,14 +148,21 @@ async function authSupabaseAllFather(request:Request,env:Env){
       return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
     const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER('allfather') LIMIT 1").first<Record<string,unknown>>();
     if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-    if(String(user.supabase_user_id||"")!==String(claims.sub)){
-      await env.DB.prepare("UPDATE users SET supabase_user_id=?,updated_at=? WHERE id=?").bind(String(claims.sub),Date.now(),String(user.id)).run();
-      user.supabase_user_id=String(claims.sub);
+    // Contract (docs/SECURITY_AUTHENTICATION_MODEL.md): the Supabase subject
+    // mapping is written only by an owner-controlled provisioning process.
+    // Login must never create, update, or replace users.supabase_user_id; an
+    // unmapped or mismatched subject is denied without a database write.
+    if(!user.supabase_user_id||String(user.supabase_user_id)!==String(claims.sub)){
+      console.warn(JSON.stringify({event:"allfather_subject_rejected",reason:user.supabase_user_id?"SUBJECT_MISMATCH":"SUBJECT_UNMAPPED",principal_id:String(user.id)}));
+      return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
     }
     return json(await issuePair(env,user,"allfather"));
   }catch(error){
-    const message=error instanceof Error?error.message:"invalid token";
-    return json({error:message,category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+    // Public responses carry only stable error codes; the verifier reason is
+    // logged server-side as a safe structured event and never includes the
+    // presented token, OAuth code, or any secret material.
+    console.error(JSON.stringify({event:"allfather_token_rejected",reason:error instanceof Error?error.message:"unknown"}));
+    return json({error:"INVALID_SUPABASE_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   }
 }
 function requireRole(session:Session,...roles:string[]){if(!roles.includes(session.role))throw new Error("FORBIDDEN_ROLE");}

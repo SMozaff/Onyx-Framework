@@ -38,6 +38,28 @@ Authentication endpoints:
 
 D1 migration `0002_onyx_identity_model.sql` adds role/email/identity fields, organization records, and the seeded All-Father authority record. Admin and Staff passwords are Argon2id hashes in D1; their accounts are not provisioned in Supabase.
 
+## Trust boundary: external claims vs ONYX-assigned privileges
+
+Which facts are proven by an external identity provider, and which are assigned by ONYX. Only the
+left column is ever *authenticated* externally; every privilege lives in the right column and is
+decided server-side by the Worker against D1.
+
+| Fact / claim | How it becomes trusted |
+|---|---|
+| Supabase JWT `sub`, `iss`, `exp`, signature | Verified by the Worker (`src/supabase.ts`): JWKS signature, RS256/ES256 allowlist, exact issuer, expiry |
+| Supabase Auth user id, primary email, `email_confirmed_at` | Resolved server-side through `GET /auth/v1/user` with the presented bearer token; must equal the verified JWT `sub` and the configured All-Father email |
+| `users.supabase_user_id` (external subject mapping) | **Owner-controlled provisioning only.** Login never creates, updates, or replaces it; an unmapped or mismatched subject is denied with `ALLFATHER_NOT_PROVISIONED` and no database write |
+| `users.role` (`ALL_FATHER` / `ORGANIZATION_ADMIN` / `STAFF`) | Assigned by ONYX provisioning in D1 (All-Father provisions organizations and Admins; Admins manage Staff in their own organization) |
+| `users.is_active`, `users.organization_id` | ONYX account lifecycle in D1; revalidated on login, refresh, and every protected request |
+| ONYX access/refresh JWT validity | Issued by the Worker with `ONYX_JWT_SECRET` only after D1 checks; expiry and `token_revocations` rechecked on use |
+| `role`, `is_admin`, `organization_id`, `class`, `parent_user_id` in any request body, query, or client store | **Never trusted as authority** — client-supplied values are ignored for authorization decisions |
+
+Public authentication failures return stable error codes only (`INVALID_CREDENTIALS`,
+`ALLFATHER_REQUIRED`, `ALLFATHER_NOT_PROVISIONED`, `INVALID_SUPABASE_TOKEN`,
+`INVALID_REFRESH_TOKEN`, `UNAUTHORIZED`). The verifier's detailed reason is logged server-side as
+a structured event (`allfather_subject_rejected`, `allfather_token_rejected`) that never contains
+tokens, passwords, OAuth codes, or secrets.
+
 ## Current state
 
 Phase 1 has converted the Worker from an origin proxy into an origin-free application boundary:
