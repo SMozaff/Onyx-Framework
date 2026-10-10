@@ -14,7 +14,6 @@ pub const ORGANIZATION_ID: &str = "11111111-1111-1111-1111-111111111111";
 pub struct PostgresHarness {
     _container: ContainerAsync<Postgres>,
     pub pool: PgPool,
-    pub database_url: String,
 }
 
 impl PostgresHarness {
@@ -64,7 +63,6 @@ impl PostgresHarness {
         Ok(Self {
             _container: container,
             pool,
-            database_url,
         })
     }
 
