@@ -84,7 +84,16 @@ async function jwtVerify(env:Env,token:string):Promise<Session>{
   if(revoked) throw new Error("revoked token"); return session;
 }
 function authorization(request:Request){const value=request.headers.get("authorization");return value?value.replace(/^Bearer\s+/i,""):null;}
-async function requireSession(request:Request,env:Env){const token=authorization(request);if(!token)throw new Error("AUTH_REQUIRED");return jwtVerify(env,token);}
+async function requireSession(request:Request,env:Env){
+  const token=authorization(request);
+  if(!token)throw new Error("AUTH_REQUIRED");
+  const session=await jwtVerify(env,token);
+  const current=await env.DB.prepare("SELECT id,organization_id,is_active,role,is_admin FROM users WHERE id=? LIMIT 1").bind(session.sub).first<Record<string,unknown>>();
+  if(!current?.is_active)throw new Error("AUTH_REQUIRED");
+  if(String(current.organization_id)!==session.organization_id||roleForUser(current)!==session.role)
+    throw new Error("AUTH_REQUIRED");
+  return session;
+}
 function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return configured[0]??null;if(configured.length===0||configured.includes("*"))return origin;return configured.includes(origin)?origin:null;}
 
 async function verifyPassword(password:string,encoded:string):Promise<boolean>{
