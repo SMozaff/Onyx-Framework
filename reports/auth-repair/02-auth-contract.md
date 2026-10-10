@@ -7,6 +7,58 @@
 **Working branch:** auth-repair/02-auth-contract  
 **Baseline:** reports/auth-repair/01-baseline.md reviewed.
 
+## Revision (2026-10-10): Phase 2 implementation at commit 2066216
+
+The contract above was re-verified against `main` tip `2066216ee08a7222df6bc64f9088a87b3c4791ce`
+and the two unambiguous contract violations were fixed with focused tests. Findings AUTH-02 and
+AUTH-03 through AUTH-12 remain open and deferred exactly as recorded in §6–§8; migration files,
+production configuration, secrets, redirect allowlists, and Worker variables were not touched.
+
+**Code changes (narrow, evidence-tied):**
+
+- AUTH-01 fixed in `deploy/cloudflare/edge-gateway/src/index.ts` (`authSupabaseAllFather`):
+  the `UPDATE users SET supabase_user_id=...` login-time write is removed. The exchange now
+  requires an already-provisioned `users.supabase_user_id` equal to the verified Supabase `sub`;
+  unmapped or mismatched subjects are denied `403 ALLFATHER_NOT_PROVISIONED` with **no database
+  write**, and a safe reason (`SUBJECT_UNMAPPED` / `SUBJECT_MISMATCH`) is logged server-side.
+- AUTH-04 fixed in the same handler: verifier failures previously echoed `error.message` to the
+  client; the public response is now the stable code `401 INVALID_SUPABASE_TOKEN`, with the
+  verifier reason logged server-side as a structured `allfather_token_rejected` event that never
+  includes the presented token.
+- No other runtime handler changed. `authLogin`, refresh, logout, and all protected routes are
+  byte-for-byte as reviewed above.
+
+**Tests (new):** `deploy/cloudflare/edge-gateway/test/auth.test.ts` — 9 vitest cases (repo
+convention: vitest, as in `web-ui`/`mobile-pwa`) covering: provisioned-subject success with zero
+writes; AUTH-01 unmapped and mismatched subject denials with write assertions; AUTH-04 generic
+401 with no token/verifier-detail leakage in body or logs; identity/`sub` mismatch; unconfirmed
+email; wrong issuer; and password-path anti-enumeration (unknown identifier vs wrong password
+responses are byte-identical). `package.json` gains `"test": "vitest run"` and a `vitest`
+devDependency; `.github/workflows/cloudflare-worker-check.yml` now runs `npm test` after
+`npm run check`, so the tests are covered by CI on every Worker PR/push.
+
+**Local verification (Node 24, same as CI):** `npx vitest run` → 9/9 passed;
+`npm run check` (`wrangler deploy --dry-run`) → passed.
+
+**Documentation:** `deploy/cloudflare/edge-gateway/README.md` gained a "Trust boundary" section
+separating externally authenticated claims (Supabase `sub`/`iss`/`exp`, resolved Auth user,
+confirmed email) from ONYX-assigned privileges (`users.role`, `is_active`, `organization_id`,
+the subject mapping), plus the stable-public-error-code policy.
+
+**Intentional API contract change and client impact:**
+
+| Change | Impact |
+|---|---|
+| `POST /api/auth/supabase` failure body: raw verifier message → stable `INVALID_SUPABASE_TOKEN` | `Login.tsx` shows generic i18n text for HTTP failures; no client code depends on the old strings (grep verified: no test or client matches them) |
+| `POST /api/auth/supabase` on unmapped/mismatched subject: session issuance → `403 ALLFATHER_NOT_PROVISIONED` | **First login after any deploy now requires `users.supabase_user_id` to be provisioned out-of-band by the owner** (open decision §8.2). This is the contract's explicit requirement; deployment must not occur before that provisioning step exists |
+
+**Remaining blocker note:** `scripts/migrate-worker-clerk-to-supabase.py` still carries the legacy
+rewrite text (login-time subject binding and raw error passthrough). It aborts before writing
+because its `clerkIssuer` anchor no longer exists in `index.ts`, so it cannot revert these fixes;
+it should be retired by the owner in a later phase rather than re-run.
+
+No production deployment, migration, secret, or identity change was made. Phase 2 stops here.
+
 ## 1. Decision and scope
 
 The intended product contract is clear enough to document, but the current Worker implementation does not fully satisfy it. Runtime changes are deferred because the gaps affect privileged identity binding, OAuth callback architecture, JWT validation, session lifecycle, and authorization boundaries. These require focused tests and owner decisions about supported OAuth clients. No migration files, production configuration, secrets, redirect allowlists, deployed services, or production data were changed. Repository API inspection cannot establish the local working-tree state or production behavior.
@@ -113,10 +165,10 @@ Required behavior differs at D1 mapping: subject must match an already provision
 
 | ID | Severity | Finding | Consequence |
 |---|---|---|---|
-| AUTH-01 | Critical | Supabase subject auto-bound/replaced during login | Authentication performs provisioning; a mismatched subject can rewrite the authoritative mapping instead of being denied. |
+| AUTH-01 | Critical | Supabase subject auto-bound/replaced during login | **Fixed in revision above:** unmapped/mismatched subject is now denied with no database write; mapping requires owner provisioning. |
 | AUTH-02 | High | Supabase JWT audience claim is not checked | Signature, issuer, expiry and subject checks exist, but audience/project claim validation is absent. |
 | AUTH-03 | High | OAuth uses implicit-style access-token fragment callback | PKCE/code exchange and Tauri callback behavior are not established; token reaches custom front-end callback code. |
-| AUTH-04 | High | Supabase verifier error details are returned to clients | authSupabaseAllFather serializes error.message in a 401 response. |
+| AUTH-04 | High | Supabase verifier error details are returned to clients | **Fixed in revision above:** public 401 now carries only `INVALID_SUPABASE_TOKEN`; reason logged server-side without token material. |
 | AUTH-05 | High | No dedicated session introspection/current-user route | Client hydration relies on stored response until a protected request fails. |
 | AUTH-06 | High | Server logout is not wired in the inspected auth store | Local logout may not revoke server tokens. |
 | AUTH-07 | High | Generic command authorization is incomplete | /api/command does not demonstrate a complete server-side role/action/resource matrix. |
