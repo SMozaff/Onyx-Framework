@@ -14,6 +14,8 @@
 
 use std::net::SocketAddr;
 
+use security_application::NewUser;
+
 /// Boots an api-server on an ephemeral port against a throwaway SQLite
 /// file and authenticates the intentional seeded test-drive administrator.
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
@@ -25,6 +27,28 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+
+    // All-Father authenticates through the external identity provider. Keep
+    // this authorization test independent of that integration by provisioning
+    // a dedicated password-based administrator in the isolated test database.
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: "team-leader-precheck-test-admin".to_string(),
+            organization_id: ORG_ID.to_string(),
+            password_hash: state
+                .password_hasher
+                .hash("team-leader-precheck-test-password")
+                .expect("test admin password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated team-leader-precheck test administrator");
+
     let app = api_server::routes::router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -38,13 +62,18 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
 
     let login: serde_json::Value = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .json(&serde_json::json!({
+            "username": "team-leader-precheck-test-admin",
+            "password": "team-leader-precheck-test-password",
+        }))
         .send()
         .await
-        .expect("login request")
+        .expect("admin login request")
+        .error_for_status()
+        .expect("admin login succeeds")
         .json()
         .await
-        .expect("login body");
+        .expect("admin login body");
 
     let token = login["access_token"]
         .as_str()
