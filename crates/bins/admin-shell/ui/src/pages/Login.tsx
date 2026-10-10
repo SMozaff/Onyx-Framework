@@ -26,9 +26,6 @@ export default function Login() {
   useEffect(() => {
     if (mode !== "allfather") return;
     let cancelled = false;
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-    const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-
     async function finishOAuthCallback() {
       const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const token = params.get("access_token");
