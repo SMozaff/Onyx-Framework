@@ -7,79 +7,71 @@ import ConnectionSettings from "@/components/ConnectionSettings";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 import { getServerAddress } from "@/utils/serverAddress";
-import { loadClerk } from "@/auth/clerk";
+
 
 type LoginMode = "account" | "allfather";
 
 export default function Login() {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const signInRef = useRef<HTMLDivElement>(null);
+
   const [mode, setMode] = useState<LoginMode>("account");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
-  const [clerkReady, setClerkReady] = useState(false);
+  const [googleAuthReady, setGoogleAuthReady] = useState(false);
 
   useEffect(() => {
     if (mode !== "allfather") return;
     let cancelled = false;
-    let cleanup: (() => void) | undefined;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+    const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
 
-    void loadClerk()
-      .then((clerk) => {
-        if (cancelled || !signInRef.current) return;
-        clerk.mountSignIn(signInRef.current, {
-          appearance: { elements: { rootBox: "w-full" } },
-        });
-        setClerkReady(true);
-
-        const exchange = async (session: { getToken: () => Promise<string | null> } | null) => {
-          if (!session || cancelled) return;
-          setLoading(true);
-          setError(null);
-          try {
-            const token = await session.getToken();
-            if (!token) throw new Error("Clerk did not provide a session token.");
-            const response = await apiClient.post("/api/auth/clerk", null, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            useAuthStore.getState().login(response.data);
-            navigate("/", { replace: true });
-          } catch (err) {
-            const status = (err as { response?: { status?: number } }).response?.status;
-            setError(
-              status === 403
-                ? "This Google identity is not the designated ONYX All-Father."
-                : status === 401
-                  ? "The Clerk session could not be verified by ONYX."
-                  : "Could not exchange the Clerk session with the ONYX API.",
-            );
-          } finally {
-            if (!cancelled) setLoading(false);
-          }
-        };
-
-        cleanup = clerk.addListener(({ session }) => void exchange(session));
-        void exchange(clerk.session);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
-      });
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
-      setClerkReady(false);
-      if (signInRef.current) {
-        void loadClerk().then((clerk) => {
-          if (signInRef.current) clerk.unmountSignIn(signInRef.current);
-        });
+    async function finishOAuthCallback() {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const token = params.get("access_token");
+      const providerError = params.get("error_description") || params.get("error");
+      if (providerError) throw new Error(providerError);
+      if (!token) {
+        setGoogleAuthReady(true);
+        return;
       }
-    };
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+      setLoading(true);
+      const response = await apiClient.post("/api/auth/supabase", null, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (cancelled) return;
+      useAuthStore.getState().login(response.data);
+      navigate("/", { replace: true });
+    }
+
+    void finishOAuthCallback().catch((err: unknown) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : "Supabase Google sign-in failed.");
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+
+    return () => { cancelled = true; };
   }, [mode, navigate]);
+
+  function beginGoogleSignIn() {
+    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\\/$/, "");
+    const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+    if (!supabaseUrl || !publishableKey) {
+      setError("Google sign-in is not configured in this build. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the Admin shell.");
+      return;
+    }
+    const redirectTo = window.location.origin + window.location.pathname + "?auth=allfather";
+    const target = new URL(`${supabaseUrl}/auth/v1/authorize`);
+    target.searchParams.set("provider", "google");
+    target.searchParams.set("redirect_to", redirectTo);
+    target.searchParams.set("flow_type", "implicit");
+    target.searchParams.set("apikey", publishableKey);
+    window.location.assign(target.toString());
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -153,17 +145,17 @@ export default function Login() {
               <button type="submit" disabled={loading} className="mt-5 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
                 {loading ? t("auth.signingIn") : t("auth.signIn")}
               </button>
-              <button type="button" onClick={() => { setError(null); setMode("allfather"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
+              <button type="button" onClick={() => { setError(null); setGoogleAuthReady(false); setMode("allfather"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 {t("auth.allFatherGoogleSignIn")}
               </button>
             </form>
           ) : (
             <div>
               <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">{t("auth.allFatherAuthority")}</p>
-              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">{t("auth.googleThroughClerk")}</h2>
+              <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">Google through Supabase</h2>
               <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.allFatherReservedPath")}</p>
-              {!clerkReady && <p className="mt-4 text-xs text-onyx-text-dim">{t("auth.initializingGoogleAuth")}</p>}
-              <div ref={signInRef} className="mt-4 min-h-[300px]" />
+              <p className="mt-4 text-xs text-onyx-text-dim">{googleAuthReady ? "Continue with your designated Google identity." : "Checking Google sign-in response…"}</p>
+              <button type="button" onClick={beginGoogleSignIn} disabled={loading} className="mt-4 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50">{loading ? "Signing in…" : "Continue with Google"}</button>
               <button type="button" onClick={() => { setError(null); setMode("account"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 {t("auth.backToAdminLogin")}
               </button>
