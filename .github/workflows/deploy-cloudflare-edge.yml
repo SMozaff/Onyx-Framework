@@ -20,6 +20,7 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   ONYX_JWT_SECRET: ${{ secrets.ONYX_JWT_SECRET }}
   ONYX_ALLFATHER_EMAIL: so.muzaff@gmail.com
+  ONYX_CORS_ORIGINS: ${{ secrets.ONYX_CORS_ORIGINS }}
   SUPABASE_URL: https://uhpqjhbciimklheohvfr.supabase.co
   SUPABASE_JWKS_URL: https://uhpqjhbciimklheohvfr.supabase.co/auth/v1/.well-known/jwks.json
   SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
@@ -49,6 +50,8 @@ jobs:
           test -n "${SUPABASE_URL}" || { echo "Missing SUPABASE_URL"; exit 1; }
           test -n "${SUPABASE_PUBLISHABLE_KEY}" || { echo "Missing SUPABASE_PUBLISHABLE_KEY"; exit 1; }
           test -n "${SUPABASE_SECRET_KEY}" || { echo "Missing SUPABASE_SECRET_KEY"; exit 1; }
+          test -n "${ONYX_CORS_ORIGINS}" || { echo "::error::Missing ONYX_CORS_ORIGINS; configure an exact comma-separated allowlist of trusted ONYX frontend origins in GitHub Actions secrets."; exit 1; }
+          if [[ "${ONYX_CORS_ORIGINS}" == "*" ]]; then echo "::error::Wildcard CORS origins are forbidden for production."; exit 1; fi
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -95,7 +98,7 @@ jobs:
           migrations_dir = "migrations"
 
           [vars]
-          ONYX_CORS_ORIGINS = "*"
+          ONYX_CORS_ORIGINS = "${ONYX_CORS_ORIGINS}"
           ONYX_ALLFATHER_EMAIL = "so.muzaff@gmail.com"
           SUPABASE_URL = "${SUPABASE_URL}"
           SUPABASE_JWKS_URL = "${SUPABASE_JWKS_URL}"
@@ -113,9 +116,11 @@ jobs:
           set -euo pipefail
           existing="$(npx wrangler secret list --format json | jq -r '.[] | select(.name == "ONYX_JWT_SECRET") | .name' | head -n1 || true)"
           if [ -z "$existing" ]; then
-            secret="${ONYX_JWT_SECRET}"
-            if [ -z "$secret" ]; then secret="$(openssl rand -hex 32)"; fi
-            printf '%s' "$secret" | npx wrangler secret put ONYX_JWT_SECRET
+            if [ -z "${ONYX_JWT_SECRET}" ]; then
+              echo "::error::ONYX_JWT_SECRET is required when initializing the Worker. Add a stable random secret to GitHub Actions secrets."
+              exit 1
+            fi
+            printf '%s' "${ONYX_JWT_SECRET}" | npx wrangler secret put ONYX_JWT_SECRET
           fi
 
       - name: Configure Supabase secret key
