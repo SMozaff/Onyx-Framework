@@ -1,5 +1,5 @@
 import { argon2id, argon2Verify } from "hash-wasm";
-import { adminCreateUser, adminSetUserBanned, passwordSignIn, verifySupabaseJwt } from "./supabase";
+import { adminCreateUser, adminSetUserBanned, getSupabaseUser, passwordSignIn, verifySupabaseJwt } from "./supabase";
 
 type Json = Record<string, unknown>;
 
@@ -136,10 +136,15 @@ async function authSupabaseAllFather(request:Request,env:Env){
   if(!token)return json({error:"AUTH_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   try{
     const claims=await verifySupabaseJwt(env,token);
-    const email=typeof claims.email==="string"?claims.email.trim().toLowerCase():"";
-    const verified=claims.email_verified;
+    const identity=await getSupabaseUser(env,token);
+    const email=(identity.email||"").trim().toLowerCase();
     const expected=(env.ONYX_ALLFATHER_EMAIL||ALLFATHER_EMAIL).trim().toLowerCase();
-    if(!email||verified===false||email!==expected)return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    // The signed JWT alone does not prove that the current Supabase user
+    // still has a confirmed email. Resolve the bearer token through Supabase
+    // Auth and bind the returned user ID to the JWT subject before granting
+    // the All-Father role.
+    if(identity.id!==claims.sub||!identity.email_confirmed_at||!email||email!==expected)
+      return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
     const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER('allfather') LIMIT 1").first<Record<string,unknown>>();
     if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
     if(String(user.supabase_user_id||"")!==String(claims.sub)){
