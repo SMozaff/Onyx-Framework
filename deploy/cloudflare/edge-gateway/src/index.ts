@@ -1,5 +1,5 @@
 import { argon2id, argon2Verify } from "hash-wasm";
-import { adminCreateUser, adminSetUserBanned, passwordSignIn, verifySupabaseJwt } from "./supabase";
+import { getSupabaseUser, verifySupabaseJwt } from "./supabase";
 
 type Json = Record<string, unknown>;
 
@@ -84,7 +84,16 @@ async function jwtVerify(env:Env,token:string):Promise<Session>{
   if(revoked) throw new Error("revoked token"); return session;
 }
 function authorization(request:Request){const value=request.headers.get("authorization");return value?value.replace(/^Bearer\s+/i,""):null;}
-async function requireSession(request:Request,env:Env){const token=authorization(request);if(!token)throw new Error("AUTH_REQUIRED");return jwtVerify(env,token);}
+async function requireSession(request:Request,env:Env){
+  const token=authorization(request);
+  if(!token)throw new Error("AUTH_REQUIRED");
+  const session=await jwtVerify(env,token);
+  const current=await env.DB.prepare("SELECT id,organization_id,is_active,role,is_admin FROM users WHERE id=? LIMIT 1").bind(session.sub).first<Record<string,unknown>>();
+  if(!current?.is_active)throw new Error("AUTH_REQUIRED");
+  if(String(current.organization_id)!==session.organization_id||roleForUser(current)!==session.role)
+    throw new Error("AUTH_REQUIRED");
+  return session;
+}
 function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return configured[0]??null;if(configured.length===0||configured.includes("*"))return origin;return configured.includes(origin)?origin:null;}
 
 async function verifyPassword(password:string,encoded:string):Promise<boolean>{
@@ -110,19 +119,11 @@ async function issuePair(env:Env,user:Record<string,unknown>,type:string){
 }
 async function authLogin(request:Request,env:Env){
   const body=await request.json().catch(()=>null) as Json|null;
-  const identifier=typeof body?.username==="string"?body.username.trim():"";
+  const identifier=typeof body?.username==="string"?body.username.trim():typeof body?.email==="string"?body.email.trim():"";
   const password=typeof body?.password==="string"?body.password:"";
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
-  if(!user?.is_active||roleForUser(user)==="ALL_FATHER"||typeof user?.email!=="string")return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  let supabaseSession:{access_token:string;refresh_token:string;user:Json};
-  try{supabaseSession=await passwordSignIn(env,String(user.email),password);}catch{return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
-  const supabaseUserId=typeof supabaseSession.user.id==="string"?supabaseSession.user.id:"";
-  if(!supabaseUserId)return json({error:"AUTH_ACCOUNT_INVALID",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  if(String(user.supabase_user_id||"")!==supabaseUserId){
-    await env.DB.prepare("UPDATE users SET supabase_user_id=?,updated_at=? WHERE id=?").bind(supabaseUserId,Date.now(),String(user.id)).run();
-    user.supabase_user_id=supabaseUserId;
-  }
+  const user=await env.DB.prepare("SELECT id,username,email,organization_id,password_hash,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
+  if(!user?.is_active||roleForUser(user)==="ALL_FATHER"||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   return json(await issuePair(env,user,clientType(body)));
 }
 async function authRefresh(request:Request,env:Env){
@@ -136,10 +137,15 @@ async function authSupabaseAllFather(request:Request,env:Env){
   if(!token)return json({error:"AUTH_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   try{
     const claims=await verifySupabaseJwt(env,token);
-    const email=typeof claims.email==="string"?claims.email.trim().toLowerCase():"";
-    const verified=claims.email_verified;
+    const identity=await getSupabaseUser(env,token);
+    const email=(identity.email||"").trim().toLowerCase();
     const expected=(env.ONYX_ALLFATHER_EMAIL||ALLFATHER_EMAIL).trim().toLowerCase();
-    if(!email||verified===false||email!==expected)return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    // The signed JWT alone does not prove that the current Supabase user
+    // still has a confirmed email. Resolve the bearer token through Supabase
+    // Auth and bind the returned user ID to the JWT subject before granting
+    // the All-Father role.
+    if(identity.id!==claims.sub||!identity.email_confirmed_at||!email||email!==expected)
+      return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
     const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER('allfather') LIMIT 1").first<Record<string,unknown>>();
     if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
     if(String(user.supabase_user_id||"")!==String(claims.sub)){
@@ -171,24 +177,21 @@ async function createUser(request:Request,env:Env,session:Session,targetRole:"OR
   if(!org)throw new Error("ORGANIZATION_NOT_FOUND");
   const existing=await env.DB.prepare("SELECT id FROM users WHERE LOWER(username)=LOWER(?) OR (? IS NOT NULL AND LOWER(email)=LOWER(?)) LIMIT 1").bind(username,email,email).first();
   if(existing)return json({error:"USER_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
-  let supabaseUserId:string;
-  try{supabaseUserId=await adminCreateUser(env,email,password,{onyx_username:username,onyx_role:targetRole,onyx_organization_id:organizationId});}
-  catch(error){return json({error:error instanceof Error?error.message:"SUPABASE_USER_CREATE_FAILED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},502);}
   const id=uuid(),timestamp=Date.now(),isAdmin=targetRole==="ORGANIZATION_ADMIN"?1:0,parent=targetRole==="STAFF"?session.sub:"__allfather__";
-  const placeholderHash="$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-  try{await env.DB.prepare("INSERT INTO users(id,username,email,supabase_user_id,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,username,email,supabaseUserId,organizationId,placeholderHash,isAdmin,1,targetRole,targetRole,parent,timestamp,timestamp).run();}
-  catch(error){try{await adminSetUserBanned(env,supabaseUserId,true);}catch{} throw error;}
-  await audit(env,session,targetRole==="STAFF"?"staff.create":"admin.create",id,{username,email,organization_id:organizationId,supabase_user_id:supabaseUserId});
+  const passwordHash=await hashPassword(password);
+  await env.DB.prepare("INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,username,email,organizationId,passwordHash,isAdmin,1,targetRole,targetRole,parent,timestamp,timestamp).run();
+  await audit(env,session,targetRole==="STAFF"?"staff.create":"admin.create",id,{username,email,organization_id:organizationId});
   return json({id,username,email,organization_id:organizationId,is_admin:Boolean(isAdmin),is_active:true,role:targetRole},201);
 }
 async function deactivateUser(request:Request,env:Env,session:Session,userId:string){
+  requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");
   const target=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
   if(!target)return json({error:"USER_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
   const role=roleForUser(target);
   if(session.role==="ALL_FATHER"&&role!=="ORGANIZATION_ADMIN")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(session.role==="ORGANIZATION_ADMIN"&&(role!=="STAFF"||String(target.organization_id)!==session.organization_id))return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(role==="ALL_FATHER")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-  if(target.supabase_user_id){try{await adminSetUserBanned(env,String(target.supabase_user_id),true);}catch(error){return json({error:error instanceof Error?error.message:"SUPABASE_USER_DEACTIVATION_FAILED",category:"AUTHORITY",retryability:"RETRYABLE"},502);}}
+  // ONYX account lifecycle is authoritative in D1; no Supabase identity exists for Admin/Staff.
   await env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=?").bind(Date.now(),userId).run();
   await audit(env,session,"user.deactivate",userId,{username:target.username,role});
   return json({success:true,id:userId,is_active:false});
