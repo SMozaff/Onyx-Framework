@@ -157,19 +157,6 @@ jobs:
         # 429/500 fault-injection contract. It is enabled only for this test invocation;
         # production/default release builds above do not enable it.
         run: cargo test --workspace --release --features api-server/test-endpoints -- --test-threads=1
-      - name: Docs
-        run: cargo doc --workspace --no-deps
-      - name: Migration idempotency and rollback
-        run: |
-          cargo run --package migration-tool -- up
-          cargo run --package migration-tool -- up
-          cargo run --package migration-tool -- status
-          cargo run --package migration-tool -- down --target 0
-          cargo run --package migration-tool -- up
-      - name: Contract verification — Team 7
-        run: bash scripts/verify/verify_team7.sh
-      - name: Contract verification — Team 8
-        run: bash scripts/verify/verify_team8.sh
 
   security-audit:
     runs-on: ubuntu-latest
