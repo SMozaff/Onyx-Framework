@@ -19,6 +19,25 @@ Cloudflare Worker (free workers.dev)
 
 Cloudflare Workers Free is the runtime boundary. No custom domain is required: the `workers.dev` hostname is sufficient. The migration deliberately does not use Cloudflare Containers, Workers Paid, Render, or another paid/container-only service.
 
+## Locked authentication and authorization model
+
+This model is binding for the migration:
+
+- **All-Father only:** Google sign-in through Supabase Auth. The Worker verifies the signed Supabase JWT, resolves the bearer token through Supabase Auth, requires the returned user ID to match the JWT subject, requires a confirmed email, and matches the configured All-Father email. Supabase identity is not used to authenticate Admin or Staff accounts.
+- **Organization Admin:** ONYX username or email plus password. Credentials are verified against the Argon2id password hash stored in D1.
+- **Staff:** ONYX username or email plus password. Accounts are created, deactivated, and managed by an authorized organization Admin; staff cannot self-register or elevate roles.
+- **D1 is authoritative** for ONYX users, password hashes, account status, roles, organization membership, and application authorization.
+- **All-Father provisions organizations and Admins. Admins manage Staff only within their own organization.** The Worker must enforce these rules server-side.
+
+Authentication endpoints:
+
+- `POST /api/auth/supabase`: exchange a valid Supabase All-Father bearer token for an ONYX session.
+- `POST /api/auth/login`: verify an ONYX username/email and password against D1, then issue an ONYX session.
+- `POST /api/auth/refresh`: rotate a valid ONYX refresh token.
+- `POST /api/auth/logout`: revoke supplied ONYX tokens.
+
+D1 migration `0002_onyx_identity_model.sql` adds role/email/identity fields, organization records, and the seeded All-Father authority record. Admin and Staff passwords are Argon2id hashes in D1; their accounts are not provisioned in Supabase.
+
 ## Current state
 
 Phase 1 has converted the Worker from an origin proxy into an origin-free application boundary:
