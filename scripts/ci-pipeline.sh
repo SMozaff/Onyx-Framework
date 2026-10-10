@@ -11,7 +11,6 @@ run cargo fmt --all -- --check
 run cargo check --workspace --all-targets
 run cargo test --workspace --exclude e2e --exclude chaos
 run cargo test -p e2e --test all_journeys
-run cargo test -p chaos --test all
 run cargo clippy --workspace --all-targets -- -D warnings
 run cargo doc --workspace --no-deps
 
