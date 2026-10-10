@@ -47,10 +47,15 @@
   "auth.allFatherGoogleSignIn": "All-Father · ورود با Google",
   "auth.allFatherReservedPath": "این مسیر فقط برای هویت اصلی تعیین‌شده رزرو شده است.",
   "auth.backToAdminLogin": "بازگشت به ورود حساب مدیر",
+  "auth.checkingGoogleSignIn": "در حال بررسی پاسخ ورود گوگل…",
+  "auth.continueWithGoogle": "ادامه با Google",
   "auth.desktopHeroBody": "کار مأموریت را بررسی کنید، تأییدها را رسیدگی کنید و با وضعیت همگام‌سازی محلی شفاف اقدام کنید.",
   "auth.desktopHeroTitle": "شفافیت عملیاتی، از هر دسکتاپ مجاز.",
   "auth.fullServerAddressRequired": "نشانی کامل سرور را با http:// یا https:// وارد کنید.",
+  "auth.googleIdentityPrompt": "با هویت گوگل تعیین‌شده خود ادامه دهید.",
+  "auth.googleSignInNotConfigured": "ورود گوگل در این نسخه پیکربندی نشده است. متغیرهای VITE_SUPABASE_URL و VITE_SUPABASE_PUBLISHABLE_KEY را تنظیم و پوسته Admin را دوباره بسازید.",
   "auth.googleThroughClerk": "Google از طریق Clerk",
+  "auth.googleThroughSupabase": "ورود گوگل از طریق Supabase",
   "auth.heroBody": "مأموریت‌ها را بررسی کنید، کارهای حساس را پایش کنید، اعلان‌ها را تأیید کنید و تصمیم‌های تأییدی مجاز را بدون نصب نسخه بومی بگیرید.",
   "auth.heroTitle": "شفافیت عملیاتی، از هر مرورگر مجاز.",
   "auth.hideServerAddress": "پنهان کردن نشانی سرور",
@@ -535,10 +540,5 @@
   "settings.title": "تنظیمات",
   "settings.useServerAndSignInAgain": "استفاده از این سرور و ورود دوباره",
   "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
-  "language.title": "زبان",
-  "auth.googleThroughSupabase": "ورود گوگل از طریق Supabase",
-  "auth.googleIdentityPrompt": "با هویت گوگل تعیین‌شده خود ادامه دهید.",
-  "auth.checkingGoogleSignIn": "در حال بررسی پاسخ ورود گوگل…",
-  "auth.continueWithGoogle": "ادامه با Google",
-  "auth.googleSignInNotConfigured": "ورود گوگل در این نسخه پیکربندی نشده است. متغیرهای VITE_SUPABASE_URL و VITE_SUPABASE_PUBLISHABLE_KEY را تنظیم و پوسته Admin را دوباره بسازید."
+  "language.title": "زبان"
 }
