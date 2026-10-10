@@ -12,7 +12,7 @@ Cloudflare Worker (free workers.dev)
         |
         +---- D1 (free SQLite-compatible database)
         |
-        +---- Clerk / existing identity boundary
+        +---- Supabase Auth (Google for All-Father; email/password for Admin/Staff)
         |
         +---- Hugging Face object storage for existing blob data
 ```
@@ -26,37 +26,24 @@ Phase 1 has converted the Worker from an origin proxy into an origin-free applic
 - `/health` is implemented locally in the Worker.
 - `/ready` checks the D1 binding when it is configured.
 - There is no `ONYX_ORIGIN_URL` and no upstream `fetch()` to Render.
-- A first D1 foundation migration mirrors the existing SQLite `users` contract.
+- D1 migrations create the Worker’s authoritative users, organization, event, and audit tables; Supabase Auth stores credentials and authenticates identities.
 - Unported ONYX API routes return `501 API_MIGRATION_IN_PROGRESS` rather than silently routing traffic to the unreachable legacy backend.
 
 This is intentional. The Worker is not claimed to be a complete replacement until each API contract has been ported and verified.
 
-## Bootstrap the free D1 database
+## Deployment
 
-From this directory, after authenticating Wrangler to the Cloudflare account:
+The GitHub Actions workflow `.github/workflows/deploy-cloudflare-edge.yml` creates or reuses the free D1 database, applies checked-in migrations, configures Worker secrets, deploys the Worker, and checks `/health`, `/ready`, and anonymous access to a protected route. It requires Cloudflare and Supabase credentials configured as GitHub Actions secrets. The workflow is manually dispatchable; deployment credentials are never committed to the repository.
+
+For local development after authenticating Wrangler:
 
 ```bash
 npm install
-npm run d1:create
-```
-
-Wrangler will print the D1 `database_id`. Add that ID to `wrangler.toml` by enabling the `[[d1_databases]]` block and replacing the placeholder.
-
-For local development:
-
-```bash
 npm run d1:local
 npm run dev
 ```
 
-For the remote D1 database:
-
-```bash
-npm run d1:remote
-npm run deploy
-```
-
-The Cloudflare account must be the user's existing account. The repository does not contain or require a Cloudflare API credential.
+Do not copy production secrets into `.dev.vars` or commit them.
 
 ## Migration rule
 
