@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Verify locked dependency graph
         run: cargo metadata --locked
       - run: cargo build --locked --release --target ${{ matrix.target }} -p api-server -p worker -p migration-tool -p sync-agent
@@ -119,7 +119,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: {node-version: "22", cache: "npm", cache-dependency-path: crates/bins/desktop-shell/ui/package-lock.json}
       # Tauri v2 on Linux links against WebKitGTK; matches ci.yml's own
@@ -280,7 +280,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with: {toolchain: "1.97.1", targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: {node-version: "22", cache: "npm", cache-dependency-path: crates/bins/admin-shell/ui/package-lock.json}
       # Tauri v2 on Linux links against WebKitGTK. This mirrors ci.yml and

@@ -63,7 +63,7 @@ jobs:
       # shared-key lets load-smoke (needs: check, so it always runs after
       # this job's cache is saved) restore the exact same release
       # target/ this job just built, instead of recompiling from scratch.
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: "release-build"
       - name: Format
@@ -425,7 +425,7 @@ jobs:
       # scratch. Confirmed necessary by the first-ever load-smoke run
       # (33176531805): it timed out with `rustc` still mid-compile when
       # this job had no cache at all and built api-server cold.
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: "release-build"
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1
