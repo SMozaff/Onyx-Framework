@@ -32,3 +32,20 @@ jobs:
         run: npm install
       - name: Validate Worker bundle
         run: npm run check
+      - name: Run Worker authentication and migration tests
+        run: npm test
+      - name: Apply migrations to a disposable local D1
+        run: |
+          cat > wrangler.test.toml <<'EOF'
+          name = "onyx-migration-test"
+          main = "src/index.ts"
+          compatibility_date = "2026-10-09"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "onyx-free-db"
+          database_id = "00000000-0000-0000-0000-000000000000"
+          migrations_dir = "migrations"
+          EOF
+          npx wrangler d1 migrations apply onyx-free-db --local --config wrangler.test.toml
+          npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --json --command "SELECT name FROM d1_migrations" | jq -e 'type == "array" and (.[0].results | length) >= 5'
