@@ -117,6 +117,8 @@ jobs:
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: https://uhpqjhbciimklheohvfr.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
         with:
           projectPath: crates/bins/admin-shell
           args: --target x86_64-pc-windows-msvc --bundles msi,nsis --debug
