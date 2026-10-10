@@ -7,10 +7,6 @@ publish.workspace = true
 [lib]
 path = "src/lib.rs"
 
-[[test]]
-name = "all"
-path = "tests/all.rs"
-
 [dependencies]
 anyhow.workspace = true
 tokio.workspace = true

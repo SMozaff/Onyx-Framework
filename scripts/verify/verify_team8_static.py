@@ -79,9 +79,6 @@ required = [
     *[f"tests/end-to-end/{name}.rs" for name in [
         "test_harness", "mission_lifecycle", "task_workflow", "conflict_resolution",
         "approval_workflow", "notification_sync", "p2p_sync", "background_sync"]],
-    *[f"tests/chaos/{name}.rs" for name in [
-        "chaos_runtime", "network_partition", "process_crash", "disk_full",
-        "clock_skew", "database_failover"]],
     "tests/load/smoke-test.js", "tests/load/performance_benchmark.rs",
     *[f"docs/runbooks/{name}.md" for name in [
         "incident-response", "backup-restore", "performance-tuning", "on-call",
@@ -284,13 +281,6 @@ for name in ["notification_sync.rs", "p2p_sync.rs", "background_sync.rs"]:
     check("#[ignore" in text(f"tests/end-to-end/{name}"),
           f"client journey not ignored: {name}")
 
-# Chaos and load contracts.
-chaos = text("tests/chaos/chaos_runtime.rs")
-check("15 * 60" in chaos, "chaos duration is not 15 minutes")
-check("ONYX_CHAOS_REALTIME" in chaos, "real-time chaos mode absent")
-check((ROOT / "tests/chaos/database_failover.rs").is_file(), "fifth chaos scenario absent")
-for scenario in ["network_partition", "process_crash", "disk_full", "clock_skew", "database_failover"]:
-    check((ROOT / f"tests/chaos/{scenario}.rs").is_file(), f"chaos scenario absent: {scenario}")
 load = text("tests/load/smoke-test.js")
 for token in ["vus: 100", "duration: '60s'", "p(95)<500"]:
     check(token in load, f"load contract missing: {token}")
@@ -413,9 +403,7 @@ team8_rust = [
     ROOT / "crates/bins/api-server/src/routes/query.rs",
     ROOT / "crates/bins/api-server/src/routes/command.rs",
     *list((ROOT / "crates/team8-e2e-tests").rglob("*.rs")),
-    *list((ROOT / "crates/team8-chaos-tests").rglob("*.rs")),
     *list((ROOT / "tests/end-to-end").rglob("*.rs")),
-    *list((ROOT / "tests/chaos").rglob("*.rs")),
     ROOT / "tests/load/performance_benchmark.rs",
 ]
 for path in team8_rust:

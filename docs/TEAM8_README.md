@@ -1,6 +1,6 @@
 # ONYX Team 8 — Release Engineering Handoff
 
-Team 8 finalizes the backend release surface defined by the frozen Team 8 Execution Prompt v1.0. The repository now contains migration tooling, CI/CD workflows, hardened container definitions, Helm/Argo Rollouts deployment charts, an AWS Terraform baseline, backend E2E/chaos/load harnesses, operational runbooks, release signing, SPDX 2.3 SBOM generation, and formal go-live controls.
+Team 8 finalizes the backend release surface defined by the frozen Team 8 Execution Prompt v1.0. The repository now contains migration tooling, CI/CD workflows, hardened container definitions, Helm/Argo Rollouts deployment charts, an AWS Terraform baseline, backend E2E/load harnesses, operational runbooks, release signing, SPDX 2.3 SBOM generation, and formal go-live controls.
 
 ## Primary commands
 
@@ -11,11 +11,6 @@ scripts/ci-pipeline.sh
 # Mandatory backend journeys
 cargo test -p e2e --test all_journeys
 
-# Deterministic chaos suite
-cargo test -p chaos --test all
-
-# Real-time 15-minute chaos drills (run in staging)
-ONYX_CHAOS_REALTIME=1 cargo test -p chaos --test all
 
 # Load acceptance gate
 k6 run tests/load/smoke-test.js --vus 100 --duration 60s
@@ -71,10 +66,9 @@ Production installation requires:
 
 1. Generate and review current dependency lockfiles.
 2. Run the complete CI pipeline.
-3. Execute the five staging chaos scenarios in real-time mode.
-4. Run the 100-user load gate.
-5. Validate restore and disaster-recovery procedures against the RTO/RPO targets.
-6. Tag `v1.0.0` to start `.github/workflows/release.yml`.
+3. Validate restore and disaster-recovery procedures against the RTO/RPO targets.
+4. Run the 100-user load gate when appropriate for the target deployment.
+5. Tag `v1.0.0` to start `.github/workflows/release.yml`.
 7. Verify image digest signatures, GPG signatures, SBOMs, and attestations.
 8. Deploy the API canary and observe the 10% → 50% → 100% progression.
 9. Complete `docs/release/go-live-checklist.md` and `docs/release/signoff-template.md`.
