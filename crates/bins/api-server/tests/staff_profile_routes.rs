@@ -6,6 +6,8 @@
 
 use std::net::SocketAddr;
 
+use security_application::NewUser;
+
 async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let db_path = std::env::temp_dir().join(format!("onyx-profiles-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
@@ -14,6 +16,27 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let state = api_server::routes::ApiState::new(&database_url)
         .await
         .expect("api state");
+    // All-Father authenticates through the external identity provider.
+    // Provision a dedicated password-based administrator so these route tests
+    // exercise profile behavior rather than the external login flow.
+    state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: "staff-profile-test-admin".to_string(),
+            organization_id: api_server::routes::ORGANIZATION_ID.to_string(),
+            password_hash: state
+                .password_hasher
+                .hash("staff-profile-test-password")
+                .expect("test admin password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create dedicated staff-profile test administrator");
+
     let app = api_server::routes::router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -25,21 +48,26 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
-    // A fresh ApiState has the intentional test-drive administrator already,
-    // so bootstrap correctly rejects a second first account.
-    let login: serde_json::Value = http
+    let response = http
         .post(format!("{base}/api/auth/login"))
-        .json(&serde_json::json!({"username": "All-Father", "password": "passvord0000"}))
+        .json(&serde_json::json!({
+            "username": "staff-profile-test-admin",
+            "password": "staff-profile-test-password",
+        }))
         .send()
         .await
-        .expect("login request")
-        .json()
-        .await
-        .expect("login body");
-
+        .expect("admin login request");
+    let status = response.status();
+    let body = response.text().await.expect("admin login response body");
+    assert!(
+        status.is_success(),
+        "admin login failed with HTTP {status}: {body}"
+    );
+    let login: serde_json::Value =
+        serde_json::from_str(&body).expect("admin login response must be JSON");
     let token = login["access_token"]
         .as_str()
-        .expect("access_token in login response")
+        .unwrap_or_else(|| panic!("access_token missing from successful login response: {login:?}"))
         .to_string();
 
     (addr, token)
