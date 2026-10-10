@@ -53,3 +53,20 @@ Supabase Auth is used only for the All-Father Google identity. Admins and Staff 
 D1 owns Cloudflare-deployment records for ONYX users, roles, active state, organization membership, and authorization decisions. Password hashes are stored only in the ONYX user record. Keep session signing keys and Supabase secrets in deployment secrets, never in source control.
 
 Do not switch production traffic until the Worker implementation and migrations satisfy this contract and GitHub Actions verifies the relevant build and authorization tests. During migration, do not silently fall back to another identity provider or grant broad access when configuration is missing.
+
+
+## Implementation reconciliation (2026-10-10)
+
+The normative contract above remains authoritative. The current Worker implementation has known gaps; see [reports/auth-repair/02-auth-contract.md](../reports/auth-repair/02-auth-contract.md) for the route matrix, evidence, and unresolved decisions.
+
+In particular:
+
+- The Supabase subject mapping must be provisioned explicitly. Login must not create, update, or replace users.supabase_user_id. A subject mismatch must be denied without a database write.
+- Supabase JWT verification must enforce signature, algorithm, issuer, expiry, subject, and the approved audience/project claim policy. The Supabase Auth user response must match the verified JWT subject and the designated confirmed identity.
+- Public authentication errors must be generic. Return stable error codes only; do not return raw verifier or upstream provider error messages.
+- ONYX access tokens currently last 1 hour and refresh tokens 7 days. Refresh rotates the presented refresh token using D1 token revocation records. These are current implementation values, not a substitute for tests or a complete session policy.
+- Protected requests must revalidate current account and organization status, role, tenant membership, and applicable client capability. Authorization for each protected command/resource remains server-side.
+- The inspected Admin Shell uses an implicit-style fragment callback. Browser and Tauri support, redirect/callback behavior, and the supported OAuth flow must be resolved before changing provider settings or deployment configuration.
+- A canonical current-user/session introspection route and server-backed logout wiring are not confirmed in the inspected implementation.
+
+This addendum records source evidence and must not be read as confirmation that production configuration or end-to-end authentication has been verified. No migrations, production configuration, secrets, or deployed services were changed in Phase 2.
