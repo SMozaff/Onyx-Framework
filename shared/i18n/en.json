@@ -47,10 +47,15 @@
   "auth.allFatherGoogleSignIn": "All-Father · Sign in with Google",
   "auth.allFatherReservedPath": "This path is reserved for the designated master identity.",
   "auth.backToAdminLogin": "Back to Admin account login",
+  "auth.checkingGoogleSignIn": "Checking Google sign-in response…",
+  "auth.continueWithGoogle": "Continue with Google",
   "auth.desktopHeroBody": "Review mission work, resolve approvals, and act with an explicit local sync state.",
   "auth.desktopHeroTitle": "Operational clarity, from every authorized desktop.",
   "auth.fullServerAddressRequired": "Enter a full server address including http:// or https://.",
+  "auth.googleIdentityPrompt": "Continue with your designated Google identity.",
+  "auth.googleSignInNotConfigured": "Google sign-in is not configured in this build. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the Admin shell.",
   "auth.googleThroughClerk": "Google through Clerk",
+  "auth.googleThroughSupabase": "Google through Supabase",
   "auth.heroBody": "Review missions, monitor critical work, acknowledge notifications, and make permitted approval decisions without installing a native replica.",
   "auth.heroTitle": "Operational clarity, from any authorized browser.",
   "auth.hideServerAddress": "Hide server address",
@@ -535,10 +540,5 @@
   "settings.title": "Settings",
   "settings.useServerAndSignInAgain": "Use this server and sign in again",
   "language.note": "Interface language. Applies instantly and is remembered on this device.",
-  "language.title": "Language",
-  "auth.googleThroughSupabase": "Google through Supabase",
-  "auth.googleIdentityPrompt": "Continue with your designated Google identity.",
-  "auth.checkingGoogleSignIn": "Checking Google sign-in response…",
-  "auth.continueWithGoogle": "Continue with Google",
-  "auth.googleSignInNotConfigured": "Google sign-in is not configured in this build. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the Admin shell."
+  "language.title": "Language"
 }
