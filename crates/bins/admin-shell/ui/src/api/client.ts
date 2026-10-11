@@ -1,13 +1,14 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../stores/authStore';
 import { getServerAddress, isSecureEnoughForProduction } from '../utils/serverAddress';
 
+type RetriableRequestConfig = AxiosRequestConfig & { _onyxRetried?: boolean };
+type RefreshResponse = { access_token: string; refresh_token: string; user: NonNullable<ReturnType<typeof useAuthStore.getState>['user']> };
+let refreshInFlight: Promise<boolean> | null = null;
+
 /**
- * No longer a fixed value read once at module load. The server
- * address is user-configurable at runtime (see Settings page +
- * `utils/serverAddress.ts`), so `baseURL` must be resolved fresh on
- * every request via the interceptor below — otherwise a saved change
- * wouldn't take effect until the app was restarted.
+ * Resolve the configurable backend URL on every request so changing the
+ * connection settings takes effect immediately.
  */
 export const apiClient = axios.create({
   timeout: 30_000,
@@ -16,13 +17,6 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config) => {
   const address = getServerAddress();
-  // H4(b) backstop: both connection-settings forms (Login's
-  // ConnectionSettings and Settings' ServerConnectionSettings) already
-  // refuse to *save* an insecure address, but this also covers an address
-  // saved by an older build before this check existed, or a value edited
-  // directly in localStorage — nothing reaches the network with
-  // credentials over an insecure link regardless of how the address got
-  // stored.
   if (!isSecureEnoughForProduction(address)) {
     return Promise.reject(
       new Error(
@@ -32,14 +26,48 @@ apiClient.interceptors.request.use((config) => {
   }
   config.baseURL = address;
   const token = useAuthStore.getState().accessToken;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Preserve explicit provider credentials for the Supabase -> ONYX exchange.
+  if (token && !config.headers.get('Authorization')) {
+    config.headers.set('Authorization', `Bearer ${token}`);
+  }
   return config;
 });
 
+async function refreshSession(): Promise<boolean> {
+  const refreshToken = useAuthStore.getState().refreshToken;
+  const address = getServerAddress().replace(/\/+$/, '');
+  if (!refreshToken || !isSecureEnoughForProduction(address)) return false;
+  try {
+    const response = await axios.post<RefreshResponse>(
+      `${address}/api/auth/refresh`,
+      { refresh_token: refreshToken },
+      { timeout: 30_000, headers: { 'Content-Type': 'application/json' } },
+    );
+    if (!response.data?.access_token || !response.data?.refresh_token || !response.data?.user) return false;
+    useAuthStore.getState().login(response.data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
+  async (error) => {
+    const request = error.config as RetriableRequestConfig | undefined;
+    const authEndpoint = request?.url?.startsWith('/api/auth/') ?? false;
+    if (error.response?.status === 401 && request && !authEndpoint && !request._onyxRetried) {
+      request._onyxRetried = true;
+      if (!refreshInFlight) {
+        refreshInFlight = refreshSession().finally(() => { refreshInFlight = null; });
+      }
+      const refreshed = await refreshInFlight;
+      const token = useAuthStore.getState().accessToken;
+      if (refreshed && token) {
+        request.headers = axios.AxiosHeaders.from(request.headers);
+        request.headers.set('Authorization', `Bearer ${token}`);
+        return apiClient.request(request);
+      }
       useAuthStore.getState().logout();
       if (window.location.pathname !== '/login') window.location.assign('/login');
     }
