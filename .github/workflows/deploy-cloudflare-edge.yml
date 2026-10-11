@@ -3,7 +3,7 @@ name: Deploy ONYX Cloudflare Worker
 on:
   workflow_dispatch:
   push:
-    branches: [migration/cloudflare-free-worker]
+    branches: [main]
     paths:
       - 'deploy/cloudflare/edge-gateway/**'
       - '.github/workflows/deploy-cloudflare-edge.yml'
@@ -20,7 +20,8 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   ONYX_JWT_SECRET: ${{ secrets.ONYX_JWT_SECRET }}
   ONYX_ALLFATHER_EMAIL: so.muzaff@gmail.com
-  ONYX_CORS_ORIGINS: ${{ secrets.ONYX_CORS_ORIGINS }}
+  # CORS origins are public deployment configuration, not credentials.
+  ONYX_CORS_ORIGINS: https://onyx-web-ui.pages.dev,https://onyx-mobile-pwa.pages.dev
   SUPABASE_URL: https://uhpqjhbciimklheohvfr.supabase.co
   SUPABASE_JWKS_URL: https://uhpqjhbciimklheohvfr.supabase.co/auth/v1/.well-known/jwks.json
   SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
@@ -50,7 +51,7 @@ jobs:
           test -n "${SUPABASE_URL}" || { echo "Missing SUPABASE_URL"; exit 1; }
           test -n "${SUPABASE_PUBLISHABLE_KEY}" || { echo "Missing SUPABASE_PUBLISHABLE_KEY"; exit 1; }
           test -n "${SUPABASE_SECRET_KEY}" || { echo "Missing SUPABASE_SECRET_KEY"; exit 1; }
-          test -n "${ONYX_CORS_ORIGINS}" || { echo "::error::Missing ONYX_CORS_ORIGINS; configure an exact comma-separated allowlist of trusted ONYX frontend origins in GitHub Actions secrets."; exit 1; }
+          test -n "${ONYX_CORS_ORIGINS}" || { echo "::error::ONYX_CORS_ORIGINS is empty."; exit 1; }
           if [[ "${ONYX_CORS_ORIGINS}" == "*" ]]; then echo "::error::Wildcard CORS origins are forbidden for production."; exit 1; fi
 
       - name: Setup Node
