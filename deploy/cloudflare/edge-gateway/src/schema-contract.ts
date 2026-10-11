@@ -17,7 +17,9 @@
 
 export interface SchemaReadClient {
   prepare(sql: string): {
-    all(): Promise<Array<Record<string, unknown>>>;
+    all(): Promise<
+      Array<Record<string, unknown>> | { results?: Array<Record<string, unknown>> }
+    >;
   };
 }
 
@@ -58,7 +60,11 @@ async function pragmaRows(
   sql: string,
 ): Promise<Array<Record<string, unknown>>> {
   const rows = await db.prepare(sql).all();
-  return Array.isArray(rows) ? rows : [];
+  // The in-memory SQLite test reader returns a bare array; Cloudflare D1
+  // returns a D1Result object with a .results array. Accept both shapes.
+  if (Array.isArray(rows)) return rows;
+  if (rows && typeof rows === "object" && Array.isArray(rows.results)) return rows.results;
+  return [];
 }
 
 /**
