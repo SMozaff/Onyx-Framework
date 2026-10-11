@@ -14,7 +14,7 @@
  *  - guarded writes + audit records, with no credential material anywhere.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -30,6 +30,7 @@ import {
   ALLFATHER_PRINCIPAL_ID,
   ALLFATHER_ROLE,
   normalizeOptions,
+  parseArgs,
   provisionAllFather,
   readAllFatherState,
   renderSql,
@@ -317,5 +318,81 @@ describe("revocation (break-glass)", () => {
     expect(
       normalizeOptions({ environment: "production", action: "revoke", approval: ALLFATHER_PRINCIPAL_ID }).options?.action,
     ).toBe("revoke");
+  });
+});
+
+describe("CLI argument handling (--flag forwarding)", () => {
+  it("maps every documented flag onto the option object the command expects", () => {
+    const { options } = parseArgs([
+      "--environment", "production",
+      "--action", "provision",
+      "--supabase-user-id", SUBJECT_A,
+      "--database", "onyx-free-db",
+      "--expect-database", "onyx-free-db",
+      "--config", "wrangler.deploy.toml",
+      "--operator", "owner@example.test",
+      "--approve-production", SUBJECT_A,
+      "--dry-run",
+      "--json",
+    ]);
+    expect(options).toMatchObject({
+      action: "provision",
+      environment: "production",
+      subject: SUBJECT_A,
+      database: "onyx-free-db",
+      expectDatabase: "onyx-free-db",
+      config: "wrangler.deploy.toml",
+      operator: "owner@example.test",
+      approval: SUBJECT_A,
+      dryRun: true,
+      json: true,
+      activate: false,
+      rebind: false,
+    });
+  });
+
+  it("forwards the parsed argv through normalizeOptions unchanged", () => {
+    // This is exactly what the CLI's main() does: parseArgs(argv) -> normalizeOptions.
+    const { options } = parseArgs([
+      "--environment", "local",
+      "--supabase-user-id", SUBJECT_A,
+      "--activate",
+      "--rebind",
+    ]);
+    const normalized = normalizeOptions(options);
+    expect(normalized.refusal).toBeUndefined();
+    expect(normalized.options).toMatchObject({
+      environment: "local",
+      subject: SUBJECT_A,
+      activate: true,
+      rebind: true,
+    });
+  });
+
+  it("parses --help and treats a trailing value flag as empty", () => {
+    expect(parseArgs(["--help"])).toEqual({ help: true });
+    const { options } = parseArgs(["--environment", "local", "--supabase-user-id"]);
+    expect(options.subject).toBe("");
+  });
+
+  it("does not accept a value that looks like the next flag", () => {
+    const { options } = parseArgs(["--environment", "local", "--supabase-user-id", "--rebind"]);
+    expect(options.subject).toBe("");
+    expect(options.rebind).toBe(true);
+  });
+});
+
+describe("documented npm command contract", () => {
+  it("exposes provision:allfather and the script file it points at", () => {
+    const here = fileURLToPath(new URL("..", import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const command = pkg.scripts?.["provision:allfather"];
+    expect(command).toBe("node scripts/provision-allfather.mjs");
+    // The README documents this alias, so the file it invokes must exist relative
+    // to the package directory the npm script runs in.
+    const target = command!.replace(/^node\s+/, "");
+    expect(existsSync(join(here, target))).toBe(true);
   });
 });
