@@ -106,9 +106,12 @@ async function hashPassword(password:string):Promise<string>{
 }
 function clientType(payload:Json){return typeof payload.client_type==="string"?payload.client_type:"web";}
 function roleForUser(user:Record<string,unknown>):string{
+  // Authorization roles are explicit (`users.role`, NOT NULL DEFAULT 'STAFF').
+  // Phase 4 (reports/auth-repair/04-allfather-provisioning.md): username and
+  // email are mutable profile attributes and must never imply ALL_FATHER; the
+  // role is only granted by an explicit provisioned `role` value in D1.
   const explicit=typeof user.role==="string"?user.role:"";
   if(explicit) return explicit;
-  if(String(user.username).toLowerCase()==="allfather") return "ALL_FATHER";
   return Boolean(user.is_admin) ? "ORGANIZATION_ADMIN" : "STAFF";
 }
 async function issuePair(env:Env,user:Record<string,unknown>,type:string){

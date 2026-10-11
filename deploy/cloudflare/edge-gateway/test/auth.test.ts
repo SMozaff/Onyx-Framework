@@ -66,11 +66,11 @@ function makeEnv(db: MockDb): WorkerEnv {
 
 function allfatherRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: "__onyx_allfather__",
+    id: "__allfather__",
     username: "allfather",
     email: ALLFATHER_EMAIL,
     supabase_user_id: SUPABASE_SUB,
-    organization_id: "__onyx_root__",
+    organization_id: "__allfather__",
     is_admin: 1,
     is_active: 1,
     class: "ALL_FATHER",
@@ -284,6 +284,45 @@ describe("POST /api/auth/login (ONYX password path)", () => {
     const { response, body } = await login("no-such-user", "whatever");
     expect(response.status).toBe(401);
     expect(body.error).toBe("INVALID_CREDENTIALS");
+  });
+
+  it("never infers ALL_FATHER from the username when role is empty (Phase 4)", async () => {
+    // The canonical seed always sets role explicitly. A row whose role is empty
+    // must not be promoted by the literal username `allfather`; it is treated as
+    // an ordinary account (a fail-closed downgrade, never an implicit grant).
+    const hash = await argon2id({
+      password: "correct horse battery staple",
+      salt: new Uint8Array(16).fill(9),
+      parallelism: 1,
+      iterations: 1,
+      memorySize: 8192,
+      hashLength: 32,
+      outputType: "encoded",
+    });
+    const db = new MockDb();
+    db.userRow = {
+      id: "legacy-allfather-name",
+      username: "allfather",
+      email: "someone@example.test",
+      organization_id: "org-1",
+      password_hash: hash,
+      is_admin: 0,
+      is_active: 1,
+      class: null,
+      role: "",
+    };
+    const request = new Request("https://onyx-worker.test/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "allfather", password: "correct horse battery staple" }),
+    });
+
+    const response = await fetchHandler(request, makeEnv(db));
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect((body.user as Record<string, unknown>).role).toBe("STAFF");
+    expect((body.user as Record<string, unknown>).role).not.toBe("ALL_FATHER");
   });
 
   it("returns an identical response for unknown identifier and wrong password", async () => {
