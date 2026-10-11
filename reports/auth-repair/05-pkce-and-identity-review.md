@@ -123,7 +123,23 @@ Local (this VM, Node 24, matching CI's Node 24 for the Worker):
 | `node scripts/sync-i18n.mjs --check` | in sync (544 keys) |
 | Clean D1 install via official Wrangler runner | 5 migrations, idempotent re-run |
 
-GitHub Actions runs for this branch/PR are recorded in the handover report, not repeated here.
+### GitHub Actions (branch `fix/auth-pkce-identity-review`, head `4e66602`)
+
+| Workflow | Run | Status |
+|---|---|---|
+| CI (run 1066) | https://github.com/SMozaff/Onyx-Framework/actions/runs/38140377036 | **success** (all 9 jobs, incl. the new `native-ui-evidence` step) |
+| Security (run 607) | https://github.com/SMozaff/Onyx-Framework/actions/runs/38140377049 | **success** |
+
+`native-ui-evidence` job (`https://github.com/SMozaff/Onyx-Framework/actions/runs/38140377036/job/114472853604`)
+ran every step successfully, including the new **"Run Admin UI authentication (PKCE) tests"** step
+between the Admin UI `npm ci` and `npm run build`.
+
+**Cloudflare Worker CI limitation:** its `push` trigger is filtered to
+`[main, 'fix/**', 'migration/**']` *and* `deploy/cloudflare/edge-gateway/**`, and GitHub did not
+evaluate the path filter for this push (which created the branch), so no run started for the branch
+push. Its `pull_request` trigger has no such gap and will run on the PR. The exact Worker CI steps
+were reproduced locally first: `npm install`, `npm run check` (bundle dry-run), `npm test` (45 tests),
+and the disposable-D1 `wrangler d1 migrations apply --local` + ledger assertion.
 
 ## 7. Production status — all **NOT VERIFIED** (blocked on owner)
 
