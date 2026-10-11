@@ -36,6 +36,8 @@ Authentication endpoints:
 - `POST /api/auth/refresh`: rotate a valid ONYX refresh token.
 - `POST /api/auth/logout`: revoke supplied ONYX tokens.
 
+Browser sign-in uses Supabase's **Authorization Code Flow with PKCE** (`crates/bins/admin-shell/ui/src/auth/allfatherOAuth.ts`): the Admin shell creates the verifier, its S256 challenge and a CSRF nonce, exchanges the code with the publishable key only, and scrubs the code from the URL. The Worker exchange endpoint is unchanged — it still accepts a bearer token and never learns any OAuth secret.
+
 The D1 migrations own this model: `0001_foundation.sql` creates the base tables, `0002_auth_hierarchy.sql` adds `email`/`role` and seeds the single inert `__allfather__` principal, `0003_supabase_identity.sql` owns `users.supabase_user_id`, and `0004_auth_schema_repair.sql` idempotently reconciles the canonical indexes and principal (see `reports/auth-repair/03-d1-migrations.md`). Admin and Staff passwords are Argon2id hashes in D1; their accounts are not provisioned in Supabase.
 
 ## Trust boundary: external claims vs ONYX-assigned privileges
@@ -46,7 +48,7 @@ decided server-side by the Worker against D1.
 
 | Fact / claim | How it becomes trusted |
 |---|---|
-| Supabase JWT `sub`, `iss`, `exp`, signature | Verified by the Worker (`src/supabase.ts`): JWKS signature, RS256/ES256 allowlist, exact issuer, expiry |
+| Supabase JWT `sub`, `iss`, `exp`, `aud`, `nbf`, signature | Verified by the Worker (`src/supabase.ts`): JWKS signature, RS256/ES256 allowlist, exact issuer, expiry, audience (`authenticated`), and not-before when present |
 | Supabase Auth user id, primary email, `email_confirmed_at` | Resolved server-side through `GET /auth/v1/user` with the presented bearer token; must equal the verified JWT `sub` and the configured All-Father email |
 | `users.supabase_user_id` (external subject mapping) | **Owner-controlled provisioning only.** Login never creates, updates, or replaces it; an unmapped or mismatched subject is denied with `ALLFATHER_NOT_PROVISIONED` and no database write |
 | `users.role` (`ALL_FATHER` / `ORGANIZATION_ADMIN` / `STAFF`) | Assigned by ONYX provisioning in D1 (All-Father provisions organizations and Admins; Admins manage Staff in their own organization) |
@@ -80,6 +82,18 @@ The command is fail-closed. It refuses to run when:
 Every accepted change writes an `audit_log` row (`allfather.provision` / `allfather.revoke`) and is
 idempotent: re-running with the same subject is a no-op that reports `already-provisioned`.
 Credentials, tokens, and `password_hash` values are never read, written, or logged.
+
+The npm alias runs the same script from this directory (`deploy/cloudflare/edge-gateway`), so it
+inherits the same working-directory assumption. Pass the script flags after `--`:
+
+```bash
+npm run provision:allfather -- --environment production --config wrangler.deploy.toml \
+  --database onyx-free-db --expect-database onyx-free-db \
+  --supabase-user-id <SUPABASE_UUID> --dry-run --json
+```
+
+The `node scripts/provision-allfather.mjs ...` examples below are equivalent (and are the form to use
+when this directory is not the current working directory).
 
 ### Runbook — first-time production provisioning
 
@@ -135,28 +149,6 @@ node scripts/provision-allfather.mjs --environment production --config wrangler.
 Note: local Wrangler D1 state is keyed by the `database_id` in the config, not the database name —
 use a distinct `database_id` for each disposable environment, and never point `--remote` at a
 database you have not identified with `--expect-database`.
-
-## Trust boundary: external claims vs ONYX-assigned privileges
-
-Which facts are proven by an external identity provider, and which are assigned by ONYX. Only the
-left column is ever *authenticated* externally; every privilege lives in the right column and is
-decided server-side by the Worker against D1.
-
-| Fact / claim | How it becomes trusted |
-|---|---|
-| Supabase JWT `sub`, `iss`, `exp`, signature | Verified by the Worker (`src/supabase.ts`): JWKS signature, RS256/ES256 allowlist, exact issuer, expiry |
-| Supabase Auth user id, primary email, `email_confirmed_at` | Resolved server-side through `GET /auth/v1/user` with the presented bearer token; must equal the verified JWT `sub` and the configured All-Father email |
-| `users.supabase_user_id` (external subject mapping) | **Owner-controlled provisioning only.** Login never creates, updates, or replaces it; an unmapped or mismatched subject is denied with `ALLFATHER_NOT_PROVISIONED` and no database write |
-| `users.role` (`ALL_FATHER` / `ORGANIZATION_ADMIN` / `STAFF`) | Assigned by ONYX provisioning in D1 (All-Father provisions organizations and Admins; Admins manage Staff in their own organization) |
-| `users.is_active`, `users.organization_id` | ONYX account lifecycle in D1; revalidated on login, refresh, and every protected request |
-| ONYX access/refresh JWT validity | Issued by the Worker with `ONYX_JWT_SECRET` only after D1 checks; expiry and `token_revocations` rechecked on use |
-| `role`, `is_admin`, `organization_id`, `class`, `parent_user_id` in any request body, query, or client store | **Never trusted as authority** — client-supplied values are ignored for authorization decisions |
-
-Public authentication failures return stable error codes only (`INVALID_CREDENTIALS`,
-`ALLFATHER_REQUIRED`, `ALLFATHER_NOT_PROVISIONED`, `INVALID_SUPABASE_TOKEN`,
-`INVALID_REFRESH_TOKEN`, `UNAUTHORIZED`). The verifier's detailed reason is logged server-side as
-a structured event (`allfather_subject_rejected`, `allfather_token_rejected`) that never contains
-tokens, passwords, OAuth codes, or secrets.
 
 ## Current state
 

@@ -359,6 +359,13 @@ jobs:
       - name: Install Admin UI dependencies
         working-directory: crates/bins/admin-shell/ui
         run: npm ci
+      # The Admin shell owns the All-Father Supabase sign-in. Since that login
+      # replaced the OAuth implicit flow with Authorization Code + PKCE, its
+      # state/verifier/callback handling is a security boundary and must be
+      # regression-tested here rather than only built.
+      - name: Run Admin UI authentication (PKCE) tests
+        working-directory: crates/bins/admin-shell/ui
+        run: npm test
       - name: Build Admin UI frontend smoke target
         working-directory: crates/bins/admin-shell/ui
         run: npm run build
@@ -367,7 +374,7 @@ jobs:
           UI_EVIDENCE_STATUS: passed
           UI_EVIDENCE_COMMANDS: |
             npm ci && npm run build (crates/bins/desktop-shell/ui)
-            npm ci && npm run build (crates/bins/admin-shell/ui)
+            npm ci && npm test && npm run build (crates/bins/admin-shell/ui)
         run: node scripts/collect-ui-evidence.mjs artifacts/ui-evidence/native-ui-frontend-smoke.json native-ui-frontend-smoke
       - name: Upload native UI smoke evidence
         if: always()

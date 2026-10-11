@@ -7,6 +7,13 @@ import ConnectionSettings from "@/components/ConnectionSettings";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 import { getServerAddress } from "@/utils/serverAddress";
+import {
+  AllfatherOAuthError,
+  beginAllfatherSignIn,
+  completeAllfatherCallback,
+  parseCallback,
+  stripOAuthParams,
+} from "@/auth/allfatherOAuth";
 
 
 type LoginMode = "account" | "allfather";
@@ -27,18 +34,36 @@ export default function Login() {
     if (mode !== "allfather") return;
     let cancelled = false;
     async function finishOAuthCallback() {
-      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-      const token = params.get("access_token");
-      const providerError = params.get("error_description") || params.get("error");
-      if (providerError) throw new Error(providerError);
-      if (!token) {
+      // Capture the full callback URL (code + state) before rewriting the
+      // address bar, then strip the sensitive parameters immediately so the
+      // authorization code never lingers in history, a referrer, or a
+      // forwarded URL.
+      const callbackUrl = window.location.href;
+      const params = parseCallback(callbackUrl);
+      if (!params.code && !params.error && !params.legacyTokenInFragment) {
         setGoogleAuthReady(true);
         return;
       }
-      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+      window.history.replaceState({}, document.title, stripOAuthParams(callbackUrl));
       setLoading(true);
+
+      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, "");
+      const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+      if (!supabaseUrl || !publishableKey) {
+        throw new AllfatherOAuthError("MISSING_CONFIG", "Supabase is not configured in this build");
+      }
+
+      // PKCE: the stored verifier + state are validated here, then the code is
+      // exchanged for a Supabase session using only the publishable key.
+      const { accessToken } = await completeAllfatherCallback({
+        supabaseUrl,
+        publishableKey,
+        callbackUrl,
+      });
+      // The Worker — not the browser — decides whether this Supabase subject is
+      // mapped to the provisioned ONYX All-Father principal (AUTH-01).
       const response = await apiClient.post("/api/auth/supabase", null, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (cancelled) return;
       useAuthStore.getState().login(response.data);
@@ -46,28 +71,36 @@ export default function Login() {
     }
 
     void finishOAuthCallback().catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : "Supabase Google sign-in failed.");
+      // Generic, localized message only: the underlying cause (state mismatch,
+      // expired code, provider error body) is deliberately not surfaced.
+      if (!cancelled) setError(oauthErrorMessage(err, t));
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
 
     return () => { cancelled = true; };
-  }, [mode, navigate]);
+  }, [mode, navigate, t]);
 
   function beginGoogleSignIn() {
-    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, "");
+    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, "");
     const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
     if (!supabaseUrl || !publishableKey) {
       setError(t("auth.googleSignInNotConfigured"));
       return;
     }
-    const redirectTo = window.location.origin + window.location.pathname + "?auth=allfather";
-    const target = new URL(`${supabaseUrl}/auth/v1/authorize`);
-    target.searchParams.set("provider", "google");
-    target.searchParams.set("redirect_to", redirectTo);
-    target.searchParams.set("flow_type", "implicit");
-    target.searchParams.set("apikey", publishableKey);
-    window.location.assign(target.toString());
+    setError(null);
+    // Authorization Code Flow with PKCE: the verifier, its S256 challenge and
+    // the CSRF nonce are created here and stored for this tab only. No secret
+    // key is involved — the exchange later uses just the publishable key.
+    void beginAllfatherSignIn({
+      supabaseUrl,
+      publishableKey,
+      redirectTo: window.location.origin + window.location.pathname,
+    }).then(({ authorizeUrl }) => {
+      window.location.assign(authorizeUrl);
+    }).catch((err: unknown) => {
+      setError(oauthErrorMessage(err, t));
+    });
   }
 
   async function submit(event: FormEvent) {
@@ -177,4 +210,16 @@ export default function Login() {
 
 function isNetworkError(error: unknown): boolean {
   return typeof error === "object" && error !== null && !("response" in error);
+}
+
+/**
+ * Maps PKCE failure codes to localized copy. Every branch is generic: the
+ * server-side reason (state mismatch, expired code, provider response body) is
+ * never shown to the client, matching the Worker's stable-error-code contract.
+ */
+function oauthErrorMessage(error: unknown, t: (key: string) => string): string {
+  if (!(error instanceof AllfatherOAuthError)) return t("auth.googleSignInFailed");
+  if (error.code === "MISSING_CONFIG") return t("auth.googleSignInNotConfigured");
+  if (error.code === "PROVIDER_DENIED") return t("auth.googleSignInCancelled");
+  return t("auth.googleSignInFailed");
 }

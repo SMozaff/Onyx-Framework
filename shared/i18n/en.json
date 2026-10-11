@@ -53,6 +53,8 @@
   "auth.desktopHeroTitle": "Operational clarity, from every authorized desktop.",
   "auth.fullServerAddressRequired": "Enter a full server address including http:// or https://.",
   "auth.googleIdentityPrompt": "Continue with your designated Google identity.",
+  "auth.googleSignInCancelled": "Google sign-in was cancelled or was not approved. No account was changed.",
+  "auth.googleSignInFailed": "Google sign-in could not be completed. Please try again.",
   "auth.googleSignInNotConfigured": "Google sign-in is not configured in this build. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the Admin shell.",
   "auth.googleThroughClerk": "Google through Clerk",
   "auth.googleThroughSupabase": "Google through Supabase",

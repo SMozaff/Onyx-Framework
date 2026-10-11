@@ -148,6 +148,7 @@ function supabaseRequest(token: string): Request {
 function validClaims(overrides: Record<string, unknown> = {}) {
   return {
     sub: SUPABASE_SUB,
+    aud: "authenticated",
     email: ALLFATHER_EMAIL,
     email_verified: true,
     iss: EXPECTED_ISSUER,
@@ -265,6 +266,52 @@ describe("POST /api/auth/supabase (All-Father exchange)", () => {
     expect(response.status).toBe(401);
     expect(body.error).toBe("INVALID_SUPABASE_TOKEN");
     expect(db.writes()).toHaveLength(0);
+  });
+
+  it("rejects a token whose audience is not the Supabase authenticated audience", async () => {
+    const db = new MockDb();
+    db.userRow = allfatherRow();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const token = await signSupabaseJwt(validClaims({ aud: "anon" }));
+
+    const response = await fetchHandler(supabaseRequest(token), makeEnv(db));
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("INVALID_SUPABASE_TOKEN");
+    expect(db.writes()).toHaveLength(0);
+    errorLog.mockRestore();
+  });
+
+  it("rejects a token with no audience claim", async () => {
+    const db = new MockDb();
+    db.userRow = allfatherRow();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const claims = validClaims();
+    delete (claims as Record<string, unknown>).aud;
+    const token = await signSupabaseJwt(claims);
+
+    const response = await fetchHandler(supabaseRequest(token), makeEnv(db));
+    expect(response.status).toBe(401);
+    expect(db.writes()).toHaveLength(0);
+    errorLog.mockRestore();
+  });
+
+  it("accepts an array audience that includes authenticated and rejects a future nbf", async () => {
+    const db = new MockDb();
+    db.userRow = allfatherRow();
+    const arrayAud = await signSupabaseJwt(validClaims({ aud: ["authenticated"] }));
+    const okResponse = await fetchHandler(supabaseRequest(arrayAud), makeEnv(db));
+    expect(okResponse.status).toBe(200);
+
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const futureNbf = await signSupabaseJwt(
+      validClaims({ nbf: Math.floor(Date.now() / 1000) + 3600 }),
+    );
+    const notYetValid = await fetchHandler(supabaseRequest(futureNbf), makeEnv(db));
+    expect(notYetValid.status).toBe(401);
+    expect(db.writes()).toHaveLength(0);
+    errorLog.mockRestore();
   });
 });
 

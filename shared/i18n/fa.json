@@ -53,6 +53,8 @@
   "auth.desktopHeroTitle": "شفافیت عملیاتی، از هر دسکتاپ مجاز.",
   "auth.fullServerAddressRequired": "نشانی کامل سرور را با http:// یا https:// وارد کنید.",
   "auth.googleIdentityPrompt": "با هویت گوگل تعیین‌شده خود ادامه دهید.",
+  "auth.googleSignInCancelled": "ورود با Google لغو شد یا تأیید نشد. حسابی تغییر نکرد.",
+  "auth.googleSignInFailed": "ورود با Google تکمیل نشد. لطفاً دوباره تلاش کنید.",
   "auth.googleSignInNotConfigured": "ورود گوگل در این نسخه پیکربندی نشده است. متغیرهای VITE_SUPABASE_URL و VITE_SUPABASE_PUBLISHABLE_KEY را تنظیم و پوسته Admin را دوباره بسازید.",
   "auth.googleThroughClerk": "Google از طریق Clerk",
   "auth.googleThroughSupabase": "ورود گوگل از طریق Supabase",

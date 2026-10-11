@@ -84,3 +84,32 @@ This addendum records source evidence and must not be read as confirmation that 
 - Google/Supabase authentication alone still cannot grant All-Father access: the verified subject
   must match the explicitly provisioned mapping, the resolved Supabase user must match the JWT
   subject with a confirmed email, and the ONYX principal must be active with an explicit role.
+
+### Implementation reconciliation (handover, 2026-10-11)
+
+- **Browser sign-in is now Authorization Code Flow with PKCE**, replacing the implicit flow
+  (`flow_type=implicit` + `access_token` in the URL fragment) that the 2026-10-10 record flagged as
+  unresolved. `crates/bins/admin-shell/ui/src/auth/allfatherOAuth.ts` generates a 32-byte random
+  verifier, its RFC 7636 S256 challenge, and a separate random CSRF nonce; the nonce and verifier
+  are stored per-tab in `sessionStorage` and the exchange uses only the publishable key
+  (`POST /auth/v1/token?grant_type=pkce`). The authorization code is scrubbed from the address bar
+  and history before any network call, a legacy implicit-flow fragment is refused rather than
+  processed, and state is validated as missing/mismatched/expired/replayed fail-closed. OAuth `state`
+  is deliberately not sent to `/authorize`, which owns that parameter internally and rejects a
+  caller-supplied value (supabase/auth#1548); the nonce travels inside the allow-listed
+  `redirect_to` instead. See
+  [reports/auth-repair/05-pkce-and-identity-review.md](../reports/auth-repair/05-pkce-and-identity-review.md).
+- **Supabase JWT verification now enforces the audience.** `src/supabase.ts` requires
+  `aud === "authenticated"` (string or array form) in addition to the existing signature,
+  RS256/ES256 allowlist, exact issuer, expiry and subject checks, and rejects a token whose
+  optional `nbf` is in the future. This satisfies the "approved audience/project claim policy"
+  requirement above; the value is a hardcoded constant rather than an env var so the Worker cannot
+  be deployed with audience checking silently disabled.
+- **The documented `npm run provision:allfather` command now exists.** `package.json` had lost the
+  script in a merge, so the README's documented command could not run; the script was restored and
+  is covered by a test that asserts the documented alias and the file it invokes both exist.
+- **Nothing here changes the privilege model.** The Worker still denies every Supabase subject that
+  is not explicitly provisioned (`ALLFATHER_NOT_PROVISIONED`, no database write), role still comes
+  only from `users.role`, and no production migration, principal, binding, secret or deployment was
+  touched. Production D1 state, the provisioned mapping, and end-to-end Google sign-in remain
+  **unverified** pending owner-run read-only checks.
