@@ -2,11 +2,22 @@ type Json = Record<string, unknown>;
 
 type SupabaseJwt = Json & {
   sub: string;
+  aud?: string | string[];
   email?: string;
   email_verified?: boolean;
   exp: number;
+  nbf?: number;
   iss: string;
 };
+
+/**
+ * Audience on a Supabase Auth *access token* for a signed-in user. Supabase
+ * issues `aud: "authenticated"` for authenticated sessions, so a token minted
+ * for any other audience must not be accepted here. Hardcoded (not an env var)
+ * so the Worker cannot be deployed in a state where audience validation is
+ * silently disabled; the deploy workflow does not need a new variable.
+ */
+const SUPABASE_JWT_AUDIENCE = "authenticated";
 
 function b64uDecode(value: string): Uint8Array {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (value.length % 4)) % 4);
@@ -46,7 +57,26 @@ export async function verifySupabaseJwt(env: { SUPABASE_URL?: string; SUPABASE_J
 
   const base = supabaseBase(env);
   const expectedIssuer = `${base}/auth/v1`;
-  if (payload.iss !== expectedIssuer || !payload.sub || Number(payload.exp) <= Math.floor(Date.now() / 1000)) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  // `aud` is the audience the token was minted for; Supabase access tokens use
+  // the literal "authenticated". Accept both the single-string and array forms
+  // of the JWT `aud` claim, but require the exact value — never "any audience".
+  const audience = payload.aud;
+  const audienceOk =
+    typeof audience === "string"
+      ? audience === SUPABASE_JWT_AUDIENCE
+      : Array.isArray(audience) && audience.includes(SUPABASE_JWT_AUDIENCE);
+  // `nbf` (not-before) is optional in Supabase access tokens. When present it
+  // must not be in the future, otherwise the token is not yet valid.
+  const notBefore = payload.nbf == null ? null : Number(payload.nbf);
+  const notBeforeOk = notBefore === null || (Number.isFinite(notBefore) && notBefore <= nowSeconds);
+  if (
+    payload.iss !== expectedIssuer ||
+    !payload.sub ||
+    Number(payload.exp) <= nowSeconds ||
+    !audienceOk ||
+    !notBeforeOk
+  ) {
     throw new Error("invalid supabase claims");
   }
 
