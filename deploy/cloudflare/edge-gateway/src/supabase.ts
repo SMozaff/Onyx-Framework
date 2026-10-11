@@ -81,11 +81,18 @@ export async function verifySupabaseJwt(env: { SUPABASE_URL?: string; SUPABASE_J
   }
 
   const jwksUrl = env.SUPABASE_JWKS_URL || `${base}/auth/v1/.well-known/jwks.json`;
-  const response = await fetch(jwksUrl, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error("supabase jwks unavailable");
-  const jwks = await response.json() as { keys?: Json[] };
-  const jwk = jwks.keys?.find((key) => key.kid === kid);
-  if (!jwk) throw new Error("supabase signing key not found");
+  let response: Response;
+  try {
+    response = await fetch(jwksUrl, { headers: { accept: "application/json" } });
+  } catch {
+    throw new Error("SUPABASE_AUTH_UNAVAILABLE");
+  }
+  if (!response.ok) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
+  const jwks = await response.json().catch(() => null) as { keys?: Json[] } | null;
+  const jwk = jwks?.keys?.find((key) => key.kid === kid);
+  // A missing signing key can happen during provider key rotation; return a
+  // transient infrastructure error instead of telling a valid user to re-login.
+  if (!jwk) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
 
   const algorithm = alg === "RS256"
     ? { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }
@@ -109,17 +116,25 @@ export async function getSupabaseUser(
   env: { SUPABASE_URL?: string; SUPABASE_PUBLISHABLE_KEY?: string },
   accessToken: string,
 ): Promise<{ id: string; email: string | null; email_confirmed_at: string | null }> {
-  const response = await fetch(`${supabaseBase(env)}/auth/v1/user`, {
-    method: "GET",
-    headers: {
-      apikey: publicKey(env),
-      authorization: `Bearer ${accessToken}`,
-      accept: "application/json",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${supabaseBase(env)}/auth/v1/user`, {
+      method: "GET",
+      headers: {
+        apikey: publicKey(env),
+        authorization: `Bearer ${accessToken}`,
+        accept: "application/json",
+      },
+    });
+  } catch {
+    throw new Error("SUPABASE_AUTH_UNAVAILABLE");
+  }
   const body = await response.json().catch(() => ({})) as Json;
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("INVALID_SUPABASE_TOKEN");
+  }
   if (!response.ok || typeof body.id !== "string") {
-    throw new Error("SUPABASE_USER_VERIFICATION_FAILED");
+    throw new Error("SUPABASE_AUTH_UNAVAILABLE");
   }
   return {
     id: body.id,
