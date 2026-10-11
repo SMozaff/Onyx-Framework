@@ -36,7 +36,7 @@ Authentication endpoints:
 - `POST /api/auth/refresh`: rotate a valid ONYX refresh token.
 - `POST /api/auth/logout`: revoke supplied ONYX tokens.
 
-D1 migration `0002_onyx_identity_model.sql` adds role/email/identity fields, organization records, and the seeded All-Father authority record. Admin and Staff passwords are Argon2id hashes in D1; their accounts are not provisioned in Supabase.
+The D1 migrations own this model: `0001_foundation.sql` creates the base tables, `0002_auth_hierarchy.sql` adds `email`/`role` and seeds the single inert `__allfather__` principal, `0003_supabase_identity.sql` owns `users.supabase_user_id`, and `0004_auth_schema_repair.sql` idempotently reconciles the canonical indexes and principal (see `reports/auth-repair/03-d1-migrations.md`). Admin and Staff passwords are Argon2id hashes in D1; their accounts are not provisioned in Supabase.
 
 ## Trust boundary: external claims vs ONYX-assigned privileges
 
@@ -59,6 +59,82 @@ Public authentication failures return stable error codes only (`INVALID_CREDENTI
 `INVALID_REFRESH_TOKEN`, `UNAUTHORIZED`). The verifier's detailed reason is logged server-side as
 a structured event (`allfather_subject_rejected`, `allfather_token_rejected`) that never contains
 tokens, passwords, OAuth codes, or secrets.
+
+## All-Father subject provisioning (owner-only, out-of-band)
+
+`users.supabase_user_id` is the trust binding between a verified Supabase subject and the single
+ONYX All-Father principal. The migrations create it `NULL`, and the only supported writer is the
+administrative command `scripts/provision-allfather.mjs` (alias `npm run provision:allfather`).
+Login never writes it, no migration writes it, and no client can supply it.
+
+The command is fail-closed. It refuses to run when:
+
+- the canonical principal `__allfather__` is missing, duplicated, inactive, not `is_admin`, or its
+  `role` is not the explicit `ALL_FATHER` value (a username/email/Google identity alone never grants it);
+- the supplied subject is not a Supabase Auth user UUID (an email address is rejected before any SQL);
+- the subject is already mapped to a *different* ONYX principal (no double-binding);
+- the principal already has a different subject and `--rebind` is not passed;
+- `--environment production` is used without `--approve-production <subject>` (or `__allfather__` for a revoke);
+- `--expect-database` does not match `--database`.
+
+Every accepted change writes an `audit_log` row (`allfather.provision` / `allfather.revoke`) and is
+idempotent: re-running with the same subject is a no-op that reports `already-provisioned`.
+Credentials, tokens, and `password_hash` values are never read, written, or logged.
+
+### Runbook — first-time production provisioning
+
+1. **Read-only preflight** (never prints hashes/tokens). Confirm exactly one privileged row and no
+   existing mapping:
+
+   ```bash
+   npx wrangler d1 execute onyx-free-db --remote --config wrangler.deploy.toml --json \
+     --command "SELECT id, username, role, is_active, is_admin, supabase_user_id FROM users"
+   ```
+
+   If there is more than one `ALL_FATHER` row or the row is not `__allfather__`, **stop** and resolve
+   it manually; the command will refuse (`PRINCIPAL_AMBIGUOUS`) rather than merge or delete rows.
+
+2. **Obtain the Supabase user UUID** from the owner's Supabase project (Authentication → Users) for
+   the Google identity. Do not derive it from the email address.
+
+3. **Dry run** (preflight + plan, no writes):
+
+   ```bash
+   node scripts/provision-allfather.mjs --environment production --config wrangler.deploy.toml \
+     --database onyx-free-db --expect-database onyx-free-db \
+     --supabase-user-id <SUPABASE_UUID> --dry-run --json
+   ```
+
+4. **Apply with explicit owner approval** (required only after the D1 migrations and the Worker are
+   deployed, since login stays denied until this mapping exists):
+
+   ```bash
+   node scripts/provision-allfather.mjs --environment production --config wrangler.deploy.toml \
+     --database onyx-free-db --expect-database onyx-free-db \
+     --supabase-user-id <SUPABASE_UUID> --approve-production <SUPABASE_UUID> \
+     --operator "<owner>"
+   ```
+
+5. **Expected success indicators:** `status: provisioned`; `SELECT supabase_user_id FROM users WHERE
+   id='__allfather__'` returns the UUID; `audit_log` contains one `allfather.provision` row; the
+   Google sign-in then returns an ONYX session instead of `403 ALLFATHER_NOT_PROVISIONED`.
+
+### Runbook — identity replacement (break-glass)
+
+For a lost or replaced Google identity, revoke first, then provision the new subject. Both steps are
+audited and require approval:
+
+```bash
+node scripts/provision-allfather.mjs --environment production --action revoke \
+  --approve-production __allfather__ --operator "<owner>"
+node scripts/provision-allfather.mjs --environment production --config wrangler.deploy.toml \
+  --database onyx-free-db --supabase-user-id <NEW_UUID> --rebind \
+  --approve-production <NEW_UUID> --operator "<owner>"
+```
+
+Note: local Wrangler D1 state is keyed by the `database_id` in the config, not the database name —
+use a distinct `database_id` for each disposable environment, and never point `--remote` at a
+database you have not identified with `--expect-database`.
 
 ## Current state
 

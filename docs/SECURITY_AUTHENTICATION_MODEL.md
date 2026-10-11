@@ -70,3 +70,17 @@ In particular:
 - A canonical current-user/session introspection route and server-backed logout wiring are not confirmed in the inspected implementation.
 
 This addendum records source evidence and must not be read as confirmation that production configuration or end-to-end authentication has been verified. No migrations, production configuration, secrets, or deployed services were changed in Phase 2.
+
+### Implementation reconciliation (Phase 4, 2026-10-11)
+
+- The single `users.supabase_user_id` binding is written **only** by the owner-run command
+  `deploy/cloudflare/edge-gateway/scripts/provision-allfather.mjs` (see
+  [reports/auth-repair/04-allfather-provisioning.md](../reports/auth-repair/04-allfather-provisioning.md)
+  and the Worker README). It is idempotent, environment-aware, requires explicit approval for
+  production, audits every change, and refuses to create a principal, double-bind a subject,
+  rebind without approval, or activate an inactive principal silently.
+- `ALL_FATHER` is never inferred from a mutable attribute: an account whose `users.role` is empty is
+  no longer promoted by the literal username `allfather` (fixed in `src/index.ts` `roleForUser`).
+- Google/Supabase authentication alone still cannot grant All-Father access: the verified subject
+  must match the explicitly provisioned mapping, the resolved Supabase user must match the JWT
+  subject with a confirmed email, and the ONYX principal must be active with an explicit role.
