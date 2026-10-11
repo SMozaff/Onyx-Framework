@@ -53,6 +53,9 @@ class MockDb {
     const record = (params: unknown[]) => this.queries.push({ sql, params });
     const row = () => (sql.includes("FROM users") ? this.userRow : null);
     return {
+      // D1 exposes .all() directly on a prepared statement; readiness uses
+      // this to inspect PRAGMA schema rows without binding parameters.
+      all: async () => ({ results: this.schemaRows(sql) }),
       bind: (...params: unknown[]) => {
         record(params);
         return {
