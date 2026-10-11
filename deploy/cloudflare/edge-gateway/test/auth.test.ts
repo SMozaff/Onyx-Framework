@@ -33,15 +33,15 @@ class MockDb {
   missingSchemaItems = new Set<string>();
 
   private schemaRows(sql: string): Array<Record<string, unknown>> {
-    const tableMatch = /PRAGMA table_info\\((\\w+)\\)/i.exec(sql);
-    if (tableMatch) {
-      const table = tableMatch[1]!;
+    const tablePrefix = "PRAGMA table_info(";
+    if (sql.toLowerCase().startsWith(tablePrefix.toLowerCase()) && sql.endsWith(")")) {
+      const table = sql.slice(tablePrefix.length, -1);
       if (this.missingSchemaItems.has(`table:${table}`)) return [];
       return (AUTH_SCHEMA_CONTRACT.tables[table] ?? [])
         .filter((column) => !this.missingSchemaItems.has(`${table}.${column}`))
         .map((name) => ({ name }));
     }
-    if (/PRAGMA index_list\\(users\\)/i.test(sql)) {
+    if (sql.toLowerCase() === "pragma index_list(users)") {
       return AUTH_SCHEMA_CONTRACT.indexes
         .filter((name) => !this.missingSchemaItems.has(`index:${name}`))
         .map((name) => ({ name }));
