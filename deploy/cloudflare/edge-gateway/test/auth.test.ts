@@ -12,6 +12,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { argon2id } from "hash-wasm";
 import worker from "../src/index";
+import { AUTH_SCHEMA_CONTRACT } from "../src/schema-contract";
 
 const SUPABASE_URL = "https://example-project.supabase.co";
 const ALLFATHER_EMAIL = "so.muzaff@gmail.com";
@@ -29,17 +30,38 @@ interface RecordedQuery {
 class MockDb {
   userRow: Record<string, unknown> | null = null;
   queries: RecordedQuery[] = [];
+  missingSchemaItems = new Set<string>();
+
+  private schemaRows(sql: string): Array<Record<string, unknown>> {
+    const tablePrefix = "PRAGMA table_info(";
+    if (sql.toLowerCase().startsWith(tablePrefix.toLowerCase()) && sql.endsWith(")")) {
+      const table = sql.slice(tablePrefix.length, -1);
+      if (this.missingSchemaItems.has(`table:${table}`)) return [];
+      return (AUTH_SCHEMA_CONTRACT.tables[table] ?? [])
+        .filter((column) => !this.missingSchemaItems.has(`${table}.${column}`))
+        .map((name) => ({ name }));
+    }
+    if (sql.toLowerCase() === "pragma index_list(users)") {
+      return AUTH_SCHEMA_CONTRACT.indexes
+        .filter((name) => !this.missingSchemaItems.has(`index:${name}`))
+        .map((name) => ({ name }));
+    }
+    return [];
+  }
 
   prepare(sql: string) {
     const record = (params: unknown[]) => this.queries.push({ sql, params });
     const row = () => (sql.includes("FROM users") ? this.userRow : null);
     return {
+      // D1 exposes .all() directly on a prepared statement; readiness uses
+      // this to inspect PRAGMA schema rows without binding parameters.
+      all: async () => ({ results: this.schemaRows(sql) }),
       bind: (...params: unknown[]) => {
         record(params);
         return {
           first: async () => row(),
           run: async () => ({ success: true }),
-          all: async () => ({ results: [] }),
+          all: async () => ({ results: this.schemaRows(sql) }),
         };
       },
       first: async () => {
@@ -59,6 +81,7 @@ function makeEnv(db: MockDb): WorkerEnv {
     DB: db,
     ONYX_JWT_SECRET: "test-onyx-secret",
     ONYX_ALLFATHER_EMAIL: ALLFATHER_EMAIL,
+    ONYX_CORS_ORIGINS: "https://app.example",
     SUPABASE_URL,
     SUPABASE_PUBLISHABLE_KEY: "pk_test_dummy",
   } as unknown as WorkerEnv;
@@ -171,6 +194,7 @@ describe("POST /api/auth/supabase (All-Father exchange)", () => {
     expect(body.refresh_token).toEqual(expect.any(String));
     expect(body.expires_in).toBe(3600);
     expect((body.user as Record<string, unknown>).username).toBe("allfather");
+    expect(db.queries.some((query) => query.sql.includes("WHERE id=?") && query.params.includes("__allfather__"))).toBe(true);
     expect(db.writes()).toHaveLength(0);
   });
 
@@ -408,5 +432,63 @@ describe("POST /api/auth/login (ONYX password path)", () => {
     expect(unknownUser.status).toBe(401);
     expect(wrongPassword.status).toBe(401);
     expect(wrongBody).toEqual(body);
+  });
+});
+
+
+
+describe("protected routes and token kinds", () => {
+  it("accepts ONYX access tokens but rejects refresh tokens as bearer credentials", async () => {
+    const db = new MockDb();
+    db.userRow = allfatherRow();
+    const providerToken = await signSupabaseJwt(validClaims());
+    const exchange = await fetchHandler(supabaseRequest(providerToken), makeEnv(db));
+    const session = await exchange.json() as { access_token: string; refresh_token: string };
+
+    const accessResponse = await fetchHandler(new Request("https://onyx-worker.test/api/profiles", {
+      headers: { authorization: `Bearer ${session.access_token}` },
+    }), makeEnv(db));
+    const refreshResponse = await fetchHandler(new Request("https://onyx-worker.test/api/profiles", {
+      headers: { authorization: `Bearer ${session.refresh_token}` },
+    }), makeEnv(db));
+
+    expect(accessResponse.status).toBe(200);
+    expect(refreshResponse.status).toBe(401);
+    expect(await refreshResponse.json()).toMatchObject({ error: "UNAUTHORIZED" });
+  });
+});
+
+describe("GET /ready", () => {
+  it("reports ready only when the complete auth schema contract is present", async () => {
+    const response = await fetchHandler(new Request("https://onyx-worker.test/ready"), makeEnv(new MockDb()));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "ok", database: "d1", schema: "ok" });
+  });
+
+  it("reports the missing schema fields instead of passing SELECT 1", async () => {
+    const db = new MockDb();
+    db.missingSchemaItems.add("users.supabase_user_id");
+    const response = await fetchHandler(new Request("https://onyx-worker.test/ready"), makeEnv(db));
+    const body = await response.json() as { missing: string[] };
+
+    expect(response.status).toBe(503);
+    expect(body.missing).toContain("users.supabase_user_id");
+  });
+});
+
+describe("CORS response policy", () => {
+  it("echoes an exact allowed origin and never emits wildcard credential CORS", async () => {
+    const allowed = await fetchHandler(new Request("https://onyx-worker.test/health", {
+      headers: { origin: "https://app.example" },
+    }), makeEnv(new MockDb()));
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://app.example");
+    expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(allowed.headers.get("vary")).toContain("Origin");
+
+    const denied = await fetchHandler(new Request("https://onyx-worker.test/health", {
+      headers: { origin: "https://attacker.example" },
+    }), makeEnv(new MockDb()));
+    expect(denied.headers.get("access-control-allow-origin")).toBeNull();
+    expect(denied.headers.get("access-control-allow-credentials")).toBeNull();
   });
 });

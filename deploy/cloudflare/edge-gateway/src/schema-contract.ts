@@ -7,17 +7,16 @@
  * items are absent from a connected database; it performs read-only PRAGMA
  * and no writes.
  *
- * Phase 6 (readiness/observability) should wire this into `/ready` (or an
- * authenticated diagnostics route) instead of inventing a second schema
- * version source. Note: `PRAGMA table_info` / `PRAGMA index_list` are the
- * read-only PRAGMAs; confirm D1 remote acceptance during Phase 6 deployment
- * verification and fall back to `information_schema`-style checks only if
- * D1 rejects them.
+ * The Worker's `/ready` route uses this check before reporting database
+ * readiness. `PRAGMA table_info` and `PRAGMA index_list` are read-only
+ * metadata queries and are also covered against SQLite in the migration tests.
  */
 
 export interface SchemaReadClient {
   prepare(sql: string): {
-    all(): Promise<Array<Record<string, unknown>>>;
+    all(): Promise<
+      Array<Record<string, unknown>> | { results?: unknown[] }
+    >;
   };
 }
 
@@ -58,7 +57,13 @@ async function pragmaRows(
   sql: string,
 ): Promise<Array<Record<string, unknown>>> {
   const rows = await db.prepare(sql).all();
-  return Array.isArray(rows) ? rows : [];
+  // The in-memory SQLite test reader returns a bare array; Cloudflare D1
+  // returns a D1Result object with a .results array. Accept both shapes.
+  if (Array.isArray(rows)) return rows;
+  if (rows && typeof rows === "object" && Array.isArray(rows.results)) {
+    return rows.results as Array<Record<string, unknown>>;
+  }
+  return [];
 }
 
 /**

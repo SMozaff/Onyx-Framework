@@ -1,5 +1,6 @@
 import { argon2id, argon2Verify } from "hash-wasm";
 import { getSupabaseUser, verifySupabaseJwt } from "./supabase";
+import { missingAuthSchema } from "./schema-contract";
 
 type Json = Record<string, unknown>;
 
@@ -80,6 +81,7 @@ async function jwtVerify(env:Env,token:string):Promise<Session>{
   if(b64u(await hmac(env.ONYX_JWT_SECRET,`${parts[0]}.${parts[1]}`))!==parts[2]) throw new Error("invalid token");
   const session=JSON.parse(new TextDecoder().decode(fromB64u(parts[1]))) as Session;
   if(!session.sub||!session.organization_id||!session.jti||session.exp<=now()) throw new Error("expired token");
+  if(session.typ!=="access"&&session.typ!=="refresh") throw new Error("invalid token type");
   const revoked=await env.DB.prepare("SELECT 1 FROM token_revocations WHERE token_hash=? LIMIT 1").bind(await sha256(token)).first();
   if(revoked) throw new Error("revoked token"); return session;
 }
@@ -88,13 +90,16 @@ async function requireSession(request:Request,env:Env){
   const token=authorization(request);
   if(!token)throw new Error("AUTH_REQUIRED");
   const session=await jwtVerify(env,token);
+  // Refresh tokens are only valid at /api/auth/refresh, never as bearer
+  // credentials for protected resources.
+  if(session.typ!=="access") throw new Error("AUTH_REQUIRED");
   const current=await env.DB.prepare("SELECT id,organization_id,is_active,role,is_admin FROM users WHERE id=? LIMIT 1").bind(session.sub).first<Record<string,unknown>>();
   if(!current?.is_active)throw new Error("AUTH_REQUIRED");
   if(String(current.organization_id)!==session.organization_id||roleForUser(current)!==session.role)
     throw new Error("AUTH_REQUIRED");
   return session;
 }
-function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return configured[0]??null;if(configured.length===0||configured.includes("*"))return origin;return configured.includes(origin)?origin:null;}
+function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return null;return configured.includes(origin)&&!configured.includes("*")?origin:null;}
 
 async function verifyPassword(password:string,encoded:string):Promise<boolean>{
   if(!encoded.startsWith("$argon2id$")) return false;
@@ -149,7 +154,9 @@ async function authSupabaseAllFather(request:Request,env:Env){
     // the All-Father role.
     if(identity.id!==claims.sub||!identity.email_confirmed_at||!email||email!==expected)
       return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-    const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE LOWER(username)=LOWER('allfather') LIMIT 1").first<Record<string,unknown>>();
+    // Use the immutable canonical principal ID. Username/email are mutable
+    // profile attributes and must never select the privileged identity.
+    const user=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,class,role FROM users WHERE id=? LIMIT 1").bind("__allfather__").first<Record<string,unknown>>();
     if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
     // Contract (docs/SECURITY_AUTHENTICATION_MODEL.md): the Supabase subject
     // mapping is written only by an owner-controlled provisioning process.
@@ -161,10 +168,21 @@ async function authSupabaseAllFather(request:Request,env:Env){
     }
     return json(await issuePair(env,user,"allfather"));
   }catch(error){
-    // Public responses carry only stable error codes; the verifier reason is
-    // logged server-side as a safe structured event and never includes the
-    // presented token, OAuth code, or any secret material.
-    console.error(JSON.stringify({event:"allfather_token_rejected",reason:error instanceof Error?error.message:"unknown"}));
+    // A bad/expired token is an authentication failure. Provider outages and
+    // missing runtime configuration are infrastructure failures and must not
+    // mislead clients into treating them as invalid credentials.
+    const reason=error instanceof Error?error.message:"unknown";
+    console.error(JSON.stringify({event:"allfather_exchange_failed",reason}));
+    if(
+      reason==="SUPABASE_AUTH_UNAVAILABLE"||
+      reason==="SUPABASE_URL is not configured"||
+      reason==="SUPABASE_PUBLISHABLE_KEY is not configured"||
+      reason==="ONYX_JWT_SECRET is not configured"||
+      reason==="SUPABASE_JWKS_URL is not configured"||
+      error instanceof TypeError
+    ){
+      return json({error:"AUTHENTICATION_SERVICE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},502);
+    }
     return json({error:"INVALID_SUPABASE_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   }
 }
@@ -250,7 +268,15 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
   const url=new URL(request.url);const origin=corsOrigin(request,env);
   if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
   if(url.pathname==="/health")return json({status:"ok",service:"onyx-cloudflare-worker",runtime:"cloudflare-workers-free"},200,origin);
-  if(url.pathname==="/ready"){try{await env.DB.prepare("SELECT 1").first();return json({status:"ok",service:"onyx-cloudflare-worker",database:"d1"},200,origin);}catch{return json({status:"degraded",database:"unavailable"},503,origin);}}
+  if(url.pathname==="/ready"){
+    try{
+      const missing=await missingAuthSchema(env.DB);
+      if(missing.length>0)return json({status:"degraded",database:"d1",schema:"incomplete",missing},503,origin);
+      return json({status:"ok",service:"onyx-cloudflare-worker",database:"d1",schema:"ok"},200,origin);
+    }catch{
+      return json({status:"degraded",database:"unavailable",schema:"unknown"},503,origin);
+    }
+  }
   try{
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return authLogin(request,env);
     if((url.pathname==="/api/auth/supabase"||url.pathname==="/api/auth/clerk")&&request.method==="POST")return authSupabaseAllFather(request,env);
@@ -273,4 +299,24 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     return json({error:"ROUTE_NOT_MIGRATED",route:url.pathname,message:"The route exists in the Axum reference service but has not yet been ported with equivalent Cloudflare semantics."},501,origin);
   }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);if(message==="FORBIDDEN_ROLE")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403,origin);if(message.startsWith("INVALID_")||message==="PASSWORD_TOO_SHORT"||message==="ORGANIZATION_NOT_FOUND")return json({error:message,category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);console.error(error);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
 }
-export default {fetch:dispatch};
+/**
+ * Apply one exact-origin CORS policy to every route, including helper
+ * responses that may have been created without the caller's origin. Never
+ * return wildcard CORS headers for credential-capable API responses.
+ */
+function applyCors(request:Request,env:Env,response:Response):Response{
+  const headers=new Headers(response.headers);
+  headers.delete("access-control-allow-origin");
+  headers.delete("access-control-allow-credentials");
+  const origin=request.headers.get("origin");
+  const allowed=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];
+  if(origin&&allowed.includes(origin)&&!allowed.includes("*")){
+    headers.set("access-control-allow-origin",origin);
+    headers.set("access-control-allow-credentials","true");
+    const vary=headers.get("vary");
+    if(!vary)headers.set("vary","Origin");
+    else if(!vary.split(",").some(value=>value.trim().toLowerCase()==="origin"))headers.set("vary",`${vary}, Origin`);
+  }
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+export default {fetch:async(request:Request,env:Env)=>applyCors(request,env,await dispatch(request,env))};
