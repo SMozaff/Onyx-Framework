@@ -58,8 +58,9 @@ apiClient.interceptors.response.use(
       const refreshed = await refreshInFlight;
       const token = useAuthStore.getState().accessToken;
       if (refreshed && token) {
-        request.headers = axios.AxiosHeaders.from(request.headers);
-        request.headers.set('Authorization', `Bearer ${token}`);
+        const retryHeaders = axios.AxiosHeaders.from(request.headers as never);
+        retryHeaders.set('Authorization', `Bearer ${token}`);
+        request.headers = retryHeaders;
         return apiClient.request(request);
       }
       useAuthStore.getState().logout();
