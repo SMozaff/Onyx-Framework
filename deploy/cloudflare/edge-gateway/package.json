@@ -9,8 +9,7 @@
     "d1:create": "wrangler d1 create onyx-free-db",
     "d1:local": "wrangler d1 migrations apply onyx-free-db --local",
     "d1:remote": "wrangler d1 migrations apply onyx-free-db --remote",
-    "test": "vitest run",
-    "provision:allfather": "node scripts/provision-allfather.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0"
