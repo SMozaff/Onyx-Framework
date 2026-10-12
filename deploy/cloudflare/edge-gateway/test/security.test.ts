@@ -783,6 +783,24 @@ describe("Worker authorization and session security", () => {
     expect(db.auditRows).toHaveLength(1);
   });
 
+  it("rejects file-asset legal holds until the UUID/content-hash identity contract is resolved", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/legal-holds", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({
+        target_id: "123e4567-e89b-42d3-a456-426614174000",
+        target_type: "file_asset",
+        reason: "preserve evidence",
+      }),
+    }), makeEnv(db));
+    expect(response.status).toBe(400);
+    expect((await response.json() as Record<string, unknown>).error).toBe("INVALID_LEGAL_HOLD");
+    expect(db.writes).toHaveLength(0);
+    expect(db.domainEvents).toHaveLength(0);
+    expect(db.auditRows).toHaveLength(0);
+  });
+
   it("rejects cross-tenant legal-hold targets without creating a hold or audit", async () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     const foreignTarget = "123e4567-e89b-42d3-a456-426614174000";

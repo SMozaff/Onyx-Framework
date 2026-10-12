@@ -767,7 +767,7 @@ async function postAdminPolicy(request: Request, env: Env, session: Session) {
   const payload: Json = { name: body.name.trim(), scope: { Organization: session.organization_id } };
   return createAdminAggregate(request, env, session, "CreatePolicy", "policy", payload, "policy_id", "policy");
 }
-const HOLD_TARGET_TYPES = new Set(["file_asset", "task", "mission", "approval", "policy", "todo_list", "target_list", "staff_loan", "notification", "report"]);
+const HOLD_TARGET_TYPES = new Set(["task", "mission", "approval", "policy", "todo_list", "target_list", "staff_loan", "notification", "report"]);
 function looksLikeUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -784,13 +784,8 @@ async function postAdminLegalHold(request: Request, env: Env, session: Session) 
   const targetId = body.target_id.toLowerCase();
   let target: Record<string, unknown> | null = null;
   try {
-    if (body.target_type === "file_asset") {
-      target = await env.DB.prepare("SELECT content_hash FROM file_assets WHERE content_hash=? AND organization_id=? LIMIT 1")
-        .bind(targetId, session.organization_id).first<Record<string, unknown>>();
-    } else {
-      target = await env.DB.prepare("SELECT id FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=? LIMIT 1")
-        .bind(targetId, session.organization_id, body.target_type).first<Record<string, unknown>>();
-    }
+    target = await env.DB.prepare("SELECT id FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=? LIMIT 1")
+      .bind(targetId, session.organization_id, body.target_type).first<Record<string, unknown>>();
   } catch {
     return json({ error: "RESOURCE_LOOKUP_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
   }
