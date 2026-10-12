@@ -116,16 +116,20 @@ jobs:
           echo "::add-mask::$PREVIEW_PASSWORD"
           echo "::add-mask::$JWT_SECRET"
           echo "PREVIEW_PASSWORD=$PREVIEW_PASSWORD" >> "$GITHUB_ENV"
+          echo "PREVIEW_PASSWORD_FINGERPRINT=$(printf '%s' "$PREVIEW_PASSWORD" | sha256sum | awk '{print $1}')" >> "$GITHUB_ENV"
           echo "JWT_SECRET=$JWT_SECRET" >> "$GITHUB_ENV"
           export PREVIEW_PASSWORD
           node --input-type=module > /tmp/onyx-preview-seed.sql <<'NODE'
-          import { argon2id } from "hash-wasm";
+          import { argon2id, argon2Verify } from "hash-wasm";
           const password = process.env.PREVIEW_PASSWORD;
           const salt = crypto.getRandomValues(new Uint8Array(16));
           const hash = await argon2id({
             password, salt, parallelism: 1, iterations: 3,
             memorySize: 65536, hashLength: 32, outputType: "encoded",
           });
+          const verified = await argon2Verify({ password, hash });
+          if (!verified) throw new Error("Generated preview password hash did not self-verify.");
+
           const org = "123e4567-e89b-42d3-a456-426614174100";
           const admin = "123e4567-e89b-42d3-a456-426614174001";
           const manager = "123e4567-e89b-42d3-a456-426614174002";
@@ -151,6 +155,24 @@ jobs:
           console.log(sql.join("\n"));
           NODE
           npx wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml --file /tmp/onyx-preview-seed.sql
+
+      - name: Verify preview password hash round-trips across workflow steps
+        shell: bash
+        run: |
+          set -euo pipefail
+          fingerprint="$(printf '%s' "$PREVIEW_PASSWORD" | sha256sum | awk '{print $1}')"
+          test "$fingerprint" = "$PREVIEW_PASSWORD_FINGERPRINT"
+          stored_hash="$(npx wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml --json --command "SELECT password_hash FROM users WHERE username='preview-admin'")"
+          export STORED_HASH="$(printf '%s' "$stored_hash" | jq -er '.[0].results[0].password_hash')"
+          node --input-type=module <<'NODE'
+          import { argon2Verify } from "hash-wasm";
+          const ok = await argon2Verify({
+            password: process.env.PREVIEW_PASSWORD,
+            hash: process.env.STORED_HASH,
+          });
+          console.log("Preview password/hash round-trip:", ok);
+          if (!ok) process.exit(1);
+          NODE
 
       - name: Deploy preview Worker and install ephemeral JWT secret
         shell: bash
