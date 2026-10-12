@@ -30,6 +30,11 @@ describe("Admin API route completeness", () => {
     expect(worker).toContain("async function assignUserClass");
   });
 
+  it("defaults legal-hold creation to a supported UUID-backed aggregate, not a hash-keyed file asset", () => {
+    expect(settings).toContain('useState("task")');
+    expect(settings).not.toContain('useState("file_asset")');
+  });
+
   it("declares the canonical hierarchy handler as a JSON-array response and preserves client parser contracts", () => {
     expect(worker).toContain("return json(canonicalHierarchy(rows.results??[]));");
     expect(worker).not.toContain("return json({users:rows.results??[]});");

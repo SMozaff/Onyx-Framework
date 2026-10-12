@@ -650,7 +650,7 @@ function LegalHoldPanel() {
   const hold = holdRows?.[0];
 
   const [targetIdInput, setTargetIdInput] = useState("");
-  const [targetTypeInput, setTargetTypeInput] = useState("file_asset");
+  const [targetTypeInput, setTargetTypeInput] = useState("task");
   const [reasonInput, setReasonInput] = useState("");
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
