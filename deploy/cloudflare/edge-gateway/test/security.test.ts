@@ -626,9 +626,17 @@ describe("Worker authorization and session security", () => {
     expect(stale.status).toBe(409);
     expect(adminDb.mobileSettings.get(ORG)?.version).toBe(1);
 
+    const staffDb = makeDb();
     const staffToken = await signToken(sessionClaims());
-    const denied = await worker.fetch(request("GET", undefined, staffToken), makeEnv(makeDb()));
+    const denied = await worker.fetch(request("GET", undefined, staffToken), makeEnv(staffDb));
     expect(denied.status).toBe(403);
+    const deniedWrite = await worker.fetch(request("PUT", {
+      allowed_classes: ["staff"], expected_version: 0,
+    }, staffToken), makeEnv(staffDb));
+    expect(deniedWrite.status).toBe(403);
+    expect(staffDb.mobileSettings.size).toBe(0);
+    expect(staffDb.writes).toHaveLength(0);
+    expect(staffDb.auditRows).toHaveLength(0);
   });
 
   it("returns hierarchy as the minimal sorted JSON array expected by Rust and Android", async () => {
@@ -766,6 +774,26 @@ describe("Worker authorization and session security", () => {
     expect(await response.json()).toEqual([]);
   });
 
+  it("rejects invalid policy payloads without persistence or audit", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    for (const payload of [
+      { name: " " },
+      { name: "Valid name", scope: { Organization: ORG } },
+      { name: "x".repeat(201) },
+    ]) {
+      const response = await worker.fetch(new Request("https://worker.test/api/admin/policies", {
+        method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      }), makeEnv(db));
+      expect(response.status).toBe(400);
+    }
+    expect(db.aggregates.size).toBe(0);
+    expect(db.domainEvents).toHaveLength(0);
+    expect(db.auditRows).toHaveLength(0);
+    expect(db.writes).toHaveLength(0);
+  });
+
   it("persists policy creation through the domain command path and returns canonical saved state", async () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
@@ -885,6 +913,20 @@ describe("Worker authorization and session security", () => {
     expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "policy")).toHaveLength(0);
     expect(db.domainEvents).toHaveLength(0);
     expect(db.auditRows).toHaveLength(0);
+  });
+
+  it("successfully assigns an operational class and writes its audit record", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/users/staff-1/class", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ class: "supervisor" }),
+    }), makeEnv(db));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, class: "supervisor" });
+    expect(db.users.get("staff-1")?.class).toBe("supervisor");
+    expect(db.auditRows).toHaveLength(1);
+    expect(db.auditRows[0]).toMatchObject({ action: "user.class.update" });
   });
 
   it("class assignment is tenant-scoped and audited because mobile access grants are class-based", async () => {
