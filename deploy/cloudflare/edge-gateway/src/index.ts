@@ -844,7 +844,7 @@ async function hierarchy(env:Env,session:Session){
   // Match the existing Rust API contract: every authenticated org member can
   // read the minimal active-org reporting tree. Direct reports must be present
   // for the client-side manager-authority cache to verify Task/Mission owners.
-  const rows=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE organization_id=? AND is_active=1 ORDER BY id")
+  const rows=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE organization_id=? AND is_active=1 ORDER BY username")
     .bind(session.organization_id).all<Record<string,unknown>>();
   return json(canonicalHierarchy(rows.results??[]));
 }

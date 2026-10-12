@@ -181,6 +181,7 @@ class SecurityDb {
         rows = rows.filter((row) => ids.has(row.id));
       }
       if (sql.includes("ORDER BY id")) rows.sort((a, b) => a.id.localeCompare(b.id));
+      if (sql.includes("ORDER BY username")) rows.sort((a, b) => a.username.localeCompare(b.username));
       const select = sql.slice(sql.indexOf("SELECT ") + 7, sql.indexOf(" FROM ")).split(",").map((value) => value.trim().replace(/^u\\./, ""));
       return rows.map((row) => Object.fromEntries(select.map((column) => [column, (row as unknown as Record<string, unknown>)[column] ?? null])));
     }
@@ -741,8 +742,8 @@ describe("Worker authorization and session security", () => {
     }), makeEnv(db));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual([
-      { id: "staff-1", parent_user_id: null, is_admin: false },
       { id: "staff-2", parent_user_id: "staff-1", is_admin: false },
+      { id: "staff-1", parent_user_id: null, is_admin: false },
     ]);
   });
 

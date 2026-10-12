@@ -15,7 +15,7 @@ All protected routes require a verified ONYX access token. Role, active-user sta
 | `POST /api/admin/policies` | `ORGANIZATION_ADMIN` | `{name: string}` | `201 {policy_id, policy, version}` |
 | `POST /api/admin/legal-holds` | `ORGANIZATION_ADMIN` | `{target_id: UUID, target_type: supported resource type, reason: string}` | `201 {legal_hold_id, legal_hold, version}` |
 | `POST /api/admin/users/:id/class` | `ORGANIZATION_ADMIN`, same organization | `{class: UserClass|string|null}` | `200 {success: true, class}` |
-| `GET /api/users/hierarchy` | Any authenticated role; scoped to caller's organization | No body | JSON array of minimal `{id, parent_user_id, is_admin}` records for all active same-org users, sorted by `id`; empty is `[]`; All-Father returns `[]` because its sentinel ID is not a UUID |
+| `GET /api/users/hierarchy` | Any authenticated role; scoped to caller's organization | No body | JSON array of minimal `{id, parent_user_id, is_admin}` records for all active same-org users, sorted by `username`; empty is `[]`; All-Father returns `[]` because its sentinel ID is not a UUID |
 
 The special All-Father principal returns an empty hierarchy array: its reserved `__allfather__` ID is not a UUID accepted by Rust's hierarchy cache, and it is not part of a regular organization reporting tree.
 
