@@ -180,11 +180,11 @@ function MobileAccessPanel() {
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
       <h2 className="text-sm font-semibold text-onyx-text">{t("common.mobileAccess")}</h2>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Configure the classes intended for mobile access. Saving stores the policy in ONYX; enforcement status is shown separately below.
+        {t("settings.mobileAccessPolicyDescription")}
       </p>
       {enforcementStatus === "disabled_untrusted_client_type" && (
         <p role="alert" className="mt-3 rounded-md border border-onyx-border p-3 text-sm text-onyx-status-blocked">
-          Configuration is persisted, but mobile-login enforcement is currently disabled. The client-supplied client_type can be spoofed and is not used as an authorization signal. Do not rely on these selections to restrict access until server-verifiable client identity or attestation is implemented.
+          {t("settings.mobileAccessEnforcementDisabled")}
         </p>
       )}
       {loading && <p className="mt-3 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
