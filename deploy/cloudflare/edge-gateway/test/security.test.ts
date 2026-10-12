@@ -956,3 +956,47 @@ describe("Worker authorization and session security", () => {
     }
   });
 });
+
+
+describe("GET /api/admin/users", () => {
+  it("returns minimal user DTOs for the caller's organization only", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    db.users.set("staff-2", {
+      id: "staff-2", username: "staff-two", email: "staff2@example.test",
+      organization_id: ORG, password_hash: "must-not-leak", is_admin: 0,
+      is_active: 0, class: "staff", parent_user_id: "staff-1", role: "STAFF",
+    });
+    db.users.set("foreign-staff", {
+      id: "foreign-staff", username: "foreign", email: "foreign@example.test",
+      organization_id: "org-2", password_hash: "secret", is_admin: 0,
+      is_active: 1, class: "staff", parent_user_id: null, role: "STAFF",
+    });
+    const token = await signToken(sessionClaims({
+      sub: "staff-1", username: "staff", organization_id: ORG,
+      role: "ORGANIZATION_ADMIN", is_admin: true,
+    }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/users", {
+      headers: { authorization: `Bearer ${token}` },
+    }), makeEnv(db));
+    expect(response.status).toBe(200);
+    const users = await response.json() as Array<Record<string, unknown>>;
+    expect(users).toHaveLength(2);
+    expect(users.map((user) => user.id)).toEqual(["staff-1", "staff-2"]);
+    expect(users.every((user) => user.organization_id === ORG)).toBe(true);
+    expect(users.every((user) => !("password_hash" in user) && !("email" in user))).toBe(true);
+    expect(users.find((user) => user.id === "staff-2")).toMatchObject({
+      is_admin: false, is_manager: false, is_active: false,
+      class: "staff", parent_user_id: "staff-1",
+    });
+  });
+
+  it("denies Staff access", async () => {
+    const db = makeDb("STAFF");
+    const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/users", {
+      headers: { authorization: `Bearer ${token}` },
+    }), makeEnv(db));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: "FORBIDDEN" });
+  });
+});
