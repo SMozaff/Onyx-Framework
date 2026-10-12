@@ -17,6 +17,7 @@ Status: implementation on a feature branch; not a production deployment. Treat t
 - `client_type` is retained only as an informational token field; it is not a command/query capability.
 - Protected requests require an unexpired signed ONYX access token with the configured Worker issuer and audience, and verify token/session-family revocation. D1 user activity, organization activity, role, tenant, and legacy admin flag are rechecked on every protected request.
 - Refresh tokens are one-use: the D1 revocation insert must report one change before a replacement pair is issued. Access and refresh tokens share a random session-family ID. Logout revokes the family even if the client submits only its access token.
+- **Deployment compatibility gate:** the stricter Worker JWT checks reject access/refresh tokens minted before issuer, audience and session-family claims were added. Treat rollout as a forced reauthentication event; validate that desktop/web/mobile clients return to login cleanly and do not retry stale refresh tokens indefinitely. This is an app-session cutover, not a reason to reset D1.
 
 ## Route inventory
 
