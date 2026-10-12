@@ -796,6 +796,28 @@ async function postAdminLegalHold(request: Request, env: Env, session: Session) 
   };
   return createAdminAggregate(request, env, session, "ApplyLegalHold", "legal_hold", payload, "legal_hold_id", "legal_hold");
 }
+async function listAdminUsers(env: Env, session: Session) {
+  // The organization Users screen is for organization administrators only.
+  // All-Father manages organizations and their Admins through dedicated routes;
+  // this endpoint must never become a cross-tenant directory.
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const rows = await env.DB.prepare(
+    "SELECT id,username,organization_id,is_admin,class,parent_user_id,is_active FROM users WHERE organization_id=? ORDER BY username LIMIT 500"
+  ).bind(session.organization_id).all<Record<string, unknown>>();
+  // is_manager is retained as a legacy UI field; the canonical Worker schema
+  // models authority with role and operational classification with class.
+  return json((rows.results ?? []).map((row) => ({
+    id: String(row.id),
+    username: String(row.username),
+    organization_id: String(row.organization_id),
+    is_admin: row.is_admin === true || row.is_admin === 1 || row.is_admin === "1",
+    is_manager: false,
+    class: typeof row.class === "string" ? row.class : null,
+    parent_user_id: typeof row.parent_user_id === "string" ? row.parent_user_id : null,
+    is_active: row.is_active === true || row.is_active === 1 || row.is_active === "1",
+  })));
+}
+
 async function assignUserClass(request: Request, env: Env, session: Session, userId: string) {
   requireRole(session, "ORGANIZATION_ADMIN");
   const body = await request.json().catch(() => null) as Json | null;
@@ -892,6 +914,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
+    if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="GET")return await getMobileAccess(env,session);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="PUT")return await putMobileAccess(request,env,session);
     if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);

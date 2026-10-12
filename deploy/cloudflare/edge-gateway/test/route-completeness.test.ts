@@ -24,6 +24,12 @@ describe("Admin API route completeness", () => {
     }
   });
 
+  it("registers the tenant-scoped Admin users list endpoint", () => {
+    expect(users).toContain('apiClient.get<UserRow[]>("/api/admin/users")');
+    expect(worker).toContain('url.pathname==="/api/admin/users"&&request.method==="GET"');
+    expect(worker).toContain("async function listAdminUsers");
+  });
+
   it("implements the class-assignment endpoint used by the Admin Users screen", () => {
     expect(users).toContain("/api/admin/users/${user.id}/class");
     expect(worker).toContain("^\\/api\\/admin\\/users\\/[^/]+\\/class$");
