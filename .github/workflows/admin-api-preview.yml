@@ -27,8 +27,8 @@ jobs:
       run:
         working-directory: deploy/cloudflare/edge-gateway
     env:
-      CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       PREVIEW_DB_NAME: onyx-adminapi-preview-189
       PREVIEW_WORKER_NAME: onyx-framework-p1-preview-189
       # Explicit tripwire: this ID belongs to the production D1 binding.
@@ -99,7 +99,7 @@ jobs:
           [[d1_databases]]
           binding = "DB"
           database_name = "$PREVIEW_DB_NAME"
-          database_id = "\${{ steps.d1.outputs.database_id }}"
+          database_id = "${{ steps.d1.outputs.database_id }}"
           migrations_dir = "migrations"
 
           [vars]
@@ -171,14 +171,14 @@ jobs:
         id: verify
         shell: bash
         env:
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           subdomain="$(curl -fsS --max-time 15 \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq -er '.result.subdomain')"
-          base="https://\${PREVIEW_WORKER_NAME}.$subdomain.workers.dev"
+          base="https://${PREVIEW_WORKER_NAME}.$subdomain.workers.dev"
           echo "preview_url=$base" >> "$GITHUB_OUTPUT"
           echo "Preview URL: $base"
           for i in {1..20}; do
@@ -193,8 +193,8 @@ jobs:
             local expected="$1"; shift
             local raw status body
             raw="$(curl -sS --retry 2 --retry-connrefused --retry-delay 2 --max-time 20 -w '\n%{http_code}' "$@")"
-            status="\${raw##*$'\n'}"
-            body="\${raw%$'\n'*}"
+            status="${raw##*$'\n'}"
+            body="${raw%$'\n'*}"
             if [ "$status" != "$expected" ]; then
               echo "::error::Expected HTTP $expected, got $status. Body: $body" >&2
               exit 1
