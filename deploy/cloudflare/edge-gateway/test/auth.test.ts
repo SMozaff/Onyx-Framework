@@ -194,7 +194,7 @@ describe("POST /api/auth/supabase (All-Father exchange)", () => {
     expect(body.refresh_token).toEqual(expect.any(String));
     expect(body.expires_in).toBe(3600);
     expect((body.user as Record<string, unknown>).username).toBe("allfather");
-    expect(db.queries.some((query) => query.sql.includes("WHERE id=?") && query.params.includes("__allfather__"))).toBe(true);
+    expect(db.queries.some((query) => query.sql.includes("WHERE u.id=?") && query.params.includes("__allfather__"))).toBe(true);
     expect(db.writes()).toHaveLength(0);
   });
 
@@ -391,9 +391,10 @@ describe("POST /api/auth/login (ONYX password path)", () => {
     const response = await fetchHandler(request, makeEnv(db));
     const body = await response.json() as Record<string, unknown>;
 
-    expect(response.status).toBe(200);
-    expect((body.user as Record<string, unknown>).role).toBe("STAFF");
-    expect((body.user as Record<string, unknown>).role).not.toBe("ALL_FATHER");
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("INVALID_CREDENTIALS");
+    expect(body.access_token).toBeUndefined();
+    expect(body.refresh_token).toBeUndefined();
   });
 
   it("returns an identical response for unknown identifier and wrong password", async () => {
