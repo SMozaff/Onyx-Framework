@@ -104,14 +104,27 @@ function MobileAccessPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [version, setVersion] = useState(0);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  function applyServerState(data: { allowed_classes?: unknown; version?: unknown }) {
+    if (!Array.isArray(data.allowed_classes) ||
+        !data.allowed_classes.every((value) => typeof value === "string") ||
+        typeof data.version !== "number" || !Number.isSafeInteger(data.version) || data.version < 0) {
+      throw new Error("The server returned an invalid mobile-access configuration.");
+    }
+    setAllowed(new Set(data.allowed_classes as string[]));
+    setVersion(data.version);
+  }
 
   useEffect(() => {
     void (async () => {
       try {
         const response = await apiClient.get("/api/admin/mobile-access");
-        setAllowed(new Set(response.data.allowed_classes as string[]));
+        applyServerState(response.data);
       } catch (err) {
+        setLoadFailed(true);
         setError(describeError(err));
       } finally {
         setLoading(false);
@@ -120,14 +133,27 @@ function MobileAccessPanel() {
   }, []);
 
   async function save(next: Set<string>) {
-    setAllowed(next);
     setSaving(true);
     setError(null);
+    setSavedAt(null);
     try {
-      await apiClient.put("/api/admin/mobile-access", { allowed_classes: Array.from(next) });
+      const allowed_classes = USER_CLASSES.filter((c) => next.has(c.value)).map((c) => c.value);
+      const response = await apiClient.put("/api/admin/mobile-access", {
+        allowed_classes,
+        expected_version: version,
+      });
+      applyServerState(response.data);
       setSavedAt(Date.now());
     } catch (err) {
       setError(describeError(err));
+      // Restore the canonical server value after validation, storage, or
+      // optimistic-concurrency failures. Never leave a failed save checked.
+      try {
+        const response = await apiClient.get("/api/admin/mobile-access");
+        applyServerState(response.data);
+      } catch {
+        setLoadFailed(true);
+      }
     } finally {
       setSaving(false);
     }
@@ -147,9 +173,7 @@ function MobileAccessPanel() {
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
       <h2 className="text-sm font-semibold text-onyx-text">{t("common.mobileAccess")}</h2>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Only the user classes checked below may sign in from the mobile app. A class with no
-        checkmark is denied mobile login entirely, until enabled here — Administrators always
-        retain mobile access regardless of this list.
+        Only checked user classes may sign in through the mobile client flow. This setting uses the client's declared type and is not device attestation. Administrators retain mobile access regardless of this list.
       </p>
       {loading && <p className="mt-3 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
       {error && <p className="mt-3 text-sm text-onyx-status-blocked">{error}</p>}
@@ -160,7 +184,7 @@ function MobileAccessPanel() {
               <input
                 type="checkbox"
                 checked={allowed.has(c.value)}
-                disabled={saving}
+                disabled={saving || loading || loadFailed}
                 onChange={() => toggle(c.value)}
               />
               {c.label}

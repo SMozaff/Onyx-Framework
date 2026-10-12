@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { argon2id } from "hash-wasm";
 import worker from "../src/index";
 import { COMMAND_POLICIES, ONYX_ROLES } from "../src/authorization";
 
@@ -15,6 +16,7 @@ interface UserRow {
   is_admin: number;
   is_active: number;
   class: string | null;
+  parent_user_id?: string | null;
   role: string;
   supabase_user_id?: string | null;
 }
@@ -58,6 +60,8 @@ class SecurityDb {
   organizations = new Map<string, OrgRow>();
   aggregates = new Map<string, AggregateRow>();
   subscriptions = new Map<string, { user_id: string; organization_id: string; endpoint: string }>();
+  mobileSettings = new Map<string, { organization_id: string; allowed_classes: string; version: number; updated_by: string; updated_at: number; last_operation_id: string }>();
+  fileAssets = new Map<string, { content_hash: string; organization_id: string }>();
   idempotency = new Map<string, string>();
   revokedTokens = new Set<string>();
   domainEvents: Array<Record<string, unknown>> = [];
@@ -91,6 +95,18 @@ class SecurityDb {
   }
 
   private first(sql: string, params: unknown[]): any {
+    if (sql.includes("FROM mobile_access_settings")) {
+      const row = this.mobileSettings.get(String(params[0]));
+      return row ? { ...row } : null;
+    }
+    if (sql.includes("FROM file_assets WHERE content_hash=? AND organization_id=?")) {
+      const row = this.fileAssets.get(String(params[0]));
+      return row?.organization_id === params[1] ? { ...row } : null;
+    }
+    if (sql.includes("FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=?")) {
+      const row = this.aggregates.get(String(params[0]));
+      return row?.organization_id === params[1] && row.aggregate_type === params[2] ? { id: row.id } : null;
+    }
     if (sql.includes("FROM token_revocations")) {
       return this.revokedTokens.has(String(params[0])) ? { 1: 1 } : null;
     }
@@ -111,7 +127,9 @@ class SecurityDb {
     }
     if (sql.includes("FROM users WHERE id=? AND organization_id=?")) {
       const user = this.users.get(String(params[0]));
-      return user?.organization_id === params[1] && user.is_active === 1 ? { id: user.id } : null;
+      if (!user || user.organization_id !== params[1] || user.is_active !== 1) return null;
+      const select = sql.slice(sql.indexOf("SELECT ") + 7, sql.indexOf(" FROM ")).split(",").map((value) => value.trim().replace(/^u\\./, ""));
+      return Object.fromEntries(select.map((column) => [column, (user as unknown as Record<string, unknown>)[column] ?? null]));
     }
     if (sql.includes("FROM aggregates WHERE id=? AND organization_id=?")) {
       const row = this.aggregates.get(String(params[0]));
@@ -152,7 +170,18 @@ class SecurityDb {
       }
       return rows;
     }
-    if (sql.includes("FROM users")) return [...this.users.values()];
+    if (sql.includes("FROM users")) {
+      let rows = [...this.users.values()];
+      if (sql.includes("organization_id=?")) rows = rows.filter((row) => row.organization_id === String(params[0]));
+      if (sql.includes("is_active=1")) rows = rows.filter((row) => row.is_active === 1);
+      if (sql.includes("id IN (?,?)")) {
+        const ids = new Set(params.slice(1).map(String));
+        rows = rows.filter((row) => ids.has(row.id));
+      }
+      if (sql.includes("ORDER BY id")) rows.sort((a, b) => a.id.localeCompare(b.id));
+      const select = sql.slice(sql.indexOf("SELECT ") + 7, sql.indexOf(" FROM ")).split(",").map((value) => value.trim().replace(/^u\\./, ""));
+      return rows.map((row) => Object.fromEntries(select.map((column) => [column, (row as unknown as Record<string, unknown>)[column] ?? null])));
+    }
     return [];
   }
 
@@ -180,6 +209,39 @@ class SecurityDb {
   }
 
   private runBatchStatement(sql: string, params: unknown[], previousChanges: number): number {
+    if (sql.startsWith("INSERT INTO mobile_access_settings")) {
+      const org = String(params[0]);
+      const existing = this.mobileSettings.get(org);
+      const expected = Number(params[5]);
+      if ((!existing && expected !== 0) || (existing && existing.version !== expected)) return 0;
+      this.mobileSettings.set(org, {
+        organization_id: org, allowed_classes: String(params[1]),
+        version: existing ? existing.version + 1 : 1, updated_by: String(params[2]),
+        updated_at: Number(params[3]), last_operation_id: String(params[4]),
+      });
+      this.writes.push({ sql, params });
+      return 1;
+    }
+    if (sql.startsWith("UPDATE users SET class=?")) {
+      const user = this.users.get(String(params[2]));
+      if (!user || user.organization_id !== params[3] || user.is_active !== 1) return 0;
+      user.class = params[0] === null ? null : String(params[0]);
+      this.writes.push({ sql, params });
+      return 1;
+    }
+    if (sql.startsWith("INSERT INTO audit_log") && sql.includes("mobile_access_settings")) {
+      const row = this.mobileSettings.get(String(params[6]));
+      if (!row || row.last_operation_id !== String(params[7]) || row.version !== Number(params[8])) return 0;
+      this.auditRows.push({ organization_id: params[0], user_id: params[1], action: params[2] });
+      this.writes.push({ sql, params });
+      return 1;
+    }
+    if (sql.startsWith("INSERT INTO audit_log") && sql.includes("WHERE changes()=1")) {
+      if (previousChanges !== 1) return 0;
+      this.auditRows.push({ organization_id: params[0], user_id: params[1], action: params[2] });
+      this.writes.push({ sql, params });
+      return 1;
+    }
     if (sql.startsWith("INSERT OR IGNORE INTO aggregates")) {
       const id = String(params[0]);
       if (this.aggregates.has(id)) return 0;
@@ -526,6 +588,132 @@ describe("Worker authorization and session security", () => {
     }), makeEnv(junkDb));
     expect(junk.status).toBe(200);
     expect(junkDb.writes).toHaveLength(0);
+  });
+
+
+
+  it("serves and durably replaces mobile-access configuration with role, validation, audit and version checks", async () => {
+    const adminDb = makeDb("ORGANIZATION_ADMIN");
+    const adminToken = await signToken(sessionClaims({
+      role: "ORGANIZATION_ADMIN", is_admin: true,
+    }));
+    const request = (method: string, body?: unknown, token = adminToken) => new Request("https://worker.test/api/admin/mobile-access", {
+      method, headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+    const initial = await worker.fetch(request("GET"), makeEnv(adminDb));
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toEqual({ allowed_classes: [], version: 0, updated_at: null });
+
+    const invalid = await worker.fetch(request("PUT", { allowed_classes: ["unknown"], expected_version: 0 }), makeEnv(adminDb));
+    expect(invalid.status).toBe(400);
+    expect(adminDb.writes).toHaveLength(0);
+
+    const saved = await worker.fetch(request("PUT", { allowed_classes: ["staff", "team_leader"], expected_version: 0 }), makeEnv(adminDb));
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ allowed_classes: ["team_leader", "staff"], version: 1 });
+    expect(adminDb.mobileSettings.get(ORG)?.allowed_classes).toBe(JSON.stringify(["team_leader", "staff"]));
+    expect(adminDb.auditRows).toHaveLength(1);
+
+    const stale = await worker.fetch(request("PUT", { allowed_classes: [], expected_version: 0 }), makeEnv(adminDb));
+    expect(stale.status).toBe(409);
+    expect(adminDb.mobileSettings.get(ORG)?.version).toBe(1);
+
+    const staffToken = await signToken(sessionClaims());
+    const denied = await worker.fetch(request("GET", undefined, staffToken), makeEnv(makeDb()));
+    expect(denied.status).toBe(403);
+  });
+
+  it("returns hierarchy as the minimal sorted JSON array expected by Rust and Android", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
+      headers: { authorization: "Bearer " + token },
+    }), makeEnv(db));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toEqual([{ id: "staff-1", parent_user_id: null, is_admin: 1 }]);
+  });
+
+  it("persists policy creation through the domain command path and returns canonical saved state", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/policies", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ name: "  Operations Policy  " }),
+    }), makeEnv(db));
+    expect(response.status).toBe(201);
+    const body = await response.json() as { policy_id: string; policy: Record<string, unknown>; version: number };
+    expect(body.policy_id).toBeTruthy();
+    expect(body.version).toBe(1);
+    expect(body.policy).toMatchObject({ name: "Operations Policy", status: "Active", versions: [] });
+    expect(db.aggregates.get(body.policy_id)?.aggregate_type).toBe("policy");
+    expect(db.domainEvents).toHaveLength(1);
+    expect(db.auditRows).toHaveLength(1);
+  });
+
+  it("rejects cross-tenant legal-hold targets without creating a hold or audit", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const foreignTarget = "123e4567-e89b-42d3-a456-426614174000";
+    db.aggregates.set(foreignTarget, {
+      id: foreignTarget, aggregate_type: "task", version: 1, lifecycle_epoch: 0,
+      authority_epoch: 0, state: JSON.stringify({ status: "Ready" }), updated_at: Date.now(), organization_id: "other-org",
+    });
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/legal-holds", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ target_id: foreignTarget, target_type: "task", reason: "preserve evidence" }),
+    }), makeEnv(db));
+    expect(response.status).toBe(404);
+    expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "legal_hold")).toHaveLength(0);
+    expect(db.domainEvents).toHaveLength(0);
+    expect(db.auditRows).toHaveLength(0);
+    expect(db.writes).toHaveLength(0);
+  });
+
+  it("uses the persisted mobile-access configuration to deny and allow ordinary mobile login", async () => {
+    const db = makeDb();
+    const password = "secure-test-password";
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    db.users.get("staff-1")!.class = "staff";
+    db.users.get("staff-1")!.password_hash = String(await argon2id({
+      password, salt, parallelism: 1, iterations: 3, memorySize: 65536, hashLength: 32, outputType: "encoded",
+    }));
+    const login = () => worker.fetch(new Request("https://worker.test/api/auth/login", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "staff", password, client_type: "mobile" }),
+    }), makeEnv(db));
+
+    const restricted = await login();
+    expect(restricted.status).toBe(403);
+    expect((await restricted.json() as Record<string, unknown>).error).toBe("MOBILE_ACCESS_RESTRICTED");
+
+    db.mobileSettings.set(ORG, {
+      organization_id: ORG, allowed_classes: JSON.stringify(["staff"]), version: 1,
+      updated_by: "admin-1", updated_at: Date.now(), last_operation_id: "test-operation",
+    });
+    const allowed = await login();
+    expect(allowed.status).toBe(200);
+    expect((await allowed.json() as { user: { role: string } }).user.role).toBe("STAFF");
+  });
+
+  it("class assignment is tenant-scoped and audited because mobile access grants are class-based", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    db.users.set("staff-2", {
+      id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: "other-org",
+      is_admin: 0, is_active: 1, class: null, role: "STAFF",
+    });
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const request = () => worker.fetch(new Request("https://worker.test/api/admin/users/staff-2/class", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ class: "staff" }),
+    }), makeEnv(db));
+    const response = await request();
+    expect(response.status).toBe(404);
+    expect(db.users.get("staff-2")?.class).toBeNull();
+    expect(db.auditRows).toHaveLength(0);
   });
 
   it("does not allow Admin or Staff to mutate client-supplied state/security fields", async () => {
