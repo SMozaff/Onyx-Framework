@@ -205,19 +205,31 @@ jobs:
 
           # Read defaults, reject malformed writes, then save and verify read-back.
           mobile="$(http 200 "$base/api/admin/mobile-access" -H "Authorization: Bearer $admin_token")"
-          printf '%s' "$mobile" | jq -e '.version == 0 and .allowed_classes == [] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null
+          echo "Preview mobile-access GET contract: $mobile"
+          printf '%s' "$mobile" | jq -e '.version == 0 and .allowed_classes == [] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null || {
+            echo "::error::Mobile-access default response contract mismatch."
+            exit 1
+          }
           http 400 "$base/api/admin/mobile-access" -X PUT -H "Authorization: Bearer $admin_token" \
             -H 'content-type: application/json' --data '{"allowed_classes":["not-a-class"],"expected_version":0}' >/dev/null
           saved="$(http 200 "$base/api/admin/mobile-access" -X PUT -H "Authorization: Bearer $admin_token" \
             -H 'content-type: application/json' --data '{"allowed_classes":["staff"],"expected_version":0}')"
-          printf '%s' "$saved" | jq -e '.version == 1 and .allowed_classes == ["staff"] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null
+          echo "Preview mobile-access saved response: $saved"
+          printf '%s' "$saved" | jq -e '.version == 1 and .allowed_classes == ["staff"] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null || {
+            echo "::error::Mobile-access saved response contract mismatch."
+            exit 1
+          }
           http 409 "$base/api/admin/mobile-access" -X PUT -H "Authorization: Bearer $admin_token" \
             -H 'content-type: application/json' --data '{"allowed_classes":[],"expected_version":0}' >/dev/null
           http 403 "$base/api/admin/mobile-access" -H "Authorization: Bearer $staff_token" >/dev/null
 
           # Staff hierarchy must include direct reports in the canonical array.
           hierarchy="$(http 200 "$base/api/users/hierarchy" -H "Authorization: Bearer $staff_token")"
-          printf '%s' "$hierarchy" | jq -e 'type == "array" and length == 3 and any(.[]; .parent_user_id == "123e4567-e89b-42d3-a456-426614174002")' >/dev/null
+          printf '%s' "$hierarchy" | jq -e 'type == "array" and length == 3 and any(.[]; .parent_user_id == "123e4567-e89b-42d3-a456-426614174002")' >/dev/null || {
+            echo "::error::Hierarchy response did not include the expected same-tenant active direct report. Body: $hierarchy"
+            exit 1
+          }
+          echo "Preview hierarchy contract passed."
 
           # Staff cannot create either policy or legal hold.
           http 403 "$base/api/admin/policies" -X POST -H "Authorization: Bearer $staff_token" \
@@ -229,6 +241,7 @@ jobs:
           policy_body='{"name":"Preview Policy"}'
           policy1="$(http 201 "$base/api/admin/policies" -X POST -H "Authorization: Bearer $admin_token" \
             -H 'content-type: application/json' -H 'idempotency-key: preview-policy-189' --data "$policy_body")"
+          echo "Preview policy creation response: $policy1"
           policy_id="$(printf '%s' "$policy1" | jq -er '.policy_id')"
           test "$(printf '%s' "$policy1" | jq -r '.version')" = "1"
           policy2="$(http 201 "$base/api/admin/policies" -X POST -H "Authorization: Bearer $admin_token" \
@@ -241,6 +254,7 @@ jobs:
           hold1="$(http 201 "$base/api/admin/legal-holds" -X POST -H "Authorization: Bearer $admin_token" \
             -H 'content-type: application/json' -H 'idempotency-key: preview-hold-189' \
             --data '{"target_id":"123e4567-e89b-42d3-a456-426614174004","target_type":"task","reason":"preserve test evidence"}')"
+          echo "Preview legal-hold creation response: $hold1"
           hold_id="$(printf '%s' "$hold1" | jq -er '.legal_hold_id')"
           hold2="$(http 201 "$base/api/admin/legal-holds" -X POST -H "Authorization: Bearer $admin_token" \
             -H 'content-type: application/json' -H 'idempotency-key: preview-hold-189' \
@@ -261,8 +275,12 @@ jobs:
             (SELECT COUNT(*) FROM domain_events WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND event_type='ApplyLegalHold') AS hold_events,
             (SELECT COUNT(*) FROM audit_log WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND action='ApplyLegalHold') AS hold_audits"
           result="$(npx wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml --json --command "$verify_sql")"
+          echo "Preview D1 persistence/audit read-back: $result"
           printf '%s' "$result" | jq -e '.[0].results[0] |
             .mobile_saved == 1 and .mobile_audits == 1 and
             .policies == 1 and .policy_events == 1 and .policy_audits == 1 and
-            .holds == 1 and .hold_events == 1 and .hold_audits == 1' >/dev/null
+            .holds == 1 and .hold_events == 1 and .hold_audits == 1' >/dev/null || {
+              echo "::error::Preview D1 persistence/audit read-back assertion failed."
+              exit 1
+            }
           echo "PASS: preview routes returned canonical contracts; authorization, version conflicts, idempotency, tenant isolation, persistence and audit read-back verified."
