@@ -1,0 +1,274 @@
+name: ONYX Admin API Preview Integration
+
+on:
+  push:
+    branches: ["fix/p1-admin-api-preview-20261012"]
+    paths:
+      - "deploy/cloudflare/edge-gateway/**"
+      - ".github/workflows/admin-api-preview.yml"
+      - "crates/bins/admin-shell/ui/src/pages/Settings.tsx"
+      - "crates/applications/client-composition/src/hierarchy_cache.rs"
+      - "mobile-android/app/src/main/kotlin/com/onyx/net/AuthApi.kt"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: onyx-admin-api-preview-189
+  cancel-in-progress: true
+
+jobs:
+  preview-integration:
+    name: Isolated Worker + D1 route integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: deploy/cloudflare/edge-gateway
+    env:
+      CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+      PREVIEW_DB_NAME: onyx-adminapi-preview-189
+      PREVIEW_WORKER_NAME: onyx-framework-p1-preview-189
+      # Explicit tripwire: this ID belongs to the production D1 binding.
+      PRODUCTION_D1_ID: 7b757d0f-3484-48a5-9422-eadabed2a995
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+      - name: Install Worker dependencies
+        run: npm install
+
+      - name: Validate isolated preview configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test "$PREVIEW_DB_NAME" = "onyx-adminapi-preview-189"
+          test "$PREVIEW_WORKER_NAME" = "onyx-framework-p1-preview-189"
+          test "$PREVIEW_DB_NAME" != "onyx-free-db"
+          test "$PREVIEW_WORKER_NAME" != "onyx-framework"
+
+      - name: Create or reuse the dedicated preview D1
+        id: d1
+        shell: bash
+        run: |
+          set -euo pipefail
+          databases="$(npx wrangler d1 list --json)"
+          db_id="$(printf '%s' "$databases" | jq -r '
+            (if type == "array" then . else (.result // .) end)
+            | if type == "array" then .[] else . end
+            | select(.name == env.PREVIEW_DB_NAME)
+            | .uuid // .database_id // empty
+          ' | sed -n '1p')"
+          if [ -z "$db_id" ] || [ "$db_id" = "null" ]; then
+            created="$(npx wrangler d1 create "$PREVIEW_DB_NAME" --json)"
+            db_id="$(printf '%s' "$created" | jq -r '
+              if type == "array" then .
+              elif has("d1_databases") then .d1_databases
+              elif has("result") then .result
+              else .
+              end
+              | if type == "array" then .[] else . end
+              | .database_id // .uuid // empty
+            ' | sed -n '1p')"
+          fi
+          test -n "$db_id" && test "$db_id" != "null"
+          if [ "$db_id" = "$PRODUCTION_D1_ID" ]; then
+            echo "::error::Preview D1 ID matches production; refusing migration and deployment."
+            exit 1
+          fi
+          echo "database_id=$db_id" >> "$GITHUB_OUTPUT"
+
+      - name: Materialize isolated Wrangler config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > wrangler.preview.toml <<EOF
+          name = "$PREVIEW_WORKER_NAME"
+          main = "src/index.ts"
+          compatibility_date = "2026-10-09"
+          workers_dev = true
+
+          [observability]
+          enabled = true
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "$PREVIEW_DB_NAME"
+          database_id = "\${{ steps.d1.outputs.database_id }}"
+          migrations_dir = "migrations"
+
+          [vars]
+          ONYX_CORS_ORIGINS = "https://onyx-admin-preview.invalid"
+          EOF
+          grep -F "database_name = \"$PREVIEW_DB_NAME\"" wrangler.preview.toml
+          grep -F "name = \"$PREVIEW_WORKER_NAME\"" wrangler.preview.toml
+          ! grep -F "database_name = \"onyx-free-db\"" wrangler.preview.toml
+          ! grep -F "name = \"onyx-framework\"" wrangler.preview.toml
+
+      - name: Apply migrations to preview-only D1
+        run: npx wrangler d1 migrations apply "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml
+
+      - name: Seed disposable preview tenant and identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREVIEW_PASSWORD="$(openssl rand -hex 24)"
+          JWT_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$PREVIEW_PASSWORD"
+          echo "::add-mask::$JWT_SECRET"
+          echo "PREVIEW_PASSWORD=$PREVIEW_PASSWORD" >> "$GITHUB_ENV"
+          echo "JWT_SECRET=$JWT_SECRET" >> "$GITHUB_ENV"
+          export PREVIEW_PASSWORD
+          node --input-type=module > /tmp/onyx-preview-seed.sql <<'NODE'
+          import { argon2id } from "hash-wasm";
+          const password = process.env.PREVIEW_PASSWORD;
+          const salt = crypto.getRandomValues(new Uint8Array(16));
+          const hash = await argon2id({
+            password, salt, parallelism: 1, iterations: 3,
+            memorySize: 65536, hashLength: 32, outputType: "encoded",
+          });
+          const org = "123e4567-e89b-42d3-a456-426614174100";
+          const admin = "123e4567-e89b-42d3-a456-426614174001";
+          const manager = "123e4567-e89b-42d3-a456-426614174002";
+          const report = "123e4567-e89b-42d3-a456-426614174003";
+          const task = "123e4567-e89b-42d3-a456-426614174004";
+          const foreignTask = "123e4567-e89b-42d3-a456-426614174005";
+          const sql = [
+            "DELETE FROM audit_log WHERE organization_id IN ('123e4567-e89b-42d3-a456-426614174100','123e4567-e89b-42d3-a456-426614174101');",
+            "DELETE FROM domain_events WHERE organization_id IN ('123e4567-e89b-42d3-a456-426614174100','123e4567-e89b-42d3-a456-426614174101');",
+            "DELETE FROM aggregates WHERE organization_id IN ('123e4567-e89b-42d3-a456-426614174100','123e4567-e89b-42d3-a456-426614174101');",
+            "DELETE FROM mobile_access_settings WHERE organization_id IN ('123e4567-e89b-42d3-a456-426614174100','123e4567-e89b-42d3-a456-426614174101');",
+            "DELETE FROM users WHERE organization_id IN ('123e4567-e89b-42d3-a456-426614174100','123e4567-e89b-42d3-a456-426614174101');",
+            "DELETE FROM organizations WHERE id IN ('123e4567-e89b-42d3-a456-426614174100','123e4567-e89b-42d3-a456-426614174101');",
+            "DELETE FROM idempotency WHERE operation_id LIKE 'rest-%';",
+            "INSERT INTO organizations(id,name,is_active,created_at,updated_at) VALUES('123e4567-e89b-42d3-a456-426614174100','Preview Test Org',1,unixepoch(),unixepoch());",
+            "INSERT INTO organizations(id,name,is_active,created_at,updated_at) VALUES('123e4567-e89b-42d3-a456-426614174101','Preview Other Org',1,unixepoch(),unixepoch());",
+            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + admin + "','preview-admin','preview-admin@onyx.invalid','" + org + "','" + hash + "',1,1,'supervisor','ORGANIZATION_ADMIN',NULL,unixepoch(),unixepoch());",
+            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + manager + "','preview-manager','preview-manager@onyx.invalid','" + org + "','" + hash + "',0,1,'supervisor','STAFF',NULL,unixepoch(),unixepoch());",
+            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + report + "','preview-report','preview-report@onyx.invalid','" + org + "','" + hash + "',0,1,'staff','STAFF','" + manager + "',unixepoch(),unixepoch());",
+            "INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES('" + task + "','task',1,0,0,'{\"status\":\"Ready\",\"owner_id\":\"" + manager + "\"}',unixepoch(),'" + org + "');",
+            "INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES('" + foreignTask + "','task',1,0,0,'{\"status\":\"Ready\"}',unixepoch(),'123e4567-e89b-42d3-a456-426614174101');",
+          ];
+          console.log(sql.join("\n"));
+          NODE
+          npx wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml --file /tmp/onyx-preview-seed.sql
+
+      - name: Deploy preview Worker and install ephemeral JWT secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The first deploy creates the isolated script; its only binding is preview D1.
+          npx wrangler deploy --config wrangler.preview.toml
+          printf '%s' "$JWT_SECRET" | npx wrangler secret put ONYX_JWT_SECRET --config wrangler.preview.toml
+          npx wrangler deploy --config wrangler.preview.toml
+
+      - name: Verify live preview endpoints, persistence, and tenant isolation
+        id: verify
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          subdomain="$(curl -fsS --max-time 15 \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq -er '.result.subdomain')"
+          base="https://\${PREVIEW_WORKER_NAME}.$subdomain.workers.dev"
+          echo "preview_url=$base" >> "$GITHUB_OUTPUT"
+          echo "Preview URL: $base"
+          for i in {1..20}; do
+            health="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "$base/health" || true)"
+            if [ "$health" = "200" ] && jq -e '.status == "ok"' /tmp/health.json >/dev/null; then break; fi
+            sleep 3
+          done
+          test "$(curl -sS -o /tmp/ready.json -w '%{http_code}' --max-time 10 "$base/ready")" = "200"
+          jq -e '.status == "ok" and .schema == "ok"' /tmp/ready.json >/dev/null
+
+          http() {
+            local expected="$1"; shift
+            local raw status body
+            raw="$(curl -sS --retry 2 --retry-connrefused --retry-delay 2 --max-time 20 -w '\n%{http_code}' "$@")"
+            status="\${raw##*$'\n'}"
+            body="\${raw%$'\n'*}"
+            if [ "$status" != "$expected" ]; then
+              echo "::error::Expected HTTP $expected, got $status. Body: $body" >&2
+              exit 1
+            fi
+            printf '%s' "$body"
+          }
+
+          admin_login="$(http 200 "$base/api/auth/login" -X POST -H 'content-type: application/json' \
+            --data "$(jq -n --arg password "$PREVIEW_PASSWORD" '{username:"preview-admin",password:$password,client_type:"web"}')")"
+          admin_token="$(printf '%s' "$admin_login" | jq -er '.access_token')"
+          staff_login="$(http 200 "$base/api/auth/login" -X POST -H 'content-type: application/json' \
+            --data "$(jq -n --arg password "$PREVIEW_PASSWORD" '{username:"preview-manager",password:$password,client_type:"desktop"}')")"
+          staff_token="$(printf '%s' "$staff_login" | jq -er '.access_token')"
+
+          # Read defaults, reject malformed writes, then save and verify read-back.
+          mobile="$(http 200 "$base/api/admin/mobile-access" -H "Authorization: Bearer $admin_token")"
+          printf '%s' "$mobile" | jq -e '.version == 0 and .allowed_classes == [] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null
+          http 400 "$base/api/admin/mobile-access" -X PUT -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' --data '{"allowed_classes":["not-a-class"],"expected_version":0}' >/dev/null
+          saved="$(http 200 "$base/api/admin/mobile-access" -X PUT -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' --data '{"allowed_classes":["staff"],"expected_version":0}')"
+          printf '%s' "$saved" | jq -e '.version == 1 and .allowed_classes == ["staff"] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null
+          http 409 "$base/api/admin/mobile-access" -X PUT -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' --data '{"allowed_classes":[],"expected_version":0}' >/dev/null
+          http 403 "$base/api/admin/mobile-access" -H "Authorization: Bearer $staff_token" >/dev/null
+
+          # Staff hierarchy must include direct reports in the canonical array.
+          hierarchy="$(http 200 "$base/api/users/hierarchy" -H "Authorization: Bearer $staff_token")"
+          printf '%s' "$hierarchy" | jq -e 'type == "array" and length == 3 and any(.[]; .parent_user_id == "123e4567-e89b-42d3-a456-426614174002")' >/dev/null
+
+          # Staff cannot create either policy or legal hold.
+          http 403 "$base/api/admin/policies" -X POST -H "Authorization: Bearer $staff_token" \
+            -H 'content-type: application/json' --data '{"name":"forbidden"}' >/dev/null
+          http 403 "$base/api/admin/legal-holds" -X POST -H "Authorization: Bearer $staff_token" \
+            -H 'content-type: application/json' --data '{"target_id":"123e4567-e89b-42d3-a456-426614174004","target_type":"task","reason":"forbidden"}' >/dev/null
+
+          # Policy creation, stable saved representation, idempotent replay, payload conflict.
+          policy_body='{"name":"Preview Policy"}'
+          policy1="$(http 201 "$base/api/admin/policies" -X POST -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' -H 'idempotency-key: preview-policy-189' --data "$policy_body")"
+          policy_id="$(printf '%s' "$policy1" | jq -er '.policy_id')"
+          test "$(printf '%s' "$policy1" | jq -r '.version')" = "1"
+          policy2="$(http 201 "$base/api/admin/policies" -X POST -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' -H 'idempotency-key: preview-policy-189' --data "$policy_body")"
+          test "$(printf '%s' "$policy2" | jq -er '.policy_id')" = "$policy_id"
+          http 409 "$base/api/admin/policies" -X POST -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' -H 'idempotency-key: preview-policy-189' --data '{"name":"Different Policy"}' >/dev/null
+
+          # Legal hold target must be existing, UUID-backed, and in this tenant.
+          hold1="$(http 201 "$base/api/admin/legal-holds" -X POST -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' -H 'idempotency-key: preview-hold-189' \
+            --data '{"target_id":"123e4567-e89b-42d3-a456-426614174004","target_type":"task","reason":"preserve test evidence"}')"
+          hold_id="$(printf '%s' "$hold1" | jq -er '.legal_hold_id')"
+          hold2="$(http 201 "$base/api/admin/legal-holds" -X POST -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' -H 'idempotency-key: preview-hold-189' \
+            --data '{"target_id":"123e4567-e89b-42d3-a456-426614174004","target_type":"task","reason":"preserve test evidence"}')"
+          test "$(printf '%s' "$hold2" | jq -er '.legal_hold_id')" = "$hold_id"
+          http 404 "$base/api/admin/legal-holds" -X POST -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' --data '{"target_id":"123e4567-e89b-42d3-a456-426614174005","target_type":"task","reason":"cross tenant"}' >/dev/null
+          http 400 "$base/api/admin/legal-holds" -X POST -H "Authorization: Bearer $admin_token" \
+            -H 'content-type: application/json' --data '{"target_id":"123e4567-e89b-42d3-a456-426614174004","target_type":"file_asset","reason":"unsupported identifier"}' >/dev/null
+
+          verify_sql="SELECT
+            (SELECT COUNT(*) FROM mobile_access_settings WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND version=1 AND allowed_classes='[\"staff\"]') AS mobile_saved,
+            (SELECT COUNT(*) FROM audit_log WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND action='mobile_access.update') AS mobile_audits,
+            (SELECT COUNT(*) FROM aggregates WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND aggregate_type='policy') AS policies,
+            (SELECT COUNT(*) FROM domain_events WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND event_type='CreatePolicy') AS policy_events,
+            (SELECT COUNT(*) FROM audit_log WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND action='CreatePolicy') AS policy_audits,
+            (SELECT COUNT(*) FROM aggregates WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND aggregate_type='legal_hold') AS holds,
+            (SELECT COUNT(*) FROM domain_events WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND event_type='ApplyLegalHold') AS hold_events,
+            (SELECT COUNT(*) FROM audit_log WHERE organization_id='123e4567-e89b-42d3-a456-426614174100' AND action='ApplyLegalHold') AS hold_audits"
+          result="$(npx wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml --json --command "$verify_sql")"
+          printf '%s' "$result" | jq -e '.[0].results[0] |
+            .mobile_saved == 1 and .mobile_audits == 1 and
+            .policies == 1 and .policy_events == 1 and .policy_audits == 1 and
+            .holds == 1 and .hold_events == 1 and .hold_audits == 1' >/dev/null
+          echo "PASS: preview routes returned canonical contracts; authorization, version conflicts, idempotency, tenant isolation, persistence and audit read-back verified."
