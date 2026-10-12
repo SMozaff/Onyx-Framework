@@ -57,6 +57,7 @@ function sessionClaims(overrides: Record<string, unknown> = {}) {
 
 class SecurityDb {
   users = new Map<string, UserRow>();
+  emptyUserQueries = false;
   organizations = new Map<string, OrgRow>();
   aggregates = new Map<string, AggregateRow>();
   subscriptions = new Map<string, { user_id: string; organization_id: string; endpoint: string }>();
@@ -171,6 +172,7 @@ class SecurityDb {
       return rows;
     }
     if (sql.includes("FROM users")) {
+      if (this.emptyUserQueries) return [];
       let rows = [...this.users.values()];
       if (sql.includes("organization_id=?")) rows = rows.filter((row) => row.organization_id === String(params[0]));
       if (sql.includes("is_active=1")) rows = rows.filter((row) => row.is_active === 1);
@@ -635,6 +637,82 @@ describe("Worker authorization and session security", () => {
     const body = await response.json();
     expect(Array.isArray(body)).toBe(true);
     expect(body).toEqual([{ id: "staff-1", parent_user_id: null, is_admin: true }]);
+  });
+
+  it("returns an honest 503 for mobile-access storage failure", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const originalPrepare = db.prepare.bind(db);
+    Object.assign(db, {
+      prepare: (sql: string) => {
+        if (sql.includes("mobile_access_settings")) throw new Error("simulated D1 outage");
+        return originalPrepare(sql);
+      },
+    });
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/mobile-access", {
+      headers: { authorization: "Bearer " + token },
+    }), makeEnv(db));
+    expect(response.status).toBe(503);
+    expect((await response.json() as Record<string, unknown>).error).toBe("MOBILE_ACCESS_STORAGE_UNAVAILABLE");
+    expect(db.writes.some((write) => write.sql.includes("mobile_access_settings"))).toBe(false);
+  });
+
+  it("returns the canonical empty hierarchy array when no visible rows are returned", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    db.emptyUserQueries = true;
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
+      headers: { authorization: "Bearer " + token },
+    }), makeEnv(db));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([]);
+  });
+
+  it("denies Staff policy and legal-hold creation without persistence or audit", async () => {
+    const db = makeDb();
+    const token = await signToken(sessionClaims());
+    const policy = await worker.fetch(new Request("https://worker.test/api/admin/policies", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Unauthorized policy" }),
+    }), makeEnv(db));
+    const hold = await worker.fetch(new Request("https://worker.test/api/admin/legal-holds", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({
+        target_id: "123e4567-e89b-42d3-a456-426614174000",
+        target_type: "task",
+        reason: "Unauthorized hold",
+      }),
+    }), makeEnv(db));
+    expect(policy.status).toBe(403);
+    expect(hold.status).toBe(403);
+    expect(db.writes).toHaveLength(0);
+    expect(db.domainEvents).toHaveLength(0);
+    expect(db.auditRows).toHaveLength(0);
+  });
+
+  it("makes policy creation idempotent and rejects key reuse with a different payload", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const create = (name: string) => worker.fetch(new Request("https://worker.test/api/admin/policies", {
+      method: "POST", headers: {
+        authorization: "Bearer " + token, "content-type": "application/json", "idempotency-key": "same-create-key",
+      },
+      body: JSON.stringify({ name }),
+    }), makeEnv(db));
+    const first = await create("Operations Policy");
+    const firstBody = await first.json() as { policy_id: string };
+    const repeated = await create("Operations Policy");
+    const repeatedBody = await repeated.json() as { policy_id: string };
+    expect(first.status).toBe(201);
+    expect(repeated.status).toBe(201);
+    expect(repeatedBody.policy_id).toBe(firstBody.policy_id);
+    expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "policy")).toHaveLength(1);
+    expect(db.domainEvents).toHaveLength(1);
+
+    const conflict = await create("Different Policy");
+    expect(conflict.status).toBe(409);
+    expect((await conflict.json() as Record<string, unknown>).error).toBe("IDEMPOTENCY_CONFLICT");
+    expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "policy")).toHaveLength(1);
   });
 
   it("persists policy creation through the domain command path and returns canonical saved state", async () => {
