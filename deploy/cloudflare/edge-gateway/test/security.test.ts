@@ -718,6 +718,34 @@ describe("Worker authorization and session security", () => {
     expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "policy")).toHaveLength(1);
   });
 
+  it("includes active direct reports for Staff within the same organization hierarchy", async () => {
+    const db = makeDb();
+    db.users.set("staff-2", {
+      id: "staff-2", username: "report", email: "report@example.test",
+      organization_id: ORG, is_admin: 0, is_active: 1, class: "staff",
+      role: "STAFF", parent_user_id: "staff-1",
+    });
+    db.users.set("staff-inactive", {
+      id: "staff-inactive", username: "inactive", email: "inactive@example.test",
+      organization_id: ORG, is_admin: 0, is_active: 0, class: "staff",
+      role: "STAFF", parent_user_id: "staff-1",
+    });
+    db.users.set("other-org-user", {
+      id: "other-org-user", username: "foreign", email: "foreign@example.test",
+      organization_id: "other-org", is_admin: 0, is_active: 1, class: "staff",
+      role: "STAFF", parent_user_id: null,
+    });
+    const token = await signToken(sessionClaims());
+    const response = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
+      headers: { authorization: "Bearer " + token },
+    }), makeEnv(db));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([
+      { id: "staff-1", parent_user_id: null, is_admin: false },
+      { id: "staff-2", parent_user_id: "staff-1", is_admin: false },
+    ]);
+  });
+
   it("returns an empty hierarchy array for the sentinel-ID All-Father principal", async () => {
     const db = new SecurityDb();
     db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });

@@ -841,17 +841,9 @@ async function hierarchy(env:Env,session:Session){
   // Rust/Android hierarchy parser requires UUID ids. It is not an org member
   // in the reporting tree, so represent its hierarchy as the valid empty array.
   if(session.role==="ALL_FATHER")return json([]);
-  if(session.role==="STAFF"){
-    const self=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
-      .bind(session.sub,session.organization_id).first<Record<string,unknown>>();
-    if(!self)return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-    const parentId=typeof self.parent_user_id==="string"?self.parent_user_id:"";
-    const rows=parentId
-      ? await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE organization_id=? AND is_active=1 AND id IN (?,?) ORDER BY id")
-          .bind(session.organization_id,session.sub,parentId).all<Record<string,unknown>>()
-      : {results:[self]};
-    return json(canonicalHierarchy(rows.results??[]));
-  }
+  // Match the existing Rust API contract: every authenticated org member can
+  // read the minimal active-org reporting tree. Direct reports must be present
+  // for the client-side manager-authority cache to verify Task/Mission owners.
   const rows=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE organization_id=? AND is_active=1 ORDER BY id")
     .bind(session.organization_id).all<Record<string,unknown>>();
   return json(canonicalHierarchy(rows.results??[]));
