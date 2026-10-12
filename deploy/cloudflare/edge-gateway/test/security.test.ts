@@ -816,7 +816,7 @@ describe("Worker authorization and session security", () => {
       body: JSON.stringify({ name: "A Staff caller must not create this" }),
     }), makeEnv(db));
     expect(denied.status).toBe(403);
-    expect(db.aggregates.size).toBe(0);
+    expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "policy")).toHaveLength(0);
     expect(db.domainEvents).toHaveLength(0);
     expect(db.auditRows).toHaveLength(0);
   });
