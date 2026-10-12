@@ -175,13 +175,26 @@ jobs:
           base="https://${PREVIEW_WORKER_NAME}.$subdomain.workers.dev"
           echo "preview_url=$base" >> "$GITHUB_OUTPUT"
           echo "Preview URL: $base"
+          health_ok=false
           for i in {1..20}; do
             health="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "$base/health" || true)"
-            if [ "$health" = "200" ] && jq -e '.status == "ok"' /tmp/health.json >/dev/null; then break; fi
+            if [ "$health" = "200" ] && jq -e '.status == "ok"' /tmp/health.json >/dev/null 2>&1; then
+              health_ok=true
+              break
+            fi
+            echo "Preview health attempt $i: status=$health body=$(cat /tmp/health.json 2>/dev/null || true)"
             sleep 3
           done
-          test "$(curl -sS -o /tmp/ready.json -w '%{http_code}' --max-time 10 "$base/ready")" = "200"
-          jq -e '.status == "ok" and .schema == "ok"' /tmp/ready.json >/dev/null
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::Preview Worker did not return a healthy response at $base/health"
+            exit 1
+          fi
+          ready_status="$(curl -sS -o /tmp/ready.json -w '%{http_code}' --max-time 10 "$base/ready" || true)"
+          if [ "$ready_status" != "200" ] || ! jq -e '.status == "ok" and .schema == "ok"' /tmp/ready.json >/dev/null 2>&1; then
+            echo "::error::Preview readiness failed: status=$ready_status body=$(cat /tmp/ready.json 2>/dev/null || true)"
+            exit 1
+          fi
+          echo "Preview health and schema readiness passed."
 
           http() {
             local expected="$1"; shift
