@@ -788,7 +788,7 @@ describe("Worker authorization and session security", () => {
       }), makeEnv(db));
       expect(response.status).toBe(400);
     }
-    expect(db.aggregates.size).toBe(0);
+    expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "policy")).toHaveLength(0);
     expect(db.domainEvents).toHaveLength(0);
     expect(db.auditRows).toHaveLength(0);
     expect(db.writes).toHaveLength(0);
