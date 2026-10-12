@@ -57,24 +57,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          databases="$(npx wrangler d1 list --json)"
-          db_id="$(printf '%s' "$databases" | jq -r '
-            (if type == "array" then . else (.result // .) end)
-            | if type == "array" then .[] else . end
-            | select(.name == env.PREVIEW_DB_NAME)
-            | .uuid // .database_id // empty
+          list_url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?per_page=100"
+          databases="$(curl -fsS --max-time 20 "$list_url" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
+          db_id="$(printf '%s' "$databases" | jq -r --arg name "$PREVIEW_DB_NAME" '
+            .result[] | select(.name == $name) | .uuid // .database_id // empty
           ' | sed -n '1p')"
           if [ -z "$db_id" ] || [ "$db_id" = "null" ]; then
-            created="$(npx wrangler d1 create "$PREVIEW_DB_NAME" --json)"
-            db_id="$(printf '%s' "$created" | jq -r '
-              if type == "array" then .
-              elif has("d1_databases") then .d1_databases
-              elif has("result") then .result
-              else .
-              end
-              | if type == "array" then .[] else . end
-              | .database_id // .uuid // empty
-            ' | sed -n '1p')"
+            created="$(curl -fsS --max-time 20 -X POST \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "$(jq -n --arg name "$PREVIEW_DB_NAME" '{name:$name}')")"
+            db_id="$(printf '%s' "$created" | jq -er '.result.uuid // .result.database_id // empty')"
           fi
           test -n "$db_id" && test "$db_id" != "null"
           if [ "$db_id" = "$PRODUCTION_D1_ID" ]; then
