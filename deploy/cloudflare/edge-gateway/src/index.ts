@@ -543,8 +543,11 @@ async function commandRoute(request:Request,env:Env,session:Session){
       return json({error:"INVALID_HOLD_TARGET",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
     const holdTargetId=resourceIdFromReference(targetRef.target_id);
     if(!holdTargetId)return json({error:"INVALID_HOLD_TARGET",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-    const held=await env.DB.prepare("SELECT id FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=? LIMIT 1")
-      .bind(holdTargetId,session.organization_id,targetRef.target_type).first();
+    const held=targetRef.target_type==="file_asset"
+      ? await env.DB.prepare("SELECT content_hash AS id FROM file_assets WHERE content_hash=? AND organization_id=? LIMIT 1")
+          .bind(holdTargetId,session.organization_id).first()
+      : await env.DB.prepare("SELECT id FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=? LIMIT 1")
+          .bind(holdTargetId,session.organization_id,targetRef.target_type).first();
     if(!held)return json({error:"INVALID_HOLD_TARGET",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   }
   if(envelope.command_type==="CreatePolicy"){

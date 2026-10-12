@@ -673,6 +673,34 @@ describe("Worker authorization and session security", () => {
     expect(db.writes).toHaveLength(0);
   });
 
+  it("creates a tenant-scoped legal hold with event, aggregate and audit when no authorizing policy is supplied", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const targetId = "123e4567-e89b-42d3-a456-426614174000";
+    db.aggregates.set(targetId, {
+      id: targetId, aggregate_type: "task", version: 1, lifecycle_epoch: 0,
+      authority_epoch: 0, state: JSON.stringify({ status: "Ready", owner_id: "staff-1" }),
+      updated_at: Date.now(), organization_id: ORG,
+    });
+    const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/legal-holds", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ target_id: targetId, target_type: "task", reason: "Preserve relevant records." }),
+    }), makeEnv(db));
+    expect(response.status).toBe(201);
+    const body = await response.json() as { legal_hold_id: string; legal_hold: Record<string, unknown>; version: number };
+    expect(body.legal_hold_id).toBeTruthy();
+    expect(body.version).toBe(1);
+    expect(body.legal_hold).toMatchObject({
+      status: "Applied",
+      target: { target_id: targetId, target_type: "task" },
+      reason: "Preserve relevant records.",
+    });
+    expect(db.aggregates.get(body.legal_hold_id)?.aggregate_type).toBe("legal_hold");
+    expect(db.domainEvents).toHaveLength(1);
+    expect(db.auditRows).toHaveLength(1);
+    expect(db.writes.some((write) => write.sql.startsWith("INSERT OR IGNORE INTO aggregates"))).toBe(true);
+  });
+
   it("uses the persisted mobile-access configuration to deny and allow ordinary mobile login", async () => {
     const db = makeDb();
     const password = "secure-test-password";
