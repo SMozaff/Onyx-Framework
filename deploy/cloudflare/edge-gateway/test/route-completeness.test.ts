@@ -31,7 +31,7 @@ describe("Admin API route completeness", () => {
   });
 
   it("declares the canonical hierarchy handler as a JSON-array response and preserves client parser contracts", () => {
-    expect(worker).toContain("return json(rows.results??[]);");
+    expect(worker).toContain("return json(canonicalHierarchy(rows.results??[]));");
     expect(worker).not.toContain("return json({users:rows.results??[]});");
     expect(read("crates/applications/client-composition/src/hierarchy_cache.rs"))
       .toContain("let wire: Vec<HierarchyUserWire>");

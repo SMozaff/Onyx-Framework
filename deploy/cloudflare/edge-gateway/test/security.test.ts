@@ -634,7 +634,7 @@ describe("Worker authorization and session security", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(Array.isArray(body)).toBe(true);
-    expect(body).toEqual([{ id: "staff-1", parent_user_id: null, is_admin: 1 }]);
+    expect(body).toEqual([{ id: "staff-1", parent_user_id: null, is_admin: true }]);
   });
 
   it("persists policy creation through the domain command path and returns canonical saved state", async () => {

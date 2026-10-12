@@ -833,6 +833,13 @@ async function assignUserClass(request: Request, env: Env, session: Session, use
   }
 }
 
+function canonicalHierarchy(rows: Record<string, unknown>[]) {
+  return rows.map((row) => ({
+    id: String(row.id),
+    parent_user_id: typeof row.parent_user_id === "string" && row.parent_user_id.length > 0 ? row.parent_user_id : null,
+    is_admin: row.is_admin === true || row.is_admin === 1 || row.is_admin === "1",
+  }));
+}
 async function hierarchy(env:Env,session:Session){
   if(session.role==="STAFF"){
     const self=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
@@ -843,11 +850,11 @@ async function hierarchy(env:Env,session:Session){
       ? await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE organization_id=? AND is_active=1 AND id IN (?,?) ORDER BY id")
           .bind(session.organization_id,session.sub,parentId).all<Record<string,unknown>>()
       : {results:[self]};
-    return json(rows.results??[]);
+    return json(canonicalHierarchy(rows.results??[]));
   }
   const rows=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE organization_id=? AND is_active=1 ORDER BY id")
     .bind(session.organization_id).all<Record<string,unknown>>();
-  return json(rows.results??[]);
+  return json(canonicalHierarchy(rows.results??[]));
 }
 async function profiles(env:Env,session:Session,ownerId?:string){
   if(session.role==="STAFF"&&ownerId&&ownerId!==session.sub)return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);

@@ -41,8 +41,13 @@ class MockDb {
         .filter((column) => !this.missingSchemaItems.has(`${table}.${column}`))
         .map((name) => ({ name }));
     }
-    if (sql.toLowerCase() === "pragma index_list(users)") {
-      return AUTH_SCHEMA_CONTRACT.indexes
+    const indexList = sql.match(/^pragma index_list\\(([^)]+)\\)$/i);
+    if (indexList) {
+      const table = indexList[1]!;
+      const indexes = table === "users"
+        ? AUTH_SCHEMA_CONTRACT.indexes
+        : AUTH_SCHEMA_CONTRACT.tableIndexes[table] ?? [];
+      return indexes
         .filter((name) => !this.missingSchemaItems.has(`index:${name}`))
         .map((name) => ({ name }));
     }
