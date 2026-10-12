@@ -164,7 +164,7 @@ This is intentional. The Worker is not claimed to be a complete replacement unti
 
 ## Deployment
 
-The GitHub Actions workflow `.github/workflows/deploy-cloudflare-edge.yml` creates or reuses the free D1 database, applies checked-in migrations, configures Worker secrets, deploys the Worker, and checks `/health`, `/ready`, and anonymous access to a protected route. It requires Cloudflare and Supabase credentials configured as GitHub Actions secrets. The workflow is manually dispatchable; deployment credentials are never committed to the repository.
+The GitHub Actions workflow `.github/workflows/deploy-cloudflare-edge.yml` creates or reuses the free D1 database, applies checked-in migrations, configures Worker secrets, deploys the Worker, and checks `/health`, `/ready`, and anonymous access to a protected route. It requires Cloudflare and Supabase credentials configured as GitHub Actions secrets. The CORS allowlist ships as a complete committed default (the deployed Pages front-ends, the Tauri shells, and the local Vite dev servers) and can be overridden with the `ONYX_CORS_ORIGINS` repository secret without a code change. The workflow is manually dispatchable; deployment credentials are never committed to the repository.
 
 ### Local development
 

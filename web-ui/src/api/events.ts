@@ -1,6 +1,23 @@
 import type { DomainEventEnvelope, EventSubscriptionFilter } from '../types/events';
+import { API_BASE } from './client';
 
-const WS_BASE = import.meta.env.VITE_WS_BASE ?? 'ws://127.0.0.1:3000';
+/**
+ * Realtime origin for the event stream.
+ *
+ * The WebSocket endpoint is served by the same Worker as the REST API, so derive
+ * its origin from the resolved API base when `VITE_WS_BASE` is not set.
+ * `VITE_API_BASE` already defaults to the Worker in production, but
+ * `VITE_WS_BASE` had no production default, so a Pages build without it opened
+ * `ws://127.0.0.1:3000` from an https:// origin and the browser blocked the
+ * mixed-content connection, leaving the status badge stuck at "disconnected".
+ */
+export function realtimeBase(apiBase: string, configuredWsBase?: string): string {
+  const configured = configuredWsBase?.trim();
+  const base = configured ? configured : apiBase.replace(/^http/i, 'ws');
+  return base.replace(/\/+$/, '');
+}
+
+const WS_BASE = realtimeBase(API_BASE, import.meta.env.VITE_WS_BASE);
 
 export interface EventStreamOptions {
   token: string;

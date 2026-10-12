@@ -20,8 +20,12 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   ONYX_JWT_SECRET: ${{ secrets.ONYX_JWT_SECRET }}
   ONYX_ALLFATHER_EMAIL: so.muzaff@gmail.com
-  # CORS origins are public deployment configuration, not credentials.
-  ONYX_CORS_ORIGINS: https://onyx-web-ui.pages.dev,https://onyx-mobile-pwa.pages.dev
+  # CORS allowlist. Origins are public deployment configuration, not credentials,
+  # so the committed default below is complete: the deployed Pages front-ends, the
+  # Tauri shells (tauri://localhost on macOS/Linux, http://tauri.localhost on
+  # Windows), and the local Vite dev servers. Set the ONYX_CORS_ORIGINS repository
+  # secret to override it (e.g. to add a custom domain) without a code change.
+  ONYX_CORS_ORIGINS: ${{ secrets.ONYX_CORS_ORIGINS || 'https://onyx-web-ui.pages.dev,https://onyx-mobile-pwa.pages.dev,tauri://localhost,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174' }}
   SUPABASE_URL: https://uhpqjhbciimklheohvfr.supabase.co
   SUPABASE_JWKS_URL: https://uhpqjhbciimklheohvfr.supabase.co/auth/v1/.well-known/jwks.json
   SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
