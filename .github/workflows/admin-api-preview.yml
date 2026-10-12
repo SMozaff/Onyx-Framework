@@ -122,13 +122,16 @@ jobs:
           node --input-type=module > /tmp/onyx-preview-seed.sql <<'NODE'
           import { argon2id, argon2Verify } from "hash-wasm";
           const password = process.env.PREVIEW_PASSWORD;
-          const salt = crypto.getRandomValues(new Uint8Array(16));
-          const hash = await argon2id({
-            password, salt, parallelism: 1, iterations: 3,
-            memorySize: 65536, hashLength: 32, outputType: "encoded",
+          const strongHash = await argon2id({
+            password, salt: crypto.getRandomValues(new Uint8Array(16)),
+            parallelism: 1, iterations: 3, memorySize: 65536, hashLength: 32, outputType: "encoded",
           });
-          const verified = await argon2Verify({ password, hash });
-          if (!verified) throw new Error("Generated preview password hash did not self-verify.");
+          const routeHash = await argon2id({
+            password, salt: crypto.getRandomValues(new Uint8Array(16)),
+            parallelism: 1, iterations: 1, memorySize: 4096, hashLength: 32, outputType: "encoded",
+          });
+          if (!(await argon2Verify({ password, hash: strongHash }))) throw new Error("Strong fixture hash did not self-verify.");
+          if (!(await argon2Verify({ password, hash: routeHash }))) throw new Error("Route-test fixture hash did not self-verify.");
 
           const org = "123e4567-e89b-42d3-a456-426614174100";
           const admin = "123e4567-e89b-42d3-a456-426614174001";
@@ -146,9 +149,10 @@ jobs:
             "DELETE FROM idempotency WHERE operation_id LIKE 'rest-%';",
             "INSERT INTO organizations(id,name,is_active,created_at,updated_at) VALUES('123e4567-e89b-42d3-a456-426614174100','Preview Test Org',1,unixepoch(),unixepoch());",
             "INSERT INTO organizations(id,name,is_active,created_at,updated_at) VALUES('123e4567-e89b-42d3-a456-426614174101','Preview Other Org',1,unixepoch(),unixepoch());",
-            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + admin + "','preview-admin','preview-admin@onyx.invalid','" + org + "','" + hash + "',1,1,'supervisor','ORGANIZATION_ADMIN',NULL,unixepoch(),unixepoch());",
-            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + manager + "','preview-manager','preview-manager@onyx.invalid','" + org + "','" + hash + "',0,1,'supervisor','STAFF',NULL,unixepoch(),unixepoch());",
-            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + report + "','preview-report','preview-report@onyx.invalid','" + org + "','" + hash + "',0,1,'staff','STAFF','" + manager + "',unixepoch(),unixepoch());",
+            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + admin + "','preview-admin','preview-admin@onyx.invalid','" + org + "','" + routeHash + "',1,1,'supervisor','ORGANIZATION_ADMIN',NULL,unixepoch(),unixepoch());",
+            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + manager + "','preview-manager','preview-manager@onyx.invalid','" + org + "','" + routeHash + "',0,1,'supervisor','STAFF',NULL,unixepoch(),unixepoch());",
+            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('" + report + "','preview-report','preview-report@onyx.invalid','" + org + "','" + routeHash + "',0,1,'staff','STAFF','" + manager + "',unixepoch(),unixepoch());",
+            "INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES('123e4567-e89b-42d3-a456-426614174006','preview-highcost-probe','preview-highcost-probe@onyx.invalid','123e4567-e89b-42d3-a456-426614174101','" + strongHash + "',0,1,'staff','STAFF',NULL,unixepoch(),unixepoch());",
             "INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES('" + task + "','task',1,0,0,'{\"status\":\"Ready\",\"owner_id\":\"" + manager + "\"}',unixepoch(),'" + org + "');",
             "INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES('" + foreignTask + "','task',1,0,0,'{\"status\":\"Ready\"}',unixepoch(),'123e4567-e89b-42d3-a456-426614174101');",
           ];
@@ -162,16 +166,17 @@ jobs:
           set -euo pipefail
           fingerprint="$(printf '%s' "$PREVIEW_PASSWORD" | sha256sum | awk '{print $1}')"
           test "$fingerprint" = "$PREVIEW_PASSWORD_FINGERPRINT"
-          stored_hash="$(npx wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml --json --command "SELECT password_hash FROM users WHERE username='preview-admin'")"
-          export STORED_HASH="$(printf '%s' "$stored_hash" | jq -er '.[0].results[0].password_hash')"
+          stored_hashes="$(npx wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config wrangler.preview.toml --json --command "SELECT username,password_hash FROM users WHERE username IN ('preview-admin','preview-highcost-probe')")"
+          export STORED_ROUTE_HASH="$(printf '%s' "$stored_hashes" | jq -er '.[0].results[] | select(.username=="preview-admin") | .password_hash')"
+          export STORED_STRONG_HASH="$(printf '%s' "$stored_hashes" | jq -er '.[0].results[] | select(.username=="preview-highcost-probe") | .password_hash')"
           node --input-type=module <<'NODE'
           import { argon2Verify } from "hash-wasm";
-          const ok = await argon2Verify({
-            password: process.env.PREVIEW_PASSWORD,
-            hash: process.env.STORED_HASH,
-          });
-          console.log("Preview password/hash round-trip:", ok);
-          if (!ok) process.exit(1);
+          const password = process.env.PREVIEW_PASSWORD;
+          const routeOk = await argon2Verify({ password, hash: process.env.STORED_ROUTE_HASH });
+          const strongOk = await argon2Verify({ password, hash: process.env.STORED_STRONG_HASH });
+          console.log("Preview route-test hash round-trip:", routeOk);
+          console.log("Preview strong hash round-trip:", strongOk);
+          if (!routeOk || !strongOk) process.exit(1);
           NODE
 
       - name: Deploy preview Worker and install ephemeral JWT secret
@@ -230,6 +235,14 @@ jobs:
             fi
             printf '%s' "$body"
           }
+
+          high_cost_status="$(curl -sS -o /tmp/preview-high-cost-login.json -w '%{http_code}' --max-time 30 "$base/api/auth/login" -X POST -H 'content-type: application/json' \
+            --data "$(jq -n --arg password "$PREVIEW_PASSWORD" '{username:"preview-highcost-probe",password:$password,client_type:"web"}')" || true)"
+          echo "High-cost Argon2 login probe: HTTP $high_cost_status body=$(cat /tmp/preview-high-cost-login.json 2>/dev/null || true)"
+          if [ "$high_cost_status" != "200" ] && [ "$high_cost_status" != "401" ]; then
+            echo "::error::Unexpected high-cost Argon2 probe response HTTP $high_cost_status"
+            exit 1
+          fi
 
           admin_login="$(http 200 "$base/api/auth/login" -X POST -H 'content-type: application/json' \
             --data "$(jq -n --arg password "$PREVIEW_PASSWORD" '{username:"preview-admin",password:$password,client_type:"web"}')")"
