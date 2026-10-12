@@ -24,8 +24,10 @@ export interface SchemaReadClient {
 export const AUTH_SCHEMA_CONTRACT: {
   tables: Record<string, string[]>;
   indexes: string[];
+  tableIndexes: Record<string, string[]>;
 } = {
   tables: {
+    mobile_access_settings: ["organization_id", "allowed_classes", "version", "updated_by", "updated_at", "last_operation_id"],
     users: [
       "id",
       "username",
@@ -50,6 +52,9 @@ export const AUTH_SCHEMA_CONTRACT: {
     "idx_users_email_lower",
     "idx_users_supabase_user",
   ],
+  tableIndexes: {
+    mobile_access_settings: ["idx_mobile_access_settings_updated_at"],
+  },
 };
 
 async function pragmaRows(
@@ -91,6 +96,13 @@ export async function missingAuthSchema(db: SchemaReadClient): Promise<string[]>
   const indexNames = new Set(userIndexes.map((row) => String(row.name)));
   for (const index of AUTH_SCHEMA_CONTRACT.indexes) {
     if (!indexNames.has(index)) missing.push(`index:${index}`);
+  }
+  for (const [table, indexes] of Object.entries(AUTH_SCHEMA_CONTRACT.tableIndexes)) {
+    const rows = await pragmaRows(db, `PRAGMA index_list(${table})`);
+    const present = new Set(rows.map((row) => String(row.name)));
+    for (const index of indexes) {
+      if (!present.has(index)) missing.push(`index:${index}`);
+    }
   }
 
   return missing.sort();

@@ -104,14 +104,34 @@ function MobileAccessPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [version, setVersion] = useState(0);
+  const [enforcementStatus, setEnforcementStatus] = useState("unknown");
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  function applyServerState(data: {
+    allowed_classes?: unknown;
+    version?: unknown;
+    enforcement_status?: unknown;
+  }) {
+    if (!Array.isArray(data.allowed_classes) ||
+        !data.allowed_classes.every((value) => typeof value === "string") ||
+        typeof data.version !== "number" || !Number.isSafeInteger(data.version) || data.version < 0 ||
+        !["disabled_untrusted_client_type", "enabled_attested_client"].includes(String(data.enforcement_status))) {
+      throw new Error("The server returned an invalid mobile-access configuration.");
+    }
+    setAllowed(new Set(data.allowed_classes as string[]));
+    setVersion(data.version);
+    setEnforcementStatus(String(data.enforcement_status));
+  }
 
   useEffect(() => {
     void (async () => {
       try {
         const response = await apiClient.get("/api/admin/mobile-access");
-        setAllowed(new Set(response.data.allowed_classes as string[]));
+        applyServerState(response.data);
       } catch (err) {
+        setLoadFailed(true);
         setError(describeError(err));
       } finally {
         setLoading(false);
@@ -120,14 +140,27 @@ function MobileAccessPanel() {
   }, []);
 
   async function save(next: Set<string>) {
-    setAllowed(next);
     setSaving(true);
     setError(null);
+    setSavedAt(null);
     try {
-      await apiClient.put("/api/admin/mobile-access", { allowed_classes: Array.from(next) });
+      const allowed_classes = USER_CLASSES.filter((c) => next.has(c.value)).map((c) => c.value);
+      const response = await apiClient.put("/api/admin/mobile-access", {
+        allowed_classes,
+        expected_version: version,
+      });
+      applyServerState(response.data);
       setSavedAt(Date.now());
     } catch (err) {
       setError(describeError(err));
+      // Restore the canonical server value after validation, storage, or
+      // optimistic-concurrency failures. Never leave a failed save checked.
+      try {
+        const response = await apiClient.get("/api/admin/mobile-access");
+        applyServerState(response.data);
+      } catch {
+        setLoadFailed(true);
+      }
     } finally {
       setSaving(false);
     }
@@ -147,10 +180,13 @@ function MobileAccessPanel() {
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
       <h2 className="text-sm font-semibold text-onyx-text">{t("common.mobileAccess")}</h2>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Only the user classes checked below may sign in from the mobile app. A class with no
-        checkmark is denied mobile login entirely, until enabled here — Administrators always
-        retain mobile access regardless of this list.
+        {t("settings.mobileAccessPolicyDescription")}
       </p>
+      {enforcementStatus === "disabled_untrusted_client_type" && (
+        <p role="alert" className="mt-3 rounded-md border border-onyx-border p-3 text-sm text-onyx-status-blocked">
+          {t("settings.mobileAccessEnforcementDisabled")}
+        </p>
+      )}
       {loading && <p className="mt-3 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
       {error && <p className="mt-3 text-sm text-onyx-status-blocked">{error}</p>}
       {!loading && (
@@ -160,7 +196,7 @@ function MobileAccessPanel() {
               <input
                 type="checkbox"
                 checked={allowed.has(c.value)}
-                disabled={saving}
+                disabled={saving || loading || loadFailed}
                 onChange={() => toggle(c.value)}
               />
               {c.label}
@@ -614,7 +650,7 @@ function LegalHoldPanel() {
   const hold = holdRows?.[0];
 
   const [targetIdInput, setTargetIdInput] = useState("");
-  const [targetTypeInput, setTargetTypeInput] = useState("file_asset");
+  const [targetTypeInput, setTargetTypeInput] = useState("task");
   const [reasonInput, setReasonInput] = useState("");
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);

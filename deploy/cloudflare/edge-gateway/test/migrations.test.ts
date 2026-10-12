@@ -108,6 +108,7 @@ describe("migration sequence integrity", () => {
       "0002_onyx_identity_model.sql",
       "0003_supabase_identity.sql",
       "0004_auth_schema_repair.sql",
+      "0005_admin_settings.sql",
     ]);
   });
 });

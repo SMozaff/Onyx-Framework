@@ -173,7 +173,7 @@ async function hashPassword(password:string):Promise<string>{
   const salt=crypto.getRandomValues(new Uint8Array(16));
   return String(await argon2id({password,salt,parallelism:1,iterations:3,memorySize:65536,hashLength:32,outputType:"encoded"}));
 }
-function clientType(payload:Json){return typeof payload.client_type==="string"?payload.client_type:"web";}
+function clientType(payload:Json|null){return validClientType(payload);}
 function roleForUser(user:Record<string,unknown>):string{
   // Never infer a role from mutable profile values or the legacy is_admin bit.
   // Invalid/missing D1 roles fail closed and cannot receive a usable session.
@@ -194,7 +194,13 @@ async function authLogin(request:Request,env:Env){
   const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role,u.supabase_user_id FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
   const role=user?roleForUser(user):"";
   if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role==="ALL_FATHER"||String(user.id)==="__allfather__"||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  return json(await issuePair(env,user,clientType(body)));
+  const requestedClientType = clientType(body);
+  if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  // client_type is caller-controlled metadata, never a trustworthy basis for an
+  // authorization decision. The persisted mobile class policy is exposed to
+  // administrators but is not enforced until the request carries a
+  // server-verifiable client identity/attestation.
+  return json(await issuePair(env,user,requestedClientType));
 }
 async function authRefresh(request:Request,env:Env){
   const body=await request.json().catch(()=>null) as Json|null;
@@ -341,7 +347,7 @@ async function createUser(request:Request,env:Env,session:Session,targetRole:"OR
   const passwordHash=await hashPassword(password);
   const action=targetRole==="STAFF"?"staff.create":"admin.create";
   const create=env.DB.prepare("INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id,username,email,organizationId,passwordHash,isAdmin,1,targetRole,targetRole,parent,timestamp,timestamp);
+    .bind(id,username,email,organizationId,passwordHash,isAdmin,1,null,targetRole,parent,timestamp,timestamp);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
     .bind(session.organization_id,session.sub,action,uuid(),JSON.stringify({target:id,username,email,organization_id:organizationId}),timestamp);
   try{
@@ -529,8 +535,11 @@ async function commandRoute(request:Request,env:Env,session:Session){
       return json({error:"INVALID_HOLD_TARGET",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
     const holdTargetId=resourceIdFromReference(targetRef.target_id);
     if(!holdTargetId)return json({error:"INVALID_HOLD_TARGET",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-    const held=await env.DB.prepare("SELECT id FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=? LIMIT 1")
-      .bind(holdTargetId,session.organization_id,targetRef.target_type).first();
+    const held=targetRef.target_type==="file_asset"
+      ? await env.DB.prepare("SELECT content_hash AS id FROM file_assets WHERE content_hash=? AND organization_id=? LIMIT 1")
+          .bind(holdTargetId,session.organization_id).first()
+      : await env.DB.prepare("SELECT id FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=? LIMIT 1")
+          .bind(holdTargetId,session.organization_id,targetRef.target_type).first();
     if(!held)return json({error:"INVALID_HOLD_TARGET",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   }
   if(envelope.command_type==="CreatePolicy"){
@@ -598,20 +607,241 @@ async function commandRoute(request:Request,env:Env,session:Session){
     return json({success:false,operation_id:envelope.operation_id,events:[],error:{code:"VERSION_CONFLICT",category:"CONCURRENCY",retryability:"RETRYABLE",safe_details:{expected},correlation_id:String(envelope.correlation_id??envelope.operation_id)}},409);
   return json(result);
 }
-async function hierarchy(env:Env,session:Session){
-  if(session.role==="STAFF"){
-    const self=await env.DB.prepare("SELECT id,username,class,parent_user_id FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
-      .bind(session.sub,session.organization_id).first<Record<string,unknown>>();
-    if(!self)return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-    const parentId=typeof self.parent_user_id==="string"?self.parent_user_id:"";
-    const rows=parentId
-      ? await env.DB.prepare("SELECT id,username,class,parent_user_id FROM users WHERE organization_id=? AND is_active=1 AND id IN (?,?) ORDER BY username")
-          .bind(session.organization_id,session.sub,parentId).all<Record<string,unknown>>()
-      : {results:[self]};
-    return json({users:rows.results??[]});
+
+const MOBILE_ACCESS_CLASSES = ["top_level_manager", "senior_manager", "team_leader", "supervisor", "staff"] as const;
+type MobileAccessClass = (typeof MOBILE_ACCESS_CLASSES)[number];
+interface MobileAccessState {
+  allowed_classes: MobileAccessClass[];
+  version: number;
+  updated_at: number | null;
+  enforcement_status: "disabled_untrusted_client_type";
+}
+function normalizeMobileClasses(value: unknown): MobileAccessClass[] | null {
+  if (!Array.isArray(value) || value.length > MOBILE_ACCESS_CLASSES.length) return null;
+  const requested = value as unknown[];
+  if (requested.some((item) => typeof item !== "string" ||
+    !MOBILE_ACCESS_CLASSES.includes(item as MobileAccessClass)) ||
+    new Set(requested).size !== requested.length) return null;
+  const selected = new Set(requested as MobileAccessClass[]);
+  return MOBILE_ACCESS_CLASSES.filter((item) => selected.has(item));
+}
+function validClientType(body: Json | null): string | null {
+  if (!body || body.client_type === undefined) return "web";
+  if (typeof body.client_type !== "string" ||
+      !["mobile", "mobile_observer", "desktop", "admin", "web"].includes(body.client_type)) return null;
+  return body.client_type;
+}
+async function readMobileAccess(env: Env, organizationId: string): Promise<MobileAccessState | null> {
+  const row = await env.DB.prepare(
+    "SELECT organization_id,allowed_classes,version,updated_at FROM mobile_access_settings WHERE organization_id=? LIMIT 1"
+  ).bind(organizationId).first<Record<string, unknown>>();
+  if (!row) return { allowed_classes: [], version: 0, updated_at: null, enforcement_status: "disabled_untrusted_client_type" };
+  let raw: unknown;
+  try { raw = JSON.parse(String(row.allowed_classes)); } catch { return null; }
+  const allowed = normalizeMobileClasses(raw);
+  const version = Number(row.version);
+  const updatedAt = Number(row.updated_at);
+  if (!allowed || !Number.isSafeInteger(version) || version < 1 ||
+      !Number.isSafeInteger(updatedAt) || updatedAt < 0) return null;
+  return { allowed_classes: allowed, version, updated_at: updatedAt, enforcement_status: "disabled_untrusted_client_type" };
+}
+async function getMobileAccess(env: Env, session: Session) {
+  requireRole(session, "ALL_FATHER", "ORGANIZATION_ADMIN");
+  try {
+    const state = await readMobileAccess(env, session.organization_id);
+    if (!state) return json({ error: "MOBILE_ACCESS_CONFIG_INVALID", category: "INFRASTRUCTURE", retryability: "NON_RETRYABLE" }, 503);
+    return json(state);
+  } catch {
+    return json({ error: "MOBILE_ACCESS_STORAGE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
   }
-  const rows=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,class,role,parent_user_id FROM users WHERE organization_id=? ORDER BY username").bind(session.organization_id).all<Record<string,unknown>>();
-  return json({users:rows.results??[]});
+}
+async function putMobileAccess(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Array.isArray(body) || Object.keys(body).some((key) => !["allowed_classes", "expected_version"].includes(key))) {
+    return json({ error: "INVALID_MOBILE_ACCESS_CONFIG", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const allowed = normalizeMobileClasses(body.allowed_classes);
+  if (!allowed) return json({ error: "INVALID_MOBILE_ACCESS_CONFIG", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const suppliedVersion = body.expected_version;
+  if (suppliedVersion !== undefined && (!Number.isSafeInteger(suppliedVersion) || Number(suppliedVersion) < 0)) {
+    return json({ error: "INVALID_EXPECTED_VERSION", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  try {
+    const current = await readMobileAccess(env, session.organization_id);
+    if (!current) return json({ error: "MOBILE_ACCESS_CONFIG_INVALID", category: "INFRASTRUCTURE", retryability: "NON_RETRYABLE" }, 503);
+    const expectedVersion = suppliedVersion === undefined ? current.version : Number(suppliedVersion);
+    if (expectedVersion !== current.version) {
+      return json({ error: "VERSION_CONFLICT", category: "CONCURRENCY", retryability: "RETRYABLE", expected_version: current.version }, 409);
+    }
+    const operationId = uuid();
+    const timestamp = Date.now();
+    const nextVersion = current.version + 1;
+    const save = env.DB.prepare(
+      "INSERT INTO mobile_access_settings(organization_id,allowed_classes,version,updated_by,updated_at,last_operation_id) VALUES(?,?,1,?,?,?) " +
+      "ON CONFLICT(organization_id) DO UPDATE SET allowed_classes=excluded.allowed_classes,version=mobile_access_settings.version+1,updated_by=excluded.updated_by,updated_at=excluded.updated_at,last_operation_id=excluded.last_operation_id " +
+      "WHERE mobile_access_settings.version=?"
+    ).bind(session.organization_id, JSON.stringify(allowed), session.sub, timestamp, operationId, expectedVersion);
+    const audit = env.DB.prepare(
+      "INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) " +
+      "SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM mobile_access_settings WHERE organization_id=? AND last_operation_id=? AND version=?)"
+    ).bind(session.organization_id, session.sub, "mobile_access.update", operationId,
+      JSON.stringify({ version: nextVersion, allowed_classes: allowed }), timestamp,
+      session.organization_id, operationId, nextVersion);
+    const batch = await env.DB.batch([save, audit]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) {
+      const latest = await readMobileAccess(env, session.organization_id);
+      return json({ error: "VERSION_CONFLICT", category: "CONCURRENCY", retryability: "RETRYABLE",
+        expected_version: latest?.version ?? current.version }, 409);
+    }
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("MOBILE_ACCESS_AUDIT_FAILED");
+    const persisted = await readMobileAccess(env, session.organization_id);
+    if (!persisted || persisted.version !== nextVersion || JSON.stringify(persisted.allowed_classes) !== JSON.stringify(allowed)) {
+      return json({ error: "MOBILE_ACCESS_PERSISTENCE_UNVERIFIED", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+    }
+    return json(persisted);
+  } catch (error) {
+    if (error instanceof Error && error.message === "MOBILE_ACCESS_AUDIT_FAILED") {
+      return json({ error: "MOBILE_ACCESS_AUDIT_FAILED", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+    }
+    return json({ error: "MOBILE_ACCESS_STORAGE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function createAdminAggregate(
+  request: Request, env: Env, session: Session,
+  commandType: "CreatePolicy" | "ApplyLegalHold", targetType: "policy" | "legal_hold",
+  payload: Json, responseField: "policy_id" | "legal_hold_id", representationField: "policy" | "legal_hold"
+) {
+  const key = request.headers.get("idempotency-key");
+  if (key !== null && (!key.trim() || key.length > 128 || /[\r\n]/.test(key))) {
+    return json({ error: "INVALID_IDEMPOTENCY_KEY", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const operationId = key
+    ? "rest-" + (await sha256(session.organization_id + "\n" + session.sub + "\n" + new URL(request.url).pathname + "\n" + key))
+    : uuid();
+  if (key) {
+    const prior = await env.DB.prepare("SELECT result FROM idempotency WHERE operation_id=? LIMIT 1")
+      .bind(operationId).first<{ result: string }>();
+    if (prior) {
+      const priorResult = safeJson(prior.result) as Json;
+      const events = Array.isArray(priorResult.events) ? priorResult.events : [];
+      const event = events[0] as Json | undefined;
+      const actor = event?.actor && typeof event.actor === "object" ? event.actor as Json : {};
+      const sameRequest = event?.organization_id === session.organization_id &&
+        event?.aggregate_type === targetType && event?.event_type === commandType &&
+        actor.user_id === session.sub && JSON.stringify(event?.payload ?? {}) === JSON.stringify(payload);
+      if (!sameRequest) return json({ error: "IDEMPOTENCY_CONFLICT", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 409);
+      const priorEntity = priorResult.result && typeof priorResult.result === "object" ? priorResult.result as Json : {};
+      return json({
+        [responseField]: String(priorEntity.id ?? ""),
+        [representationField]: priorEntity.state ?? null,
+        version: Number(priorResult.new_version ?? 1),
+      }, 201);
+    }
+  }
+  const targetId = uuid();
+  const envelope = {
+    command_id: uuid(), operation_id: operationId, command_type: commandType,
+    target: { id: targetId, type: targetType, organization_id: session.organization_id },
+    expected_version: 0, expected_lifecycle_epoch: 0, expected_authority_epoch: 0, payload,
+  };
+  const response = await commandRoute(new Request(request.url, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(envelope),
+  }), env, session);
+  const result = await response.json().catch(() => ({})) as Json;
+  if (!response.ok) return json(result, response.status);
+  const entity = result.result && typeof result.result === "object" ? result.result as Json : {};
+  return json({
+    [responseField]: String(entity.id ?? targetId),
+    [representationField]: entity.state ?? null,
+    version: Number(result.new_version ?? 1),
+  }, 201);
+}
+async function postAdminPolicy(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Array.isArray(body) || Object.keys(body).some((key) => key !== "name") ||
+      typeof body.name !== "string" || !body.name.trim() || body.name.trim().length > 200) {
+    return json({ error: "INVALID_POLICY", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const payload: Json = { name: body.name.trim(), scope: { Organization: session.organization_id } };
+  return createAdminAggregate(request, env, session, "CreatePolicy", "policy", payload, "policy_id", "policy");
+}
+const HOLD_TARGET_TYPES = new Set(["task", "mission", "approval", "policy", "todo_list", "target_list", "staff_loan", "notification", "report"]);
+function looksLikeUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+async function postAdminLegalHold(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Array.isArray(body) ||
+      Object.keys(body).some((key) => !["target_id", "target_type", "reason"].includes(key)) ||
+      typeof body.target_id !== "string" || !looksLikeUuid(body.target_id) ||
+      typeof body.target_type !== "string" || !HOLD_TARGET_TYPES.has(body.target_type) ||
+      typeof body.reason !== "string" || !body.reason.trim() || body.reason.trim().length > 2000) {
+    return json({ error: "INVALID_LEGAL_HOLD", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const targetId = body.target_id.toLowerCase();
+  let target: Record<string, unknown> | null = null;
+  try {
+    target = await env.DB.prepare("SELECT id FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type=? LIMIT 1")
+      .bind(targetId, session.organization_id, body.target_type).first<Record<string, unknown>>();
+  } catch {
+    return json({ error: "RESOURCE_LOOKUP_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+  if (!target) return json({ error: "LEGAL_HOLD_TARGET_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  const payload: Json = {
+    target: { target_id: targetId, target_type: body.target_type },
+    reason: body.reason.trim(),
+  };
+  return createAdminAggregate(request, env, session, "ApplyLegalHold", "legal_hold", payload, "legal_hold_id", "legal_hold");
+}
+async function assignUserClass(request: Request, env: Env, session: Session, userId: string) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.prototype.hasOwnProperty.call(body, "class")) {
+    return json({ error: "INVALID_USER_CLASS", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const value = body.class;
+  if (value !== null && (typeof value !== "string" || !MOBILE_ACCESS_CLASSES.includes(value as MobileAccessClass))) {
+    return json({ error: "INVALID_USER_CLASS", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const timestamp = Date.now();
+  const operationId = uuid();
+  try {
+    const update = env.DB.prepare("UPDATE users SET class=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1")
+      .bind(value, timestamp, userId, session.organization_id);
+    const audit = env.DB.prepare(
+      "INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1"
+    ).bind(session.organization_id, session.sub, "user.class.update", operationId,
+      JSON.stringify({ target: userId, class: value }), timestamp);
+    const batch = await env.DB.batch([update, audit]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_CLASS_AUDIT_FAILED");
+    return json({ success: true, class: value });
+  } catch {
+    return json({ error: "USER_CLASS_STORAGE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+
+function canonicalHierarchy(rows: Record<string, unknown>[]) {
+  return rows.map((row) => ({
+    id: String(row.id),
+    parent_user_id: typeof row.parent_user_id === "string" && row.parent_user_id.length > 0 ? row.parent_user_id : null,
+    is_admin: row.is_admin === true || row.is_admin === 1 || row.is_admin === "1",
+  }));
+}
+async function hierarchy(env:Env,session:Session){
+  // The canonical All-Father principal uses a non-UUID sentinel id, while the
+  // Rust/Android hierarchy parser requires UUID ids. It is not an org member
+  // in the reporting tree, so represent its hierarchy as the valid empty array.
+  if(session.role==="ALL_FATHER")return json([]);
+  // Match the existing Rust API contract: every authenticated org member can
+  // read the minimal active-org reporting tree. Direct reports must be present
+  // for the client-side manager-authority cache to verify Task/Mission owners.
+  const rows=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE organization_id=? AND is_active=1 ORDER BY username")
+    .bind(session.organization_id).all<Record<string,unknown>>();
+  return json(canonicalHierarchy(rows.results??[]));
 }
 async function profiles(env:Env,session:Session,ownerId?:string){
   if(session.role==="STAFF"&&ownerId&&ownerId!==session.sub)return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
@@ -642,7 +872,7 @@ async function signedS3Get(endpoint:string,bucket:string,key:string,access:strin
 
 async function dispatch(request:Request,env:Env):Promise<Response>{
   const url=new URL(request.url);const origin=corsOrigin(request,env);
-  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
+  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
   if(url.pathname==="/health")return json({status:"ok",service:"onyx-cloudflare-worker",runtime:"cloudflare-workers-free"},200,origin);
   if(url.pathname==="/ready"){
     try{
@@ -662,6 +892,11 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
+    if(url.pathname==="/api/admin/mobile-access"&&request.method==="GET")return await getMobileAccess(env,session);
+    if(url.pathname==="/api/admin/mobile-access"&&request.method==="PUT")return await putMobileAccess(request,env,session);
+    if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);
+    if(url.pathname==="/api/admin/legal-holds"&&request.method==="POST")return await postAdminLegalHold(request,env,session);
+    if(/^\/api\/admin\/users\/[^/]+\/class$/.test(url.pathname)&&request.method==="POST")return await assignUserClass(request,env,session,url.pathname.split("/").at(-2)!);
     if(url.pathname==="/api/profiles"&&request.method==="GET")return await profiles(env,session);
     if(url.pathname.startsWith("/api/profiles/")&&request.method==="GET")return await profiles(env,session,url.pathname.split("/").pop());
     if(url.pathname==="/api/push/subscriptions"&&request.method==="POST")return await pushSubscribe(request,env,session);

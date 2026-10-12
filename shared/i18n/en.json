@@ -527,6 +527,8 @@
   "settings.localDb": "Local-first database",
   "settings.localhostAddress": "http://127.0.0.1:3000",
   "settings.lookupPolicyById": "Look up by policy id (UUID)",
+  "settings.mobileAccessEnforcementDisabled": "Configuration is saved, but mobile-login enforcement is disabled. The client-supplied client_type can be spoofed and is not a trusted authorization signal. Do not rely on this setting to restrict sign-in until server-verifiable client identity or attestation is implemented.",
+  "settings.mobileAccessPolicyDescription": "Configure the user classes intended for mobile access. Saving persists the policy; its enforcement status is shown separately below.",
   "settings.organizationPolicyDescription": "Organization policy: feature availability, limits, retention, and legal holds.",
   "settings.p2pSync": "Peer-to-peer sync",
   "settings.publishDraft": "Publish draft",
