@@ -606,7 +606,10 @@ describe("Worker authorization and session security", () => {
 
     const initial = await worker.fetch(request("GET"), makeEnv(adminDb));
     expect(initial.status).toBe(200);
-    expect(await initial.json()).toEqual({ allowed_classes: [], version: 0, updated_at: null });
+    expect(await initial.json()).toEqual({
+      allowed_classes: [], version: 0, updated_at: null,
+      enforcement_status: "disabled_untrusted_client_type",
+    });
 
     const invalid = await worker.fetch(request("PUT", { allowed_classes: ["unknown"], expected_version: 0 }), makeEnv(adminDb));
     expect(invalid.status).toBe(400);
@@ -779,7 +782,7 @@ describe("Worker authorization and session security", () => {
     expect(db.writes.some((write) => write.sql.startsWith("INSERT OR IGNORE INTO aggregates"))).toBe(true);
   });
 
-  it("uses the persisted mobile-access configuration to deny and allow ordinary mobile login", async () => {
+  it("does not trust client_type for authorization or let it override the persisted mobile policy", async () => {
     const db = makeDb();
     const password = "secure-test-password";
     const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -787,22 +790,35 @@ describe("Worker authorization and session security", () => {
     db.users.get("staff-1")!.password_hash = String(await argon2id({
       password, salt, parallelism: 1, iterations: 3, memorySize: 65536, hashLength: 32, outputType: "encoded",
     }));
-    const login = () => worker.fetch(new Request("https://worker.test/api/auth/login", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ username: "staff", password, client_type: "mobile" }),
-    }), makeEnv(db));
-
-    const restricted = await login();
-    expect(restricted.status).toBe(403);
-    expect((await restricted.json() as Record<string, unknown>).error).toBe("MOBILE_ACCESS_RESTRICTED");
-
     db.mobileSettings.set(ORG, {
-      organization_id: ORG, allowed_classes: JSON.stringify(["staff"]), version: 1,
+      organization_id: ORG, allowed_classes: JSON.stringify([]), version: 1,
       updated_by: "admin-1", updated_at: Date.now(), last_operation_id: "test-operation",
     });
-    const allowed = await login();
-    expect(allowed.status).toBe(200);
-    expect((await allowed.json() as { user: { role: string } }).user.role).toBe("STAFF");
+    const login = (client_type: string) => worker.fetch(new Request("https://worker.test/api/auth/login", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "staff", password, client_type }),
+    }), makeEnv(db));
+
+    const mobile = await login("mobile");
+    const desktop = await login("desktop");
+    expect(mobile.status).toBe(200);
+    expect(desktop.status).toBe(200);
+    const mobileBody = await mobile.json() as { access_token: string; user: { role: string } };
+    const desktopBody = await desktop.json() as { access_token: string; user: { role: string } };
+    expect(mobileBody.user.role).toBe("STAFF");
+    expect(desktopBody.user.role).toBe("STAFF");
+
+    const denied = await worker.fetch(new Request("https://worker.test/api/admin/policies", {
+      method: "POST", headers: {
+        authorization: "Bearer " + mobileBody.access_token,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "A Staff caller must not create this" }),
+    }), makeEnv(db));
+    expect(denied.status).toBe(403);
+    expect(db.aggregates.size).toBe(0);
+    expect(db.domainEvents).toHaveLength(0);
+    expect(db.auditRows).toHaveLength(0);
   });
 
   it("class assignment is tenant-scoped and audited because mobile access grants are class-based", async () => {

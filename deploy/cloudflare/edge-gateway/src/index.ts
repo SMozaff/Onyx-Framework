@@ -196,18 +196,10 @@ async function authLogin(request:Request,env:Env){
   if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role==="ALL_FATHER"||String(user.id)==="__allfather__"||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const requestedClientType = clientType(body);
   if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
-  if (requestedClientType === "mobile" && role !== "ORGANIZATION_ADMIN" && role !== "ALL_FATHER") {
-    try {
-      const config = await readMobileAccess(env, String(user.organization_id));
-      if (!config) return json({error:"MOBILE_ACCESS_CONFIG_INVALID",category:"INFRASTRUCTURE",retryability:"NON_RETRYABLE"},503);
-      const userClass = typeof user.class === "string" ? user.class : "";
-      if (!userClass || !config.allowed_classes.includes(userClass as MobileAccessClass)) {
-        return json({error:"MOBILE_ACCESS_RESTRICTED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-      }
-    } catch {
-      return json({error:"MOBILE_ACCESS_STORAGE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
-    }
-  }
+  // client_type is caller-controlled metadata, never a trustworthy basis for an
+  // authorization decision. The persisted mobile class policy is exposed to
+  // administrators but is not enforced until the request carries a
+  // server-verifiable client identity/attestation.
   return json(await issuePair(env,user,requestedClientType));
 }
 async function authRefresh(request:Request,env:Env){
@@ -622,6 +614,7 @@ interface MobileAccessState {
   allowed_classes: MobileAccessClass[];
   version: number;
   updated_at: number | null;
+  enforcement_status: "disabled_untrusted_client_type";
 }
 function normalizeMobileClasses(value: unknown): MobileAccessClass[] | null {
   if (!Array.isArray(value) || value.length > MOBILE_ACCESS_CLASSES.length) return null;
@@ -642,7 +635,7 @@ async function readMobileAccess(env: Env, organizationId: string): Promise<Mobil
   const row = await env.DB.prepare(
     "SELECT organization_id,allowed_classes,version,updated_at FROM mobile_access_settings WHERE organization_id=? LIMIT 1"
   ).bind(organizationId).first<Record<string, unknown>>();
-  if (!row) return { allowed_classes: [], version: 0, updated_at: null };
+  if (!row) return { allowed_classes: [], version: 0, updated_at: null, enforcement_status: "disabled_untrusted_client_type" };
   let raw: unknown;
   try { raw = JSON.parse(String(row.allowed_classes)); } catch { return null; }
   const allowed = normalizeMobileClasses(raw);
@@ -650,7 +643,7 @@ async function readMobileAccess(env: Env, organizationId: string): Promise<Mobil
   const updatedAt = Number(row.updated_at);
   if (!allowed || !Number.isSafeInteger(version) || version < 1 ||
       !Number.isSafeInteger(updatedAt) || updatedAt < 0) return null;
-  return { allowed_classes: allowed, version, updated_at: updatedAt };
+  return { allowed_classes: allowed, version, updated_at: updatedAt, enforcement_status: "disabled_untrusted_client_type" };
 }
 async function getMobileAccess(env: Env, session: Session) {
   requireRole(session, "ALL_FATHER", "ORGANIZATION_ADMIN");

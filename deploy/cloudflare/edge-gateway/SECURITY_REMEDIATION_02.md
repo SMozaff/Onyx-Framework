@@ -10,7 +10,7 @@ All protected routes require a verified ONYX access token. Role, active-user sta
 
 | Method/path | Role | Request | Success |
 |---|---|---|---|
-| `GET /api/admin/mobile-access` | `ORGANIZATION_ADMIN` or `ALL_FATHER`, scoped only to the caller's organization | No body | `200 {allowed_classes: string[], version: number, updated_at: number|null}` |
+| `GET /api/admin/mobile-access` | `ORGANIZATION_ADMIN` or `ALL_FATHER`, scoped only to the caller's organization | No body | `200 {allowed_classes: string[], version: number, updated_at: number|null, enforcement_status: "disabled_untrusted_client_type"}` |
 | `PUT /api/admin/mobile-access` | `ORGANIZATION_ADMIN`, own organization | `{allowed_classes: string[], expected_version?: number}` | `200` with the canonical saved representation |
 | `POST /api/admin/policies` | `ORGANIZATION_ADMIN` | `{name: string}` | `201 {policy_id, policy, version}` |
 | `POST /api/admin/legal-holds` | `ORGANIZATION_ADMIN` | `{target_id: UUID, target_type: supported resource type, reason: string}` | `201 {legal_hold_id, legal_hold, version}` |

@@ -106,16 +106,23 @@ function MobileAccessPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [version, setVersion] = useState(0);
+  const [enforcementStatus, setEnforcementStatus] = useState("unknown");
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  function applyServerState(data: { allowed_classes?: unknown; version?: unknown }) {
+  function applyServerState(data: {
+    allowed_classes?: unknown;
+    version?: unknown;
+    enforcement_status?: unknown;
+  }) {
     if (!Array.isArray(data.allowed_classes) ||
         !data.allowed_classes.every((value) => typeof value === "string") ||
-        typeof data.version !== "number" || !Number.isSafeInteger(data.version) || data.version < 0) {
+        typeof data.version !== "number" || !Number.isSafeInteger(data.version) || data.version < 0 ||
+        !["disabled_untrusted_client_type", "enabled_attested_client"].includes(String(data.enforcement_status))) {
       throw new Error("The server returned an invalid mobile-access configuration.");
     }
     setAllowed(new Set(data.allowed_classes as string[]));
     setVersion(data.version);
+    setEnforcementStatus(String(data.enforcement_status));
   }
 
   useEffect(() => {
@@ -173,8 +180,13 @@ function MobileAccessPanel() {
     <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
       <h2 className="text-sm font-semibold text-onyx-text">{t("common.mobileAccess")}</h2>
       <p className="mt-1 text-sm text-onyx-text-dim">
-        Only checked user classes may sign in through the mobile client flow. This setting uses the client's declared type and is not device attestation. Administrators retain mobile access regardless of this list.
+        Configure the classes intended for mobile access. Saving stores the policy in ONYX; enforcement status is shown separately below.
       </p>
+      {enforcementStatus === "disabled_untrusted_client_type" && (
+        <p role="alert" className="mt-3 rounded-md border border-onyx-border p-3 text-sm text-onyx-status-blocked">
+          Configuration is persisted, but mobile-login enforcement is currently disabled. The client-supplied client_type can be spoofed and is not used as an authorization signal. Do not rely on these selections to restrict access until server-verifiable client identity or attestation is implemented.
+        </p>
+      )}
       {loading && <p className="mt-3 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
       {error && <p className="mt-3 text-sm text-onyx-status-blocked">{error}</p>}
       {!loading && (
