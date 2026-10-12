@@ -718,6 +718,25 @@ describe("Worker authorization and session security", () => {
     expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "policy")).toHaveLength(1);
   });
 
+  it("returns an empty hierarchy array for the sentinel-ID All-Father principal", async () => {
+    const db = new SecurityDb();
+    db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
+    db.users.set("__allfather__", {
+      id: "__allfather__", username: "allfather", email: "allfather@example.test",
+      organization_id: "__allfather__", is_admin: 1, is_active: 1, class: "ALL_FATHER",
+      role: "ALL_FATHER", supabase_user_id: "subject-current",
+    });
+    const token = await signToken(sessionClaims({
+      sub: "__allfather__", username: "allfather", organization_id: "__allfather__",
+      is_admin: true, role: "ALL_FATHER", identity_sub: "subject-current",
+    }));
+    const response = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
+      headers: { authorization: "Bearer " + token },
+    }), makeEnv(db));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([]);
+  });
+
   it("persists policy creation through the domain command path and returns canonical saved state", async () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     const token = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));

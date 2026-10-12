@@ -17,6 +17,8 @@ All protected routes require a verified ONYX access token. Role, active-user sta
 | `POST /api/admin/users/:id/class` | `ORGANIZATION_ADMIN`, same organization | `{class: UserClass|string|null}` | `200 {success: true, class}` |
 | `GET /api/users/hierarchy` | Any authenticated role; scoped to caller's organization and Staff's authority view | No body | JSON array of `{id, parent_user_id, is_admin}`, sorted by `id`; empty is `[]` |
 
+The special All-Father principal returns an empty hierarchy array: its reserved `__allfather__` ID is not a UUID accepted by Rust's hierarchy cache, and it is not part of a regular organization reporting tree.
+
 The existing Rust mobile-access contract establishes the five values: `top_level_manager`, `senior_manager`, `team_leader`, `supervisor`, and `staff`. Duplicate/unknown values are rejected. A mobile-access PUT is a **replace-all** operation; a missing configuration reads as the intended restrictive default of an empty list, version `0`, with no update timestamp.
 
 ## Persistence, concurrency, and auditing

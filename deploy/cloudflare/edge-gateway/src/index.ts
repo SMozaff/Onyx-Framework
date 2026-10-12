@@ -837,6 +837,10 @@ function canonicalHierarchy(rows: Record<string, unknown>[]) {
   }));
 }
 async function hierarchy(env:Env,session:Session){
+  // The canonical All-Father principal uses a non-UUID sentinel id, while the
+  // Rust/Android hierarchy parser requires UUID ids. It is not an org member
+  // in the reporting tree, so represent its hierarchy as the valid empty array.
+  if(session.role==="ALL_FATHER")return json([]);
   if(session.role==="STAFF"){
     const self=await env.DB.prepare("SELECT id,parent_user_id,is_admin FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
       .bind(session.sub,session.organization_id).first<Record<string,unknown>>();
