@@ -1,0 +1,49 @@
+# Local development configuration for the ONYX Cloudflare Worker.
+#
+# This is the config `npm run dev`, `npm run d1:local`, and `npm run check` use.
+# It carries the D1 binding and the non-secret public [vars] the Worker reads so
+# a checked-out repository can boot the Worker and apply migrations with no extra
+# setup:
+#
+#   npm install
+#   npm run d1:local   # create + apply migrations to the local D1 database
+#   npm run dev        # wrangler dev against the local D1
+#
+# Production is never deployed from this file. The deploy workflow
+# (.github/workflows/deploy-cloudflare-edge.yml) materializes wrangler.deploy.toml
+# with the real D1 database_id and the deployment [vars], then sets secrets with
+# `wrangler secret put`.
+#
+# Secrets (ONYX_JWT_SECRET, SUPABASE_SECRET_KEY, HF_S3_ACCESS_KEY_ID,
+# HF_S3_SECRET_ACCESS_KEY) must NOT appear here. Put them in an untracked
+# .dev.vars file for local development - see .dev.vars.example.
+
+name = "onyx-framework-local"
+main = "src/index.ts"
+compatibility_date = "2026-10-09"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "onyx-free-db"
+# Fixed local-only placeholder. Miniflare keys its local D1 state by this id, and
+# it is deliberately NOT the production database id, so no command run against
+# this config can accidentally target the remote/production database.
+database_id = "00000000-0000-0000-0000-0000000000d3"
+migrations_dir = "migrations"
+
+[vars]
+# Public, non-secret configuration. Keep in sync with the deploy workflow's
+# materialized [vars].
+ONYX_ALLFATHER_EMAIL = "so.muzaff@gmail.com"
+SUPABASE_URL = "https://uhpqjhbciimklheohvfr.supabase.co"
+SUPABASE_JWKS_URL = "https://uhpqjhbciimklheohvfr.supabase.co/auth/v1/.well-known/jwks.json"
+HF_S3_ENDPOINT = "https://s3.hf.co/Arronthemalkavian"
+HF_S3_BUCKET = "onyx"
+
+# Browser origins allowed to call the local Worker: the web-ui (5173), the
+# mobile-pwa (5174) and the admin-shell (5174) Vite dev servers, plus Tauri.
+ONYX_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,tauri://localhost,http://tauri.localhost"

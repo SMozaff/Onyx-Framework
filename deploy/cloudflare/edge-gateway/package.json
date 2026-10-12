@@ -3,12 +3,12 @@
   "name": "@onyx/cloudflare-edge-gateway",
   "version": "2.1.0",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "check": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy --config wrangler.deploy.toml",
+    "dev": "wrangler dev --config wrangler.dev.toml",
+    "check": "wrangler deploy --dry-run --config wrangler.dev.toml",
     "d1:create": "wrangler d1 create onyx-free-db",
-    "d1:local": "wrangler d1 migrations apply onyx-free-db --local",
-    "d1:remote": "wrangler d1 migrations apply onyx-free-db --remote",
+    "d1:local": "wrangler d1 migrations apply onyx-free-db --local --config wrangler.dev.toml",
+    "d1:remote": "wrangler d1 migrations apply onyx-free-db --remote --config wrangler.deploy.toml",
     "test": "vitest run",
     "provision:allfather": "node scripts/provision-allfather.mjs"
   },

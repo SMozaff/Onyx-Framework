@@ -49,3 +49,19 @@ jobs:
           EOF
           npx wrangler d1 migrations apply onyx-free-db --local --config wrangler.test.toml
           npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --json --command "SELECT name FROM d1_migrations" | jq -e 'type == "array" and (.[0].results | length) >= 5'
+      - name: Verify the mobile-access migration landed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `0005_admin_settings.sql` must be recorded, and the table plus index the
+          # `/ready` schema contract requires must exist. A missing migration leaves
+          # the deployed Worker permanently degraded (see SECURITY_REMEDIATION_02.md).
+          applied="$(npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --json \
+            --command "SELECT name FROM d1_migrations ORDER BY name")"
+          printf '%s' "$applied" | jq -e '[.[0].results[].name] | index("0005_admin_settings.sql") != null'
+          columns="$(npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --json \
+            --command "SELECT name FROM pragma_table_info('mobile_access_settings')")"
+          printf '%s' "$columns" | jq -e '[.[0].results[].name] | sort == ["allowed_classes","last_operation_id","organization_id","updated_at","updated_by","version"]'
+          indexes="$(npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --json \
+            --command "SELECT name FROM pragma_index_list('mobile_access_settings')")"
+          printf '%s' "$indexes" | jq -e '[.[0].results[].name] | index("idx_mobile_access_settings_updated_at") != null'
