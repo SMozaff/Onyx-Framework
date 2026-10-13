@@ -1386,11 +1386,13 @@ async function websocketEvents(request: Request, env: Env): Promise<Response> {
     headers.set("authorization", "Bearer " + token);
     const sessionRequest = new Request(request, { headers });
     const session = await requireSession(sessionRequest, env);
-    // Preserve the Worker's existing event-stream authority boundary until
-    // event payloads have resource-level Staff filtering.
-    requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");
+    // Staff subscriptions are permitted only because EventHub applies
+    // resource-level ownership filtering before fan-out. The role header is
+    // generated here from the verified session, never from client input.
+    requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN","STAFF");
     headers.set("x-onyx-authenticated-org", session.organization_id);
     headers.set("x-onyx-authenticated-user", session.sub);
+    headers.set("x-onyx-authenticated-role", session.role);
     const hubId = env.EVENTS_HUB.idFromName(session.organization_id);
     return await env.EVENTS_HUB.get(hubId).fetch(new Request(request, { headers }));
   } catch (error) {
