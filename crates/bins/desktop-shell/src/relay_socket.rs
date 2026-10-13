@@ -99,7 +99,11 @@ async fn mint_relay_ticket(
             .json::<serde_json::Value>()
             .await
             .ok()
-            .and_then(|body| body.get("route").and_then(serde_json::Value::as_str).map(str::to_string))
+            .and_then(|body| {
+                body.get("route")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| "/api/relay-ticket".to_string());
         return Err(TransportError::Platform(format!(
             "relay feature unavailable on this API server (501 ROUTE_NOT_MIGRATED: {route})"
