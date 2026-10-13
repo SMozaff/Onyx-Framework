@@ -185,23 +185,16 @@
     "/api/events": {
       "get": {
         "operationId": "subscribeEvents",
-        "description": "WebSocket upgrade endpoint. Connect to ws(s)://host/api/events with the Sec-WebSocket-Protocol header containing `onyx-bearer` and the access token as the second protocol, then send the EventSubscription message.",
-        "parameters": [
-          {
-            "name": "token",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "description": "WebSocket upgrade endpoint. Connect to ws(s)://host/api/events with Sec-WebSocket-Protocol containing exactly `onyx-bearer` and the access token as the second protocol. The token must not be sent in a query parameter.",
         "responses": {
           "101": {
             "description": "Switching Protocols"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
