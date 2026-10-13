@@ -36,6 +36,8 @@ services:
         sync: false
       - key: SUPABASE_PUBLISHABLE_KEY
         sync: false
+      - key: ONYX_ALLFATHER_SUPABASE_USER_ID
+        sync: false
       - key: ONYX_BLOB_STORE_BACKEND
         value: huggingface
       - key: ONYX_BLOB_STORE_S3_ENDPOINT
