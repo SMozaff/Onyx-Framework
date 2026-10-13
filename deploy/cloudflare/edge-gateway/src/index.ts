@@ -798,6 +798,17 @@ async function postAdminLegalHold(request: Request, env: Env, session: Session) 
   };
   return createAdminAggregate(request, env, session, "ApplyLegalHold", "legal_hold", payload, "legal_hold_id", "legal_hold");
 }
+async function listUsers(env: Env, session: Session) {
+  // Minimal active identity picker, always scoped to the authenticated tenant.
+  const rows = await env.DB.prepare(
+    "SELECT id,username FROM users WHERE organization_id=? AND is_active=1 ORDER BY username LIMIT 500"
+  ).bind(session.organization_id).all<Record<string, unknown>>();
+  return json((rows.results ?? []).map((row) => ({
+    id: String(row.id),
+    username: String(row.username),
+  })));
+}
+
 async function listAdminUsers(env: Env, session: Session) {
   // The organization Users screen is for organization administrators only.
   // All-Father manages organizations and their Admins through dedicated routes;
@@ -964,8 +975,10 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     const session=await requireSession(request,env);
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
+    if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
+    if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await deactivateUser(request,env,session,url.pathname.split("/").at(-2)!);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="GET")return await getMobileAccess(env,session);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="PUT")return await putMobileAccess(request,env,session);
     if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);
@@ -981,7 +994,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/allfather/admins"&&request.method==="POST")return await createUser(request,env,session,"ORGANIZATION_ADMIN");
     if(url.pathname==="/api/admin/staff"&&request.method==="POST")return await createUser(request,env,session,"STAFF");
     if(url.pathname.startsWith("/api/admin/users/")&&request.method==="DELETE")return await deactivateUser(request,env,session,url.pathname.split("/").pop()!);
-    return json({error:"ROUTE_NOT_MIGRATED",route:url.pathname,message:"The route exists in the Axum reference service but has not yet been ported with equivalent Cloudflare semantics."},501,origin);
+    return json({error:"ROUTE_NOT_MIGRATED",route:url.pathname,method:request.method,message:"This feature is not available on the Cloudflare Worker yet. The equivalent Axum route exists but has not been ported with equivalent authorization and persistence semantics.",category:"FEATURE_UNAVAILABLE",retryability:"NON_RETRYABLE",correlation_id:uuid()},501,origin);
   }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);if(message==="FORBIDDEN_ROLE")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403,origin);if(message.startsWith("INVALID_")||message==="PASSWORD_TOO_SHORT"||message==="ORGANIZATION_NOT_FOUND")return json({error:message,category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);console.error(error);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
 }
 /**
