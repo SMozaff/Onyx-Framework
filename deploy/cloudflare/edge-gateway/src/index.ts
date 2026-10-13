@@ -1,4 +1,4 @@
-export { EventHub } from "./event-hub";
+export { EventHub, RelayHub } from "./event-hub";
 import { argon2id, argon2Verify } from "hash-wasm";
 import { getSupabaseUser, verifySupabaseJwt } from "./supabase";
 import { missingAuthSchema } from "./schema-contract";
