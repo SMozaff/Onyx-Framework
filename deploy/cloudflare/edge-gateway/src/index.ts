@@ -1349,10 +1349,47 @@ async function pushSubscribe(request:Request,env:Env,session:Session){
 }
 async function pushDelete(env:Env,session:Session,id:string){await env.DB.prepare("DELETE FROM push_subscriptions WHERE id=? AND user_id=? AND organization_id=?").bind(id,session.sub,session.organization_id).run();return json({success:true});}
 async function fileDownload(env:Env,session:Session,hash:string){
-  // The current file_assets schema has tenant scope but no per-user owner or
-  // ACL columns. Until ACL parity exists, Staff file downloads fail closed.
-  requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");
-  const asset=await env.DB.prepare("SELECT blob_key,content_type FROM file_assets WHERE content_hash=? AND organization_id=? LIMIT 1").bind(hash,session.organization_id).first<{blob_key:string;content_type:string|null}>();if(!asset)return json({error:"FILE_NOT_FOUND"},404);const endpoint=env.HF_S3_ENDPOINT,bucket=env.HF_S3_BUCKET,access=env.HF_S3_ACCESS_KEY_ID,secret=env.HF_S3_SECRET_ACCESS_KEY;if(!endpoint||!bucket||!access||!secret)return json({error:"BLOB_STORE_NOT_CONFIGURED"},503);const response=await signedS3Get(endpoint,bucket,asset.blob_key,access,secret);if(!response.ok)return json({error:"BLOB_STORE_UNAVAILABLE"},502);const headers=new Headers();headers.set("cache-control","private, max-age=60");if(asset.content_type)headers.set("content-type",asset.content_type);return new Response(response.body,{status:200,headers});}
+  requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN","STAFF");
+  const asset=await env.DB.prepare("SELECT blob_key,content_type FROM file_assets WHERE content_hash=? AND organization_id=? LIMIT 1").bind(hash,session.organization_id).first<{blob_key:string;content_type:string|null}>();if(!asset)return json({error:"FILE_NOT_FOUND"},404);
+  if(session.role==="STAFF"){
+    const grant=await env.DB.prepare("SELECT 1 AS allowed FROM file_asset_acl WHERE content_hash=? AND user_id=? AND organization_id=? LIMIT 1").bind(hash,session.sub,session.organization_id).first();
+    if(!grant)return json({error:"FILE_ACCESS_DENIED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  }
+  const endpoint=env.HF_S3_ENDPOINT,bucket=env.HF_S3_BUCKET,access=env.HF_S3_ACCESS_KEY_ID,secret=env.HF_S3_SECRET_ACCESS_KEY;if(!endpoint||!bucket||!access||!secret)return json({error:"BLOB_STORE_NOT_CONFIGURED"},503);const response=await signedS3Get(endpoint,bucket,asset.blob_key,access,secret);if(!response.ok)return json({error:"BLOB_STORE_UNAVAILABLE"},502);const headers=new Headers();headers.set("cache-control","private, max-age=60");if(asset.content_type)headers.set("content-type",asset.content_type);return new Response(response.body,{status:200,headers});}
+
+async function grantFileAccess(request:Request,env:Env,session:Session,hash:string){
+  requireRole(session,"ORGANIZATION_ADMIN");
+  const body=await request.json().catch(()=>null) as Json|null;
+  if(!body||Array.isArray(body)||Object.keys(body).length!==1||typeof body.user_id!=="string"||!body.user_id.trim())
+    return json({error:"INVALID_FILE_ACL",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const asset=await env.DB.prepare("SELECT content_hash FROM file_assets WHERE content_hash=? AND organization_id=? LIMIT 1").bind(hash,session.organization_id).first();
+  if(!asset)return json({error:"FILE_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const userId=body.user_id.trim();
+  const user=await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND role='STAFF' LIMIT 1").bind(userId,session.organization_id).first();
+  if(!user)return json({error:"STAFF_USER_NOT_FOUND",category:"AUTHORITY",retryability:"NON_RETRYABLE"},404);
+  const timestamp=Date.now(),operationId=uuid();
+  try{
+    const results=await env.DB.batch([
+      env.DB.prepare("INSERT INTO file_asset_acl(content_hash,organization_id,user_id,granted_by,created_at) VALUES(?,?,?,?,?) ON CONFLICT(content_hash,user_id) DO UPDATE SET organization_id=excluded.organization_id,granted_by=excluded.granted_by,created_at=excluded.created_at").bind(hash,session.organization_id,userId,session.sub,timestamp),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id,session.sub,"file.acl.grant",operationId,JSON.stringify({content_hash:hash,user_id:userId}),timestamp),
+    ]);
+    if(Number(results[0]?.meta?.changes??0)!==1)throw new Error("FILE_ACL_WRITE_FAILED");
+    return json({success:true,content_hash:hash,user_id:userId});
+  }catch{return json({error:"FILE_ACL_STORAGE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);}
+}
+async function revokeFileAccess(env:Env,session:Session,hash:string,userId:string){
+  requireRole(session,"ORGANIZATION_ADMIN");
+  const timestamp=Date.now(),operationId=uuid();
+  try{
+    const results=await env.DB.batch([
+      env.DB.prepare("DELETE FROM file_asset_acl WHERE content_hash=? AND user_id=? AND organization_id=?").bind(hash,userId,session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id,session.sub,"file.acl.revoke",operationId,JSON.stringify({content_hash:hash,user_id:userId}),timestamp),
+    ]);
+    if(Number(results[0]?.meta?.changes??0)!==1)return json({error:"FILE_ACL_GRANT_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+    if(Number(results[1]?.meta?.changes??0)!==1)throw new Error("FILE_ACL_AUDIT_FAILED");
+    return json({success:true,content_hash:hash,user_id:userId});
+  }catch{return json({error:"FILE_ACL_STORAGE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);}
+}
 async function hmacBytes(keyBytes:Uint8Array,value:string):Promise<Uint8Array>{const key=await crypto.subtle.importKey("raw",keyBytes,{name:"HMAC",hash:"SHA-256"},false,["sign"]);return new Uint8Array(await crypto.subtle.sign("HMAC",key,new TextEncoder().encode(value)));}
 async function signedS3Get(endpoint:string,bucket:string,key:string,access:string,secret:string){const base=endpoint.replace(/\/$/,"");const path=`/${bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;const url=`${base}${path}`;const host=new URL(base).host;const bodyHash=await sha256("");const date=new Date();const amzDate=date.toISOString().replace(/[-:]/g,"").replace(/\.\d{3}Z$/,"");const short=amzDate.slice(0,8);const canonicalHeaders=`host:${host}\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${amzDate}\n`;const signedHeaders="host;x-amz-content-sha256;x-amz-date";const canonicalRequest=`GET\n${path}\n\n${canonicalHeaders}\n${signedHeaders}\n${bodyHash}`;const scope=`${short}/us-east-1/s3/aws4_request`;const stringToSign=`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${await sha256(canonicalRequest)}`;const kDate=await hmacBytes(new TextEncoder().encode(`AWS4${secret}`),short);const kRegion=await hmacBytes(kDate,"us-east-1");const kService=await hmacBytes(kRegion,"s3");const signingKey=await hmacBytes(kService,"aws4_request");const signature=Array.from(await hmacBytes(signingKey,stringToSign),(b)=>b.toString(16).padStart(2,"0")).join("");return fetch(url,{headers:{Host:host,"x-amz-content-sha256":bodyHash,"x-amz-date":amzDate,Authorization:`AWS4-HMAC-SHA256 Credential=${access}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`}});}
 
@@ -1453,6 +1490,9 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/admin/profiles/export"&&request.method==="GET")return await exportProfiles(request,env,session);
     if(url.pathname==="/api/push/subscriptions"&&request.method==="POST")return await pushSubscribe(request,env,session);
     if(url.pathname.startsWith("/api/push/subscriptions/")&&request.method==="DELETE")return await pushDelete(env,session,url.pathname.split("/").pop()!);
+    const fileAclMatch=url.pathname.match(/^\/api\/admin\/files\/([^/]+)\/acl(?:\/([^/]+))?$/);
+    if(fileAclMatch&&request.method==="POST"&&!fileAclMatch[2])return await grantFileAccess(request,env,session,decodeURIComponent(fileAclMatch[1]));
+    if(fileAclMatch&&request.method==="DELETE"&&fileAclMatch[2])return await revokeFileAccess(env,session,decodeURIComponent(fileAclMatch[1]),decodeURIComponent(fileAclMatch[2]));
     if(url.pathname.startsWith("/api/files/")&&request.method==="GET")return await fileDownload(env,session,url.pathname.split("/").pop()!);
 
     if(url.pathname==="/api/allfather/organizations"&&request.method==="POST")return await createOrganization(request,env,session);
