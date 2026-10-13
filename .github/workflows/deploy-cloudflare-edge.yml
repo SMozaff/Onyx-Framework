@@ -118,9 +118,17 @@ jobs:
           name = "EVENTS_HUB"
           class_name = "EventHub"
 
+          [[durable_objects.bindings]]
+          name = "RELAY_HUB"
+          class_name = "RelayHub"
+
           [[migrations]]
           tag = "v1"
           new_sqlite_classes = ["EventHub"]
+
+          [[migrations]]
+          tag = "v2"
+          new_sqlite_classes = ["RelayHub"]
 
           [vars]
           ONYX_CORS_ORIGINS = "${ONYX_CORS_ORIGINS}"
