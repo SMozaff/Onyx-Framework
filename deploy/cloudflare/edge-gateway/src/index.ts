@@ -471,6 +471,15 @@ function freshnessDto(rows: Array<{version?: unknown; updated_at?: unknown}>){
   }
   return {projection_version:projectionVersion,last_updated_at:new Date(latestUpdated).toISOString(),is_stale:false};
 }
+function querySortValue(row:Record<string,unknown>,sortBy:string):unknown{
+  if(Object.prototype.hasOwnProperty.call(row,sortBy))return row[sortBy];
+  let value:unknown=row.state;
+  for(const segment of sortBy.split(".")){
+    if(!value||typeof value!=="object"||Array.isArray(value))return undefined;
+    value=(value as Record<string,unknown>)[segment];
+  }
+  return value;
+}
 function compareQueryValues(left:unknown,right:unknown,sortOrder:"asc"|"desc"):number{
   let result=0;
   if(left==null&&right!=null)result=-1;
@@ -522,10 +531,8 @@ async function queryRoute(request:Request,env:Env,session:Session){
   const sortOrder=envelope.sort_order==="asc"?"asc":"desc";
   if(!isDetail){
     normalized.sort((a,b)=>{
-      const aState=a.state&&typeof a.state==="object"&&!Array.isArray(a.state)?a.state as Json:{};
-      const bState=b.state&&typeof b.state==="object"&&!Array.isArray(b.state)?b.state as Json:{};
-      const aValue=Object.prototype.hasOwnProperty.call(a,requestedSort)?a[requestedSort]:aState[requestedSort];
-      const bValue=Object.prototype.hasOwnProperty.call(b,requestedSort)?b[requestedSort]:bState[requestedSort];
+      const aValue=querySortValue(a,requestedSort);
+      const bValue=querySortValue(b,requestedSort);
       const compared=compareQueryValues(aValue,bValue,sortOrder);
       return compared||String(a.id).localeCompare(String(b.id));
     });
