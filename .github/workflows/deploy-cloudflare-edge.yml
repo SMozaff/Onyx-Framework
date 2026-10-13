@@ -114,6 +114,14 @@ jobs:
           database_id = "${{ steps.d1.outputs.database_id }}"
           migrations_dir = "migrations"
 
+          [[durable_objects.bindings]]
+          name = "EVENTS_HUB"
+          class_name = "EventHub"
+
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = ["EventHub"]
+
           [vars]
           ONYX_CORS_ORIGINS = "${ONYX_CORS_ORIGINS}"
           ONYX_ALLFATHER_EMAIL = "so.muzaff@gmail.com"
