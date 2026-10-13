@@ -1,0 +1,10 @@
+# Wrangler local state (D1/Miniflare persistence) and generated configs.
+.wrangler/
+wrangler.deploy.toml
+wrangler.test.toml
+wrangler.preview.toml
+
+# Local secrets. Never commit these; use .dev.vars.example as a template.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
