@@ -27,7 +27,7 @@ This document governs the ONYX authentication migration. Do not replace this des
 - Staff accounts are created, deactivated, and managed by an authorized Admin.
 - Staff cannot self-register, create organizations, create Admins, or elevate their own role.
 - An Admin may manage Staff only within that Admin's own organization.
-- Staff use ONYX username/email + password authentication, not Clerk or Supabase Auth.
+- Staff use ONYX username/email + password authentication. Supabase Auth is reserved for the designated All-Father identity.
 
 ## Roles and authorization
 
