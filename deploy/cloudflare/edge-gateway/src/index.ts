@@ -460,6 +460,30 @@ async function audit(env:Env,session:Session,action:string,targetId:string,detai
 function queryEnvelope(raw:string):Json|null{try{return JSON.parse(new TextDecoder().decode(fromB64u(raw))) as Json;}catch{return null;}}
 function safeJson(value:string):unknown{try{return JSON.parse(value);}catch{return value;}}
 function isActivePolicyState(value:unknown):boolean{return Boolean(value)&&typeof value==="object"&&!Array.isArray(value)&&(value as Record<string,unknown>).status==="Active";}
+function freshnessDto(rows: Array<{version?: unknown; updated_at?: unknown}>){
+  let projectionVersion=0,latestUpdated=0;
+  for(const row of rows){
+    const version=Number(row.version);
+    if(Number.isFinite(version))projectionVersion=Math.max(projectionVersion,version);
+    const updated=typeof row.updated_at==="number"?row.updated_at:
+      typeof row.updated_at==="string"?(Number.isFinite(Number(row.updated_at))?Number(row.updated_at):Date.parse(row.updated_at)):0;
+    if(Number.isFinite(updated))latestUpdated=Math.max(latestUpdated,updated);
+  }
+  return {projection_version:projectionVersion,last_updated_at:new Date(latestUpdated).toISOString(),is_stale:false};
+}
+function compareQueryValues(left:unknown,right:unknown,sortOrder:"asc"|"desc"):number{
+  let result=0;
+  if(left==null&&right!=null)result=-1;
+  else if(left!=null&&right==null)result=1;
+  else if(typeof left==="number"&&typeof right==="number")result=left-right;
+  else if(typeof left==="boolean"&&typeof right==="boolean")result=Number(left)-Number(right);
+  else if(left!=null&&right!=null){
+    const leftDate=typeof left==="string"?Date.parse(left):NaN,rightDate=typeof right==="string"?Date.parse(right):NaN;
+    if(Number.isFinite(leftDate)&&Number.isFinite(rightDate))result=leftDate-rightDate;
+    else result=String(left).localeCompare(String(right),undefined,{numeric:true,sensitivity:"base"});
+  }
+  return sortOrder==="asc"?result:-result;
+}
 async function queryRoute(request:Request,env:Env,session:Session){
   const raw=new URL(request.url).searchParams.get("envelope");const envelope=raw?queryEnvelope(raw):null;
   if(!envelope||typeof envelope.query_id!=="string"||typeof envelope.query_type!=="string"||typeof envelope.organization_id!=="string")return json({error:"INVALID_QUERY_ENVELOPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
@@ -469,26 +493,54 @@ async function queryRoute(request:Request,env:Env,session:Session){
   if(type!=="dashboard.summary"&&!aggregateType)return json({error:"UNKNOWN_QUERY",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(!authorizeQuery(session.role,type))return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(type==="dashboard.summary"){
-    if(session.role==="STAFF"){
-      const rows=await env.DB.prepare(`SELECT aggregate_type,COUNT(*) AS count FROM aggregates WHERE organization_id=? AND ${staffOwnedPredicateSql()} GROUP BY aggregate_type`)
-        .bind(session.organization_id,...staffOwnedBindings(session.sub)).all<Record<string,unknown>>();
-      const data=rows.results??[];
-      return json({query_id:envelope.query_id,data,has_more:false,next_cursor:null,total_count:data.length,freshness:"d1"});
-    }
-    const row=await env.DB.prepare("SELECT aggregate_type,COUNT(*) AS count FROM aggregates WHERE organization_id=? GROUP BY aggregate_type").bind(session.organization_id).all();
-    return json({query_id:envelope.query_id,data:row.results??[],has_more:false,next_cursor:null,total_count:row.results?.length??0,freshness:"d1"});
+    const ownOnly=session.role==="STAFF",ownSql=ownOnly?` AND ${staffOwnedPredicateSql()}`:"",ownArgs=ownOnly?staffOwnedBindings(session.sub):[];
+    const rows=await env.DB.prepare(`SELECT aggregate_type,version,updated_at FROM aggregates WHERE organization_id=?${ownSql}`)
+      .bind(session.organization_id,...ownArgs).all<Record<string,unknown>>();
+    const allRows=rows.results??[],counts=new Map<string,number>();
+    for(const row of allRows)counts.set(String(row.aggregate_type),(counts.get(String(row.aggregate_type))??0)+1);
+    const data=Array.from(counts,([aggregate_type,count])=>({aggregate_type,count}));
+    return json({query_id:envelope.query_id,data,has_more:false,next_cursor:null,total_count:data.length,freshness:freshnessDto(allRows)});
   }
   const filters=(envelope.filters&&typeof envelope.filters==="object"&&!Array.isArray(envelope.filters)?envelope.filters:{}) as Json;
   const targetId=typeof filters.target_id==="string"?filters.target_id:typeof envelope.target_id==="string"?envelope.target_id:null;
-  let rows;
   const ownOnly=session.role==="STAFF";
   const ownSql=ownOnly?` AND ${staffOwnedPredicateSql()}`:"";
   const ownArgs=ownOnly?staffOwnedBindings(session.sub):[];
-  if(aggregateType==="*")rows=await env.DB.prepare(`SELECT id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at FROM aggregates WHERE organization_id=?${ownSql} ORDER BY updated_at DESC LIMIT 100`).bind(session.organization_id,...ownArgs).all<Record<string,unknown>>();
-  else if(targetId)rows=await env.DB.prepare(`SELECT id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at FROM aggregates WHERE organization_id=? AND aggregate_type=? AND id=?${ownSql} LIMIT 1`).bind(session.organization_id,aggregateType,targetId,...ownArgs).all<Record<string,unknown>>();
-  else rows=await env.DB.prepare(`SELECT id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at FROM aggregates WHERE organization_id=? AND aggregate_type=?${ownSql} ORDER BY updated_at DESC LIMIT 100`).bind(session.organization_id,aggregateType,...ownArgs).all<Record<string,unknown>>();
-  const data=(rows.results??[]).map(row=>({...row,state:typeof row.state==="string"?safeJson(row.state):row.state}));return json({query_id:envelope.query_id,data,has_more:false,next_cursor:null,total_count:data.length,freshness:"d1"});
+  const queryTypeFilter=aggregateType==="*"?"": " AND aggregate_type=?";
+  const sql=`SELECT id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at FROM aggregates WHERE organization_id=?${queryTypeFilter}${ownSql} ORDER BY updated_at DESC`;
+  const bindings=aggregateType==="*"?[session.organization_id,...ownArgs]:[session.organization_id,aggregateType,...ownArgs];
+  const rows=await env.DB.prepare(sql).bind(...bindings).all<Record<string,unknown>>();
+  const allRows=rows.results??[];
+  let selected=allRows.filter(row=>!targetId||String(row.id)===targetId);
+  const isDetail=type.endsWith(".detail");
+  if(isDetail)selected=selected.slice(0,1);
+  const normalized=selected.map(row=>{
+    const state=typeof row.state==="string"?safeJson(row.state):row.state;
+    return {...row,state};
+  });
+  const requestedSort=typeof envelope.sort_by==="string"&&/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(envelope.sort_by)?envelope.sort_by:"updated_at";
+  const sortOrder=envelope.sort_order==="asc"?"asc":"desc";
+  if(!isDetail){
+    normalized.sort((a,b)=>{
+      const aState=a.state&&typeof a.state==="object"&&!Array.isArray(a.state)?a.state as Json:{};
+      const bState=b.state&&typeof b.state==="object"&&!Array.isArray(b.state)?b.state as Json:{};
+      const aValue=Object.prototype.hasOwnProperty.call(a,requestedSort)?a[requestedSort]:aState[requestedSort];
+      const bValue=Object.prototype.hasOwnProperty.call(b,requestedSort)?b[requestedSort]:bState[requestedSort];
+      const compared=compareQueryValues(aValue,bValue,sortOrder);
+      return compared||String(a.id).localeCompare(String(b.id));
+    });
+  }
+  const totalCount=normalized.length;
+  const parsedLimit=Number(envelope.limit);
+  const limit=envelope.limit===undefined?100:Number.isFinite(parsedLimit)?Math.max(1,Math.min(200,Math.trunc(parsedLimit))):100;
+  const cursor=typeof envelope.cursor==="string"&&/^\d+$/.test(envelope.cursor)?Number(envelope.cursor):0;
+  const offset=Number.isSafeInteger(cursor)&&cursor>=0?cursor:0;
+  const page=isDetail?normalized.slice(0,1):normalized.slice(offset,offset+limit);
+  const nextOffset=offset+page.length;
+  const hasMore=!isDetail&&nextOffset<totalCount;
+  return json({query_id:envelope.query_id,data:page,has_more:hasMore,next_cursor:hasMore?String(nextOffset):null,total_count:totalCount,freshness:freshnessDto(allRows)});
 }
+
 async function commandRoute(request:Request,env:Env,session:Session){
   const envelope=await request.json().catch(()=>null) as Json|null;
   if(!envelope||typeof envelope.command_id!=="string"||!envelope.command_id||envelope.command_id.length>128||
@@ -508,10 +560,13 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const decision=authorizeCommand(session.role,envelope.command_type,targetType);
   if(!decision.allowed)return json({error:decision.reason==="UNKNOWN_COMMAND"?"UNKNOWN_COMMAND":"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const policy=decision.policy;
-  const payloadValue=envelope.payload??{};
-  if(!payloadValue||typeof payloadValue!=="object"||Array.isArray(payloadValue))
-    return json({error:"INVALID_COMMAND_PAYLOAD",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
-  const payload=payloadValue as Json;
+  const payloadValue=envelope.payload===undefined?{}:envelope.payload;
+  // The Axum contract accepts serde_json::Value, not just JSON objects.
+  // Normalize scalar/array values to an empty field map for the Worker's
+  // field-level authorization checks; command semantics still reject missing
+  // required fields for commands that actually require a structured payload.
+  const payload=payloadValue!==null&&typeof payloadValue==="object"&&!Array.isArray(payloadValue)
+    ?payloadValue as Json:{};
   // The Worker is not the domain state-machine authority. Clients may not
   // forge lifecycle/tenant/security fields by smuggling them into a payload.
   const forbiddenPayloadKeys=["status","state","lifecycle","lifecycle_state","version","role","is_admin","is_active","organization_id","organizationId","tenant_id","_command_type","_updated_by"];
