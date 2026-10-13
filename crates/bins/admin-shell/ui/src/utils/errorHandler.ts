@@ -2,7 +2,7 @@ import axios from "axios";
 import type { CommandError } from "@/types/command";
 
 export type ToastTone = "info" | "success" | "warning" | "error";
-export type UiErrorCode = "NETWORK_UNAVAILABLE" | "SESSION_EXPIRED" | "PERMISSION_DENIED" | "CONFLICT" | "VALIDATION_FAILED" | "RESOURCE_NOT_FOUND" | "SERVICE_UNAVAILABLE" | "UNEXPECTED";
+export type UiErrorCode = "NETWORK_UNAVAILABLE" | "SESSION_EXPIRED" | "PERMISSION_DENIED" | "CONFLICT" | "VALIDATION_FAILED" | "RESOURCE_NOT_FOUND" | "SERVICE_UNAVAILABLE" | "FEATURE_UNAVAILABLE" | "UNEXPECTED";
 
 export interface ToastDetail { message: string; tone: ToastTone; }
 export interface UserFacingError {
@@ -40,6 +40,20 @@ export function normalizeError(error: unknown): UserFacingError {
   if (!error.response) {
     notifyNetworkError();
     return { code: "NETWORK_UNAVAILABLE", title: "Connection lost", message: "Check your network connection, then try again.", retryable: true, action: "retry", commandError };
+  }
+  if (status === 501 && error.response?.data?.error === "ROUTE_NOT_MIGRATED") {
+    const route = typeof error.response.data.route === "string" ? error.response.data.route : "requested route";
+    const message = typeof error.response.data.message === "string"
+      ? error.response.data.message
+      : `The feature for ${route} is not available on this server yet.`;
+    return {
+      code: "FEATURE_UNAVAILABLE",
+      title: "Feature not available on this server",
+      message,
+      retryable: false,
+      action: "none",
+      commandError,
+    };
   }
   const base = byStatus[status ?? 500] ?? fallback;
   const safeMessage = commandError?.safe_details?.message;
