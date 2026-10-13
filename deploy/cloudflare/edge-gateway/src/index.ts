@@ -560,10 +560,13 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const decision=authorizeCommand(session.role,envelope.command_type,targetType);
   if(!decision.allowed)return json({error:decision.reason==="UNKNOWN_COMMAND"?"UNKNOWN_COMMAND":"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const policy=decision.policy;
-  const payloadValue=envelope.payload??{};
-  if(!payloadValue||typeof payloadValue!=="object"||Array.isArray(payloadValue))
-    return json({error:"INVALID_COMMAND_PAYLOAD",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
-  const payload=payloadValue as Json;
+  const payloadValue=envelope.payload===undefined?{}:envelope.payload;
+  // The Axum contract accepts serde_json::Value, not just JSON objects.
+  // Normalize scalar/array values to an empty field map for the Worker's
+  // field-level authorization checks; command semantics still reject missing
+  // required fields for commands that actually require a structured payload.
+  const payload=payloadValue!==null&&typeof payloadValue==="object"&&!Array.isArray(payloadValue)
+    ?payloadValue as Json:{};
   // The Worker is not the domain state-machine authority. Clients may not
   // forge lifecycle/tenant/security fields by smuggling them into a payload.
   const forbiddenPayloadKeys=["status","state","lifecycle","lifecycle_state","version","role","is_admin","is_active","organization_id","organizationId","tenant_id","_command_type","_updated_by"];
