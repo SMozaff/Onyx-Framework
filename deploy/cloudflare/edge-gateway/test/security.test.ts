@@ -1115,7 +1115,7 @@ describe("Phase 3 WebSocket and Staff file boundaries", () => {
     expect(await response.json()).toMatchObject({ error: "ORIGIN_NOT_ALLOWED" });
   });
 
-  it("keeps Staff file downloads fail-closed before looking up an asset", async () => {
+  it("denies Staff file downloads without an explicit tenant-scoped ACL grant", async () => {
     const db = makeDb("STAFF");
     db.fileAssets.set("private-hash", { content_hash: "private-hash", organization_id: ORG });
     const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
@@ -1123,8 +1123,8 @@ describe("Phase 3 WebSocket and Staff file boundaries", () => {
       headers: { authorization: "Bearer " + token },
     }), makeEnv(db));
     expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: "FORBIDDEN" });
-    expect(db.fileAssetLookups).toBe(0);
+    expect(await response.json()).toMatchObject({ error: "FILE_ACCESS_DENIED" });
+    expect(db.fileAssetLookups).toBe(1);
     expect(db.writes).toHaveLength(0);
   });
 });
