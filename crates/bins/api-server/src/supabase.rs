@@ -130,11 +130,21 @@ fn is_designated_identity(identity: &SupabaseUser, expected_subject: &str) -> bo
 }
 
 fn auth_error(code: &str) -> ApiError {
+    let (status, category, retryability) = match code {
+        "SUPABASE_AUTH_UNAVAILABLE" | "SUPABASE_USER_RESPONSE_INVALID"
+        | "SUPABASE_AUTH_NOT_CONFIGURED" | "USER_STORE_UNAVAILABLE"
+        | "TOKEN_ISSUANCE_FAILED" => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "INFRASTRUCTURE",
+            "TRANSIENT",
+        ),
+        _ => (StatusCode::UNAUTHORIZED, "AUTHORITY", "NON_RETRYABLE"),
+    };
     ApiError::new(
-        StatusCode::UNAUTHORIZED,
+        status,
         code,
-        "AUTHORITY",
-        "NON_RETRYABLE",
+        category,
+        retryability,
         uuid::Uuid::new_v4().to_string(),
         json!({}),
     )
@@ -178,7 +188,14 @@ pub async fn login(
         })?;
 
     if !user.is_admin {
-        return Err(auth_error("ALLFATHER_NOT_ADMIN"));
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "ALLFATHER_NOT_ADMIN",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            uuid::Uuid::new_v4().to_string(),
+            json!({}),
+        ));
     }
 
     let access_token = issue_token(
