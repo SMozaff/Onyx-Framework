@@ -184,3 +184,83 @@ export class EventHub {
       .slice(0, 100);
   }
 }
+
+
+interface RelaySocketAttachment {
+  organization_id: string;
+  user_id: string;
+  self_replica: string;
+  target_replica: string;
+}
+
+/**
+ * Tenant-partitioned binary relay. The Worker verifies and consumes a
+ * short-lived ticket before forwarding the WebSocket upgrade here.
+ * This class never trusts tenant/replica identity from a client frame.
+ */
+export class RelayHub {
+  constructor(private readonly state: DurableObjectState) {}
+
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("Not found", { status: 404 });
+    const organizationId=request.headers.get("x-onyx-relay-org");
+    const userId=request.headers.get("x-onyx-relay-user");
+    const selfReplica=request.headers.get("x-onyx-relay-self");
+    const targetReplica=request.headers.get("x-onyx-relay-target");
+    if (!organizationId || !userId || !selfReplica || !targetReplica) return new Response("Unauthorized", { status: 401 });
+    const pair=new WebSocketPair();
+    this.state.acceptWebSocket(pair[1]);
+    pair[1].serializeAttachment({organization_id:organizationId,user_id:userId,self_replica:selfReplica,target_replica:targetReplica} satisfies RelaySocketAttachment);
+    return new Response(null,{status:101,webSocket:pair[0]});
+  }
+
+  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (!(message instanceof ArrayBuffer) || message.byteLength < 60 || message.byteLength > 10*1024*1024) {
+      try { socket.close(1003,"binary sync frame required"); } catch {}
+      return;
+    }
+    const attachment=socket.deserializeAttachment() as RelaySocketAttachment | null;
+    if (!attachment?.organization_id || !attachment.self_replica || !attachment.target_replica) {
+      try { socket.close(1008,"unauthorized"); } catch {}
+      return;
+    }
+    const bytes=new Uint8Array(message);
+    // SyncMessage wire header: type(1), id(16), version length(1), version,
+    // organization(16), sender(16), target-present(1), target(16), payload length(4).
+    const versionLength=bytes[17];
+    const orgOffset=18+versionLength, senderOffset=orgOffset+16, targetFlagOffset=senderOffset+16, targetOffset=targetFlagOffset+1;
+    if (bytes.length < targetOffset+16+4) { try { socket.close(1003,"invalid sync frame"); } catch {} return; }
+    const org=bytesToUuid(bytes.slice(orgOffset,orgOffset+16));
+    const sender=bytesToUuid(bytes.slice(senderOffset,senderOffset+16));
+    if (org!==attachment.organization_id.toLowerCase() || sender!==attachment.self_replica.toLowerCase()) {
+      try { socket.close(1008,"replica or tenant mismatch"); } catch {}
+      return;
+    }
+    const targetPresent=bytes[targetFlagOffset]!==0;
+    const target=targetPresent?bytesToUuid(bytes.slice(targetOffset,targetOffset+16)):attachment.target_replica.toLowerCase();
+    if(target!==attachment.target_replica.toLowerCase()) { try { socket.close(1008,"relay target mismatch"); } catch {} return; }
+    const payloadLengthOffset=targetOffset+16;
+    const payloadLength=new DataView(message).getUint32(payloadLengthOffset,false);
+    const signatureFlagOffset=payloadLengthOffset+4+payloadLength+8;
+    if(signatureFlagOffset+3>bytes.length) { try { socket.close(1003,"invalid sync frame"); } catch {} return; }
+    const signaturePresent=bytes[signatureFlagOffset]!==0;
+    const signatureLength=new DataView(message).getUint16(signatureFlagOffset+1,false);
+    if(signatureFlagOffset+3+signatureLength!==bytes.length || (!signaturePresent && signatureLength!==0)) { try { socket.close(1003,"invalid sync frame"); } catch {} return; }
+    const peers=this.state.getWebSockets();
+    for (const peer of peers) {
+      if (peer===socket) continue;
+      const peerAttachment=peer.deserializeAttachment() as RelaySocketAttachment | null;
+      if (!peerAttachment || peerAttachment.organization_id!==attachment.organization_id) continue;
+      if (peerAttachment.self_replica.toLowerCase()!==target) continue;
+      try { peer.send(message); } catch {}
+    }
+  }
+
+  async webSocketClose(socket: WebSocket): Promise<void> { try { socket.close(); } catch {} }
+  async webSocketError(): Promise<void> {}
+}
+
+function bytesToUuid(bytes: Uint8Array): string {
+  const hex=Array.from(bytes,value=>value.toString(16).padStart(2,"0")).join("");
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}

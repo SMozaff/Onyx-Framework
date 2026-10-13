@@ -1,4 +1,4 @@
-export { EventHub } from "./event-hub";
+export { EventHub, RelayHub } from "./event-hub";
 import { argon2id, argon2Verify } from "hash-wasm";
 import { getSupabaseUser, verifySupabaseJwt } from "./supabase";
 import { missingAuthSchema } from "./schema-contract";
@@ -11,6 +11,7 @@ type Json = Record<string, unknown>;
 interface Env {
   DB: D1Database;
   EVENTS_HUB: DurableObjectNamespace;
+  RELAY_HUB: DurableObjectNamespace;
   ONYX_JWT_SECRET?: string;
   ONYX_CORS_ORIGINS?: string;
   ONYX_ALLFATHER_EMAIL?: string;
@@ -33,6 +34,7 @@ interface Session {
   role: string;
   client_type: string;
   exp: number;
+  iat_ms?: number;
   jti: string;
   sid: string;
   typ: "access" | "refresh";
@@ -86,7 +88,7 @@ const ONYX_JWT_AUDIENCE = "onyx-api";
 async function jwtSign(env:Env,session:Omit<Session,"jti">):Promise<string>{
   if(!env.ONYX_JWT_SECRET) throw new Error("ONYX_JWT_SECRET is not configured");
   const header=b64u(JSON.stringify({alg:"HS256",typ:"JWT"}));
-  const payload=b64u(JSON.stringify({...session,iss:ONYX_JWT_ISSUER,aud:ONYX_JWT_AUDIENCE,jti:uuid()}));
+  const payload=b64u(JSON.stringify({...session,iat_ms:Date.now(),iss:ONYX_JWT_ISSUER,aud:ONYX_JWT_AUDIENCE,jti:uuid()}));
   const input=`${header}.${payload}`;
   return `${input}.${b64u(await hmac(env.ONYX_JWT_SECRET,input))}`;
 }
@@ -153,6 +155,8 @@ async function requireSession(request:Request,env:Env){
   ).bind(session.sub).first<Record<string,unknown>>();
   const currentRole=current?roleForUser(current):"";
   if(!current||!ONYX_ROLES.includes(currentRole as typeof ONYX_ROLES[number])||(String(current.id)==="__allfather__"&&currentRole!=="ALL_FATHER"))throw new Error("AUTH_REQUIRED");
+  const revocation=await env.DB.prepare("SELECT revoked_before_ms FROM user_session_revocations WHERE user_id=? LIMIT 1").bind(String(current.id)).first<{revoked_before_ms:number}>();
+  if(revocation && (!Number.isSafeInteger(session.iat_ms) || Number(session.iat_ms)<=Number(revocation.revoked_before_ms)))throw new Error("revoked session");
   if(String(current.organization_id)!==session.organization_id||currentRole!==session.role||
      Boolean(current.is_admin)!==Boolean(session.is_admin))throw new Error("AUTH_REQUIRED");
   // All-Father sessions are bound to the canonical ONYX principal and exact
@@ -314,6 +318,70 @@ async function authSupabaseAllFather(request:Request,env:Env){
     return json({error:"INVALID_SUPABASE_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   }
 }
+
+const RELAY_TICKET_TTL_SECONDS=30;
+type RelayTicketClaims={sub:string;organization_id:string;typ:"relay_ticket";target_id:string;self_replica:string;iat:number;exp:number;jti:string};
+async function signRelayTicket(env:Env,claims:RelayTicketClaims):Promise<string>{
+  if(!env.ONYX_JWT_SECRET)throw new Error("ONYX_JWT_SECRET is not configured");
+  const header=b64u(JSON.stringify({alg:"HS256",typ:"JWT"})),payload=b64u(JSON.stringify(claims)),input=header+"."+payload;
+  return input+"."+b64u(await hmac(env.ONYX_JWT_SECRET,input));
+}
+async function verifyRelayTicket(env:Env,token:string):Promise<RelayTicketClaims>{
+  if(!env.ONYX_JWT_SECRET)throw new Error("ONYX_JWT_SECRET is not configured");
+  if(token.length>8192)throw new Error("invalid relay ticket");
+  const parts=token.split(".");
+  if(parts.length!==3||parts.some(part=>!/^[A-Za-z0-9_-]+$/.test(part)))throw new Error("invalid relay ticket");
+  const header=decodeJsonB64u(parts[0]),claims=decodeJsonB64u(parts[1]);
+  if(header.alg!=="HS256"||header.typ!=="JWT")throw new Error("invalid relay ticket");
+  const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(env.ONYX_JWT_SECRET),{name:"HMAC",hash:"SHA-256"},false,["verify"]);
+  if(!await crypto.subtle.verify("HMAC",key,fromB64u(parts[2]),new TextEncoder().encode(parts[0]+"."+parts[1])))throw new Error("invalid relay ticket");
+  const c=claims as unknown as RelayTicketClaims;
+  if(c.typ!=="relay_ticket"||!looksLikeUuid(c.sub)||!looksLikeUuid(c.organization_id)||!looksLikeUuid(c.target_id)||!looksLikeUuid(c.self_replica)||typeof c.jti!=="string"||!c.jti||!Number.isSafeInteger(c.exp)||c.exp<=now()||!Number.isSafeInteger(c.iat)||c.iat>now()+5||c.exp-c.iat>RELAY_TICKET_TTL_SECONDS)throw new Error("invalid relay ticket");
+  return c;
+}
+async function issueRelayTicket(request:Request,env:Env,session:Session){
+  if(session.client_type==="mobile_observer")return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const body=await request.json().catch(()=>null) as Json|null;
+  if(!body||Array.isArray(body)||Object.keys(body).some(key=>key!=="target_id"&&key!=="self_replica")||
+     typeof body.target_id!=="string"||!looksLikeUuid(body.target_id)||typeof body.self_replica!=="string"||!looksLikeUuid(body.self_replica))
+    return json({error:"INVALID_REPLICA_ID",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  if(!looksLikeUuid(session.sub)||!looksLikeUuid(session.organization_id))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  const self=body.self_replica.toLowerCase(),target=body.target_id.toLowerCase(),timestamp=Date.now();
+  try{
+    await env.DB.prepare("INSERT INTO replica_ownership(replica_id,user_id,organization_id,claimed_at) VALUES(?,?,?,?) ON CONFLICT(replica_id) DO NOTHING")
+      .bind(self,session.sub,session.organization_id,now()).run();
+    const owner=await env.DB.prepare("SELECT user_id,organization_id FROM replica_ownership WHERE replica_id=? LIMIT 1").bind(self).first<{user_id:string;organization_id:string}>();
+    if(!owner||owner.user_id!==session.sub||owner.organization_id!==session.organization_id)return json({error:"REPLICA_OWNERSHIP_REJECTED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+    const claims:RelayTicketClaims={sub:session.sub,organization_id:session.organization_id,typ:"relay_ticket",target_id:target,self_replica:self,iat:now(),exp:now()+RELAY_TICKET_TTL_SECONDS,jti:uuid()};
+    return json({ticket:await signRelayTicket(env,claims),expires_in:RELAY_TICKET_TTL_SECONDS});
+  }catch{
+    return json({error:"RELAY_TICKET_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
+async function relaySocket(request:Request,env:Env):Promise<Response>{
+  if(request.headers.get("upgrade")?.toLowerCase()!=="websocket")return json({error:"WEBSOCKET_UPGRADE_REQUIRED",category:"DOMAIN",retryability:"NON_RETRYABLE"},426);
+  const url=new URL(request.url),target=url.pathname.split("/").pop()||"",token=url.searchParams.get("ticket")||"";
+  if(!looksLikeUuid(target)||!token)return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  let claims:RelayTicketClaims;
+  try{claims=await verifyRelayTicket(env,token);}catch{return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
+  if(claims.target_id!==target.toLowerCase())return json({error:"RELAY_TARGET_MISMATCH",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  try{
+    const redeemed=await env.DB.prepare("INSERT OR IGNORE INTO relay_ticket_redemptions(jti,expires_at,redeemed_at) VALUES(?,?,?)")
+      .bind(claims.jti,claims.exp,now()).run();
+    if(Number(redeemed.meta?.changes??0)!==1)return json({error:"RELAY_TICKET_REPLAYED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+    await env.DB.prepare("DELETE FROM relay_ticket_redemptions WHERE expires_at<?").bind(now()-3600).run();
+    const headers=new Headers(request.headers);
+    headers.set("x-onyx-relay-org",claims.organization_id);
+    headers.set("x-onyx-relay-user",claims.sub);
+    headers.set("x-onyx-relay-self",claims.self_replica);
+    headers.set("x-onyx-relay-target",claims.target_id);
+    const hub=env.RELAY_HUB.idFromName(claims.organization_id);
+    return await env.RELAY_HUB.get(hub).fetch(new Request(request,{headers}));
+  }catch{
+    return json({error:"RELAY_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
+
 function requireRole(session:Session,...roles:string[]){if(!roles.includes(session.role))throw new Error("FORBIDDEN_ROLE");}
 function requiredString(body:Json,key:string):string{const value=body[key];if(typeof value!=="string"||!value.trim())throw new Error(`INVALID_${key.toUpperCase()}`);return value.trim();}
 function optionalEmail(body:Json):string|null{const value=typeof body.email==="string"?body.email.trim().toLowerCase():null;return value||null;}
@@ -815,7 +883,7 @@ async function listAdminUsers(env: Env, session: Session) {
   // this endpoint must never become a cross-tenant directory.
   requireRole(session, "ORGANIZATION_ADMIN");
   const rows = await env.DB.prepare(
-    "SELECT id,username,organization_id,is_admin,class,parent_user_id,is_active FROM users WHERE organization_id=? ORDER BY username LIMIT 500"
+    "SELECT id,username,organization_id,is_admin,is_manager,class,parent_user_id,is_active FROM users WHERE organization_id=? ORDER BY username LIMIT 500"
   ).bind(session.organization_id).all<Record<string, unknown>>();
   // is_manager is retained as a legacy UI field; the canonical Worker schema
   // models authority with role and operational classification with class.
@@ -824,7 +892,7 @@ async function listAdminUsers(env: Env, session: Session) {
     username: String(row.username),
     organization_id: String(row.organization_id),
     is_admin: row.is_admin === true || row.is_admin === 1 || row.is_admin === "1",
-    is_manager: false,
+    is_manager: row.is_manager === true || row.is_manager === 1 || row.is_manager === "1",
     class: typeof row.class === "string" ? row.class : null,
     parent_user_id: typeof row.parent_user_id === "string" ? row.parent_user_id : null,
     is_active: row.is_active === true || row.is_active === 1 || row.is_active === "1",
@@ -859,6 +927,88 @@ async function assignUserClass(request: Request, env: Env, session: Session, use
   }
 }
 
+
+async function setUserActive(env: Env, session: Session, userId: string, active: boolean) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  if (userId === session.sub && !active) return json({ error: "CANNOT_DEACTIVATE_SELF", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const timestamp = Date.now(), operationId = uuid();
+  try {
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET is_active=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__'").bind(active ? 1 : 0, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, active ? "user.activate" : "user.deactivate", operationId, JSON.stringify({ target: userId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_AUDIT_FAILED");
+    if (!active) await env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=excluded.revoked_before_ms,updated_at=excluded.updated_at").bind(userId, Date.now(), timestamp).run();
+    return json({ success: true });
+  } catch {
+    return json({ error: "USER_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function setUserPassword(request: Request, env: Env, session: Session, userId: string) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Object.keys(body).length !== 1 || typeof body.password !== "string" || body.password.length < 12 || body.password.length > 1024) return json({ error: "WEAK_PASSWORD", message: "Password must contain at least 12 characters.", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const target = await env.DB.prepare("SELECT id,username FROM users WHERE id=? AND organization_id=? AND role='STAFF' LIMIT 1").bind(userId, session.organization_id).first<{id:string;username:string}>();
+  if (!target || userId === "__allfather__" || target.username.toLowerCase() === "allfather") return json({ error: target ? "RESERVED_IDENTITY" : "USER_NOT_FOUND", category: target ? "AUTHORITY" : "DOMAIN", retryability: "NON_RETRYABLE" }, target ? 403 : 404);
+  try {
+    const hash = await hashPassword(body.password), timestamp = Date.now(), operationId = uuid();
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET password_hash=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF'").bind(hash, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=excluded.revoked_before_ms,updated_at=excluded.updated_at").bind(userId, timestamp, timestamp),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id, session.sub, "user.password.reset", operationId, JSON.stringify({ target: userId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    return json({ success: true });
+  } catch {
+    return json({ error: "USER_PASSWORD_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function setUserManager(request: Request, env: Env, session: Session, userId: string) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Object.keys(body).length !== 1 || typeof body.is_manager !== "boolean") return json({ error: "INVALID_MANAGER_FLAG", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const timestamp = Date.now(), operationId = uuid();
+  try {
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET is_manager=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__'").bind(body.is_manager ? 1 : 0, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.manager.update", operationId, JSON.stringify({ target: userId, is_manager: body.is_manager }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_MANAGER_AUDIT_FAILED");
+    return json({ success: true, is_manager: body.is_manager });
+  } catch {
+    return json({ error: "USER_MANAGER_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function setUserParent(request: Request, env: Env, session: Session, userId: string) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Object.keys(body).length !== 1 || !Object.prototype.hasOwnProperty.call(body, "parent_user_id") || (body.parent_user_id !== null && typeof body.parent_user_id !== "string")) return json({ error: "INVALID_PARENT", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const parentId = typeof body.parent_user_id === "string" ? body.parent_user_id.trim() : null;
+  if (parentId === userId) return json({ error: "PARENT_CYCLE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const target = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__' LIMIT 1").bind(userId, session.organization_id).first();
+  if (!target) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  if (parentId) {
+    const parent = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1").bind(parentId, session.organization_id).first();
+    if (!parent) return json({ error: "PARENT_USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+    const cycle = await env.DB.prepare("WITH RECURSIVE descendants(id) AS (SELECT id FROM users WHERE parent_user_id=? AND organization_id=? UNION ALL SELECT u.id FROM users u JOIN descendants d ON u.parent_user_id=d.id WHERE u.organization_id=?) SELECT 1 AS found FROM descendants WHERE id=? LIMIT 1").bind(userId, session.organization_id, session.organization_id, parentId).first();
+    if (cycle) return json({ error: "PARENT_CYCLE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const timestamp = Date.now(), operationId = uuid();
+  try {
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET parent_user_id=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1").bind(parentId, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.parent.update", operationId, JSON.stringify({ target: userId, parent_user_id: parentId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_PARENT_AUDIT_FAILED");
+    return json({ success: true, parent_user_id: parentId });
+  } catch {
+    return json({ error: "USER_PARENT_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+
 function canonicalHierarchy(rows: Record<string, unknown>[]) {
   return rows.map((row) => ({
     id: String(row.id),
@@ -884,6 +1034,245 @@ async function profiles(env:Env,session:Session,ownerId?:string){
   const rows=ownerId?await env.DB.prepare("SELECT id,state FROM aggregates WHERE organization_id=? AND aggregate_type=? AND id=? LIMIT 1").bind(session.organization_id,"staff_profile",ownerId).all<Record<string,unknown>>():await env.DB.prepare("SELECT id,state FROM aggregates WHERE organization_id=? AND aggregate_type=? ORDER BY updated_at DESC LIMIT 100").bind(session.organization_id,"staff_profile").all<Record<string,unknown>>();
   return json((rows.results??[]).map(r=>({id:r.id,...(safeJson(String(r.state)) as Json)})));
 }
+
+
+function validTimeWindow(body: Json): {start_at_ms:number;end_at_ms:number}|null {
+  const start=body.start_at_ms, end=body.end_at_ms;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || Number(start)<0 || Number(end)<=Number(start)) return null;
+  return {start_at_ms:Number(start),end_at_ms:Number(end)};
+}
+async function createTodoAggregate(request: Request, env: Env, session: Session, kind: "todo_list"|"target_list"|"staff_loan") {
+  if(session.client_type==="mobile_observer")return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const body=await request.json().catch(()=>null) as Json|null;
+  if (!body || Array.isArray(body)) return json({error:"INVALID_TODO_REQUEST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const id=uuid(), timestamp=Date.now(), operationId=uuid();
+  const getUser=async (key:string) => {
+    const value=body[key];
+    if(typeof value!=="string" || !looksLikeUuid(value)) return null;
+    return env.DB.prepare("SELECT id,organization_id,is_active,is_manager,role FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
+      .bind(value,session.organization_id).first<{id:string;organization_id:string;is_active:number;is_manager:number;role:string}>();
+  };
+  let state: Json, eventPayload: Json;
+  if (kind==="todo_list") {
+    if(Object.keys(body).some(key=>!["owner","origin","items"].includes(key)) || (body.origin!=="manager_assigned" && body.origin!=="staff_authored") ||
+       !Array.isArray(body.items) || body.items.length>200 || !body.items.every(item=>!!item&&typeof item==="object"&&!Array.isArray(item)&&typeof (item as Json).description==="string"&&(item as Json).description.trim().length>0&&(item as Json).description.length<=1000)) {
+      return json({error:"INVALID_TODO_LIST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    }
+    const owner=await getUser("owner");
+    if(!owner)return json({error:"INVALID_RESOURCE_OWNER",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(session.role==="STAFF" && (owner.id!==session.sub || body.origin!=="staff_authored"))return json({error:"RESOURCE_NOT_OWNED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(session.role==="STAFF" && body.origin==="manager_assigned")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    const items=(body.items as Json[]).map(item=>({item_id:uuid(),description:String(item.description).trim()}));
+    eventPayload={owner:owner.id,origin:body.origin,items};
+    state={id,version:1,lifecycle_epoch:0,authority_epoch:0,status:"Draft",owner:owner.id,owner_id:owner.id,origin:body.origin==="manager_assigned"?"ManagerAssigned":"StaffAuthored",items,created_by:session.sub,team_leader_pre_check:null,escalated_to:null};
+  } else if(kind==="target_list") {
+    if(Object.keys(body).some(key=>!["owner","origin","description","time_window"].includes(key)) ||
+       (body.origin!=="manager_assigned"&&body.origin!=="staff_authored") || typeof body.description!=="string" || !body.description.trim() || body.description.length>2000 ||
+       !body.time_window || typeof body.time_window!=="object" || Array.isArray(body.time_window)) return json({error:"INVALID_TARGET_LIST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    const owner=await getUser("owner"), window=validTimeWindow(body.time_window as Json);
+    if(!owner)return json({error:"INVALID_RESOURCE_OWNER",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(!window)return json({error:"INVALID_TIME_WINDOW",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    if(session.role==="STAFF"&&(owner.id!==session.sub||body.origin!=="staff_authored"))return json({error:"RESOURCE_NOT_OWNED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    eventPayload={owner:owner.id,origin:body.origin,description:body.description.trim(),time_window:window};
+    state={id,version:1,lifecycle_epoch:0,authority_epoch:0,status:"Draft",owner:owner.id,owner_id:owner.id,origin:body.origin==="manager_assigned"?"ManagerAssigned":"StaffAuthored",description:body.description.trim(),time_window:window,created_by:session.sub,team_leader_pre_check:null,escalated_to:null};
+  } else {
+    const allowed=["staff_user_id","real_owner_id","borrowing_manager_id","start_at_ms","end_at_ms"];
+    if(Object.keys(body).some(key=>!allowed.includes(key)))return json({error:"INVALID_STAFF_LOAN",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    const staff=await getUser("staff_user_id"), owner=await getUser("real_owner_id"), manager=await getUser("borrowing_manager_id");
+    const start=body.start_at_ms,end=body.end_at_ms;
+    if(!staff||!owner||!manager)return json({error:"INVALID_LOAN_PARTICIPANT",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||Number(start)<0||Number(end)<=Number(start))return json({error:"INVALID_TIME_WINDOW",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    if(session.role==="STAFF"&&session.sub!==manager.id&&!(session.sub===staff.id&&session.sub===owner.id))return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(session.role==="STAFF"&&!(manager.is_manager===1))return json({error:"MANAGER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    eventPayload={staff_user_id:staff.id,real_owner_id:owner.id,borrowing_manager_id:manager.id,start_at_ms:Number(start),end_at_ms:Number(end)};
+    state={id,version:1,lifecycle_epoch:0,authority_epoch:0,status:"Requested",staff_user_id:staff.id,real_owner_id:owner.id,borrowing_manager_id:manager.id,owner_id:staff.id,start_at_ms:Number(start),end_at_ms:Number(end),created_by:session.sub};
+  }
+  try {
+    const event={event_id:uuid(),aggregate_id:id,aggregate_type:kind,event_type:kind==="todo_list"?"CreateTodoList":kind==="target_list"?"CreateTargetList":"RequestStaffLoan",aggregate_version:1,organization_id:session.organization_id,payload:eventPayload,occurred_at:timestamp,operation_id:operationId,correlation_id:operationId,causation_id:null,actor:{user_id:session.sub,organization_id:session.organization_id}};
+    const result=await env.DB.batch([
+      env.DB.prepare("INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,?,1,0,0,?,?,?)").bind(id,kind,JSON.stringify(state),timestamp,session.organization_id),
+      env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,operation_id,correlation_id,causation_id,actor,organization_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(event.event_id,id,1,event.event_type,JSON.stringify(eventPayload),timestamp,operationId,operationId,null,JSON.stringify(event.actor),session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id,session.sub,kind+".create",operationId,JSON.stringify({target:id}),timestamp),
+    ]);
+    if(Number(result[0]?.meta?.changes??0)!==1)throw new Error("TODO_AGGREGATE_CREATE_FAILED");
+    const responseField=kind==="todo_list"?"todo_list_id":kind==="target_list"?"target_list_id":"staff_loan_id";
+    return json({[responseField]:id},201);
+  } catch {
+    return json({error:"TODO_STORAGE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
+
+type ProfileRecord = {
+  profile_id: string; owner_id: string; full_name: string; photo_blob_key: string | null;
+  job_title: string | null; contact_email: string | null; contact_phone: string | null;
+  department: string | null; class_label: string | null; parent_display_name: string | null;
+  team_memberships: string[]; work_stats?: { assigned_items_count: number | null; completed_items_count: number | null; target_summary: string | null };
+};
+function profileDto(state: Json, session: Session): Json {
+  const dto: Json = {};
+  for (const key of ["profile_id","owner_id","full_name","photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name","team_memberships"]) {
+    if (Object.prototype.hasOwnProperty.call(state,key)) dto[key] = state[key];
+  }
+  if (session.role === "ORGANIZATION_ADMIN" || session.class === "top_level_manager") {
+    dto.work_stats = state.work_stats && typeof state.work_stats === "object"
+      ? state.work_stats
+      : { assigned_items_count: null, completed_items_count: null, target_summary: null };
+  }
+  return dto;
+}
+async function allProfileRows(env: Env, session: Session) {
+  const result = await env.DB.prepare("SELECT id,state,version FROM aggregates WHERE organization_id=? AND aggregate_type='staff_profile' ORDER BY updated_at DESC LIMIT 500")
+    .bind(session.organization_id).all<{id:string;state:string;version:number}>();
+  return (result.results ?? []).map(row => ({ ...row, state: safeJson(row.state) as Json }));
+}
+function validProfileBody(body: Json): boolean {
+  const strings = ["owner_id","full_name"];
+  if (strings.some(key => typeof body[key] !== "string" || !(body[key] as string).trim())) return false;
+  for (const key of ["photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name"]) {
+    if (body[key] !== undefined && body[key] !== null && typeof body[key] !== "string") return false;
+  }
+  return body.full_name !== undefined && (body.full_name as string).trim().length <= 200 &&
+    (body.owner_id as string).length <= 128 &&
+    (body.team_memberships === undefined || (Array.isArray(body.team_memberships) && body.team_memberships.length <= 100 && body.team_memberships.every(x => typeof x === "string" && x.length <= 100)));
+}
+async function upsertProfile(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Array.isArray(body) || !validProfileBody(body)) return json({ error: "PROFILE_DOMAIN_ERROR", message: "A valid owner_id and full_name are required.", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const ownerId = String(body.owner_id).trim();
+  const owner = await env.DB.prepare("SELECT id,class,parent_user_id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1")
+    .bind(ownerId, session.organization_id).first<{id:string;class:string|null;parent_user_id:string|null}>();
+  if (!owner) return json({ error: "PROFILE_OWNER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  const profiles = await allProfileRows(env, session);
+  const existing = profiles.find(row => row.state && String(row.state.owner_id ?? "") === ownerId);
+  const profileId = existing ? String(existing.state.profile_id ?? existing.id) : uuid();
+  const profile: ProfileRecord = {
+    profile_id: profileId, owner_id: ownerId, full_name: String(body.full_name).trim(),
+    photo_blob_key: typeof body.photo_blob_key === "string" ? body.photo_blob_key.trim() || null : null,
+    job_title: typeof body.job_title === "string" ? body.job_title.trim() || null : null,
+    contact_email: typeof body.contact_email === "string" ? body.contact_email.trim() || null : null,
+    contact_phone: typeof body.contact_phone === "string" ? body.contact_phone.trim() || null : null,
+    department: typeof body.department === "string" ? body.department.trim() || null : null,
+    class_label: typeof body.class_label === "string" ? body.class_label.trim() || null : owner.class,
+    parent_display_name: typeof body.parent_display_name === "string" ? body.parent_display_name.trim() || null : null,
+    team_memberships: Array.isArray(body.team_memberships) ? body.team_memberships.map(x => String(x).trim()).filter(Boolean) : [],
+    work_stats: existing?.state?.work_stats && typeof existing.state.work_stats === "object"
+      ? existing.state.work_stats as ProfileRecord["work_stats"]
+      : { assigned_items_count: null, completed_items_count: null, target_summary: null },
+  };
+  const timestamp = Date.now(), operationId = uuid(), version = existing ? Number(existing.version || 1) + 1 : 1;
+  try {
+    const write = existing
+      ? env.DB.prepare("UPDATE aggregates SET state=?,version=?,updated_at=? WHERE id=? AND organization_id=? AND aggregate_type='staff_profile'")
+          .bind(JSON.stringify(profile), version, timestamp, existing.id, session.organization_id)
+      : env.DB.prepare("INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,'staff_profile',1,0,0,?,?,?)")
+          .bind(profileId, JSON.stringify(profile), timestamp, session.organization_id);
+    const eventId=uuid(), aggregateId=existing?existing.id:profileId;
+    const eventPayload=JSON.stringify(profile);
+    const batch = await env.DB.batch([
+      write,
+      env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,causation_id,actor,organization_id) SELECT ?,?,?,?,?,?,'{}',?,?,NULL,?,? WHERE EXISTS (SELECT 1 FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type='staff_profile' AND version=?)")
+        .bind(eventId,aggregateId,version,existing?"ProfileUpdated":"ProfileCreated",eventPayload,timestamp,operationId,operationId,JSON.stringify({user_id:session.sub,organization_id:session.organization_id}),session.organization_id,aggregateId,session.organization_id,version),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
+        .bind(session.organization_id, session.sub, existing ? "profile.update" : "profile.create", operationId, JSON.stringify({ owner_id: ownerId, profile_id: profileId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1 || Number(batch[1]?.meta?.changes ?? 0) !== 1 || Number(batch[2]?.meta?.changes ?? 0) !== 1) throw new Error("PROFILE_WRITE_FAILED");
+    return json(profileDto(profile as unknown as Json, session), existing ? 200 : 201);
+  } catch {
+    return json({ error: "PROFILE_STORE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function listProfiles(env: Env, session: Session, ownerId?: string) {
+  const rows = await allProfileRows(env, session);
+  const profiles = rows.filter(row => row.state && (!ownerId || String(row.state.owner_id ?? "") === ownerId));
+  if (ownerId && profiles.length === 0) return json({ error: "PROFILE_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  return json(ownerId ? profileDto(profiles[0].state, session) : profiles.map(row => profileDto(row.state, session)));
+}
+function parseCsvRows(input: string): Json[] {
+  const rows: string[][] = [];
+  let row: string[] = [], field = "", quoted = false;
+  for (let i=0; i<input.length; i++) {
+    const c=input[i];
+    if (quoted && c === '"' && input[i+1] === '"') { field += '"'; i++; }
+    else if (c === '"') quoted = !quoted;
+    else if (c === ',' && !quoted) { row.push(field); field=""; }
+    else if ((c === '\n' || c === '\r') && !quoted) {
+      if (c === '\r' && input[i+1] === '\n') i++;
+      row.push(field); if (row.some(value => value.length)) rows.push(row); row=[]; field="";
+    } else field += c;
+  }
+  row.push(field); if (row.some(value => value.length)) rows.push(row);
+  if (rows.length < 2) return [];
+  const headers=rows[0].map(value=>value.trim());
+  return rows.slice(1).map(values => {
+    const obj: Json = {};
+    headers.forEach((key,index)=>{ if (key === "team_memberships") obj[key]=(values[index]||"").split(";").map(x=>x.trim()).filter(Boolean); else obj[key]=values[index]||null; });
+    return obj;
+  });
+}
+async function importProfiles(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const contentType=(request.headers.get("content-type")||"text/csv").toLowerCase();
+  const raw=await request.text();
+  if (raw.length > 2_000_000) return json({ error:"IMPORT_TOO_LARGE",category:"DOMAIN",retryability:"NON_RETRYABLE" },413);
+  let rows: Json[];
+  try {
+    if (contentType.includes("json")) { const parsed=JSON.parse(raw); rows=Array.isArray(parsed)?parsed:[]; }
+    else rows=parseCsvRows(raw);
+  } catch { return json({ error:"INVALID_PROFILE_IMPORT",category:"DOMAIN",retryability:"NON_RETRYABLE" },400); }
+  if (rows.length > 500) return json({ error:"IMPORT_TOO_MANY_ROWS",category:"DOMAIN",retryability:"NON_RETRYABLE" },400);
+  let created=0, updated=0, failed=0;
+  const results:Json[]=[];
+  for (let index=0; index<rows.length; index++) {
+    const row=rows[index];
+    const userId=row&&typeof row.user_id==="string"?row.user_id:null;
+    if (!row || Array.isArray(row) || typeof row!=="object") {
+      failed++; results.push({outcome:"failed",user_id:userId,reason:"INVALID_PROFILE_ROW"}); continue;
+    }
+    const ownerId=typeof row.user_id==="string"?row.user_id:row.owner_id;
+    const normalized:Json={...row,owner_id:ownerId};
+    if (typeof ownerId!=="string" || !looksLikeUuid(ownerId) ||
+        ["full_name","contact_email","contact_phone","job_title","department"].some(key=>typeof row[key]!=="string"||!(row[key] as string).trim()) ||
+        !validProfileBody(normalized)) {
+      failed++; results.push({outcome:"failed",user_id:userId,reason:"INVALID_PROFILE_ROW"}); continue;
+    }
+    const response=await upsertProfile(new Request(request.url,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(normalized)}),env,session);
+    if (response.ok) {
+      const isCreated=response.status===201;
+      if(isCreated)created++;else updated++;
+      results.push({outcome:isCreated?"created":"updated",user_id:ownerId});
+    } else {
+      const error=await response.json().catch(()=>({error:"PROFILE_IMPORT_FAILED"})) as Json;
+      failed++; results.push({outcome:"failed",user_id:ownerId,reason:String(error.error||"PROFILE_IMPORT_FAILED")});
+    }
+  }
+  return json({total_rows:rows.length,created,updated,failed,results});
+}
+
+async function exportProfiles(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const rows=await allProfileRows(env,session);
+  const profiles=rows.filter(row=>row.state).map(row=>({
+    user_id:String(row.state.owner_id??""),
+    full_name:String(row.state.full_name??""),
+    contact_email:String(row.state.contact_email??""),
+    contact_phone:String(row.state.contact_phone??""),
+    job_title:String(row.state.job_title??""),
+    department:String(row.state.department??""),
+    photo_blob_key:row.state.photo_blob_key??null,
+    class_label:row.state.class_label??null,
+    parent_display_name:row.state.parent_display_name??null,
+    team_memberships:Array.isArray(row.state.team_memberships)?row.state.team_memberships:[],
+  } as Json));
+  const format=new URL(request.url).searchParams.get("format")||"csv";
+  if (format==="json") return json(profiles);
+  if (format!=="csv") return json({error:"INVALID_EXPORT_FORMAT",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const fields=["user_id","full_name","contact_email","contact_phone","job_title","department","photo_blob_key","class_label","parent_display_name","team_memberships"];
+  const escape=(value:unknown)=>{const text=Array.isArray(value)?value.join(";"):value==null?"":String(value);return /[",\r\n]/.test(text)?'"'+text.replace(/"/g,'""')+'"':text;};
+  const csv=[fields.join(","),...profiles.map(profile=>fields.map(key=>escape(profile[key])).join(","))].join("\r\n");
+  return new Response(csv,{status:200,headers:{"content-type":"text/csv; charset=utf-8","content-disposition":"attachment; filename=onyx-staff-profiles.csv","cache-control":"no-store"}});
+}
+
 async function pushSubscribe(request:Request,env:Env,session:Session){
   const body=await request.json().catch(()=>null) as Json|null;
   if(!body||typeof body.endpoint!=="string"||!body.endpoint||typeof body.p256dh!=="string"||!body.p256dh||typeof body.auth!=="string"||!body.auth)
@@ -968,6 +1357,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
   }
   try{
     if(url.pathname==="/api/events"&&request.method==="GET")return await websocketEvents(request,env);
+    if(url.pathname.startsWith("/api/relay/")&&request.method==="GET")return await relaySocket(request,env);
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return await authLogin(request,env);
     if((url.pathname==="/api/auth/supabase"||url.pathname==="/api/auth/clerk")&&request.method==="POST")return await authSupabaseAllFather(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return await authRefresh(request,env);
@@ -975,17 +1365,28 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     const session=await requireSession(request,env);
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
+    if(url.pathname==="/api/relay-ticket"&&request.method==="POST")return await issueRelayTicket(request,env,session);
     if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
-    if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await deactivateUser(request,env,session,url.pathname.split("/").at(-2)!);
+    if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,false);
+    if(/^\/api\/admin\/users\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,true);
+    if(/^\/api\/admin\/users\/[^/]+\/password$/.test(url.pathname)&&request.method==="POST")return await setUserPassword(request,env,session,url.pathname.split("/").at(-2)!);
+    if(/^\/api\/admin\/users\/[^/]+\/manager$/.test(url.pathname)&&request.method==="POST")return await setUserManager(request,env,session,url.pathname.split("/").at(-2)!);
+    if(/^\/api\/admin\/users\/[^/]+\/parent$/.test(url.pathname)&&request.method==="POST")return await setUserParent(request,env,session,url.pathname.split("/").at(-2)!);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="GET")return await getMobileAccess(env,session);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="PUT")return await putMobileAccess(request,env,session);
     if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);
     if(url.pathname==="/api/admin/legal-holds"&&request.method==="POST")return await postAdminLegalHold(request,env,session);
+    if(url.pathname==="/api/todo/lists"&&request.method==="POST")return await createTodoAggregate(request,env,session,"todo_list");
+    if(url.pathname==="/api/todo/targets"&&request.method==="POST")return await createTodoAggregate(request,env,session,"target_list");
+    if(url.pathname==="/api/todo/staff-loans"&&request.method==="POST")return await createTodoAggregate(request,env,session,"staff_loan");
     if(/^\/api\/admin\/users\/[^/]+\/class$/.test(url.pathname)&&request.method==="POST")return await assignUserClass(request,env,session,url.pathname.split("/").at(-2)!);
-    if(url.pathname==="/api/profiles"&&request.method==="GET")return await profiles(env,session);
-    if(url.pathname.startsWith("/api/profiles/")&&request.method==="GET")return await profiles(env,session,url.pathname.split("/").pop());
+    if(url.pathname==="/api/profiles"&&request.method==="GET")return await listProfiles(env,session);
+    if(url.pathname.startsWith("/api/profiles/")&&request.method==="GET")return await listProfiles(env,session,decodeURIComponent(url.pathname.split("/").pop()!));
+    if(url.pathname==="/api/admin/profiles"&&request.method==="PUT")return await upsertProfile(request,env,session);
+    if(url.pathname==="/api/admin/profiles/import"&&request.method==="POST")return await importProfiles(request,env,session);
+    if(url.pathname==="/api/admin/profiles/export"&&request.method==="GET")return await exportProfiles(request,env,session);
     if(url.pathname==="/api/push/subscriptions"&&request.method==="POST")return await pushSubscribe(request,env,session);
     if(url.pathname.startsWith("/api/push/subscriptions/")&&request.method==="DELETE")return await pushDelete(env,session,url.pathname.split("/").pop()!);
     if(url.pathname.startsWith("/api/files/")&&request.method==="GET")return await fileDownload(env,session,url.pathname.split("/").pop()!);

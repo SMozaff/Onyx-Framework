@@ -1079,7 +1079,7 @@ describe("B1 client-call route contracts", () => {
     expect(users.every((user) => Object.keys(user).sort().join(",") === "id,username")).toBe(true);
   });
 
-  it("returns a machine-classifiable 501 envelope for an authenticated unported route", async () => {
+  it("rejects Todo creation with an invalid owner instead of returning 501", async () => {
     const db = makeDb("STAFF");
     const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
     const response = await worker.fetch(new Request("https://worker.test/api/todo/lists", {
@@ -1087,16 +1087,12 @@ describe("B1 client-call route contracts", () => {
       headers: { authorization: "Bearer " + token, "content-type": "application/json" },
       body: JSON.stringify({ owner: "staff-1", origin: "staff_authored", items: [] }),
     }), makeEnv(db));
-    expect(response.status).toBe(501);
-    const body = await response.json() as Record<string, unknown>;
-    expect(body).toMatchObject({
-      error: "ROUTE_NOT_MIGRATED",
-      route: "/api/todo/lists",
-      method: "POST",
-      category: "FEATURE_UNAVAILABLE",
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: "INVALID_RESOURCE_OWNER",
+      category: "AUTHORITY",
       retryability: "NON_RETRYABLE",
     });
-    expect(typeof body.correlation_id).toBe("string");
-    expect(String(body.correlation_id).length).toBeGreaterThan(0);
+    expect(db.writes).toHaveLength(0);
   });
 });
