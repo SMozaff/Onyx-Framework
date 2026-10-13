@@ -50,6 +50,7 @@ export const AUTH_SCHEMA_CONTRACT: {
     replica_ownership: ["replica_id", "user_id", "organization_id", "claimed_at"],
     relay_ticket_redemptions: ["jti", "expires_at", "redeemed_at"],
     audit_log: ["organization_id", "user_id", "action", "correlation_id", "details", "created_at"],
+    file_asset_acl: ["content_hash", "organization_id", "user_id", "granted_by", "created_at"],
   },
   indexes: [
     "idx_users_username_lower",
@@ -60,6 +61,7 @@ export const AUTH_SCHEMA_CONTRACT: {
     mobile_access_settings: ["idx_mobile_access_settings_updated_at"],
     replica_ownership: ["idx_replica_ownership_org"],
     relay_ticket_redemptions: ["idx_relay_ticket_expiry"],
+    file_asset_acl: ["idx_file_asset_acl_user_org"],
   },
 };
 

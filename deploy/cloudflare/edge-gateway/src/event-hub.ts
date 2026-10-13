@@ -5,6 +5,7 @@ interface HubEnv {
 interface SocketAttachment {
   organization_id: string;
   user_id: string;
+  role: "ALL_FATHER" | "ORGANIZATION_ADMIN" | "STAFF";
   subscribed: boolean;
   event_types: string[];
   aggregate_ids: string[];
@@ -54,7 +55,11 @@ export class EventHub {
     }
     const organizationId = request.headers.get("x-onyx-authenticated-org");
     const userId = request.headers.get("x-onyx-authenticated-user");
-    if (!organizationId || !userId) return new Response("Unauthorized", { status: 401 });
+    const role = request.headers.get("x-onyx-authenticated-role");
+    if (!organizationId || !userId || !role ||
+        !["ALL_FATHER", "ORGANIZATION_ADMIN", "STAFF"].includes(role)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -64,6 +69,7 @@ export class EventHub {
     server.serializeAttachment({
       organization_id: organizationId,
       user_id: userId,
+      role: role as SocketAttachment["role"],
       subscribed: false,
       event_types: [],
       aggregate_ids: [],
@@ -165,6 +171,9 @@ export class EventHub {
           if (!attachment?.subscribed || attachment.organization_id !== row.organization_id) continue;
           if (attachment.event_types.length && !attachment.event_types.includes(row.event_type)) continue;
           if (attachment.aggregate_ids.length && !attachment.aggregate_ids.includes(row.aggregate_id)) continue;
+          // Staff may receive only events for resources they own/participate in,
+          // or events they authored. Tenant membership alone is not resource ACL.
+          if (attachment.role === "STAFF" && !(await this.staffMayReceive(row, attachment.user_id))) continue;
           try { socket.send(JSON.stringify(event)); } catch { /* close callbacks clean up failed sockets */ }
         }
       }
@@ -175,6 +184,37 @@ export class EventHub {
     if (this.state.getWebSockets().length > 0) {
       await this.state.storage.setAlarm(Date.now() + 1000);
     }
+  }
+
+  private async staffMayReceive(row: EventRow, userId: string): Promise<boolean> {
+    const actor = decodeJson(row.actor, {}) as Record<string, unknown>;
+    if (actor && typeof actor === "object" && actor.user_id === userId) return true;
+
+    const aggregate = await this.env.DB.prepare(
+      "SELECT state FROM aggregates WHERE id=? AND organization_id=? LIMIT 1"
+    ).bind(row.aggregate_id, row.organization_id).first<{ state: string }>();
+    if (!aggregate || typeof aggregate.state !== "string") return false;
+    const state = decodeJson(aggregate.state, null);
+    if (!state || typeof state !== "object" || Array.isArray(state)) return false;
+    const record = state as Record<string, unknown>;
+    const ids: unknown[] = [
+      record.owner_id, record.owner, record.user_id, record.recipient_user_id,
+      record.assignee_id, record.assigned_to, record.staff_user_id,
+      record.real_owner_id, record.borrowing_manager_id,
+    ];
+    const nestedOwner = record.owner && typeof record.owner === "object" && !Array.isArray(record.owner)
+      ? (record.owner as Record<string, unknown>).user_id : undefined;
+    ids.push(nestedOwner);
+    return ids.some((id) => {
+      if (typeof id === "string") return id === userId;
+      // Some native aggregate projections serialize ObjectId as 16 bytes.
+      if (Array.isArray(id) && id.length === 16 && /^[0-9a-f-]{36}$/i.test(userId)) {
+        const hex = id.map((byte) => Number(byte).toString(16).padStart(2, "0")).join("");
+        const uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+        return uuid.toLowerCase() === userId.toLowerCase();
+      }
+      return false;
+    });
   }
 
   private stringArray(value: unknown): string[] {
