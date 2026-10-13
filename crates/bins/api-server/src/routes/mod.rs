@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod auth;
+#[path = "../supabase.rs"]
 pub mod supabase;
 pub mod client_type;
 pub mod command;
