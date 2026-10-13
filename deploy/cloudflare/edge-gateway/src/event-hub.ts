@@ -238,6 +238,7 @@ export class RelayHub {
     }
     const targetPresent=bytes[targetFlagOffset]!==0;
     const target=targetPresent?bytesToUuid(bytes.slice(targetOffset,targetOffset+16)):attachment.target_replica.toLowerCase();
+    if(target!==attachment.target_replica.toLowerCase()) { try { socket.close(1008,"relay target mismatch"); } catch {} return; }
     const payloadLengthOffset=targetOffset+16;
     const payloadLength=new DataView(message).getUint32(payloadLengthOffset,false);
     const signatureFlagOffset=payloadLengthOffset+4+payloadLength+8;
