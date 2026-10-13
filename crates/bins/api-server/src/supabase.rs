@@ -117,7 +117,12 @@ impl SupabaseAuth {
 }
 
 fn is_designated_identity(identity: &SupabaseUser, expected_subject: &str) -> bool {
-    let email = identity.email.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+    let email = identity
+        .email
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     let confirmed = identity
         .email_confirmed_at
         .as_deref()
@@ -131,8 +136,10 @@ fn is_designated_identity(identity: &SupabaseUser, expected_subject: &str) -> bo
 
 fn auth_error(code: &str) -> ApiError {
     let (status, category, retryability) = match code {
-        "SUPABASE_AUTH_UNAVAILABLE" | "SUPABASE_USER_RESPONSE_INVALID"
-        | "SUPABASE_AUTH_NOT_CONFIGURED" | "USER_STORE_UNAVAILABLE"
+        "SUPABASE_AUTH_UNAVAILABLE"
+        | "SUPABASE_USER_RESPONSE_INVALID"
+        | "SUPABASE_AUTH_NOT_CONFIGURED"
+        | "USER_STORE_UNAVAILABLE"
         | "TOKEN_ISSUANCE_FAILED" => (
             StatusCode::SERVICE_UNAVAILABLE,
             "INFRASTRUCTURE",
@@ -198,24 +205,12 @@ pub async fn login(
         ));
     }
 
-    let access_token = issue_token(
-        &state,
-        &user,
-        "access",
-        3600,
-        ClientType::Web,
-    )
-    .await
-    .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
-    let refresh_token = issue_token(
-        &state,
-        &user,
-        "refresh",
-        7 * 24 * 3600,
-        ClientType::Web,
-    )
-    .await
-    .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
+    let access_token = issue_token(&state, &user, "access", 3600, ClientType::Web)
+        .await
+        .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
+    let refresh_token = issue_token(&state, &user, "refresh", 7 * 24 * 3600, ClientType::Web)
+        .await
+        .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
 
     Ok(Json(SupabaseIdentityResponse {
         access_token,
@@ -230,7 +225,6 @@ pub async fn login(
         },
     }))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -248,7 +242,11 @@ mod tests {
     #[test]
     fn accepts_only_confirmed_designated_subject() {
         assert!(is_designated_identity(
-            &user("supabase-user-123", ALLFATHER_EMAIL, Some("2026-10-01T00:00:00Z")),
+            &user(
+                "supabase-user-123",
+                ALLFATHER_EMAIL,
+                Some("2026-10-01T00:00:00Z")
+            ),
             "supabase-user-123"
         ));
     }
@@ -256,7 +254,11 @@ mod tests {
     #[test]
     fn rejects_subject_mismatch_even_when_email_is_confirmed() {
         assert!(!is_designated_identity(
-            &user("different-subject", ALLFATHER_EMAIL, Some("2026-10-01T00:00:00Z")),
+            &user(
+                "different-subject",
+                ALLFATHER_EMAIL,
+                Some("2026-10-01T00:00:00Z")
+            ),
             "supabase-user-123"
         ));
     }
@@ -268,7 +270,11 @@ mod tests {
             "supabase-user-123"
         ));
         assert!(!is_designated_identity(
-            &user("supabase-user-123", "other@example.com", Some("2026-10-01T00:00:00Z")),
+            &user(
+                "supabase-user-123",
+                "other@example.com",
+                Some("2026-10-01T00:00:00Z")
+            ),
             "supabase-user-123"
         ));
     }
