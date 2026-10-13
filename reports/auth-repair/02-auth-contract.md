@@ -52,9 +52,9 @@ the subject mapping), plus the stable-public-error-code policy.
 | `POST /api/auth/supabase` failure body: raw verifier message → stable `INVALID_SUPABASE_TOKEN` | `Login.tsx` shows generic i18n text for HTTP failures; no client code depends on the old strings (grep verified: no test or client matches them) |
 | `POST /api/auth/supabase` on unmapped/mismatched subject: session issuance → `403 ALLFATHER_NOT_PROVISIONED` | **First login after any deploy now requires `users.supabase_user_id` to be provisioned out-of-band by the owner** (open decision §8.2). This is the contract's explicit requirement; deployment must not occur before that provisioning step exists |
 
-**Remaining blocker note:** `scripts/migrate-worker-clerk-to-supabase.py` still carries the legacy
+**Remaining blocker note:** `obsolete one-time migration script` still carries the legacy
 rewrite text (login-time subject binding and raw error passthrough). It aborts before writing
-because its `clerkIssuer` anchor no longer exists in `index.ts`, so it cannot revert these fixes;
+because its `supabaseIssuer` anchor no longer exists in `index.ts`, so it cannot revert these fixes;
 it should be retired by the owner in a later phase rather than re-run.
 
 No production deployment, migration, secret, or identity change was made. Phase 2 stops here.
@@ -131,7 +131,7 @@ Source reviewed: deploy/cloudflare/edge-gateway/src/index.ts and src/supabase.ts
 |---|---|---|
 | POST /api/auth/login | authLogin | Username/email + Argon2id; rejects inactive and All-Father; generic credential failure. Does not check organization active state. |
 | POST /api/auth/supabase | authSupabaseAllFather | JWT and Supabase user checks; confirmed designated email and subject equality; auto-binds/replaces supabase_user_id; no audience check. |
-| POST /api/auth/clerk | Alias to authSupabaseAllFather | Misleading legacy provider alias; compatibility inventory required before removal. |
+| POST /api/auth/supabase | Alias to authSupabaseAllFather | Legacy alias removed; only the canonical Supabase route remains. |
 | POST /api/auth/refresh | authRefresh | Validates refresh token and account active state, revokes old refresh token, issues new pair. Organization state and all privilege claims need revalidation. |
 | POST /api/auth/logout | authLogout | Revokes supplied bearer and/or refresh token hashes; client wiring is not established. |
 | Current-user/session introspection | No dedicated route found | No canonical /api/auth/me route found in inspected router. Client relies on stored login/session state. |
@@ -173,7 +173,7 @@ Required behavior differs at D1 mapping: subject must match an already provision
 | AUTH-06 | High | Server logout is not wired in the inspected auth store | Local logout may not revoke server tokens. |
 | AUTH-07 | High | Generic command authorization is incomplete | /api/command does not demonstrate a complete server-side role/action/resource matrix. |
 | AUTH-08 | Medium | Session validation omits organization active state and some privilege fields | Stale or inconsistent claims may survive until expiry or another check. |
-| AUTH-09 | Medium | /api/auth/clerk aliases the Supabase handler | Provider boundary is obscured; remove only after compatibility review. |
+| AUTH-09 | Medium | /api/auth/supabase aliases the Supabase handler | Provider boundary was obscured; the obsolete alias is removed. |
 | AUTH-10 | Medium | Supported OAuth client targets are unresolved | Redirect/callback correctness for browser and Tauri is unproven. |
 | AUTH-11 | Medium | Authentication audit coverage is undefined/incomplete | Provisioning/deactivation are audited; auth lifecycle and privileged denial coverage need policy. |
 | AUTH-12 | Medium | Duplicate 0002 migration/schema conflicts remain | Phase 1 identified competing All-Father seeds and overlapping columns; deployed impact is unknown. |
@@ -192,7 +192,7 @@ Phase 1 found no dedicated Worker authentication test file in the inspected tree
 6. Should a disabled organization immediately invalidate member sessions and block login/refresh? Recommended: yes.
 7. Approve role × route/action × aggregate ownership/manager × client capability rules for generic commands and read routes.
 8. Define audit coverage/retention for login, failures, refresh, logout/revocation, unknown Supabase subject, and privileged denial without storing secrets.
-9. Define compatibility window for /api/auth/clerk before deprecation/removal.
+9. Remove the obsolete provider alias; keep /api/auth/supabase as the sole external identity exchange.
 10. Standardize generic public errors and safe server-side reason codes.
 
 ## 9. Conclusion
