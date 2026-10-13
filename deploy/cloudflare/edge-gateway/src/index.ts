@@ -9,6 +9,7 @@ type Json = Record<string, unknown>;
 
 interface Env {
   DB: D1Database;
+  EVENTS_HUB: DurableObjectNamespace;
   ONYX_JWT_SECRET?: string;
   ONYX_CORS_ORIGINS?: string;
   ONYX_ALLFATHER_EMAIL?: string;
@@ -892,6 +893,51 @@ async function fileDownload(env:Env,session:Session,hash:string){
 async function hmacBytes(keyBytes:Uint8Array,value:string):Promise<Uint8Array>{const key=await crypto.subtle.importKey("raw",keyBytes,{name:"HMAC",hash:"SHA-256"},false,["sign"]);return new Uint8Array(await crypto.subtle.sign("HMAC",key,new TextEncoder().encode(value)));}
 async function signedS3Get(endpoint:string,bucket:string,key:string,access:string,secret:string){const base=endpoint.replace(/\/$/,"");const path=`/${bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;const url=`${base}${path}`;const host=new URL(base).host;const bodyHash=await sha256("");const date=new Date();const amzDate=date.toISOString().replace(/[-:]/g,"").replace(/\.\d{3}Z$/,"");const short=amzDate.slice(0,8);const canonicalHeaders=`host:${host}\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${amzDate}\n`;const signedHeaders="host;x-amz-content-sha256;x-amz-date";const canonicalRequest=`GET\n${path}\n\n${canonicalHeaders}\n${signedHeaders}\n${bodyHash}`;const scope=`${short}/us-east-1/s3/aws4_request`;const stringToSign=`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${await sha256(canonicalRequest)}`;const kDate=await hmacBytes(new TextEncoder().encode(`AWS4${secret}`),short);const kRegion=await hmacBytes(kDate,"us-east-1");const kService=await hmacBytes(kRegion,"s3");const signingKey=await hmacBytes(kService,"aws4_request");const signature=Array.from(await hmacBytes(signingKey,stringToSign),(b)=>b.toString(16).padStart(2,"0")).join("");return fetch(url,{headers:{Host:host,"x-amz-content-sha256":bodyHash,"x-amz-date":amzDate,Authorization:`AWS4-HMAC-SHA256 Credential=${access}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`}});}
 
+const WS_AUTH_PROTOCOL = "onyx-bearer";
+
+function websocketBearer(request: Request): string | null {
+  const header = request.headers.get("sec-websocket-protocol");
+  if (!header || header.length > 20_000) return null;
+  const protocols = header.split(",").map((value) => value.trim()).filter(Boolean);
+  const authProtocols = protocols.filter((value) => value === WS_AUTH_PROTOCOL);
+  const credentials = protocols.filter((value) => value !== WS_AUTH_PROTOCOL);
+  if (authProtocols.length !== 1 || credentials.length !== 1) return null;
+  const token = credentials[0];
+  return token.length <= 16_384 && /^[A-Za-z0-9._~-]+$/.test(token) ? token : null;
+}
+
+async function websocketEvents(request: Request, env: Env): Promise<Response> {
+  const origin = request.headers.get("origin");
+  const allowedOrigins = env.ONYX_CORS_ORIGINS?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
+  if (origin && (!allowedOrigins.includes(origin) || allowedOrigins.includes("*"))) {
+    return json({ error: "ORIGIN_NOT_ALLOWED", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 403);
+  }
+  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket" ||
+      !request.headers.get("connection")?.toLowerCase().split(",").map((value) => value.trim()).includes("upgrade")) {
+    return json({ error: "WEBSOCKET_UPGRADE_REQUIRED", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 426);
+  }
+  const token = websocketBearer(request);
+  if (!token) return json({ error: "UNAUTHORIZED", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 401);
+  try {
+    const headers = new Headers(request.headers);
+    headers.set("authorization", "Bearer " + token);
+    const sessionRequest = new Request(request, { headers });
+    const session = await requireSession(sessionRequest, env);
+    headers.set("x-onyx-authenticated-org", session.organization_id);
+    headers.set("x-onyx-authenticated-user", session.sub);
+    const hubId = env.EVENTS_HUB.idFromName(session.organization_id);
+    return await env.EVENTS_HUB.get(hubId).fetch(new Request(request, { headers }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "FORBIDDEN_ROLE") return json({ error: "FORBIDDEN", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 403);
+    if (message === "AUTH_REQUIRED" || message.includes("token") || message.includes("expired") || message.includes("revoked")) {
+      return json({ error: "UNAUTHORIZED", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 401);
+    }
+    console.error("WebSocket authentication unavailable");
+    return json({ error: "AUTHENTICATION_SERVICE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+
 async function dispatch(request:Request,env:Env):Promise<Response>{
   const url=new URL(request.url);const origin=corsOrigin(request,env);
   if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
@@ -906,6 +952,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     }
   }
   try{
+    if(url.pathname==="/api/events"&&request.method==="GET")return await websocketEvents(request,env);
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return await authLogin(request,env);
     if((url.pathname==="/api/auth/supabase"||url.pathname==="/api/auth/clerk")&&request.method==="POST")return await authSupabaseAllFather(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return await authRefresh(request,env);
@@ -925,7 +972,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/push/subscriptions"&&request.method==="POST")return await pushSubscribe(request,env,session);
     if(url.pathname.startsWith("/api/push/subscriptions/")&&request.method==="DELETE")return await pushDelete(env,session,url.pathname.split("/").pop()!);
     if(url.pathname.startsWith("/api/files/")&&request.method==="GET")return await fileDownload(env,session,url.pathname.split("/").pop()!);
-    if(url.pathname==="/api/events"&&request.method==="GET"){requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");const rows=await env.DB.prepare("SELECT event_id,aggregate_id,event_type,payload,occurred_at,organization_id FROM domain_events WHERE organization_id=? ORDER BY occurred_at DESC LIMIT 100").bind(session.organization_id).all();return json(rows.results??[],200,origin);}
+
     if(url.pathname==="/api/allfather/organizations"&&request.method==="POST")return await createOrganization(request,env,session);
     if(url.pathname==="/api/allfather/admins"&&request.method==="POST")return await createUser(request,env,session,"ORGANIZATION_ADMIN");
     if(url.pathname==="/api/admin/staff"&&request.method==="POST")return await createUser(request,env,session,"STAFF");
@@ -939,6 +986,10 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
  * return wildcard CORS headers for credential-capable API responses.
  */
 function applyCors(request:Request,env:Env,response:Response):Response{
+  // A WebSocket upgrade carries a platform-managed webSocket property that
+  // cannot be reconstructed by the standard Response constructor. Origin was
+  // validated before forwarding the upgrade to the internal Durable Object.
+  if (response.status === 101) return response;
   const headers=new Headers(response.headers);
   headers.delete("access-control-allow-origin");
   headers.delete("access-control-allow-credentials");
