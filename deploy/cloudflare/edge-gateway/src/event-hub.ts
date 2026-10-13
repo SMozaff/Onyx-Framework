@@ -238,17 +238,20 @@ export class RelayHub {
     }
     const targetPresent=bytes[targetFlagOffset]!==0;
     const target=targetPresent?bytesToUuid(bytes.slice(targetOffset,targetOffset+16)):attachment.target_replica.toLowerCase();
+    const payloadLengthOffset=targetOffset+16;
+    const payloadLength=new DataView(message).getUint32(payloadLengthOffset,false);
+    const signatureFlagOffset=payloadLengthOffset+4+payloadLength+8;
+    if(signatureFlagOffset+3>bytes.length) { try { socket.close(1003,"invalid sync frame"); } catch {} return; }
+    const signaturePresent=bytes[signatureFlagOffset]!==0;
+    const signatureLength=new DataView(message).getUint16(signatureFlagOffset+1,false);
+    if(signatureFlagOffset+3+signatureLength!==bytes.length || (!signaturePresent && signatureLength!==0)) { try { socket.close(1003,"invalid sync frame"); } catch {} return; }
     const peers=this.state.getWebSockets();
-    let delivered=false;
     for (const peer of peers) {
       if (peer===socket) continue;
       const peerAttachment=peer.deserializeAttachment() as RelaySocketAttachment | null;
       if (!peerAttachment || peerAttachment.organization_id!==attachment.organization_id) continue;
-      if (targetPresent ? peerAttachment.self_replica.toLowerCase()!==target : false) continue;
-      try { peer.send(message); delivered=true; } catch {}
-    }
-    if (!delivered && targetPresent) {
-      // Targeted delivery is best-effort; the sync layer owns retry semantics.
+      if (peerAttachment.self_replica.toLowerCase()!==target) continue;
+      try { peer.send(message); } catch {}
     }
   }
 
