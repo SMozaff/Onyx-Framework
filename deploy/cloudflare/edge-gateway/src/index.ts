@@ -11,6 +11,7 @@ type Json = Record<string, unknown>;
 interface Env {
   DB: D1Database;
   EVENTS_HUB: DurableObjectNamespace;
+  RELAY_HUB: DurableObjectNamespace;
   ONYX_JWT_SECRET?: string;
   ONYX_CORS_ORIGINS?: string;
   ONYX_ALLFATHER_EMAIL?: string;
@@ -317,6 +318,70 @@ async function authSupabaseAllFather(request:Request,env:Env){
     return json({error:"INVALID_SUPABASE_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   }
 }
+
+const RELAY_TICKET_TTL_SECONDS=30;
+type RelayTicketClaims={sub:string;organization_id:string;typ:"relay_ticket";target_id:string;self_replica:string;iat:number;exp:number;jti:string};
+async function signRelayTicket(env:Env,claims:RelayTicketClaims):Promise<string>{
+  if(!env.ONYX_JWT_SECRET)throw new Error("ONYX_JWT_SECRET is not configured");
+  const header=b64u(JSON.stringify({alg:"HS256",typ:"JWT"})),payload=b64u(JSON.stringify(claims)),input=header+"."+payload;
+  return input+"."+b64u(await hmac(env.ONYX_JWT_SECRET,input));
+}
+async function verifyRelayTicket(env:Env,token:string):Promise<RelayTicketClaims>{
+  if(!env.ONYX_JWT_SECRET)throw new Error("ONYX_JWT_SECRET is not configured");
+  if(token.length>8192)throw new Error("invalid relay ticket");
+  const parts=token.split(".");
+  if(parts.length!==3||parts.some(part=>!/^[A-Za-z0-9_-]+$/.test(part)))throw new Error("invalid relay ticket");
+  const header=decodeJsonB64u(parts[0]),claims=decodeJsonB64u(parts[1]);
+  if(header.alg!=="HS256"||header.typ!=="JWT")throw new Error("invalid relay ticket");
+  const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(env.ONYX_JWT_SECRET),{name:"HMAC",hash:"SHA-256"},false,["verify"]);
+  if(!await crypto.subtle.verify("HMAC",key,fromB64u(parts[2]),new TextEncoder().encode(parts[0]+"."+parts[1])))throw new Error("invalid relay ticket");
+  const c=claims as unknown as RelayTicketClaims;
+  if(c.typ!=="relay_ticket"||!looksLikeUuid(c.sub)||!looksLikeUuid(c.organization_id)||!looksLikeUuid(c.target_id)||!looksLikeUuid(c.self_replica)||typeof c.jti!=="string"||!c.jti||!Number.isSafeInteger(c.exp)||c.exp<=now()||!Number.isSafeInteger(c.iat))throw new Error("invalid relay ticket");
+  return c;
+}
+async function issueRelayTicket(request:Request,env:Env,session:Session){
+  if(session.client_type==="mobile_observer")return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const body=await request.json().catch(()=>null) as Json|null;
+  if(!body||Array.isArray(body)||Object.keys(body).some(key=>key!=="target_id"&&key!=="self_replica")||
+     typeof body.target_id!=="string"||!looksLikeUuid(body.target_id)||typeof body.self_replica!=="string"||!looksLikeUuid(body.self_replica))
+    return json({error:"INVALID_REPLICA_ID",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  if(!looksLikeUuid(session.sub)||!looksLikeUuid(session.organization_id))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  const self=body.self_replica.toLowerCase(),target=body.target_id.toLowerCase(),timestamp=Date.now();
+  try{
+    await env.DB.prepare("INSERT INTO replica_ownership(replica_id,user_id,organization_id,claimed_at) VALUES(?,?,?,?) ON CONFLICT(replica_id) DO NOTHING")
+      .bind(self,session.sub,session.organization_id,now()).run();
+    const owner=await env.DB.prepare("SELECT user_id,organization_id FROM replica_ownership WHERE replica_id=? LIMIT 1").bind(self).first<{user_id:string;organization_id:string}>();
+    if(!owner||owner.user_id!==session.sub||owner.organization_id!==session.organization_id)return json({error:"REPLICA_OWNERSHIP_REJECTED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+    const claims:RelayTicketClaims={sub:session.sub,organization_id:session.organization_id,typ:"relay_ticket",target_id:target,self_replica:self,iat:now(),exp:now()+RELAY_TICKET_TTL_SECONDS,jti:uuid()};
+    return json({ticket:await signRelayTicket(env,claims),expires_in:RELAY_TICKET_TTL_SECONDS});
+  }catch{
+    return json({error:"RELAY_TICKET_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
+async function relaySocket(request:Request,env:Env):Promise<Response>{
+  if(request.headers.get("upgrade")?.toLowerCase()!=="websocket")return json({error:"WEBSOCKET_UPGRADE_REQUIRED",category:"DOMAIN",retryability:"NON_RETRYABLE"},426);
+  const url=new URL(request.url),target=url.pathname.split("/").pop()||"",token=url.searchParams.get("ticket")||"";
+  if(!looksLikeUuid(target)||!token)return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  let claims:RelayTicketClaims;
+  try{claims=await verifyRelayTicket(env,token);}catch{return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
+  if(claims.target_id!==target.toLowerCase())return json({error:"RELAY_TARGET_MISMATCH",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  try{
+    const redeemed=await env.DB.prepare("INSERT OR IGNORE INTO relay_ticket_redemptions(jti,expires_at,redeemed_at) VALUES(?,?,?)")
+      .bind(claims.jti,claims.exp,now()).run();
+    if(Number(redeemed.meta?.changes??0)!==1)return json({error:"RELAY_TICKET_REPLAYED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+    await env.DB.prepare("DELETE FROM relay_ticket_redemptions WHERE expires_at<?").bind(now()-3600).run();
+    const headers=new Headers(request.headers);
+    headers.set("x-onyx-relay-org",claims.organization_id);
+    headers.set("x-onyx-relay-user",claims.sub);
+    headers.set("x-onyx-relay-self",claims.self_replica);
+    headers.set("x-onyx-relay-target",claims.target_id);
+    const hub=env.RELAY_HUB.idFromName(claims.organization_id);
+    return await env.RELAY_HUB.get(hub).fetch(new Request(request,{headers}));
+  }catch{
+    return json({error:"RELAY_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
+
 function requireRole(session:Session,...roles:string[]){if(!roles.includes(session.role))throw new Error("FORBIDDEN_ROLE");}
 function requiredString(body:Json,key:string):string{const value=body[key];if(typeof value!=="string"||!value.trim())throw new Error(`INVALID_${key.toUpperCase()}`);return value.trim();}
 function optionalEmail(body:Json):string|null{const value=typeof body.email==="string"?body.email.trim().toLowerCase():null;return value||null;}
@@ -1258,6 +1323,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
   }
   try{
     if(url.pathname==="/api/events"&&request.method==="GET")return await websocketEvents(request,env);
+    if(url.pathname.startsWith("/api/relay/")&&request.method==="GET")return await relaySocket(request,env);
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return await authLogin(request,env);
     if((url.pathname==="/api/auth/supabase"||url.pathname==="/api/auth/clerk")&&request.method==="POST")return await authSupabaseAllFather(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return await authRefresh(request,env);
@@ -1265,6 +1331,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     const session=await requireSession(request,env);
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
+    if(url.pathname==="/api/relay-ticket"&&request.method==="POST")return await issueRelayTicket(request,env,session);
     if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
