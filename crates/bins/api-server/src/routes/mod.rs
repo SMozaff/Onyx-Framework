@@ -3,8 +3,6 @@
 
 pub mod admin;
 pub mod auth;
-#[path = "../supabase.rs"]
-pub mod supabase;
 pub mod client_type;
 pub mod command;
 pub mod events;
@@ -14,6 +12,8 @@ pub mod profiles;
 pub mod push;
 pub mod query;
 pub mod relay;
+#[path = "../supabase.rs"]
+pub mod supabase;
 pub mod todo_admin;
 
 use std::{
@@ -344,7 +344,10 @@ impl ApiState {
         // usable password and is reachable only through the Supabase exchange.
         let supabase_auth = supabase::SupabaseAuth::from_env()?.map(Arc::new);
         if supabase_auth.is_some() {
-            match user_store.find_by_username(supabase::ALLFATHER_USERNAME).await? {
+            match user_store
+                .find_by_username(supabase::ALLFATHER_USERNAME)
+                .await?
+            {
                 Some(existing) if !existing.is_admin || !existing.is_active => {
                     anyhow::bail!("configured All-Father principal is not backed by an active ONYX administrator");
                 }
@@ -352,17 +355,21 @@ impl ApiState {
                 None => {
                     let password_hash = password_hasher
                         .hash(&format!("onyx-supabase-{}", uuid::Uuid::new_v4()))
-                        .map_err(|e| anyhow::anyhow!("failed to create unusable All-Father credential: {e}"))?;
-                    user_store.create(security_application::NewUser {
-                        user_id: uuid::Uuid::new_v4().to_string(),
-                        username: supabase::ALLFATHER_USERNAME.to_owned(),
-                        organization_id: ORGANIZATION_ID.to_owned(),
-                        password_hash,
-                        is_admin: true,
-                        is_manager: false,
-                        class: None,
-                        parent_user_id: None,
-                    }).await?;
+                        .map_err(|e| {
+                            anyhow::anyhow!("failed to create unusable All-Father credential: {e}")
+                        })?;
+                    user_store
+                        .create(security_application::NewUser {
+                            user_id: uuid::Uuid::new_v4().to_string(),
+                            username: supabase::ALLFATHER_USERNAME.to_owned(),
+                            organization_id: ORGANIZATION_ID.to_owned(),
+                            password_hash,
+                            is_admin: true,
+                            is_manager: false,
+                            class: None,
+                            parent_user_id: None,
+                        })
+                        .await?;
                     tracing::info!("provisioned the designated Supabase identity as the ONYX master administrator");
                 }
             }
