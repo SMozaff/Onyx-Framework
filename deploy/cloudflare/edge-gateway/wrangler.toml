@@ -3,18 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-10-09"
 workers_dev = true
 
-# Local-only D1 binding. This deliberately uses a placeholder ID distinct from
-# the production database UUID; Wrangler keeps local state separate from remote D1.
-[[d1_databases]]
-binding = "DB"
-database_name = "onyx-free-db"
-database_id = "00000000-0000-0000-0000-000000000001"
-migrations_dir = "migrations"
-
-# Exact local development origins only. Production origins belong in the
-# ONYX_CORS_ORIGINS GitHub Actions secret used by the deployment workflow.
-[vars]
-ONYX_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175,tauri://localhost,http://tauri.localhost,https://tauri.localhost"
+# The deployment workflow materializes the D1 database_id at deploy time.
+# This Worker has no Render origin and does not use Cloudflare Containers.
+#
+# This file is the production/deploy shape only. For local development use
+# wrangler.dev.toml (`npm run dev`, `npm run d1:local`, `npm run check`), which
+# carries the D1 binding and the non-secret dev [vars].
 
 [observability]
 enabled = true
