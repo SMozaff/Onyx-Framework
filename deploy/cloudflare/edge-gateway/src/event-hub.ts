@@ -77,8 +77,6 @@ export class EventHub {
       cursor = Number(row?.seq ?? 0);
       await this.state.storage.put("cursor", cursor);
     }
-    await this.state.storage.setAlarm(Date.now() + 1000);
-
     return new Response(null, {
       status: 101,
       webSocket: client,
