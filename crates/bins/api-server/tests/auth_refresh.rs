@@ -60,7 +60,7 @@ async fn refresh_token_yields_a_working_new_access_token_and_rotates() {
 
     // A dedicated test-drive administrator is created by start_server for this
     // suite. The designated All-Father is passwordless and authenticates through
-    // Clerk, so password-based token-refresh coverage uses an ordinary ONYX
+    // Supabase Auth, so password-based token-refresh coverage uses an ordinary ONYX
     // administrator instead.
 
     let login: serde_json::Value = http
