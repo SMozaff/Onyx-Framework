@@ -23,7 +23,7 @@ async fn start_server(db_label: &str) -> (SocketAddr, reqwest::Client) {
         .expect("api state");
 
     // Seed a dedicated password-authenticated administrator. The designated
-    // All-Father identity is passwordless and uses the Clerk boundary; tests
+    // All-Father identity is passwordless and uses the Supabase Auth boundary; tests
     // must not rely on a historical development seed being present.
     state
         .user_store
@@ -78,7 +78,7 @@ async fn mobile_login_is_denied_by_default_then_allowed_once_granted_admin_alway
     let base = format!("http://{addr}");
 
     // Use the dedicated administrator created by start_server; the
-    // All-Father identity is passwordless and reserved for Clerk login.
+    // All-Father identity is passwordless and reserved for Supabase Auth login.
     let admin_login_resp =
         login(&http, &base, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD, None).await;
     assert_eq!(
