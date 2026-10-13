@@ -94,6 +94,17 @@ async fn mint_relay_ticket(
         .send()
         .await
         .map_err(|e| TransportError::Platform(format!("relay ticket request failed: {e}")))?;
+    if response.status().as_u16() == 501 {
+        let route = response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|body| body.get("route").and_then(serde_json::Value::as_str).map(str::to_string))
+            .unwrap_or_else(|| "/api/relay-ticket".to_string());
+        return Err(TransportError::Platform(format!(
+            "relay feature unavailable on this API server (501 ROUTE_NOT_MIGRATED: {route})"
+        )));
+    }
     if !response.status().is_success() {
         return Err(TransportError::Platform(format!(
             "relay ticket request returned {}",
@@ -171,7 +182,16 @@ impl RelaySocketFactory for TungsteniteRelaySocketFactory {
         let (stream, _response) = tokio::time::timeout(timeout, connect_async(request))
             .await
             .map_err(|_| TransportError::Timeout)?
-            .map_err(|e| TransportError::Platform(format!("relay handshake failed: {e}")))?;
+            .map_err(|e| match e {
+                tokio_tungstenite::tungstenite::Error::Http(response)
+                    if response.status().as_u16() == 501 =>
+                {
+                    TransportError::Platform(
+                        "relay WebSocket feature unavailable on this API server (501 ROUTE_NOT_MIGRATED: /api/relay/<target_id>)".to_string()
+                    )
+                }
+                other => TransportError::Platform(format!("relay handshake failed: {other}")),
+            })?;
 
         Ok(Box::new(TungsteniteRelaySocket { stream }))
     }
