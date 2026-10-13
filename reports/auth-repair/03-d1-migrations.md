@@ -115,7 +115,7 @@ No production path is invoked by these steps.
 2. **Applying the repaired migrations to production** (via the deploy workflow or `d1:remote`).
 3. **Deploying the Worker** built from this tree (includes the Phase 2 AUTH-01 change: Supabase login requires an owner-provisioned `users.supabase_user_id` mapping — provisioning must exist before users may sign in).
 4. **Supabase subject provisioning** for the `__allfather__` row (out-of-band, owner-controlled; not a migration).
-5. **Cleanup:** deleting the unreferenced `deploy/cloudflare/edge-gateway/d1/` duplicate directory; retiring `obsolete one-time migration script` and the `/api/auth/supabase` alias (compatibility window decision).
+5. **Cleanup:** deleting the unreferenced `deploy/cloudflare/edge-gateway/d1/` duplicate directory; the obsolete one-time migration script/workflow and provider alias have been removed in the Supabase-only cleanup branch.
 6. **Deferred schema decisions** (require data evidence + approval before a future migration): `role` CHECK constraint and users→organizations foreign key (both need table rebuilds or validated backfills; not safe to guess), and any deletion of stray privileged rows.
 
 ## 11. Unknowns
