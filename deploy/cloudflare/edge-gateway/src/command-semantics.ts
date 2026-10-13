@@ -125,6 +125,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validatePayload(schema: PayloadSchema, payload: unknown): string | null {
+  // Commands with no payload fields are represented by arbitrary serde_json::Value
+  // on the Axum API; the Worker must not reject string/number/bool/null solely
+  // because the transport value is not an object.
+  if (Object.keys(schema).length === 0) return null;
   if (!isRecord(payload)) return "INVALID_COMMAND_PAYLOAD";
   for (const key of Object.keys(payload)) {
     if (!Object.prototype.hasOwnProperty.call(schema, key)) return "INVALID_COMMAND_PAYLOAD";
