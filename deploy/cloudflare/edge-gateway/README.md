@@ -164,17 +164,33 @@ This is intentional. The Worker is not claimed to be a complete replacement unti
 
 ## Deployment
 
-The GitHub Actions workflow `.github/workflows/deploy-cloudflare-edge.yml` creates or reuses the free D1 database, applies checked-in migrations, configures Worker secrets, deploys the Worker, and checks `/health`, `/ready`, and anonymous access to a protected route. It requires Cloudflare and Supabase credentials configured as GitHub Actions secrets. The workflow is manually dispatchable; deployment credentials are never committed to the repository.
+The GitHub Actions workflow `.github/workflows/deploy-cloudflare-edge.yml` creates or reuses the free D1 database, applies checked-in migrations, configures Worker secrets, deploys the Worker, and checks `/health`, `/ready`, and anonymous access to a protected route. It requires Cloudflare and Supabase credentials configured as GitHub Actions secrets. The production CORS allowlist is supplied through the required `ONYX_CORS_ORIGINS` GitHub Actions secret. The deployment workflow fails closed when the secret is missing or contains a wildcard; keep the allowlist limited to the exact trusted origins. The workflow is manually dispatchable; deployment credentials are never committed to the repository.
 
-For local development after authenticating Wrangler:
+### Local development
+
+Local development uses the committed `wrangler.dev.toml`. It carries the D1
+binding (`DB`, `migrations_dir = "migrations"`) and the non-secret public `[vars]`
+the Worker reads, so a fresh checkout can boot the Worker and apply migrations
+with no extra setup. Its `database_id` is a fixed **local-only placeholder** that
+is deliberately not the production id, so no command run against this config can
+target the remote database.
 
 ```bash
 npm install
-npm run d1:local
-npm run dev
+npm run d1:local   # create + apply all migrations to the local D1, including 0005_admin_settings.sql
+npm run dev        # serve the Worker with the local D1 binding
 ```
 
-Do not copy production secrets into `.dev.vars` or commit them.
+`GET /ready` should then return `{"status":"ok","database":"d1","schema":"ok"}`;
+`/health` and the anonymous `401` on a protected route are the same checks the
+deploy workflow runs. `npm run check` (used by CI) validates the bundle built from
+this config.
+
+Do not commit secrets. `ONYX_JWT_SECRET`, `SUPABASE_SECRET_KEY`,
+`SUPABASE_PUBLISHABLE_KEY`, `HF_S3_ACCESS_KEY_ID`, and `HF_S3_SECRET_ACCESS_KEY`
+belong in an untracked `.dev.vars` (see `.dev.vars.example`); production sets them
+with `wrangler secret put`. Remote commands (`npm run d1:remote`, `npm run deploy`)
+use the CI-materialized `wrangler.deploy.toml`, which is not committed.
 
 ## Migration rule
 
