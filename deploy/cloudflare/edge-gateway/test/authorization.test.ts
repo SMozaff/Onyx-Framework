@@ -64,6 +64,13 @@ describe("explicit command payload and lifecycle semantics", () => {
     }
   });
 
+  it("accepts scalar JSON payloads for commands with no payload fields", () => {
+    expect(validateCommandSemantics("todo_list.SubmitTodoList", { status: "Draft" }, "SubmitTodoList"))
+      .toEqual({ allowed: true, nextStatus: "Submitted" });
+    expect(validateCommandSemantics("todo_list.SubmitTodoList", { status: "Draft" }, null))
+      .toEqual({ allowed: true, nextStatus: "Submitted" });
+  });
+
   it("accepts a valid task transition and denies invalid transitions", () => {
     expect(validateCommandSemantics("StartTask", { status: "Ready", owner_id: "staff-1" }, { reason: "start" }))
       .toEqual({ allowed: true, nextStatus: "Active" });
