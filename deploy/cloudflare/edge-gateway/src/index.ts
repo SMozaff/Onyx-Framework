@@ -869,7 +869,7 @@ async function setUserActive(env: Env, session: Session, userId: string, active:
   const timestamp = Date.now(), operationId = uuid();
   try {
     const batch = await env.DB.batch([
-      env.DB.prepare("UPDATE users SET is_active=?,updated_at=? WHERE id=? AND organization_id=? AND id<>'__allfather__'").bind(active ? 1 : 0, timestamp, userId, session.organization_id),
+      env.DB.prepare("UPDATE users SET is_active=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__'").bind(active ? 1 : 0, timestamp, userId, session.organization_id),
       env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, active ? "user.activate" : "user.deactivate", operationId, JSON.stringify({ target: userId }), timestamp),
     ]);
     if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
@@ -884,7 +884,7 @@ async function setUserPassword(request: Request, env: Env, session: Session, use
   requireRole(session, "ORGANIZATION_ADMIN");
   const body = await request.json().catch(() => null) as Json | null;
   if (!body || Object.keys(body).length !== 1 || typeof body.password !== "string" || body.password.length < 12 || body.password.length > 1024) return json({ error: "WEAK_PASSWORD", message: "Password must contain at least 12 characters.", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
-  const target = await env.DB.prepare("SELECT id,username FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1").bind(userId, session.organization_id).first<{id:string;username:string}>();
+  const target = await env.DB.prepare("SELECT id,username FROM users WHERE id=? AND organization_id=? AND role='STAFF' AND is_active=1 LIMIT 1").bind(userId, session.organization_id).first<{id:string;username:string}>();
   if (!target || userId === "__allfather__" || target.username.toLowerCase() === "allfather") return json({ error: target ? "RESERVED_IDENTITY" : "USER_NOT_FOUND", category: target ? "AUTHORITY" : "DOMAIN", retryability: "NON_RETRYABLE" }, target ? 403 : 404);
   try {
     const hash = await hashPassword(body.password), timestamp = Date.now(), operationId = uuid();
@@ -906,7 +906,7 @@ async function setUserManager(request: Request, env: Env, session: Session, user
   const timestamp = Date.now(), operationId = uuid();
   try {
     const batch = await env.DB.batch([
-      env.DB.prepare("UPDATE users SET is_manager=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__'").bind(body.is_manager ? 1 : 0, timestamp, userId, session.organization_id),
+      env.DB.prepare("UPDATE users SET is_manager=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND is_active=1 AND id<>'__allfather__'").bind(body.is_manager ? 1 : 0, timestamp, userId, session.organization_id),
       env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.manager.update", operationId, JSON.stringify({ target: userId, is_manager: body.is_manager }), timestamp),
     ]);
     if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
@@ -922,7 +922,7 @@ async function setUserParent(request: Request, env: Env, session: Session, userI
   if (!body || Object.keys(body).length !== 1 || !Object.prototype.hasOwnProperty.call(body, "parent_user_id") || (body.parent_user_id !== null && typeof body.parent_user_id !== "string")) return json({ error: "INVALID_PARENT", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
   const parentId = typeof body.parent_user_id === "string" ? body.parent_user_id.trim() : null;
   if (parentId === userId) return json({ error: "PARENT_CYCLE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
-  const target = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1").bind(userId, session.organization_id).first();
+  const target = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND role='STAFF' AND is_active=1 AND id<>'__allfather__' LIMIT 1").bind(userId, session.organization_id).first();
   if (!target) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
   if (parentId) {
     const parent = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1").bind(parentId, session.organization_id).first();
@@ -1268,7 +1268,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
-    if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await deactivateUser(request,env,session,url.pathname.split("/").at(-2)!);
+    if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,false);
     if(/^\/api\/admin\/users\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,true);
     if(/^\/api\/admin\/users\/[^/]+\/password$/.test(url.pathname)&&request.method==="POST")return await setUserPassword(request,env,session,url.pathname.split("/").at(-2)!);
     if(/^\/api\/admin\/users\/[^/]+\/manager$/.test(url.pathname)&&request.method==="POST")return await setUserManager(request,env,session,url.pathname.split("/").at(-2)!);
