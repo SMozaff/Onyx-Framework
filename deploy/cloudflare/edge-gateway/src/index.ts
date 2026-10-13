@@ -532,7 +532,7 @@ async function queryRoute(request:Request,env:Env,session:Session){
   }
   const totalCount=normalized.length;
   const parsedLimit=Number(envelope.limit);
-  const limit=envelope.limit===undefined?100:Number.isFinite(parsedLimit)?Math.max(1,Math.min(200,Math.trunc(parsedLimit))):100;
+  const limit=envelope.limit==null?100:Number.isFinite(parsedLimit)?Math.max(1,Math.min(200,Math.trunc(parsedLimit))):100;
   const cursor=typeof envelope.cursor==="string"&&/^\d+$/.test(envelope.cursor)?Number(envelope.cursor):0;
   const offset=Number.isSafeInteger(cursor)&&cursor>=0?cursor:0;
   const page=isDetail?normalized.slice(0,1):normalized.slice(offset,offset+limit);
