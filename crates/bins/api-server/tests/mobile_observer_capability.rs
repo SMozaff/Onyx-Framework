@@ -30,7 +30,7 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
         .await
         .expect("api state");
 
-    // All-Father is passwordless and authenticates through Clerk. Seed a
+    // All-Father is passwordless and authenticates through Supabase Auth. Seed a
     // dedicated password-authenticated administrator for this HTTP test so
     // the observer-capability assertions exercise the intended client gate.
     state

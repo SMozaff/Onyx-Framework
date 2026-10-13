@@ -27,7 +27,14 @@ This document governs the ONYX authentication migration. Do not replace this des
 - Staff accounts are created, deactivated, and managed by an authorized Admin.
 - Staff cannot self-register, create organizations, create Admins, or elevate their own role.
 - An Admin may manage Staff only within that Admin's own organization.
-- Staff use ONYX username/email + password authentication, not Clerk or Supabase Auth.
+- Staff use ONYX username/email + password authentication. Supabase Auth is reserved for the designated All-Father identity.
+
+### Render/Axum API configuration
+
+- The Axum API server exposes the same designated-identity exchange at `POST /api/auth/supabase`.
+- Configure `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `ONYX_ALLFATHER_SUPABASE_USER_ID` together. The API server asks Supabase Auth to validate the bearer token, then requires a confirmed designated email and an exact match to the configured Supabase subject ID before issuing an ONYX session.
+- These are deployment settings, not source defaults. If any setting is missing while another is present, startup fails closed. If all are absent, the external identity exchange remains unavailable.
+- Render's `sync: false` declarations do not set hosted values by themselves. Configure the values in Render before relying on this route.
 
 ## Roles and authorization
 
@@ -66,7 +73,7 @@ In particular:
 - Public authentication errors must be generic. Return stable error codes only; do not return raw verifier or upstream provider error messages.
 - ONYX access tokens currently last 1 hour and refresh tokens 7 days. Refresh rotates the presented refresh token using D1 token revocation records. These are current implementation values, not a substitute for tests or a complete session policy.
 - Protected requests must revalidate current account and organization status, role, tenant membership, and applicable client capability. Authorization for each protected command/resource remains server-side.
-- The inspected Admin Shell uses an implicit-style fragment callback. Browser and Tauri support, redirect/callback behavior, and the supported OAuth flow must be resolved before changing provider settings or deployment configuration.
+- Historical note resolved by the handover below: the Admin Shell uses Authorization Code Flow with PKCE, not the older implicit-style fragment callback. Do not reintroduce implicit token fragments; verify browser/Tauri redirect behavior through the PKCE flow before changing provider settings.
 - A canonical current-user/session introspection route and server-backed logout wiring are not confirmed in the inspected implementation.
 
 This addendum records source evidence and must not be read as confirmation that production configuration or end-to-end authentication has been verified. No migrations, production configuration, secrets, or deployed services were changed in Phase 2.

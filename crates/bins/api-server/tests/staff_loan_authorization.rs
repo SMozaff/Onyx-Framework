@@ -21,9 +21,9 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
         .await
         .expect("api state");
 
-    // All-Father is passwordless and authenticates through the external identity
-    // provider. Provision a dedicated password-based test administrator so these
-    // tests exercise staff-loan authorization rather than the Clerk login flow.
+    // All-Father is passwordless and authenticates through Supabase Auth. Provision a
+    // dedicated password-based test administrator so these tests exercise
+    // staff-loan authorization independently of external identity login.
     state
         .user_store
         .create(NewUser {

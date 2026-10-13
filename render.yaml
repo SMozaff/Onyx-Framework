@@ -30,15 +30,13 @@ services:
         sync: false
       - key: ONYX_AUTHORITY_SIGNING_KEY
         sync: false
-      # Clerk authenticates Google identities. ONYX remains the account,
-      # role and authorization authority. Allfather is bound in source to the
-      # designated verified email: so.muzaff@gmail.com.
-      # Must be the Clerk Frontend API URL, e.g. https://<instance>.clerk.accounts.dev — no trailing slash
-      - key: CLERK_ISSUER
+      # Supabase Auth verifies the designated All-Father Google identity.
+      # ONYX remains authoritative for principals, roles, and authorization.
+      - key: SUPABASE_URL
         sync: false
-      - key: CLERK_SECRET_KEY
+      - key: SUPABASE_PUBLISHABLE_KEY
         sync: false
-      - key: CLERK_JWKS_URL
+      - key: ONYX_ALLFATHER_SUPABASE_USER_ID
         sync: false
       - key: ONYX_BLOB_STORE_BACKEND
         value: huggingface

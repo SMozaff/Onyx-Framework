@@ -85,8 +85,7 @@ causes the second insert to be silently ignored, so the surviving principal depe
 
 `deploy/cloudflare/edge-gateway/src/index.ts`:
 
-- Route dispatch (lines 245–248): `POST /api/auth/login`, `POST /api/auth/supabase` (legacy alias
-  `/api/auth/clerk`), `POST /api/auth/refresh`, `POST /api/auth/logout`.
+- Route dispatch at this baseline: `POST /api/auth/login`, the designated All-Father identity exchange, `POST /api/auth/refresh`, and `POST /api/auth/logout`. The current canonical external identity route is `POST /api/auth/supabase`; there is no provider alias.
 - `/api/auth/supabase` (lines 135–157) now verifies the Supabase JWT, resolves the bearer token
   through Supabase Auth (`src/supabase.ts:37–101`: signature via JWKS, algorithm allowlist
   RS256/ES256, issuer `${SUPABASE_URL}/auth/v1`, expiry, `identity.id === claims.sub`,
@@ -121,8 +120,7 @@ causes the second insert to be silently ignored, so the surviving principal depe
   requested in source.** Provider-side configuration is not verifiable from the repository.
 - Lines 58–59: Supabase URL/publishable key come from `VITE_SUPABASE_URL` /
   `VITE_SUPABASE_PUBLISHABLE_KEY`; if unset the UI shows a not-configured message.
-- Legacy Clerk code remains: `crates/bins/admin-shell/ui/src/auth/clerk.ts` contains a hard-coded
-  fallback Clerk publishable key (public-by-design value) and is dead weight against the locked model.
+- The obsolete identity-provider helper was removed in the Supabase-only cleanup. The Admin shell now uses the shared Supabase Auth flow; no legacy provider SDK helper is retained.
 - Session tokens are stored client-side via `src/utils/auth.ts` / `src/stores/authStore.ts` (localStorage-backed).
 
 ### 4.4 Deployment and CI wiring — source-confirmed
@@ -138,7 +136,7 @@ causes the second insert to be silently ignored, so the surviving principal depe
   (`wrangler deploy --dry-run`) only — a bundle validation, **not** a test run.
 - `.github/workflows/live-deployment-smoke.yml`: live `/health` + `/ready` probe on pushes to
   `migration/cloudflare-free-worker`; also expects 401 from `/api/users`.
-- `.github/workflows/migrate-worker-to-supabase.yml`: deterministic Python source rewrite that
+- The obsolete one-time migration workflow (now removed) was a deterministic Python source rewrite that
   commits and pushes to `migration/cloudflare-free-worker` (write-enabled workflow).
 - `deploy/cloudflare/edge-gateway/package.json` defines `d1:local` / `d1:remote` against `migrations/`.
 
@@ -205,7 +203,7 @@ Interpretation:
    stable principal lookup; generic public errors)
 6. `deploy/cloudflare/edge-gateway/src/supabase.ts`
 7. `crates/bins/admin-shell/ui/src/pages/Login.tsx` (flow type/callback handling)
-8. `crates/bins/admin-shell/ui/src/auth/clerk.ts` (legacy removal)
+8. Legacy identity-provider helper (removed in the Supabase-only cleanup)
 9. `.github/workflows/deploy-cloudflare-edge.yml`
 10. `.github/workflows/cloudflare-worker-check.yml` (real Worker auth/migration tests)
 11. `deploy/cloudflare/edge-gateway/package.json` + new Worker test files
@@ -218,7 +216,7 @@ Interpretation:
    D1 ledger + schema evidence, then choose one of the two history-dependent repair paths documented
    in draft PR #173. Forward-only, additive repair preferred; do not rewrite applied history.
 4. **Supabase identity binding:** remove the `supabase_user_id` write from login (index.ts:151–154),
-   key the principal on a stable ID, resolve the implicit-flow callback decision, delete legacy Clerk code.
+   key the principal on a stable ID, resolve the implicit-flow callback decision, delete legacy Supabase Auth code.
 5. **ONYX credential/session path:** refresh-rotation and revocation tests, inactive-account
    rejection, generic error responses.
 6. **Readiness and observability:** extend `/ready` to verify required auth tables/columns and the
@@ -249,7 +247,7 @@ Baseline re-verified at `2066216`. The two most consequential confirmed facts ar
 (1) the migration set still contains conflicting duplicate `0002` files that seed **two different**
 All-Father principals and double-add identity columns, and
 (2) the **deployed production Worker is an older build that does not implement the auth routes at
-all** — `/api/auth/supabase` currently answers `501 ROUTE_NOT_MIGRATED` in production, so no
+all** — at the historical baseline commit, the designated All-Father identity exchange answered `501 ROUTE_NOT_MIGRATED`; the current Worker has the canonical Supabase route, so no
 Supabase sign-in can work today regardless of the source-level improvements merged in PR #172.
 Implementation is intentionally not started by this phase; the next actionable step is the
 owner-authorized read-only D1 inspection already staged in draft PR #173, followed by a migration

@@ -205,9 +205,9 @@ pub async fn login(
 
     // The designated All-Father identity is deliberately passwordless.
     // Its ONYX principal may exist in the ordinary user store so the
-    // Clerk exchange can mint an ONYX session, but it must never acquire
-    // a password-login path through an admin password reset.
-    if user.username == super::clerk::ALLFATHER_USERNAME {
+    // Supabase identity exchange can mint an ONYX session, but it must never
+    // acquire a password-login path through an admin password reset.
+    if user.username == super::supabase::ALLFATHER_USERNAME {
         return Err(invalid_credentials());
     }
 

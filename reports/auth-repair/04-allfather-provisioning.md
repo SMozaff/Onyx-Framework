@@ -158,7 +158,7 @@ The full operator runbook lives in `deploy/cloudflare/edge-gateway/README.md` (�
 2. **Where `ONYX_ALLFATHER_EMAIL` is configured for each environment** (the deploy workflow and Worker variables), and whether the hard-coded default in `src/index.ts` should remain.
 3. **Whether the seeded principal should carry `users.email` at all** — it is profile data and is not used for authorization, but it currently duplicates the designated-email configuration.
 4. **Audit retention/ownership** for the `allfather.provision`/`allfather.revoke` rows and the `__owner__:<environment>` actor marker.
-5. **Retiring legacy paths** that still describe auto-binding: `scripts/migrate-worker-clerk-to-supabase.py` (contains the old `UPDATE users SET supabase_user_id=…` login rewrite) and the `/api/auth/clerk` alias.
+5. **Retiring legacy paths** that still describe auto-binding: the obsolete one-time migration script/workflow and provider alias; the canonical `/api/auth/supabase` route now requires the pre-provisioned subject mapping.
 6. **Verification of the real Supabase project**: confirm the Google identity's actual Supabase user UUID and that the project's issuer/JWKS/audience policy matches the Worker before provisioning production.
 
 ## 10. Phase 4 status
