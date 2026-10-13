@@ -1421,7 +1421,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/events"&&request.method==="GET")return await websocketEvents(request,env);
     if(url.pathname.startsWith("/api/relay/")&&request.method==="GET")return await relaySocket(request,env);
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return await authLogin(request,env);
-    if((url.pathname==="/api/auth/supabase"||url.pathname==="/api/auth/clerk")&&request.method==="POST")return await authSupabaseAllFather(request,env);
+    if(url.pathname==="/api/auth/supabase"&&request.method==="POST")return await authSupabaseAllFather(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return await authRefresh(request,env);
     if(url.pathname==="/api/auth/logout"&&request.method==="POST")return await authLogout(request,env);
     const session=await requireSession(request,env);
