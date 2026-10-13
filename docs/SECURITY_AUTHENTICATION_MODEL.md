@@ -73,7 +73,7 @@ In particular:
 - Public authentication errors must be generic. Return stable error codes only; do not return raw verifier or upstream provider error messages.
 - ONYX access tokens currently last 1 hour and refresh tokens 7 days. Refresh rotates the presented refresh token using D1 token revocation records. These are current implementation values, not a substitute for tests or a complete session policy.
 - Protected requests must revalidate current account and organization status, role, tenant membership, and applicable client capability. Authorization for each protected command/resource remains server-side.
-- The inspected Admin Shell uses an implicit-style fragment callback. Browser and Tauri support, redirect/callback behavior, and the supported OAuth flow must be resolved before changing provider settings or deployment configuration.
+- Historical note resolved by the handover below: the Admin Shell uses Authorization Code Flow with PKCE, not the older implicit-style fragment callback. Do not reintroduce implicit token fragments; verify browser/Tauri redirect behavior through the PKCE flow before changing provider settings.
 - A canonical current-user/session introspection route and server-backed logout wiring are not confirmed in the inspected implementation.
 
 This addendum records source evidence and must not be read as confirmation that production configuration or end-to-end authentication has been verified. No migrations, production configuration, secrets, or deployed services were changed in Phase 2.
