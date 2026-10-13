@@ -128,7 +128,7 @@ Source reviewed: deploy/cloudflare/edge-gateway/src/index.ts and src/supabase.ts
 | Route | Handler / boundary | Current behavior and gap |
 |---|---|---|
 | POST /api/auth/login | authLogin | Username/email + Argon2id; rejects inactive and All-Father; generic credential failure. Does not check organization active state. |
-| POST /api/auth/supabase | authSupabaseAllFather | JWT and Supabase user checks; confirmed designated email and subject equality; auto-binds/replaces supabase_user_id; no audience check. |
+| POST /api/auth/supabase | authSupabaseAllFather | Verifies Supabase JWT signature, issuer, expiry, subject and `authenticated` audience; confirms the designated email and requires a pre-provisioned subject match. No login-time subject writes. |
 
 | POST /api/auth/refresh | authRefresh | Validates refresh token and account active state, revokes old refresh token, issues new pair. Organization state and all privilege claims need revalidation. |
 | POST /api/auth/logout | authLogout | Revokes supplied bearer and/or refresh token hashes; client wiring is not established. |
