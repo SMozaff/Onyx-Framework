@@ -29,6 +29,13 @@ This document governs the ONYX authentication migration. Do not replace this des
 - An Admin may manage Staff only within that Admin's own organization.
 - Staff use ONYX username/email + password authentication. Supabase Auth is reserved for the designated All-Father identity.
 
+### Render/Axum API configuration
+
+- The Axum API server exposes the same designated-identity exchange at `POST /api/auth/supabase`.
+- Configure `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `ONYX_ALLFATHER_SUPABASE_USER_ID` together. The API server asks Supabase Auth to validate the bearer token, then requires a confirmed designated email and an exact match to the configured Supabase subject ID before issuing an ONYX session.
+- These are deployment settings, not source defaults. If any setting is missing while another is present, startup fails closed. If all are absent, the external identity exchange remains unavailable.
+- Render's `sync: false` declarations do not set hosted values by themselves. Configure the values in Render before relying on this route.
+
 ## Roles and authorization
 
 At minimum, distinguish:
