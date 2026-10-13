@@ -1056,3 +1056,45 @@ describe("Phase 3 WebSocket and Staff file boundaries", () => {
     expect(db.writes).toHaveLength(0);
   });
 });
+
+
+describe("B1 client-call route contracts", () => {
+  it("returns only active same-organization identities from GET /api/users", async () => {
+    const db = makeDb("STAFF");
+    db.users.set("inactive-staff", {
+      id: "inactive-staff", username: "inactive", email: "inactive@example.test",
+      organization_id: ORG, is_admin: 0, is_active: 0, class: "staff", role: "STAFF",
+    });
+    db.users.set("foreign-staff", {
+      id: "foreign-staff", username: "foreign", email: "foreign@example.test",
+      organization_id: "org-2", is_admin: 0, is_active: 1, class: "staff", role: "STAFF",
+    });
+    const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
+    const response = await worker.fetch(new Request("https://worker.test/api/users", {
+      headers: { authorization: "Bearer " + token },
+    }), makeEnv(db));
+    expect(response.status).toBe(200);
+    const users = await response.json() as Array<Record<string, unknown>>;
+    expect(users).toEqual([{ id: "staff-1", username: "staff" }]);
+    expect(users.every((user) => Object.keys(user).sort().join(",") === "id,username")).toBe(true);
+  });
+
+  it("returns a machine-classifiable 501 envelope for an authenticated unported route", async () => {
+    const db = makeDb("STAFF");
+    const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
+    const response = await worker.fetch(new Request("https://worker.test/api/todo/lists", {
+      method: "POST",
+      headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ owner: "staff-1", origin: "staff_authored", items: [] }),
+    }), makeEnv(db));
+    expect(response.status).toBe(501);
+    expect(await response.json()).toMatchObject({
+      error: "ROUTE_NOT_MIGRATED",
+      route: "/api/todo/lists",
+      method: "POST",
+      category: "FEATURE_UNAVAILABLE",
+      retryability: "NON_RETRYABLE",
+    });
+    expect((await response.json().catch(() => ({})) as Record<string, unknown>).correlation_id).toBeUndefined();
+  });
+});
