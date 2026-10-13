@@ -1073,9 +1073,22 @@ describe("Phase 3 WebSocket and Staff file boundaries", () => {
     expect(await response.json()).toMatchObject({ error: "UNAUTHORIZED" });
   });
 
-  it("does not broaden the existing event-stream role boundary to Staff", async () => {
+  it("forwards Staff WebSocket sessions to the hub with a verified role for resource-level filtering", async () => {
     const db = makeDb("STAFF");
     const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
+    let forwardedRole: string | null = null;
+    const env = {
+      ...makeEnv(db),
+      EVENTS_HUB: {
+        idFromName: () => "org-hub",
+        get: () => ({
+          fetch: async (request: Request) => {
+            forwardedRole = request.headers.get("x-onyx-authenticated-role");
+            return new Response("forwarded", { status: 200 });
+          },
+        }),
+      },
+    } as unknown as WorkerEnv;
     const response = await worker.fetch(new Request("https://worker.test/api/events", {
       headers: {
         upgrade: "websocket",
@@ -1083,9 +1096,9 @@ describe("Phase 3 WebSocket and Staff file boundaries", () => {
         origin: "https://app.example",
         "sec-websocket-protocol": "onyx-bearer, " + token,
       },
-    }), makeEnv(db));
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: "FORBIDDEN" });
+    }), env);
+    expect(response.status).toBe(200);
+    expect(forwardedRole).toBe("STAFF");
   });
 
   it("rejects disallowed WebSocket origins before authentication", async () => {
