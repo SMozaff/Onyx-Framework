@@ -39,9 +39,17 @@ migrations_dir = "migrations"
 name = "EVENTS_HUB"
 class_name = "EventHub"
 
+[[durable_objects.bindings]]
+name = "RELAY_HUB"
+class_name = "RelayHub"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["EventHub"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RelayHub"]
 
 [vars]
 # Public, non-secret configuration. Keep in sync with the deploy workflow's
