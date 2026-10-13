@@ -26,7 +26,6 @@ Status: implementation on a feature branch; not a production deployment. Treat t
 | `GET /health`, `GET /ready` | Public health/readiness | No user data or mutations |
 | `POST /api/auth/login` | Public entry to ONYX Admin/Staff credentials | Active user + active organization + recognized explicit D1 role + password verification; All-Father excluded |
 | `POST /api/auth/supabase` | All-Father identity exchange | Verified Supabase identity, confirmed designated account, canonical D1 role and exact subject binding |
-| `POST /api/auth/clerk` | Legacy alias to the same Supabase exchange | No separate Clerk trust path; subject binding remains required |
 | `POST /api/auth/refresh` | Signed refresh token | Active D1 user/organization, unchanged role/tenant/admin flag, exact All-Father subject binding, one-use refresh token |
 | `POST /api/auth/logout` | Idempotent revocation endpoint | Verifies supplied token(s), revokes token hash and session-family hash |
 | `GET /api/query` | Role/query matrix | Unknown query denied; requested organization must match the session; Staff aggregate reads include a D1 SQL ownership predicate |
