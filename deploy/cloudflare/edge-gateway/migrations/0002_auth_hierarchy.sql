@@ -1,5 +1,5 @@
 -- ONYX authentication hierarchy.
--- All-Father authenticates through Clerk; Admin/Staff authenticate with ONYX passwords.
+-- All-Father authenticates through Supabase Auth; Admin/Staff authenticate with ONYX passwords.
 
 CREATE TABLE IF NOT EXISTS organizations (
     id TEXT PRIMARY KEY,
