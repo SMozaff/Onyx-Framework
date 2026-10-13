@@ -5,8 +5,6 @@
 //! Only the confirmed, designated email may exchange a Supabase identity for
 //! an ONYX session.
 
-use std::sync::Arc;
-
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
