@@ -1014,6 +1014,21 @@ describe("Phase 3 WebSocket and Staff file boundaries", () => {
     expect(await response.json()).toMatchObject({ error: "UNAUTHORIZED" });
   });
 
+  it("does not broaden the existing event-stream role boundary to Staff", async () => {
+    const db = makeDb("STAFF");
+    const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
+    const response = await worker.fetch(new Request("https://worker.test/api/events", {
+      headers: {
+        upgrade: "websocket",
+        connection: "Upgrade",
+        origin: "https://app.example",
+        "sec-websocket-protocol": "onyx-bearer, " + token,
+      },
+    }), makeEnv(db));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: "FORBIDDEN" });
+  });
+
   it("rejects disallowed WebSocket origins before authentication", async () => {
     const db = makeDb("STAFF");
     const response = await worker.fetch(new Request("https://worker.test/api/events", {
