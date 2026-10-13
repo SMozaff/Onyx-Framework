@@ -1,0 +1,203 @@
+//! Supabase Auth identity exchange for the designated ONYX All-Father account.
+//!
+//! Supabase verifies the bearer access token through its authenticated-user
+//! endpoint. ONYX still owns the principal, role, tenant, and authorization.
+//! Only the confirmed, designated email may exchange a Supabase identity for
+//! an ONYX session.
+
+use std::sync::Arc;
+
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    Json,
+};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use super::{auth::LoginUser, client_type::ClientType, issue_token, ApiError, ApiState};
+
+pub const ALLFATHER_USERNAME: &str = "allfather";
+pub const ALLFATHER_EMAIL: &str = "so.muzaff@gmail.com";
+
+#[derive(Clone)]
+pub struct SupabaseAuth {
+    url: String,
+    publishable_key: String,
+    client: Client,
+}
+
+#[derive(Debug, Deserialize)]
+struct SupabaseUser {
+    id: String,
+    email: Option<String>,
+    email_confirmed_at: Option<String>,
+    confirmed_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SupabaseIdentityResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: u64,
+    pub user: LoginUser,
+}
+
+impl SupabaseAuth {
+    pub fn from_env() -> anyhow::Result<Option<Self>> {
+        let url = std::env::var("SUPABASE_URL")
+            .ok()
+            .map(|value| value.trim().trim_end_matches('/').to_owned())
+            .filter(|value| !value.is_empty());
+        let publishable_key = std::env::var("SUPABASE_PUBLISHABLE_KEY")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+
+        match (url, publishable_key) {
+            (None, None) => Ok(None),
+            (Some(url), Some(publishable_key)) => {
+                if !url.starts_with("https://") {
+                    anyhow::bail!("SUPABASE_URL must use HTTPS");
+                }
+                Ok(Some(Self {
+                    url,
+                    publishable_key,
+                    client: Client::new(),
+                }))
+            }
+            _ => anyhow::bail!(
+                "SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY must be configured together"
+            ),
+        }
+    }
+
+    async fn verified_user(&self, headers: &HeaderMap) -> Result<SupabaseUser, ApiError> {
+        let value = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| auth_error("SUPABASE_AUTH_REQUIRED"))?;
+        let token = value
+            .strip_prefix("Bearer ")
+            .or_else(|| value.strip_prefix("bearer "))
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| auth_error("SUPABASE_AUTH_REQUIRED"))?;
+
+        let response = self
+            .client
+            .get(format!("{}/auth/v1/user", self.url))
+            .header("apikey", &self.publishable_key)
+            .bearer_auth(token)
+            .header("accept", "application/json")
+            .send()
+            .await
+            .map_err(|_| auth_error("SUPABASE_AUTH_UNAVAILABLE"))?;
+
+        if response.status() == StatusCode::UNAUTHORIZED
+            || response.status() == StatusCode::FORBIDDEN
+        {
+            return Err(auth_error("INVALID_SUPABASE_TOKEN"));
+        }
+        if !response.status().is_success() {
+            return Err(auth_error("SUPABASE_AUTH_UNAVAILABLE"));
+        }
+
+        response
+            .json::<SupabaseUser>()
+            .await
+            .map_err(|_| auth_error("SUPABASE_USER_RESPONSE_INVALID"))
+    }
+}
+
+fn auth_error(code: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::UNAUTHORIZED,
+        code,
+        "AUTHORITY",
+        "NON_RETRYABLE",
+        uuid::Uuid::new_v4().to_string(),
+        json!({}),
+    )
+}
+
+pub async fn login(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Json<SupabaseIdentityResponse>, ApiError> {
+    let auth = state
+        .supabase_auth
+        .as_ref()
+        .ok_or_else(|| auth_error("SUPABASE_AUTH_NOT_CONFIGURED"))?;
+    let identity = auth.verified_user(&headers).await?;
+    let email = identity.email.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+    let confirmed = identity
+        .email_confirmed_at
+        .as_deref()
+        .or(identity.confirmed_at.as_deref())
+        .is_some_and(|value| !value.trim().is_empty());
+
+    if !confirmed || email != ALLFATHER_EMAIL || identity.id.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "SUPABASE_IDENTITY_NOT_AUTHORIZED",
+            "AUTHORITY",
+            "NON_RETRYABLE",
+            uuid::Uuid::new_v4().to_string(),
+            json!({"message":"Only the confirmed, designated All-Father identity may use this sign-in route"}),
+        ));
+    }
+
+    let user = state
+        .user_store
+        .find_by_username(ALLFATHER_USERNAME)
+        .await
+        .map_err(|_| auth_error("USER_STORE_UNAVAILABLE"))?
+        .filter(|user| user.is_active)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::FORBIDDEN,
+                "ONYX_ACCOUNT_NOT_PROVISIONED",
+                "AUTHORITY",
+                "NON_RETRYABLE",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?;
+
+    if !user.is_admin {
+        return Err(auth_error("ALLFATHER_NOT_ADMIN"));
+    }
+
+    let access_token = issue_token(
+        &state,
+        &user,
+        "access",
+        3600,
+        ClientType::Web,
+    )
+    .await
+    .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
+    let refresh_token = issue_token(
+        &state,
+        &user,
+        "refresh",
+        7 * 24 * 3600,
+        ClientType::Web,
+    )
+    .await
+    .map_err(|_| auth_error("TOKEN_ISSUANCE_FAILED"))?;
+
+    Ok(Json(SupabaseIdentityResponse {
+        access_token,
+        refresh_token,
+        expires_in: 3600,
+        user: LoginUser {
+            id: user.user_id,
+            username: user.username,
+            organization_id: user.organization_id,
+            is_admin: user.is_admin,
+            class: user.class.map(|class| class.as_str().to_owned()),
+        },
+    }))
+}
