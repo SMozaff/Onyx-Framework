@@ -924,6 +924,9 @@ async function websocketEvents(request: Request, env: Env): Promise<Response> {
     headers.set("authorization", "Bearer " + token);
     const sessionRequest = new Request(request, { headers });
     const session = await requireSession(sessionRequest, env);
+    // Preserve the Worker's existing event-stream authority boundary until
+    // event payloads have resource-level Staff filtering.
+    requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");
     headers.set("x-onyx-authenticated-org", session.organization_id);
     headers.set("x-onyx-authenticated-user", session.sub);
     const hubId = env.EVENTS_HUB.idFromName(session.organization_id);
