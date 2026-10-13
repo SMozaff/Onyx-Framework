@@ -352,6 +352,23 @@ describe("Worker authorization and session security", () => {
     expect(observerDb.domainEvents).toHaveLength(1);
   });
 
+  it("accepts the web client's string payload for SubmitTodoList", async () => {
+    const db = makeDb();
+    db.aggregates.set("todo-1", {
+      id: "todo-1", aggregate_type: "todo_list", version: 1, lifecycle_epoch: 0,
+      authority_epoch: 0, state: JSON.stringify({ status: "Draft", owner_id: "staff-1" }),
+      updated_at: Date.now(), organization_id: ORG,
+    });
+    const response = await postCommand("desktop", db, {
+      command_type: "todo_list.SubmitTodoList",
+      target: { id: "todo-1", type: "todo_list", organization_id: ORG },
+      payload: "SubmitTodoList",
+    });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(db.aggregates.get("todo-1")!.state).status).toBe("Submitted");
+    expect(db.domainEvents).toHaveLength(1);
+  });
+
   it("applies Staff ownership inside protected query reads", async () => {
     const db = makeDb();
     db.aggregates.set("task-other", {
@@ -372,6 +389,48 @@ describe("Worker authorization and session security", () => {
     expect(response.status).toBe(200);
     const body = await response.json() as { data: Array<{ id: string }> };
     expect(body.data.map((item) => item.id)).toEqual(["task-1"]);
+  });
+
+  it("returns typed freshness and honors query limit, cursor, and sorting", async () => {
+    const db = makeDb();
+    db.aggregates.set("task-a", {
+      id: "task-a", aggregate_type: "task", version: 2, lifecycle_epoch: 0,
+      authority_epoch: 0, state: JSON.stringify({ status: "Ready", owner_id: "staff-1", title: "Alpha" }),
+      updated_at: Date.now() - 20_000, organization_id: ORG,
+    });
+    db.aggregates.set("task-z", {
+      id: "task-z", aggregate_type: "task", version: 7, lifecycle_epoch: 0,
+      authority_epoch: 0, state: JSON.stringify({ status: "Ready", owner_id: "staff-1", title: "Zulu" }),
+      updated_at: Date.now() - 10_000, organization_id: ORG,
+    });
+    const token = await signToken(sessionClaims());
+    const query = async (cursor?: string) => {
+      const envelope = b64u(JSON.stringify({
+        query_id: "q-page", query_type: "task.list", organization_id: ORG,
+        limit: 1, cursor, sort_by: "title", sort_order: "asc",
+      }));
+      return worker.fetch(new Request("https://worker.test/api/query?envelope=" + encodeURIComponent(envelope), {
+        headers: { authorization: "Bearer " + token },
+      }), makeEnv(db));
+    };
+    const first = await query();
+    expect(first.status).toBe(200);
+    const page1 = await first.json() as {
+      data: Array<{ id: string }>; has_more: boolean; next_cursor: string | null;
+      total_count: number; freshness: { projection_version: number; last_updated_at: string; is_stale: boolean };
+    };
+    expect(page1.data.map(row => row.id)).toEqual(["task-a"]);
+    expect(page1.has_more).toBe(true);
+    expect(page1.next_cursor).toBe("1");
+    expect(page1.total_count).toBe(3);
+    expect(page1.freshness.projection_version).toBe(7);
+    expect(Number.isFinite(Date.parse(page1.freshness.last_updated_at))).toBe(true);
+    expect(page1.freshness.is_stale).toBe(false);
+    const second = await query(page1.next_cursor ?? undefined);
+    const page2 = await second.json() as { data: Array<{ id: string }>; has_more: boolean; next_cursor: string | null };
+    expect(page2.data.map(row => row.id)).toEqual(["task-1"]);
+    expect(page2.has_more).toBe(true);
+    expect(page2.next_cursor).toBe("2");
   });
 
   it("denies cross-tenant resource scope for every role × registered command", async () => {

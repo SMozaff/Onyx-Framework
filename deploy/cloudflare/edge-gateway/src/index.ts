@@ -471,6 +471,15 @@ function freshnessDto(rows: Array<{version?: unknown; updated_at?: unknown}>){
   }
   return {projection_version:projectionVersion,last_updated_at:new Date(latestUpdated).toISOString(),is_stale:false};
 }
+function querySortValue(row:Record<string,unknown>,sortBy:string):unknown{
+  if(Object.prototype.hasOwnProperty.call(row,sortBy))return row[sortBy];
+  let value:unknown=row.state;
+  for(const segment of sortBy.split(".")){
+    if(!value||typeof value!=="object"||Array.isArray(value))return undefined;
+    value=(value as Record<string,unknown>)[segment];
+  }
+  return value;
+}
 function compareQueryValues(left:unknown,right:unknown,sortOrder:"asc"|"desc"):number{
   let result=0;
   if(left==null&&right!=null)result=-1;
@@ -522,17 +531,15 @@ async function queryRoute(request:Request,env:Env,session:Session){
   const sortOrder=envelope.sort_order==="asc"?"asc":"desc";
   if(!isDetail){
     normalized.sort((a,b)=>{
-      const aState=a.state&&typeof a.state==="object"&&!Array.isArray(a.state)?a.state as Json:{};
-      const bState=b.state&&typeof b.state==="object"&&!Array.isArray(b.state)?b.state as Json:{};
-      const aValue=Object.prototype.hasOwnProperty.call(a,requestedSort)?a[requestedSort]:aState[requestedSort];
-      const bValue=Object.prototype.hasOwnProperty.call(b,requestedSort)?b[requestedSort]:bState[requestedSort];
+      const aValue=querySortValue(a,requestedSort);
+      const bValue=querySortValue(b,requestedSort);
       const compared=compareQueryValues(aValue,bValue,sortOrder);
       return compared||String(a.id).localeCompare(String(b.id));
     });
   }
   const totalCount=normalized.length;
   const parsedLimit=Number(envelope.limit);
-  const limit=envelope.limit===undefined?100:Number.isFinite(parsedLimit)?Math.max(1,Math.min(200,Math.trunc(parsedLimit))):100;
+  const limit=envelope.limit==null?100:Number.isFinite(parsedLimit)?Math.max(1,Math.min(200,Math.trunc(parsedLimit))):100;
   const cursor=typeof envelope.cursor==="string"&&/^\d+$/.test(envelope.cursor)?Number(envelope.cursor):0;
   const offset=Number.isSafeInteger(cursor)&&cursor>=0?cursor:0;
   const page=isDetail?normalized.slice(0,1):normalized.slice(offset,offset+limit);
@@ -560,13 +567,13 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const decision=authorizeCommand(session.role,envelope.command_type,targetType);
   if(!decision.allowed)return json({error:decision.reason==="UNKNOWN_COMMAND"?"UNKNOWN_COMMAND":"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const policy=decision.policy;
-  const payloadValue=envelope.payload===undefined?{}:envelope.payload;
+  const commandPayload=envelope.payload===undefined?{}:envelope.payload;
   // The Axum contract accepts serde_json::Value, not just JSON objects.
   // Normalize scalar/array values to an empty field map for the Worker's
   // field-level authorization checks; command semantics still reject missing
   // required fields for commands that actually require a structured payload.
-  const payload=payloadValue!==null&&typeof payloadValue==="object"&&!Array.isArray(payloadValue)
-    ?payloadValue as Json:{};
+  const payload=commandPayload!==null&&typeof commandPayload==="object"&&!Array.isArray(commandPayload)
+    ?commandPayload as Json:{};
   // The Worker is not the domain state-machine authority. Clients may not
   // forge lifecycle/tenant/security fields by smuggling them into a payload.
   const forbiddenPayloadKeys=["status","state","lifecycle","lifecycle_state","version","role","is_admin","is_active","organization_id","organizationId","tenant_id","_command_type","_updated_by"];
@@ -582,7 +589,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
       const actor=event.actor&&typeof event.actor==="object"?event.actor as Json:{};
       return event.organization_id===session.organization_id&&event.aggregate_id===targetId&&
         event.aggregate_type===targetType&&event.event_type===envelope.command_type&&
-        actor.user_id===session.sub&&JSON.stringify(event.payload??{})===JSON.stringify(payload);
+        actor.user_id===session.sub&&JSON.stringify(event.payload)===JSON.stringify(commandPayload);
     });
     if(!sameActorReplay)return json({error:"IDEMPOTENCY_CONFLICT",category:"AUTHORITY",retryability:"NON_RETRYABLE"},409);
     return json(priorResult);
@@ -605,7 +612,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
   if(existing&&(expected!==Number(existing.version)||expectedLifecycle!==Number(existing.lifecycle_epoch)||expectedAuthority!==Number(existing.authority_epoch)))
     return json({success:false,operation_id:envelope.operation_id,events:[],error:{code:"VERSION_CONFLICT",category:"CONCURRENCY",retryability:"RETRYABLE",safe_details:{expected,actual:existing.version},correlation_id:String(envelope.correlation_id??envelope.operation_id)}},409);
   const previousState=existing?safeJson(existing.state):null;
-  const semantic=validateCommandSemantics(envelope.command_type,previousState,payload,session.sub);
+  const semantic=validateCommandSemantics(envelope.command_type,previousState,commandPayload,session.sub);
   if(!semantic.allowed){
     const status=semantic.reason==="INVALID_COMMAND_PAYLOAD"?400:
       semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"?409:403;
@@ -717,14 +724,14 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const nextLifecycle=existing&&semantic.nextStatus!==currentStatus?expectedLifecycle+1:expectedLifecycle;
   const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold"];
   const nextAuthority=existing&&authorityChangingActions.includes(envelope.command_type)?expectedAuthority+1:expectedAuthority;
-  const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
+  const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:commandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
   const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[event],result:{id:targetId,type:targetType,state:merged}};
   // D1 batch is atomic. Conditional event/audit/idempotency inserts mean a
   // failed optimistic insert/update cannot leave partial side effects.
   const aggregateStatement=policy.effect==="create"
     ? env.DB.prepare("INSERT OR IGNORE INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,?,?,?,?,?,?,?)").bind(targetId,targetType,nextVersion,nextLifecycle,nextAuthority,JSON.stringify(merged),Date.now(),session.organization_id)
     : env.DB.prepare("UPDATE aggregates SET aggregate_type=?,version=?,lifecycle_epoch=?,authority_epoch=?,state=?,updated_at=? WHERE id=? AND organization_id=? AND aggregate_type=? AND version=? AND lifecycle_epoch=? AND authority_epoch=?").bind(targetType,nextVersion,nextLifecycle,nextAuthority,JSON.stringify(merged),Date.now(),targetId,session.organization_id,targetType,expected,expectedLifecycle,expectedAuthority);
-  const eventStatement=env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE changes()=1").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(payload),Date.now(),"{}",envelope.operation_id,String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id);
+  const eventStatement=env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE changes()=1").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(commandPayload),Date.now(),"{}",envelope.operation_id,String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id);
   const idemStatement=env.DB.prepare("INSERT INTO idempotency(operation_id,result,created_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(envelope.operation_id,JSON.stringify(result),Date.now(),event.event_id,session.organization_id);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(session.organization_id,session.sub,envelope.command_type,String(envelope.correlation_id??envelope.operation_id),JSON.stringify({target:targetId}),Date.now(),event.event_id,session.organization_id);
   const batch=await env.DB.batch([aggregateStatement,eventStatement,idemStatement,auditStatement]);
