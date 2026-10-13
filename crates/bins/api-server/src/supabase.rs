@@ -25,6 +25,7 @@ pub const ALLFATHER_EMAIL: &str = "so.muzaff@gmail.com";
 pub struct SupabaseAuth {
     url: String,
     publishable_key: String,
+    allfather_user_id: String,
     client: Client,
 }
 
@@ -54,21 +55,26 @@ impl SupabaseAuth {
             .ok()
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
+        let allfather_user_id = std::env::var("ONYX_ALLFATHER_SUPABASE_USER_ID")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
 
-        match (url, publishable_key) {
-            (None, None) => Ok(None),
-            (Some(url), Some(publishable_key)) => {
+        match (url, publishable_key, allfather_user_id) {
+            (None, None, None) => Ok(None),
+            (Some(url), Some(publishable_key), Some(allfather_user_id)) => {
                 if !url.starts_with("https://") {
                     anyhow::bail!("SUPABASE_URL must use HTTPS");
                 }
                 Ok(Some(Self {
                     url,
                     publishable_key,
+                    allfather_user_id,
                     client: Client::new(),
                 }))
             }
             _ => anyhow::bail!(
-                "SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY must be configured together"
+                "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, and ONYX_ALLFATHER_SUPABASE_USER_ID must be configured together"
             ),
         }
     }
@@ -137,7 +143,11 @@ pub async fn login(
         .or(identity.confirmed_at.as_deref())
         .is_some_and(|value| !value.trim().is_empty());
 
-    if !confirmed || email != ALLFATHER_EMAIL || identity.id.trim().is_empty() {
+    if !confirmed
+        || email != ALLFATHER_EMAIL
+        || identity.id.trim().is_empty()
+        || identity.id != auth.allfather_user_id
+    {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "SUPABASE_IDENTITY_NOT_AUTHORIZED",
