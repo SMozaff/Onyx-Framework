@@ -35,6 +35,7 @@ export const AUTH_SCHEMA_CONTRACT: {
       "password_hash",
       "organization_id",
       "is_admin",
+      "is_manager",
       "is_active",
       "class",
       "role",
@@ -45,6 +46,9 @@ export const AUTH_SCHEMA_CONTRACT: {
     ],
     organizations: ["id", "name", "is_active", "created_at", "updated_at"],
     token_revocations: ["token_hash", "revoked_at"],
+    user_session_revocations: ["user_id", "revoked_before_ms", "updated_at"],
+    replica_ownership: ["replica_id", "user_id", "organization_id", "claimed_at"],
+    relay_ticket_redemptions: ["jti", "expires_at", "redeemed_at"],
     audit_log: ["organization_id", "user_id", "action", "correlation_id", "details", "created_at"],
   },
   indexes: [
@@ -54,6 +58,8 @@ export const AUTH_SCHEMA_CONTRACT: {
   ],
   tableIndexes: {
     mobile_access_settings: ["idx_mobile_access_settings_updated_at"],
+    replica_ownership: ["idx_replica_ownership_org"],
+    relay_ticket_redemptions: ["idx_relay_ticket_expiry"],
   },
 };
 
