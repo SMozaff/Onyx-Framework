@@ -116,6 +116,19 @@ impl SupabaseAuth {
     }
 }
 
+fn is_designated_identity(identity: &SupabaseUser, expected_subject: &str) -> bool {
+    let email = identity.email.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+    let confirmed = identity
+        .email_confirmed_at
+        .as_deref()
+        .or(identity.confirmed_at.as_deref())
+        .is_some_and(|value| !value.trim().is_empty());
+    confirmed
+        && email == ALLFATHER_EMAIL
+        && !identity.id.trim().is_empty()
+        && identity.id == expected_subject
+}
+
 fn auth_error(code: &str) -> ApiError {
     ApiError::new(
         StatusCode::UNAUTHORIZED,
@@ -136,18 +149,7 @@ pub async fn login(
         .as_ref()
         .ok_or_else(|| auth_error("SUPABASE_AUTH_NOT_CONFIGURED"))?;
     let identity = auth.verified_user(&headers).await?;
-    let email = identity.email.as_deref().unwrap_or("").trim().to_ascii_lowercase();
-    let confirmed = identity
-        .email_confirmed_at
-        .as_deref()
-        .or(identity.confirmed_at.as_deref())
-        .is_some_and(|value| !value.trim().is_empty());
-
-    if !confirmed
-        || email != ALLFATHER_EMAIL
-        || identity.id.trim().is_empty()
-        || identity.id != auth.allfather_user_id
-    {
+    if !is_designated_identity(&identity, &auth.allfather_user_id) {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "SUPABASE_IDENTITY_NOT_AUTHORIZED",
@@ -210,4 +212,47 @@ pub async fn login(
             class: user.class.map(|class| class.as_str().to_owned()),
         },
     }))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::{is_designated_identity, SupabaseUser, ALLFATHER_EMAIL};
+
+    fn user(id: &str, email: &str, confirmed: Option<&str>) -> SupabaseUser {
+        SupabaseUser {
+            id: id.to_owned(),
+            email: Some(email.to_owned()),
+            email_confirmed_at: confirmed.map(str::to_owned),
+            confirmed_at: None,
+        }
+    }
+
+    #[test]
+    fn accepts_only_confirmed_designated_subject() {
+        assert!(is_designated_identity(
+            &user("supabase-user-123", ALLFATHER_EMAIL, Some("2026-10-01T00:00:00Z")),
+            "supabase-user-123"
+        ));
+    }
+
+    #[test]
+    fn rejects_subject_mismatch_even_when_email_is_confirmed() {
+        assert!(!is_designated_identity(
+            &user("different-subject", ALLFATHER_EMAIL, Some("2026-10-01T00:00:00Z")),
+            "supabase-user-123"
+        ));
+    }
+
+    #[test]
+    fn rejects_unconfirmed_or_non_designated_email() {
+        assert!(!is_designated_identity(
+            &user("supabase-user-123", ALLFATHER_EMAIL, None),
+            "supabase-user-123"
+        ));
+        assert!(!is_designated_identity(
+            &user("supabase-user-123", "other@example.com", Some("2026-10-01T00:00:00Z")),
+            "supabase-user-123"
+        ));
+    }
 }
