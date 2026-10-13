@@ -3,8 +3,7 @@
 
 pub mod admin;
 pub mod auth;
-#[path = "../clerk.rs"]
-pub mod clerk;
+pub mod supabase;
 pub mod client_type;
 pub mod command;
 pub mod events;
@@ -89,10 +88,10 @@ pub struct ApiState {
     /// Identity store backing `/api/auth/login` (audit finding H-01).
     /// Replaces the former `DEFAULT_USERNAME`/`DEFAULT_PASSWORD` constants.
     pub user_store: Arc<dyn UserStore>,
-    /// Optional Clerk identity boundary. Clerk is never the ONYX authorization store;
-    /// this adapter only verifies the external identity and exchanges it for an
-    /// already-provisioned ONYX principal.
-    pub clerk_auth: Option<Arc<clerk::ClerkAuth>>,
+    /// Optional Supabase Auth identity boundary for the designated All-Father account.
+    /// Supabase verifies the external identity; ONYX remains authoritative for
+    /// principal provisioning, role, tenant, and authorization.
+    pub supabase_auth: Option<Arc<supabase::SupabaseAuth>>,
     /// Repository for `profile_domain::StaffProfile`. Backs the staff
     /// profile view/edit routes and the batch import/export feature —
     /// see `routes::profiles`.
@@ -339,42 +338,31 @@ impl ApiState {
 
         let password_hasher = Arc::new(PasswordHasher::new());
 
-        // Clerk is the external identity boundary. Allfather is permanently
-        // bound to the designated verified email in clerk.rs; there is no
-        // HTTP bootstrap and no self-registration flow. The canonical
-        // Allfather principal is materialized once so the verified identity
-        // can exchange its Clerk session for an ONYX administrator session.
-        let clerk_auth = clerk::ClerkAuth::from_env()?.map(Arc::new);
-        if clerk_auth.is_some() {
-            match user_store
-                .find_by_username(clerk::ALLFATHER_USERNAME)
-                .await?
-            {
+        // Supabase Auth verifies the designated All-Father identity. ONYX
+        // retains the principal and authorization model; the principal has no
+        // usable password and is reachable only through the Supabase exchange.
+        let supabase_auth = supabase::SupabaseAuth::from_env()?.map(Arc::new);
+        if supabase_auth.is_some() {
+            match user_store.find_by_username(supabase::ALLFATHER_USERNAME).await? {
                 Some(existing) if !existing.is_admin || !existing.is_active => {
-                    anyhow::bail!("configured Allfather principal is not backed by an active ONYX administrator");
+                    anyhow::bail!("configured All-Father principal is not backed by an active ONYX administrator");
                 }
                 Some(_) => {}
                 None => {
                     let password_hash = password_hasher
-                        .hash(&format!("onyx-clerk-{}", uuid::Uuid::new_v4()))
-                        .map_err(|e| {
-                            anyhow::anyhow!("failed to create unusable Allfather credential: {e}")
-                        })?;
-                    user_store
-                        .create(security_application::NewUser {
-                            user_id: uuid::Uuid::new_v4().to_string(),
-                            username: clerk::ALLFATHER_USERNAME.to_owned(),
-                            organization_id: ORGANIZATION_ID.to_owned(),
-                            password_hash,
-                            is_admin: true,
-                            is_manager: false,
-                            class: None,
-                            parent_user_id: None,
-                        })
-                        .await?;
-                    tracing::info!(
-                        "provisioned the designated Allfather email identity as the ONYX master administrator"
-                    );
+                        .hash(&format!("onyx-supabase-{}", uuid::Uuid::new_v4()))
+                        .map_err(|e| anyhow::anyhow!("failed to create unusable All-Father credential: {e}"))?;
+                    user_store.create(security_application::NewUser {
+                        user_id: uuid::Uuid::new_v4().to_string(),
+                        username: supabase::ALLFATHER_USERNAME.to_owned(),
+                        organization_id: ORGANIZATION_ID.to_owned(),
+                        password_hash,
+                        is_admin: true,
+                        is_manager: false,
+                        class: None,
+                        parent_user_id: None,
+                    }).await?;
+                    tracing::info!("provisioned the designated Supabase identity as the ONYX master administrator");
                 }
             }
         }
@@ -435,7 +423,7 @@ impl ApiState {
             audit_writer,
             metrics: Metrics::new("onyx_api_server")?,
             user_store,
-            clerk_auth,
+            supabase_auth,
             password_hasher,
             relay_registry: relay::RelayRegistry::new(),
             blob_store,
@@ -572,8 +560,8 @@ pub fn router(state: ApiState) -> Router {
         .route("/ready", get(readiness))
         // Ordinary Admin/Staff accounts authenticate directly against ONYX credentials.
         .route("/api/auth/login", post(auth::login))
-        // Clerk/Google is reserved for the designated All-Father identity.
-        .route("/api/auth/clerk", post(clerk::login))
+        // Supabase Auth is reserved for the designated All-Father identity.
+        .route("/api/auth/supabase", post(supabase::login))
         // Refresh consumes a refresh token rather than an access token, so it
         // intentionally remains outside the standard access-auth layer.
         .route("/api/auth/refresh", post(auth::refresh))
