@@ -367,14 +367,14 @@ async fn create_user_record(
     is_admin: bool,
 ) -> Result<UserDto, ApiError> {
     let username = payload.username.trim().to_string();
-    if username.eq_ignore_ascii_case(super::clerk::ALLFATHER_USERNAME) {
+    if username.eq_ignore_ascii_case(super::supabase::ALLFATHER_USERNAME) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "RESERVED_USERNAME",
             "AUTHORITY",
             "NON_RETRYABLE",
             correlation(),
-            json!({"message":"The designated All-Father identity is reserved for Clerk authentication"}),
+            json!({"message":"The designated All-Father identity is reserved for Supabase authentication"}),
         ));
     }
     if username.is_empty() {
@@ -735,7 +735,7 @@ pub async fn set_user_password(
         })?;
     if target
         .username
-        .eq_ignore_ascii_case(super::clerk::ALLFATHER_USERNAME)
+        .eq_ignore_ascii_case(super::supabase::ALLFATHER_USERNAME)
     {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -743,7 +743,7 @@ pub async fn set_user_password(
             "AUTHORITY",
             "NON_RETRYABLE",
             correlation(),
-            json!({"message":"The designated All-Father identity is managed exclusively by Clerk"}),
+            json!({"message":"The designated All-Father identity is managed exclusively by Supabase Auth"}),
         ));
     }
     let hash = state
