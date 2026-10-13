@@ -1219,9 +1219,14 @@ async function importProfiles(request: Request, env: Env, session: Session) {
   const imported: Json[] = [], failed: Json[] = [];
   for (let index=0; index<rows.length; index++) {
     const row=rows[index];
-    if (!row || Array.isArray(row) || typeof row!=="object" || !validProfileBody(row)) { failed.push({ row:index+1, reason:"INVALID_PROFILE_ROW" }); continue; }
-    const response=await upsertProfile(new Request(request.url,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(row)}),env,session);
-    if (response.ok) imported.push({ row:index+1, owner_id:row.owner_id });
+    if (!row || Array.isArray(row) || typeof row!=="object") { failed.push({ row:index+1, reason:"INVALID_PROFILE_ROW" }); continue; }
+    const ownerId=typeof row.user_id==="string"?row.user_id:row.owner_id;
+    const normalized:Json={...row,owner_id:ownerId};
+    if (typeof ownerId!=="string" || !looksLikeUuid(ownerId) ||
+        ["full_name","contact_email","contact_phone","job_title","department"].some(key=>typeof row[key]!=="string"||!(row[key] as string).trim()) ||
+        !validProfileBody(normalized)) { failed.push({ row:index+1, reason:"INVALID_PROFILE_ROW" }); continue; }
+    const response=await upsertProfile(new Request(request.url,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(normalized)}),env,session);
+    if (response.ok) imported.push({ row:index+1, user_id:ownerId });
     else { const error=await response.json().catch(()=>({error:"PROFILE_IMPORT_FAILED"})) as Json; failed.push({row:index+1,reason:String(error.error||"PROFILE_IMPORT_FAILED")}); }
   }
   return json({ total:rows.length, imported:imported.length, failed:failed.length, failures:failed, results:imported });
@@ -1229,11 +1234,22 @@ async function importProfiles(request: Request, env: Env, session: Session) {
 async function exportProfiles(request: Request, env: Env, session: Session) {
   requireRole(session, "ORGANIZATION_ADMIN");
   const rows=await allProfileRows(env,session);
-  const profiles=rows.filter(row=>row.state).map(row=>profileDto(row.state,session));
+  const profiles=rows.filter(row=>row.state).map(row=>({
+    user_id:String(row.state.owner_id??""),
+    full_name:String(row.state.full_name??""),
+    contact_email:String(row.state.contact_email??""),
+    contact_phone:String(row.state.contact_phone??""),
+    job_title:String(row.state.job_title??""),
+    department:String(row.state.department??""),
+    photo_blob_key:row.state.photo_blob_key??null,
+    class_label:row.state.class_label??null,
+    parent_display_name:row.state.parent_display_name??null,
+    team_memberships:Array.isArray(row.state.team_memberships)?row.state.team_memberships:[],
+  } as Json));
   const format=new URL(request.url).searchParams.get("format")||"csv";
   if (format==="json") return json(profiles);
   if (format!=="csv") return json({error:"INVALID_EXPORT_FORMAT",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
-  const fields=["owner_id","full_name","photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name","team_memberships"];
+  const fields=["user_id","full_name","contact_email","contact_phone","job_title","department","photo_blob_key","class_label","parent_display_name","team_memberships"];
   const escape=(value:unknown)=>{const text=Array.isArray(value)?value.join(";"):value==null?"":String(value);return /[",\r\n]/.test(text)?'"'+text.replace(/"/g,'""')+'"':text;};
   const csv=[fields.join(","),...profiles.map(profile=>fields.map(key=>escape(profile[key])).join(","))].join("\r\n");
   return new Response(csv,{status:200,headers:{"content-type":"text/csv; charset=utf-8","content-disposition":"attachment; filename=onyx-staff-profiles.csv","cache-control":"no-store"}});
