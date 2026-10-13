@@ -976,8 +976,10 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     const session=await requireSession(request,env);
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
-    if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);\n    if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
-    if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);\n    if(/^\\/api\\/admin\\/users\\/[^/]+\\/deactivate$/.test(url.pathname)&&request.method==="POST")return await deactivateUser(request,env,session,url.pathname.split("/").at(-2)!);
+    if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
+    if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
+    if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
+    if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await deactivateUser(request,env,session,url.pathname.split("/").at(-2)!);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="GET")return await getMobileAccess(env,session);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="PUT")return await putMobileAccess(request,env,session);
     if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);
