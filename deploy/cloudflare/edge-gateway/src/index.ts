@@ -1207,30 +1207,43 @@ function parseCsvRows(input: string): Json[] {
 }
 async function importProfiles(request: Request, env: Env, session: Session) {
   requireRole(session, "ORGANIZATION_ADMIN");
-  const contentType=(request.headers.get("content-type")||"application/json").toLowerCase();
+  const contentType=(request.headers.get("content-type")||"text/csv").toLowerCase();
   const raw=await request.text();
   if (raw.length > 2_000_000) return json({ error:"IMPORT_TOO_LARGE",category:"DOMAIN",retryability:"NON_RETRYABLE" },413);
   let rows: Json[];
   try {
-    if (contentType.includes("text/csv") || contentType.includes("application/csv")) rows=parseCsvRows(raw);
-    else { const parsed=JSON.parse(raw); rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed.profiles)?parsed.profiles:[]); }
+    if (contentType.includes("json")) { const parsed=JSON.parse(raw); rows=Array.isArray(parsed)?parsed:[]; }
+    else rows=parseCsvRows(raw);
   } catch { return json({ error:"INVALID_PROFILE_IMPORT",category:"DOMAIN",retryability:"NON_RETRYABLE" },400); }
   if (rows.length > 500) return json({ error:"IMPORT_TOO_MANY_ROWS",category:"DOMAIN",retryability:"NON_RETRYABLE" },400);
-  const imported: Json[] = [], failed: Json[] = [];
+  let created=0, updated=0, failed=0;
+  const results:Json[]=[];
   for (let index=0; index<rows.length; index++) {
     const row=rows[index];
-    if (!row || Array.isArray(row) || typeof row!=="object") { failed.push({ row:index+1, reason:"INVALID_PROFILE_ROW" }); continue; }
+    const userId=row&&typeof row.user_id==="string"?row.user_id:null;
+    if (!row || Array.isArray(row) || typeof row!=="object") {
+      failed++; results.push({outcome:"failed",user_id:userId,reason:"INVALID_PROFILE_ROW"}); continue;
+    }
     const ownerId=typeof row.user_id==="string"?row.user_id:row.owner_id;
     const normalized:Json={...row,owner_id:ownerId};
     if (typeof ownerId!=="string" || !looksLikeUuid(ownerId) ||
         ["full_name","contact_email","contact_phone","job_title","department"].some(key=>typeof row[key]!=="string"||!(row[key] as string).trim()) ||
-        !validProfileBody(normalized)) { failed.push({ row:index+1, reason:"INVALID_PROFILE_ROW" }); continue; }
+        !validProfileBody(normalized)) {
+      failed++; results.push({outcome:"failed",user_id:userId,reason:"INVALID_PROFILE_ROW"}); continue;
+    }
     const response=await upsertProfile(new Request(request.url,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(normalized)}),env,session);
-    if (response.ok) imported.push({ row:index+1, user_id:ownerId });
-    else { const error=await response.json().catch(()=>({error:"PROFILE_IMPORT_FAILED"})) as Json; failed.push({row:index+1,reason:String(error.error||"PROFILE_IMPORT_FAILED")}); }
+    if (response.ok) {
+      const isCreated=response.status===201;
+      if(isCreated)created++;else updated++;
+      results.push({outcome:isCreated?"created":"updated",user_id:ownerId});
+    } else {
+      const error=await response.json().catch(()=>({error:"PROFILE_IMPORT_FAILED"})) as Json;
+      failed++; results.push({outcome:"failed",user_id:ownerId,reason:String(error.error||"PROFILE_IMPORT_FAILED")});
+    }
   }
-  return json({ total:rows.length, imported:imported.length, failed:failed.length, failures:failed, results:imported });
+  return json({total_rows:rows.length,created,updated,failed,results});
 }
+
 async function exportProfiles(request: Request, env: Env, session: Session) {
   requireRole(session, "ORGANIZATION_ADMIN");
   const rows=await allProfileRows(env,session);
