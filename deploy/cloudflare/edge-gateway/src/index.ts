@@ -969,6 +969,145 @@ async function profiles(env:Env,session:Session,ownerId?:string){
   const rows=ownerId?await env.DB.prepare("SELECT id,state FROM aggregates WHERE organization_id=? AND aggregate_type=? AND id=? LIMIT 1").bind(session.organization_id,"staff_profile",ownerId).all<Record<string,unknown>>():await env.DB.prepare("SELECT id,state FROM aggregates WHERE organization_id=? AND aggregate_type=? ORDER BY updated_at DESC LIMIT 100").bind(session.organization_id,"staff_profile").all<Record<string,unknown>>();
   return json((rows.results??[]).map(r=>({id:r.id,...(safeJson(String(r.state)) as Json)})));
 }
+
+type ProfileRecord = {
+  profile_id: string; owner_id: string; full_name: string; photo_blob_key: string | null;
+  job_title: string | null; contact_email: string | null; contact_phone: string | null;
+  department: string | null; class_label: string | null; parent_display_name: string | null;
+  team_memberships: string[]; work_stats?: { assigned_items_count: number | null; completed_items_count: number | null; target_summary: string | null };
+};
+function profileDto(state: Json, session: Session): Json {
+  const dto: Json = {};
+  for (const key of ["profile_id","owner_id","full_name","photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name","team_memberships"]) {
+    if (Object.prototype.hasOwnProperty.call(state,key)) dto[key] = state[key];
+  }
+  if (session.role === "ORGANIZATION_ADMIN" || session.class === "top_level_manager") {
+    dto.work_stats = state.work_stats && typeof state.work_stats === "object"
+      ? state.work_stats
+      : { assigned_items_count: null, completed_items_count: null, target_summary: null };
+  }
+  return dto;
+}
+async function allProfileRows(env: Env, session: Session) {
+  const result = await env.DB.prepare("SELECT id,state,version FROM aggregates WHERE organization_id=? AND aggregate_type='staff_profile' ORDER BY updated_at DESC LIMIT 500")
+    .bind(session.organization_id).all<{id:string;state:string;version:number}>();
+  return (result.results ?? []).map(row => ({ ...row, state: safeJson(row.state) as Json }));
+}
+function validProfileBody(body: Json): boolean {
+  const strings = ["owner_id","full_name"];
+  if (strings.some(key => typeof body[key] !== "string" || !(body[key] as string).trim())) return false;
+  for (const key of ["photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name"]) {
+    if (body[key] !== undefined && body[key] !== null && typeof body[key] !== "string") return false;
+  }
+  return body.full_name !== undefined && (body.full_name as string).trim().length <= 200 &&
+    (body.owner_id as string).length <= 128 &&
+    (body.team_memberships === undefined || (Array.isArray(body.team_memberships) && body.team_memberships.length <= 100 && body.team_memberships.every(x => typeof x === "string" && x.length <= 100)));
+}
+async function upsertProfile(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Array.isArray(body) || !validProfileBody(body)) return json({ error: "PROFILE_DOMAIN_ERROR", message: "A valid owner_id and full_name are required.", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const ownerId = String(body.owner_id).trim();
+  const owner = await env.DB.prepare("SELECT id,class,parent_user_id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1")
+    .bind(ownerId, session.organization_id).first<{id:string;class:string|null;parent_user_id:string|null}>();
+  if (!owner) return json({ error: "PROFILE_OWNER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  const profiles = await allProfileRows(env, session);
+  const existing = profiles.find(row => row.state && String(row.state.owner_id ?? "") === ownerId);
+  const profileId = existing ? String(existing.state.profile_id ?? existing.id) : uuid();
+  const profile: ProfileRecord = {
+    profile_id: profileId, owner_id: ownerId, full_name: String(body.full_name).trim(),
+    photo_blob_key: typeof body.photo_blob_key === "string" ? body.photo_blob_key.trim() || null : null,
+    job_title: typeof body.job_title === "string" ? body.job_title.trim() || null : null,
+    contact_email: typeof body.contact_email === "string" ? body.contact_email.trim() || null : null,
+    contact_phone: typeof body.contact_phone === "string" ? body.contact_phone.trim() || null : null,
+    department: typeof body.department === "string" ? body.department.trim() || null : null,
+    class_label: typeof body.class_label === "string" ? body.class_label.trim() || null : owner.class,
+    parent_display_name: typeof body.parent_display_name === "string" ? body.parent_display_name.trim() || null : null,
+    team_memberships: Array.isArray(body.team_memberships) ? body.team_memberships.map(x => String(x).trim()).filter(Boolean) : [],
+    work_stats: existing?.state?.work_stats && typeof existing.state.work_stats === "object"
+      ? existing.state.work_stats as ProfileRecord["work_stats"]
+      : { assigned_items_count: null, completed_items_count: null, target_summary: null },
+  };
+  const timestamp = Date.now(), operationId = uuid(), version = existing ? Number(existing.version || 1) + 1 : 1;
+  try {
+    const write = existing
+      ? env.DB.prepare("UPDATE aggregates SET state=?,version=?,updated_at=? WHERE id=? AND organization_id=? AND aggregate_type='staff_profile'")
+          .bind(JSON.stringify(profile), version, timestamp, existing.id, session.organization_id)
+      : env.DB.prepare("INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,'staff_profile',1,0,0,?,?,?)")
+          .bind(profileId, JSON.stringify(profile), timestamp, session.organization_id);
+    const batch = await env.DB.batch([
+      write,
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)")
+        .bind(session.organization_id, session.sub, existing ? "profile.update" : "profile.create", operationId, JSON.stringify({ owner_id: ownerId, profile_id: profileId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) throw new Error("PROFILE_WRITE_FAILED");
+    return json(profileDto(profile as unknown as Json, session), existing ? 200 : 201);
+  } catch {
+    return json({ error: "PROFILE_STORE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function listProfiles(env: Env, session: Session, ownerId?: string) {
+  const rows = await allProfileRows(env, session);
+  const profiles = rows.filter(row => row.state && (!ownerId || String(row.state.owner_id ?? "") === ownerId));
+  if (ownerId && profiles.length === 0) return json({ error: "PROFILE_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  return json(ownerId ? profileDto(profiles[0].state, session) : profiles.map(row => profileDto(row.state, session)));
+}
+function parseCsvRows(input: string): Json[] {
+  const rows: string[][] = [];
+  let row: string[] = [], field = "", quoted = false;
+  for (let i=0; i<input.length; i++) {
+    const c=input[i];
+    if (quoted && c === '"' && input[i+1] === '"') { field += '"'; i++; }
+    else if (c === '"') quoted = !quoted;
+    else if (c === ',' && !quoted) { row.push(field); field=""; }
+    else if ((c === '\n' || c === '\r') && !quoted) {
+      if (c === '\r' && input[i+1] === '\n') i++;
+      row.push(field); if (row.some(value => value.length)) rows.push(row); row=[]; field="";
+    } else field += c;
+  }
+  row.push(field); if (row.some(value => value.length)) rows.push(row);
+  if (rows.length < 2) return [];
+  const headers=rows[0].map(value=>value.trim());
+  return rows.slice(1).map(values => {
+    const obj: Json = {};
+    headers.forEach((key,index)=>{ if (key === "team_memberships") obj[key]=(values[index]||"").split(";").map(x=>x.trim()).filter(Boolean); else obj[key]=values[index]||null; });
+    return obj;
+  });
+}
+async function importProfiles(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const contentType=(request.headers.get("content-type")||"application/json").toLowerCase();
+  const raw=await request.text();
+  if (raw.length > 2_000_000) return json({ error:"IMPORT_TOO_LARGE",category:"DOMAIN",retryability:"NON_RETRYABLE" },413);
+  let rows: Json[];
+  try {
+    if (contentType.includes("text/csv") || contentType.includes("application/csv")) rows=parseCsvRows(raw);
+    else { const parsed=JSON.parse(raw); rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed.profiles)?parsed.profiles:[]); }
+  } catch { return json({ error:"INVALID_PROFILE_IMPORT",category:"DOMAIN",retryability:"NON_RETRYABLE" },400); }
+  if (rows.length > 500) return json({ error:"IMPORT_TOO_MANY_ROWS",category:"DOMAIN",retryability:"NON_RETRYABLE" },400);
+  const imported: Json[] = [], failed: Json[] = [];
+  for (let index=0; index<rows.length; index++) {
+    const row=rows[index];
+    if (!row || Array.isArray(row) || typeof row!=="object" || !validProfileBody(row)) { failed.push({ row:index+1, reason:"INVALID_PROFILE_ROW" }); continue; }
+    const response=await upsertProfile(new Request(request.url,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(row)}),env,session);
+    if (response.ok) imported.push({ row:index+1, owner_id:row.owner_id });
+    else { const error=await response.json().catch(()=>({error:"PROFILE_IMPORT_FAILED"})) as Json; failed.push({row:index+1,reason:String(error.error||"PROFILE_IMPORT_FAILED")}); }
+  }
+  return json({ total:rows.length, imported:imported.length, failed:failed.length, failures:failed, results:imported });
+}
+async function exportProfiles(request: Request, env: Env, session: Session) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const rows=await allProfileRows(env,session);
+  const profiles=rows.filter(row=>row.state).map(row=>profileDto(row.state,session));
+  const format=new URL(request.url).searchParams.get("format")||"csv";
+  if (format==="json") return json(profiles);
+  if (format!=="csv") return json({error:"INVALID_EXPORT_FORMAT",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const fields=["owner_id","full_name","photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name","team_memberships"];
+  const escape=(value:unknown)=>{const text=Array.isArray(value)?value.join(";"):value==null?"":String(value);return /[",\r\n]/.test(text)?'"'+text.replace(/"/g,'""')+'"':text;};
+  const csv=[fields.join(","),...profiles.map(profile=>fields.map(key=>escape(profile[key])).join(","))].join("\r\n");
+  return new Response(csv,{status:200,headers:{"content-type":"text/csv; charset=utf-8","content-disposition":"attachment; filename=onyx-staff-profiles.csv","cache-control":"no-store"}});
+}
+
 async function pushSubscribe(request:Request,env:Env,session:Session){
   const body=await request.json().catch(()=>null) as Json|null;
   if(!body||typeof body.endpoint!=="string"||!body.endpoint||typeof body.p256dh!=="string"||!body.p256dh||typeof body.auth!=="string"||!body.auth)
@@ -1073,8 +1212,11 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);
     if(url.pathname==="/api/admin/legal-holds"&&request.method==="POST")return await postAdminLegalHold(request,env,session);
     if(/^\/api\/admin\/users\/[^/]+\/class$/.test(url.pathname)&&request.method==="POST")return await assignUserClass(request,env,session,url.pathname.split("/").at(-2)!);
-    if(url.pathname==="/api/profiles"&&request.method==="GET")return await profiles(env,session);
-    if(url.pathname.startsWith("/api/profiles/")&&request.method==="GET")return await profiles(env,session,url.pathname.split("/").pop());
+    if(url.pathname==="/api/profiles"&&request.method==="GET")return await listProfiles(env,session);
+    if(url.pathname.startsWith("/api/profiles/")&&request.method==="GET")return await listProfiles(env,session,decodeURIComponent(url.pathname.split("/").pop()!));
+    if(url.pathname==="/api/admin/profiles"&&request.method==="PUT")return await upsertProfile(request,env,session);
+    if(url.pathname==="/api/admin/profiles/import"&&request.method==="POST")return await importProfiles(request,env,session);
+    if(url.pathname==="/api/admin/profiles/export"&&request.method==="GET")return await exportProfiles(request,env,session);
     if(url.pathname==="/api/push/subscriptions"&&request.method==="POST")return await pushSubscribe(request,env,session);
     if(url.pathname.startsWith("/api/push/subscriptions/")&&request.method==="DELETE")return await pushDelete(env,session,url.pathname.split("/").pop()!);
     if(url.pathname.startsWith("/api/files/")&&request.method==="GET")return await fileDownload(env,session,url.pathname.split("/").pop()!);
