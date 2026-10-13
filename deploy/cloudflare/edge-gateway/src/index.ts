@@ -1167,12 +1167,16 @@ async function upsertProfile(request: Request, env: Env, session: Session) {
           .bind(JSON.stringify(profile), version, timestamp, existing.id, session.organization_id)
       : env.DB.prepare("INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,'staff_profile',1,0,0,?,?,?)")
           .bind(profileId, JSON.stringify(profile), timestamp, session.organization_id);
+    const eventId=uuid(), aggregateId=existing?existing.id:profileId;
+    const eventPayload=JSON.stringify(profile);
     const batch = await env.DB.batch([
       write,
-      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)")
+      env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,causation_id,actor,organization_id) SELECT ?,?,?,?,?,?,'{}',?,?,NULL,?,? WHERE EXISTS (SELECT 1 FROM aggregates WHERE id=? AND organization_id=? AND aggregate_type='staff_profile' AND version=?)")
+        .bind(eventId,aggregateId,version,existing?"ProfileUpdated":"ProfileCreated",eventPayload,timestamp,operationId,operationId,JSON.stringify({user_id:session.sub,organization_id:session.organization_id}),session.organization_id,aggregateId,session.organization_id,version),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
         .bind(session.organization_id, session.sub, existing ? "profile.update" : "profile.create", operationId, JSON.stringify({ owner_id: ownerId, profile_id: profileId }), timestamp),
     ]);
-    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) throw new Error("PROFILE_WRITE_FAILED");
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1 || Number(batch[1]?.meta?.changes ?? 0) !== 1 || Number(batch[2]?.meta?.changes ?? 0) !== 1) throw new Error("PROFILE_WRITE_FAILED");
     return json(profileDto(profile as unknown as Json, session), existing ? 200 : 201);
   } catch {
     return json({ error: "PROFILE_STORE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
