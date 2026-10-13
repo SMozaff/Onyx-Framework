@@ -336,7 +336,7 @@ async function verifyRelayTicket(env:Env,token:string):Promise<RelayTicketClaims
   const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(env.ONYX_JWT_SECRET),{name:"HMAC",hash:"SHA-256"},false,["verify"]);
   if(!await crypto.subtle.verify("HMAC",key,fromB64u(parts[2]),new TextEncoder().encode(parts[0]+"."+parts[1])))throw new Error("invalid relay ticket");
   const c=claims as unknown as RelayTicketClaims;
-  if(c.typ!=="relay_ticket"||!looksLikeUuid(c.sub)||!looksLikeUuid(c.organization_id)||!looksLikeUuid(c.target_id)||!looksLikeUuid(c.self_replica)||typeof c.jti!=="string"||!c.jti||!Number.isSafeInteger(c.exp)||c.exp<=now()||!Number.isSafeInteger(c.iat))throw new Error("invalid relay ticket");
+  if(c.typ!=="relay_ticket"||!looksLikeUuid(c.sub)||!looksLikeUuid(c.organization_id)||!looksLikeUuid(c.target_id)||!looksLikeUuid(c.self_replica)||typeof c.jti!=="string"||!c.jti||!Number.isSafeInteger(c.exp)||c.exp<=now()||!Number.isSafeInteger(c.iat)||c.iat>now()+5||c.exp-c.iat>RELAY_TICKET_TTL_SECONDS)throw new Error("invalid relay ticket");
   return c;
 }
 async function issueRelayTicket(request:Request,env:Env,session:Session){
@@ -1042,6 +1042,7 @@ function validTimeWindow(body: Json): {start_at_ms:number;end_at_ms:number}|null
   return {start_at_ms:Number(start),end_at_ms:Number(end)};
 }
 async function createTodoAggregate(request: Request, env: Env, session: Session, kind: "todo_list"|"target_list"|"staff_loan") {
+  if(session.client_type==="mobile_observer")return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const body=await request.json().catch(()=>null) as Json|null;
   if (!body || Array.isArray(body)) return json({error:"INVALID_TODO_REQUEST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
   const id=uuid(), timestamp=Date.now(), operationId=uuid();
