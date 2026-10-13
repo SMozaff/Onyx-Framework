@@ -60,6 +60,7 @@ export class EventHub {
     const client = pair[0];
     const server = pair[1];
     this.state.acceptWebSocket(server);
+    await this.state.storage.put("organization_id", organizationId);
     server.serializeAttachment({
       organization_id: organizationId,
       user_id: userId,
@@ -72,7 +73,7 @@ export class EventHub {
     // receives live invalidation hints, not an unbounded historical replay.
     let cursor = await this.state.storage.get<number>("cursor");
     if (cursor === undefined) {
-      const row = await this.env.DB.prepare("SELECT COALESCE(MAX(rowid), 0) AS seq FROM domain_events").first<{ seq: number }>();
+      const row = await this.env.DB.prepare("SELECT COALESCE(MAX(rowid), 0) AS seq FROM domain_events WHERE organization_id=?").bind(organizationId).first<{ seq: number }>();
       cursor = Number(row?.seq ?? 0);
       await this.state.storage.put("cursor", cursor);
     }
@@ -133,9 +134,11 @@ export class EventHub {
     if (this.state.getWebSockets().length === 0) return;
     try {
       const cursor = Number((await this.state.storage.get<number>("cursor")) ?? 0);
+      const organizationId = await this.state.storage.get<string>("organization_id");
+      if (!organizationId) return;
       const result = await this.env.DB.prepare(
-        "SELECT e.rowid AS seq,e.event_id,e.aggregate_id,e.aggregate_version,e.event_type,e.payload,e.occurred_at,e.vector_clock,e.operation_id,e.correlation_id,e.causation_id,e.actor,e.organization_id,a.aggregate_type,a.lifecycle_epoch,a.authority_epoch FROM domain_events e LEFT JOIN aggregates a ON a.id=e.aggregate_id WHERE e.rowid>? ORDER BY e.rowid ASC LIMIT 100"
-      ).bind(cursor).all<EventRow>();
+        "SELECT e.rowid AS seq,e.event_id,e.aggregate_id,e.aggregate_version,e.event_type,e.payload,e.occurred_at,e.vector_clock,e.operation_id,e.correlation_id,e.causation_id,e.actor,e.organization_id,a.aggregate_type,a.lifecycle_epoch,a.authority_epoch FROM domain_events e LEFT JOIN aggregates a ON a.id=e.aggregate_id AND a.organization_id=e.organization_id WHERE e.organization_id=? AND e.rowid>? ORDER BY e.rowid ASC LIMIT 100"
+      ).bind(organizationId, cursor).all<EventRow>();
       const rows = result.results ?? [];
       for (const row of rows) {
         const event = {
