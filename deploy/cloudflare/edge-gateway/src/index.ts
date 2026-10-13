@@ -970,6 +970,72 @@ async function profiles(env:Env,session:Session,ownerId?:string){
   return json((rows.results??[]).map(r=>({id:r.id,...(safeJson(String(r.state)) as Json)})));
 }
 
+
+function validTimeWindow(body: Json): {start_at_ms:number;end_at_ms:number}|null {
+  const start=body.start_at_ms, end=body.end_at_ms;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || Number(start)<0 || Number(end)<=Number(start)) return null;
+  return {start_at_ms:Number(start),end_at_ms:Number(end)};
+}
+async function createTodoAggregate(request: Request, env: Env, session: Session, kind: "todo_list"|"target_list"|"staff_loan") {
+  const body=await request.json().catch(()=>null) as Json|null;
+  if (!body || Array.isArray(body)) return json({error:"INVALID_TODO_REQUEST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const id=uuid(), timestamp=Date.now(), operationId=uuid();
+  const getUser=async (key:string) => {
+    const value=body[key];
+    if(typeof value!=="string" || !looksLikeUuid(value)) return null;
+    return env.DB.prepare("SELECT id,organization_id,is_active,is_manager,role FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
+      .bind(value,session.organization_id).first<{id:string;organization_id:string;is_active:number;is_manager:number;role:string}>();
+  };
+  let state: Json, eventPayload: Json;
+  if (kind==="todo_list") {
+    if(Object.keys(body).some(key=>!["owner","origin","items"].includes(key)) || (body.origin!=="manager_assigned" && body.origin!=="staff_authored") ||
+       !Array.isArray(body.items) || body.items.length>200 || !body.items.every(item=>!!item&&typeof item==="object"&&!Array.isArray(item)&&typeof (item as Json).description==="string"&&(item as Json).description.trim().length>0&&(item as Json).description.length<=1000)) {
+      return json({error:"INVALID_TODO_LIST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    }
+    const owner=await getUser("owner");
+    if(!owner)return json({error:"INVALID_RESOURCE_OWNER",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(session.role==="STAFF" && (owner.id!==session.sub || body.origin!=="staff_authored"))return json({error:"RESOURCE_NOT_OWNED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(session.role==="STAFF" && body.origin==="manager_assigned")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    const items=(body.items as Json[]).map(item=>({item_id:uuid(),description:String(item.description).trim()}));
+    eventPayload={owner:owner.id,origin:body.origin,items};
+    state={id,version:1,lifecycle_epoch:0,authority_epoch:0,status:"Draft",owner:owner.id,owner_id:owner.id,origin:body.origin==="manager_assigned"?"ManagerAssigned":"StaffAuthored",items,created_by:session.sub,team_leader_pre_check:null,escalated_to:null};
+  } else if(kind==="target_list") {
+    if(Object.keys(body).some(key=>!["owner","origin","description","time_window"].includes(key)) ||
+       (body.origin!=="manager_assigned"&&body.origin!=="staff_authored") || typeof body.description!=="string" || !body.description.trim() || body.description.length>2000 ||
+       !body.time_window || typeof body.time_window!=="object" || Array.isArray(body.time_window)) return json({error:"INVALID_TARGET_LIST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    const owner=await getUser("owner"), window=validTimeWindow(body.time_window as Json);
+    if(!owner)return json({error:"INVALID_RESOURCE_OWNER",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(!window)return json({error:"INVALID_TIME_WINDOW",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    if(session.role==="STAFF"&&(owner.id!==session.sub||body.origin!=="staff_authored"))return json({error:"RESOURCE_NOT_OWNED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    eventPayload={owner:owner.id,origin:body.origin,description:body.description.trim(),time_window:window};
+    state={id,version:1,lifecycle_epoch:0,authority_epoch:0,status:"Draft",owner:owner.id,owner_id:owner.id,origin:body.origin==="manager_assigned"?"ManagerAssigned":"StaffAuthored",description:body.description.trim(),time_window:window,created_by:session.sub,team_leader_pre_check:null,escalated_to:null};
+  } else {
+    const allowed=["staff_user_id","real_owner_id","borrowing_manager_id","start_at_ms","end_at_ms"];
+    if(Object.keys(body).some(key=>!allowed.includes(key)))return json({error:"INVALID_STAFF_LOAN",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    const staff=await getUser("staff_user_id"), owner=await getUser("real_owner_id"), manager=await getUser("borrowing_manager_id");
+    const start=body.start_at_ms,end=body.end_at_ms;
+    if(!staff||!owner||!manager)return json({error:"INVALID_LOAN_PARTICIPANT",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||Number(start)<0||Number(end)<=Number(start))return json({error:"INVALID_TIME_WINDOW",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    if(session.role==="STAFF"&&session.sub!==manager.id&&!(session.sub===staff.id&&session.sub===owner.id))return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    if(session.role==="STAFF"&&!(manager.is_manager===1))return json({error:"MANAGER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+    eventPayload={staff_user_id:staff.id,real_owner_id:owner.id,borrowing_manager_id:manager.id,start_at_ms:Number(start),end_at_ms:Number(end)};
+    state={id,version:1,lifecycle_epoch:0,authority_epoch:0,status:"Requested",staff_user_id:staff.id,real_owner_id:owner.id,borrowing_manager_id:manager.id,owner_id:staff.id,start_at_ms:Number(start),end_at_ms:Number(end),created_by:session.sub};
+  }
+  try {
+    const event={event_id:uuid(),aggregate_id:id,aggregate_type:kind,event_type:kind==="todo_list"?"CreateTodoList":kind==="target_list"?"CreateTargetList":"RequestStaffLoan",aggregate_version:1,organization_id:session.organization_id,payload:eventPayload,occurred_at:timestamp,operation_id:operationId,correlation_id:operationId,causation_id:null,actor:{user_id:session.sub,organization_id:session.organization_id}};
+    const result=await env.DB.batch([
+      env.DB.prepare("INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,?,1,0,0,?,?,?)").bind(id,kind,JSON.stringify(state),timestamp,session.organization_id),
+      env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,operation_id,correlation_id,causation_id,actor,organization_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(event.event_id,id,1,event.event_type,JSON.stringify(eventPayload),timestamp,operationId,operationId,null,JSON.stringify(event.actor),session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id,session.sub,kind+".create",operationId,JSON.stringify({target:id}),timestamp),
+    ]);
+    if(Number(result[0]?.meta?.changes??0)!==1)throw new Error("TODO_AGGREGATE_CREATE_FAILED");
+    const responseField=kind==="todo_list"?"todo_list_id":kind==="target_list"?"target_list_id":"staff_loan_id";
+    return json({[responseField]:id},201);
+  } catch {
+    return json({error:"TODO_STORAGE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
+
 type ProfileRecord = {
   profile_id: string; owner_id: string; full_name: string; photo_blob_key: string | null;
   job_title: string | null; contact_email: string | null; contact_phone: string | null;
@@ -1211,6 +1277,9 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="PUT")return await putMobileAccess(request,env,session);
     if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);
     if(url.pathname==="/api/admin/legal-holds"&&request.method==="POST")return await postAdminLegalHold(request,env,session);
+    if(url.pathname==="/api/todo/lists"&&request.method==="POST")return await createTodoAggregate(request,env,session,"todo_list");
+    if(url.pathname==="/api/todo/targets"&&request.method==="POST")return await createTodoAggregate(request,env,session,"target_list");
+    if(url.pathname==="/api/todo/staff-loans"&&request.method==="POST")return await createTodoAggregate(request,env,session,"staff_loan");
     if(/^\/api\/admin\/users\/[^/]+\/class$/.test(url.pathname)&&request.method==="POST")return await assignUserClass(request,env,session,url.pathname.split("/").at(-2)!);
     if(url.pathname==="/api/profiles"&&request.method==="GET")return await listProfiles(env,session);
     if(url.pathname.startsWith("/api/profiles/")&&request.method==="GET")return await listProfiles(env,session,decodeURIComponent(url.pathname.split("/").pop()!));
