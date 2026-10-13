@@ -33,6 +33,7 @@ interface Session {
   role: string;
   client_type: string;
   exp: number;
+  iat_ms?: number;
   jti: string;
   sid: string;
   typ: "access" | "refresh";
@@ -86,7 +87,7 @@ const ONYX_JWT_AUDIENCE = "onyx-api";
 async function jwtSign(env:Env,session:Omit<Session,"jti">):Promise<string>{
   if(!env.ONYX_JWT_SECRET) throw new Error("ONYX_JWT_SECRET is not configured");
   const header=b64u(JSON.stringify({alg:"HS256",typ:"JWT"}));
-  const payload=b64u(JSON.stringify({...session,iss:ONYX_JWT_ISSUER,aud:ONYX_JWT_AUDIENCE,jti:uuid()}));
+  const payload=b64u(JSON.stringify({...session,iat_ms:Date.now(),iss:ONYX_JWT_ISSUER,aud:ONYX_JWT_AUDIENCE,jti:uuid()}));
   const input=`${header}.${payload}`;
   return `${input}.${b64u(await hmac(env.ONYX_JWT_SECRET,input))}`;
 }
@@ -153,6 +154,8 @@ async function requireSession(request:Request,env:Env){
   ).bind(session.sub).first<Record<string,unknown>>();
   const currentRole=current?roleForUser(current):"";
   if(!current||!ONYX_ROLES.includes(currentRole as typeof ONYX_ROLES[number])||(String(current.id)==="__allfather__"&&currentRole!=="ALL_FATHER"))throw new Error("AUTH_REQUIRED");
+  const revocation=await env.DB.prepare("SELECT revoked_before_ms FROM user_session_revocations WHERE user_id=? LIMIT 1").bind(String(current.id)).first<{revoked_before_ms:number}>();
+  if(revocation && (!Number.isSafeInteger(session.iat_ms) || Number(session.iat_ms)<=Number(revocation.revoked_before_ms)))throw new Error("revoked session");
   if(String(current.organization_id)!==session.organization_id||currentRole!==session.role||
      Boolean(current.is_admin)!==Boolean(session.is_admin))throw new Error("AUTH_REQUIRED");
   // All-Father sessions are bound to the canonical ONYX principal and exact
@@ -815,7 +818,7 @@ async function listAdminUsers(env: Env, session: Session) {
   // this endpoint must never become a cross-tenant directory.
   requireRole(session, "ORGANIZATION_ADMIN");
   const rows = await env.DB.prepare(
-    "SELECT id,username,organization_id,is_admin,class,parent_user_id,is_active FROM users WHERE organization_id=? ORDER BY username LIMIT 500"
+    "SELECT id,username,organization_id,is_admin,is_manager,class,parent_user_id,is_active FROM users WHERE organization_id=? ORDER BY username LIMIT 500"
   ).bind(session.organization_id).all<Record<string, unknown>>();
   // is_manager is retained as a legacy UI field; the canonical Worker schema
   // models authority with role and operational classification with class.
@@ -824,7 +827,7 @@ async function listAdminUsers(env: Env, session: Session) {
     username: String(row.username),
     organization_id: String(row.organization_id),
     is_admin: row.is_admin === true || row.is_admin === 1 || row.is_admin === "1",
-    is_manager: false,
+    is_manager: row.is_manager === true || row.is_manager === 1 || row.is_manager === "1",
     class: typeof row.class === "string" ? row.class : null,
     parent_user_id: typeof row.parent_user_id === "string" ? row.parent_user_id : null,
     is_active: row.is_active === true || row.is_active === 1 || row.is_active === "1",
@@ -856,6 +859,88 @@ async function assignUserClass(request: Request, env: Env, session: Session, use
     return json({ success: true, class: value });
   } catch {
     return json({ error: "USER_CLASS_STORAGE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+
+
+async function setUserActive(env: Env, session: Session, userId: string, active: boolean) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  if (userId === session.sub && !active) return json({ error: "CANNOT_DEACTIVATE_SELF", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const timestamp = Date.now(), operationId = uuid();
+  try {
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET is_active=?,updated_at=? WHERE id=? AND organization_id=? AND id<>'__allfather__'").bind(active ? 1 : 0, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, active ? "user.activate" : "user.deactivate", operationId, JSON.stringify({ target: userId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_AUDIT_FAILED");
+    if (!active) await env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=excluded.revoked_before_ms,updated_at=excluded.updated_at").bind(userId, Date.now(), timestamp).run();
+    return json({ success: true });
+  } catch {
+    return json({ error: "USER_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function setUserPassword(request: Request, env: Env, session: Session, userId: string) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Object.keys(body).length !== 1 || typeof body.password !== "string" || body.password.length < 12 || body.password.length > 1024) return json({ error: "WEAK_PASSWORD", message: "Password must contain at least 12 characters.", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const target = await env.DB.prepare("SELECT id,username FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1").bind(userId, session.organization_id).first<{id:string;username:string}>();
+  if (!target || userId === "__allfather__" || target.username.toLowerCase() === "allfather") return json({ error: target ? "RESERVED_IDENTITY" : "USER_NOT_FOUND", category: target ? "AUTHORITY" : "DOMAIN", retryability: "NON_RETRYABLE" }, target ? 403 : 404);
+  try {
+    const hash = await hashPassword(body.password), timestamp = Date.now(), operationId = uuid();
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET password_hash=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1").bind(hash, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=excluded.revoked_before_ms,updated_at=excluded.updated_at").bind(userId, timestamp, timestamp),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id, session.sub, "user.password.reset", operationId, JSON.stringify({ target: userId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    return json({ success: true });
+  } catch {
+    return json({ error: "USER_PASSWORD_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function setUserManager(request: Request, env: Env, session: Session, userId: string) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Object.keys(body).length !== 1 || typeof body.is_manager !== "boolean") return json({ error: "INVALID_MANAGER_FLAG", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const timestamp = Date.now(), operationId = uuid();
+  try {
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET is_manager=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__'").bind(body.is_manager ? 1 : 0, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.manager.update", operationId, JSON.stringify({ target: userId, is_manager: body.is_manager }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_MANAGER_AUDIT_FAILED");
+    return json({ success: true, is_manager: body.is_manager });
+  } catch {
+    return json({ error: "USER_MANAGER_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
+}
+async function setUserParent(request: Request, env: Env, session: Session, userId: string) {
+  requireRole(session, "ORGANIZATION_ADMIN");
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Object.keys(body).length !== 1 || !Object.prototype.hasOwnProperty.call(body, "parent_user_id") || (body.parent_user_id !== null && typeof body.parent_user_id !== "string")) return json({ error: "INVALID_PARENT", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const parentId = typeof body.parent_user_id === "string" ? body.parent_user_id.trim() : null;
+  if (parentId === userId) return json({ error: "PARENT_CYCLE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const target = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1").bind(userId, session.organization_id).first();
+  if (!target) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  if (parentId) {
+    const parent = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1").bind(parentId, session.organization_id).first();
+    if (!parent) return json({ error: "PARENT_USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+    const cycle = await env.DB.prepare("WITH RECURSIVE descendants(id) AS (SELECT id FROM users WHERE parent_user_id=? AND organization_id=? UNION ALL SELECT u.id FROM users u JOIN descendants d ON u.parent_user_id=d.id WHERE u.organization_id=?) SELECT 1 AS found FROM descendants WHERE id=? LIMIT 1").bind(userId, session.organization_id, session.organization_id, parentId).first();
+    if (cycle) return json({ error: "PARENT_CYCLE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const timestamp = Date.now(), operationId = uuid();
+  try {
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET parent_user_id=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1").bind(parentId, timestamp, userId, session.organization_id),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.parent.update", operationId, JSON.stringify({ target: userId, parent_user_id: parentId }), timestamp),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_PARENT_AUDIT_FAILED");
+    return json({ success: true, parent_user_id: parentId });
+  } catch {
+    return json({ error: "USER_PARENT_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
   }
 }
 
@@ -979,6 +1064,10 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
     if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await deactivateUser(request,env,session,url.pathname.split("/").at(-2)!);
+    if(/^\/api\/admin\/users\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,true);
+    if(/^\/api\/admin\/users\/[^/]+\/password$/.test(url.pathname)&&request.method==="POST")return await setUserPassword(request,env,session,url.pathname.split("/").at(-2)!);
+    if(/^\/api\/admin\/users\/[^/]+\/manager$/.test(url.pathname)&&request.method==="POST")return await setUserManager(request,env,session,url.pathname.split("/").at(-2)!);
+    if(/^\/api\/admin\/users\/[^/]+\/parent$/.test(url.pathname)&&request.method==="POST")return await setUserParent(request,env,session,url.pathname.split("/").at(-2)!);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="GET")return await getMobileAccess(env,session);
     if(url.pathname==="/api/admin/mobile-access"&&request.method==="PUT")return await putMobileAccess(request,env,session);
     if(url.pathname==="/api/admin/policies"&&request.method==="POST")return await postAdminPolicy(request,env,session);
