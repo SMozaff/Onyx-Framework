@@ -8,6 +8,20 @@ export const API_BASE = (configuredApiBase || (
     : 'http://127.0.0.1:3000'
 )).replace(/\/+$/, '');
 
+export class ApiFeatureUnavailableError extends Error {
+  readonly code = "ROUTE_NOT_MIGRATED";
+
+  constructor(readonly route: string, message?: string) {
+    super(message || `The API route ${route} is not implemented by this server yet.`);
+    this.name = "ApiFeatureUnavailableError";
+  }
+}
+
+/** Allows a UI feature to hide/disable only genuinely unported endpoints. */
+export function isApiFeatureUnavailable(error: unknown): error is ApiFeatureUnavailableError {
+  return error instanceof ApiFeatureUnavailableError && error.code === "ROUTE_NOT_MIGRATED";
+}
+
 type RetriableRequestConfig = AxiosRequestConfig & { _onyxRetried?: boolean };
 type RefreshResponse = { access_token: string; refresh_token: string; user: NonNullable<ReturnType<typeof useAuthStore.getState>['user']> };
 let refreshInFlight: Promise<boolean> | null = null;
@@ -48,6 +62,11 @@ async function refreshSession(): Promise<boolean> {
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
+    if (error.response?.status === 501 && error.response?.data?.error === 'ROUTE_NOT_MIGRATED') {
+      const route = typeof error.response.data.route === 'string' ? error.response.data.route : 'unknown';
+      const message = typeof error.response.data.message === 'string' ? error.response.data.message : undefined;
+      return Promise.reject(new ApiFeatureUnavailableError(route, message));
+    }
     const request = error.config as RetriableRequestConfig | undefined;
     const authEndpoint = request?.url?.startsWith('/api/auth/') ?? false;
     if (error.response?.status === 401 && request && !authEndpoint && !request._onyxRetried) {

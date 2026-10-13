@@ -35,6 +35,14 @@ database_name = "onyx-free-db"
 database_id = "00000000-0000-0000-0000-0000000000d3"
 migrations_dir = "migrations"
 
+[[durable_objects.bindings]]
+name = "EVENTS_HUB"
+class_name = "EventHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["EventHub"]
+
 [vars]
 # Public, non-secret configuration. Keep in sync with the deploy workflow's
 # materialized [vars].
