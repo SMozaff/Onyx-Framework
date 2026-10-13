@@ -10,6 +10,7 @@ export type UiErrorCode =
   | 'VALIDATION_FAILED'
   | 'RESOURCE_NOT_FOUND'
   | 'SERVICE_UNAVAILABLE'
+  | 'FEATURE_UNAVAILABLE'
   | 'UNEXPECTED';
 
 export interface ToastDetail {
@@ -67,6 +68,20 @@ export function normalizeError(error: unknown): UserFacingError {
     };
   }
 
+  if (status === 501 && error.response?.data?.error === 'ROUTE_NOT_MIGRATED') {
+    const route = typeof error.response.data.route === 'string' ? error.response.data.route : 'requested route';
+    return {
+      code: 'FEATURE_UNAVAILABLE',
+      title: 'Feature not available on this server',
+      message: typeof error.response.data.message === 'string'
+        ? error.response.data.message
+        : `The feature for ${route} is not available on this server yet.`,
+      retryable: false,
+      action: 'none',
+      diagnosticId,
+      commandError,
+    };
+  }
   const base = statusErrors[status ?? 500] ?? unexpectedError();
   const safeMessage = commandError?.safe_details?.message;
   return {
