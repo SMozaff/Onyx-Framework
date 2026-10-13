@@ -1088,13 +1088,15 @@ describe("B1 client-call route contracts", () => {
       body: JSON.stringify({ owner: "staff-1", origin: "staff_authored", items: [] }),
     }), makeEnv(db));
     expect(response.status).toBe(501);
-    expect(await response.json()).toMatchObject({
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toMatchObject({
       error: "ROUTE_NOT_MIGRATED",
       route: "/api/todo/lists",
       method: "POST",
       category: "FEATURE_UNAVAILABLE",
       retryability: "NON_RETRYABLE",
     });
-    expect((await response.json().catch(() => ({})) as Record<string, unknown>).correlation_id).toBeUndefined();
+    expect(typeof body.correlation_id).toBe("string");
+    expect(String(body.correlation_id).length).toBeGreaterThan(0);
   });
 });
