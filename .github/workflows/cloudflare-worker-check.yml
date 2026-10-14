@@ -46,6 +46,22 @@ jobs:
           database_name = "onyx-free-db"
           database_id = "00000000-0000-0000-0000-000000000000"
           migrations_dir = "migrations"
+
+          [[durable_objects.bindings]]
+          name = "EVENTS_HUB"
+          class_name = "EventHub"
+
+          [[durable_objects.bindings]]
+          name = "RELAY_HUB"
+          class_name = "RelayHub"
+
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = ["EventHub"]
+
+          [[migrations]]
+          tag = "v2"
+          new_sqlite_classes = ["RelayHub"]
           EOF
           npx wrangler d1 migrations apply onyx-free-db --local --config wrangler.test.toml
           npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --json --command "SELECT name FROM d1_migrations" | jq -e 'type == "array" and (.[0].results | length) >= 5'
@@ -65,3 +81,34 @@ jobs:
           indexes="$(npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --json \
             --command "SELECT name FROM pragma_index_list('mobile_access_settings')")"
           printf '%s' "$indexes" | jq -e '[.[0].results[].name] | index("idx_mobile_access_settings_updated_at") != null'
+
+      - name: Verify real Worker RelayHub WebSocket connection
+        shell: bash
+        run: |
+          set -euo pipefail
+          ORG="11111111-2222-4333-8444-555555555555"
+          USER="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+          npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --command "INSERT INTO organizations (id,name,is_active,created_at,updated_at) VALUES ('$ORG','relay-integration-org',1,unixepoch(),unixepoch())"
+          npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --command "INSERT INTO users (id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES ('$USER','relay-test-staff','relay-test@example.test','$ORG','not-used-for-token-auth',0,1,'STAFF','STAFF',NULL,unixepoch(),unixepoch())"
+          printf 'ONYX_JWT_SECRET=relay-test-secret\n' > .dev.vars
+          npx wrangler dev --local --config wrangler.test.toml --port 8787 > /tmp/onyx-relay-worker.log 2>&1 &
+          worker_pid=$!
+          cleanup() {
+            kill "$worker_pid" 2>/dev/null || true
+            rm -f .dev.vars
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8787/health >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            cat /tmp/onyx-relay-worker.log
+            echo "::error::Local Worker did not start for the relay WebSocket integration test."
+            exit 1
+          fi
+          ONYX_JWT_SECRET=relay-test-secret node test/relay-websocket.integration.mjs
