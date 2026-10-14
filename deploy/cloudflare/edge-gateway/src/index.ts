@@ -894,8 +894,14 @@ async function commandRoute(request:Request,env:Env,session:Session){
     if(realOwnerId){
       const owner=await env.DB.prepare("SELECT parent_user_id FROM users WHERE id=? AND organization_id=? LIMIT 1")
         .bind(realOwnerId,session.organization_id).first<{parent_user_id:string|null}>();
-      const higherManager=owner&&typeof owner.parent_user_id==="string"&&owner.parent_user_id!=="__allfather__"?owner.parent_user_id:null;
-      if(higherManager)notificationRecipients.add(higherManager);
+      const higherManagerId=owner&&typeof owner.parent_user_id==="string"&&owner.parent_user_id!=="__allfather__"?owner.parent_user_id:null;
+      if(higherManagerId){
+        const higherManager=await env.DB.prepare(
+          "SELECT id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+        ).bind(higherManagerId,session.organization_id).first<Record<string,unknown>>();
+        if(higherManager&&Number(higherManager.is_active)===1&&isManagerUser(higherManager))
+          notificationRecipients.add(higherManagerId);
+      }
       notificationTitle="Staff loan request declined";
       notificationMessage=`A staff loan request was declined. Reason: ${String(payload.reason??"No reason provided")}. Staff member: ${String(loan.staff_user_id??"unknown")}; borrowing manager: ${String(loan.borrowing_manager_id??"unknown")}. Review the interaction for oversight.`;
     }
