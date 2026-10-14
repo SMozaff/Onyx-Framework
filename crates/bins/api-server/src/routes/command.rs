@@ -168,6 +168,44 @@ async fn require_team_leader_or_admin(
     }
 }
 
+async fn resolve_escalation_recipient(
+    state: &ApiState,
+    payload: &Value,
+    variant: &str,
+    actor: &ActorContext,
+    current_verifier_id: ObjectId,
+) -> Result<ObjectId, crate::CommandError> {
+    let requested = payload.get(variant).and_then(|v| v.get("escalated_to"))
+        .and_then(Value::as_str).filter(|value| !value.trim().is_empty());
+    let Some(requested) = requested else {
+        return crate::escalation_resolution::resolve_escalation_target(current_verifier_id, &state.user_store)
+            .await.map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+            .ok_or_else(|| crate::CommandError::Domain(
+                "nothing to escalate to -- the current verifier has no manager above them".to_string()
+            ));
+    };
+    let target_uuid = uuid::Uuid::parse_str(requested).map_err(|_| {
+        crate::CommandError::Domain("escalation recipient must be a valid user id".to_string())
+    })?;
+    let target = state.user_store.find_by_id(&target_uuid.to_string()).await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or_else(|| crate::CommandError::Domain("escalation recipient not found".to_string()))?;
+    let organization_id = uuid::Uuid::from_bytes(actor.organization_id.0).to_string();
+    let can_verify = matches!(target.class,
+        Some(security_application::UserClass::TopLevelManager)
+        | Some(security_application::UserClass::SeniorManager)
+        | Some(security_application::UserClass::TeamLeader));
+    if !target.is_active || target.organization_id != organization_id || !can_verify {
+        return Err(crate::CommandError::Domain(
+            "escalation recipient must be an active, authorized manager in the same organization".to_string()
+        ));
+    }
+    if target.user_id == uuid::Uuid::from_bytes(actor.user_id.0).to_string() {
+        return Err(crate::CommandError::Domain("cannot escalate a list to the current actor".to_string()));
+    }
+    Ok(ObjectId(*target_uuid.as_bytes()))
+}
+
 /// Resolves and constructs a full `TodoListCommand::EscalateTodoList`
 /// for `/api/command`'s dispatch. `escalated_to` cannot come from the
 /// client -- it's server-resolved (design doc §4.1, confirmed
@@ -196,6 +234,7 @@ async fn resolve_todo_list_escalation_command(
     state: &ApiState,
     target_id: ObjectId,
     payload: &Value,
+    actor: &ActorContext,
 ) -> Result<todo_domain::TodoListCommand, crate::CommandError> {
     let loaded = state
         .todo_list_repo
@@ -204,17 +243,7 @@ async fn resolve_todo_list_escalation_command(
         .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
         .ok_or(crate::CommandError::NotFound(target_id))?;
     let current_verifier_id = current_verifier_for_escalation(state, &loaded.aggregate).await?;
-    let escalated_to = crate::escalation_resolution::resolve_escalation_target(
-        current_verifier_id,
-        &state.user_store,
-    )
-    .await
-    .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
-    .ok_or_else(|| {
-        crate::CommandError::Domain(
-            "nothing to escalate to -- the current verifier has no manager above them".to_string(),
-        )
-    })?;
+    let escalated_to = resolve_escalation_recipient(state, payload, "EscalateTodoList", actor, current_verifier_id).await?;
     let reason = payload
         .get("EscalateTodoList")
         .and_then(|v| v.get("reason"))
@@ -233,6 +262,7 @@ async fn resolve_target_list_escalation_command(
     state: &ApiState,
     target_id: ObjectId,
     payload: &Value,
+    actor: &ActorContext,
 ) -> Result<todo_domain::TargetListCommand, crate::CommandError> {
     let loaded = state
         .target_list_repo
@@ -241,17 +271,7 @@ async fn resolve_target_list_escalation_command(
         .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
         .ok_or(crate::CommandError::NotFound(target_id))?;
     let current_verifier_id = current_verifier_for_escalation(state, &loaded.aggregate).await?;
-    let escalated_to = crate::escalation_resolution::resolve_escalation_target(
-        current_verifier_id,
-        &state.user_store,
-    )
-    .await
-    .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
-    .ok_or_else(|| {
-        crate::CommandError::Domain(
-            "nothing to escalate to -- the current verifier has no manager above them".to_string(),
-        )
-    })?;
+    let escalated_to = resolve_escalation_recipient(state, payload, "EscalateTargetList", actor, current_verifier_id).await?;
     let reason = payload
         .get("EscalateTargetList")
         .and_then(|v| v.get("reason"))
@@ -970,7 +990,7 @@ pub async fn command_route(
                 let command: todo_domain::TodoListCommand = if envelope.command_type
                     == "todo_list.EscalateTodoList"
                 {
-                    resolve_todo_list_escalation_command(&state, target_id, &envelope.payload)
+                    resolve_todo_list_escalation_command(&state, target_id, &envelope.payload, &actor)
                         .await?
                 } else {
                     serde_json::from_value(envelope.payload.clone())
@@ -1009,7 +1029,7 @@ pub async fn command_route(
                 let command: todo_domain::TargetListCommand = if envelope.command_type
                     == "target_list.EscalateTargetList"
                 {
-                    resolve_target_list_escalation_command(&state, target_id, &envelope.payload)
+                    resolve_target_list_escalation_command(&state, target_id, &envelope.payload, &actor)
                         .await?
                 } else {
                     serde_json::from_value(envelope.payload.clone())
