@@ -110,3 +110,56 @@ describe("explicit command payload and lifecycle semantics", () => {
       .toEqual({ allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" });
   });
 });
+
+
+describe("policy evaluation and violation semantics", () => {
+  const publishedPolicy = {
+    status: "Active",
+    versions: [{
+      version_number: 3,
+      status: "Published",
+      rules: [{ key: "task.result.required", value: true }],
+    }],
+  };
+
+  it("evaluates a known key against the latest published policy version", () => {
+    expect(validateCommandSemantics("EvaluatePolicy", publishedPolicy, { rule_key: "task.result.required" }))
+      .toEqual({
+        allowed: true,
+        nextStatus: "Active",
+        commandResult: { rule_key: "task.result.required", result: true, evaluated_version: 3 },
+      });
+  });
+
+  it("returns no result for an unknown key without treating it as an error", () => {
+    expect(validateCommandSemantics("EvaluatePolicy", publishedPolicy, { rule_key: "unknown.rule" }))
+      .toEqual({
+        allowed: true,
+        nextStatus: "Active",
+        commandResult: { rule_key: "unknown.rule", result: null, evaluated_version: 3 },
+      });
+  });
+
+  it("requires a published version for evaluation and violation recording", () => {
+    const draftOnly = { status: "Active", versions: [{ version_number: 1, status: "Draft", rules: [] }] };
+    expect(validateCommandSemantics("EvaluatePolicy", draftOnly, { rule_key: "task.result.required" }))
+      .toEqual({ allowed: false, reason: "NO_PUBLISHED_VERSION" });
+    expect(validateCommandSemantics("RegisterViolation", draftOnly, { rule_key: "unknown.rule", reason: "Missing result" }))
+      .toEqual({ allowed: false, reason: "NO_PUBLISHED_VERSION" });
+  });
+
+  it("records a violation even when its rule key is not in the published rule list", () => {
+    expect(validateCommandSemantics("RegisterViolation", publishedPolicy, {
+      rule_key: "legacy.rule", reason: "Required result was not delivered",
+    })).toEqual({
+      allowed: true,
+      nextStatus: "Active",
+      commandResult: {
+        recorded: true,
+        rule_key: "legacy.rule",
+        reason: "Required result was not delivered",
+        policy_version: 3,
+      },
+    });
+  });
+});
