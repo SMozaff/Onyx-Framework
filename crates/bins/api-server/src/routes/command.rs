@@ -1108,6 +1108,14 @@ pub async fn command_route(
         }
     };
 
+    if !was_duplicate && matches!(envelope.command_type.as_str(),
+        "staff_loan.DeclineStaffLoan" | "staff_loan.EndStaffLoanEarly") {
+        if let Err(error) = notify_staff_loan_lifecycle(
+            &state, &actor, target_id, &envelope.command_type, &envelope.payload,
+        ).await {
+            tracing::error!(command_type = %envelope.command_type, error, "staff-loan notification failed");
+        }
+    }
     let public_result = publicize_command_result(&result)?;
     append_command_audit(&state, &envelope, &actor, "accepted", json!({
         "duplicate": was_duplicate,
@@ -1122,6 +1130,108 @@ pub async fn command_route(
     }
 
     Ok(Json(public_result))
+}
+
+async fn notify_staff_loan_lifecycle(
+    state: &ApiState,
+    actor: &ActorContext,
+    target_id: ObjectId,
+    command_type: &str,
+    payload: &Value,
+) -> Result<(), String> {
+    let loaded = state.staff_loan_repo.load(&target_id).await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "staff loan not found after command".to_string())?;
+    let aggregate = loaded.aggregate;
+    let real_owner_id = parse_real_owner_id_field(&aggregate).map_err(|e| format!("{e:?}"))?;
+    let real_owner_uuid = uuid::Uuid::from_bytes(real_owner_id.0);
+    let owner = state.user_store.find_by_id(&real_owner_uuid.to_string()).await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "staff loan real owner not found".to_string())?;
+    let organization_id = uuid::Uuid::from_bytes(actor.organization_id.0).to_string();
+    let source_id = uuid::Uuid::from_bytes(target_id.0).to_string();
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let mut recipients = std::collections::BTreeSet::<String>::new();
+    let (title, message) = if command_type == "staff_loan.DeclineStaffLoan" {
+        if let Some(parent_id) = owner.parent_user_id.as_deref() {
+            if let Some(parent) = state.user_store.find_by_id(parent_id).await.map_err(|e| e.to_string())? {
+                if parent.is_active && parent.organization_id == organization_id &&
+                    matches!(parent.class,
+                        Some(security_application::UserClass::TopLevelManager)
+                        | Some(security_application::UserClass::SeniorManager)
+                        | Some(security_application::UserClass::TeamLeader)) {
+                    recipients.insert(parent.user_id);
+                }
+            }
+        }
+        let reason = payload.get("DeclineStaffLoan").and_then(|v| v.get("reason"))
+            .and_then(Value::as_str).unwrap_or("No reason provided");
+        ("Staff loan request declined", format!(
+            "A staff loan request was declined. Reason: {reason}. Loan: {source_id}. The interaction is available for oversight."
+        ))
+    } else {
+        for field in ["staff_user_id", "real_owner_id", "borrowing_manager_id"] {
+            if let Ok(id) = parse_object_id_field(&aggregate, field) {
+                recipients.insert(uuid::Uuid::from_bytes(id.0).to_string());
+            }
+        }
+        ("Staff loan returned early", format!(
+            "The staff loan {source_id} ended early. The staff member is returned to the owning team; review the assignment and notify relevant people."
+        ))
+    };
+    for recipient_id in recipients {
+        let notification_id = uuid::Uuid::new_v4();
+        let state_json = json!({
+            "public_id": notification_id.to_string(),
+            "title": title,
+            "message": message,
+            "priority": "high",
+            "status": "unacknowledged",
+            "recipient_id": recipient_id,
+            "source_id": source_id,
+            "source_type": "staff_loan",
+            "created_at": now,
+            "acknowledged_at": Value::Null,
+            "version": 1,
+            "lifecycle_epoch": 0,
+            "authority_epoch": 0
+        });
+        match &state.projection_pool {
+            crate::query_handler::ProjectionPool::Postgres(pool) => {
+                sqlx::query("INSERT INTO aggregates (id, aggregate_type, organization_id, version, lifecycle_epoch, authority_epoch, state, updated_at) VALUES ($1, 'notification', $2, 1, 0, 0, $3::jsonb, NOW())")
+                    .bind(notification_id).bind(&organization_id).bind(state_json.to_string())
+                    .execute(pool).await.map_err(|e| e.to_string())?;
+            }
+            crate::query_handler::ProjectionPool::Sqlite(pool) => {
+                sqlx::query("INSERT INTO aggregates (id, aggregate_type, organization_id, version, lifecycle_epoch, authority_epoch, state, updated_at) VALUES (?1, 'notification', ?2, 1, 0, 0, ?3, ?4)")
+                    .bind(notification_id.to_string()).bind(&organization_id).bind(state_json.to_string()).bind(chrono::Utc::now().timestamp_millis())
+                    .execute(pool).await.map_err(|e| e.to_string())?;
+            }
+        }
+        let _ = state.events.send(json!({
+            "event_type": "notification.Created",
+            "aggregate_id": notification_id.to_string(),
+            "aggregate_type": "notification",
+            "organization_id": organization_id,
+            "payload": state_json
+        }));
+    }
+    Ok(())
+}
+
+fn parse_object_id_field(aggregate: &Value, field: &str) -> Result<ObjectId, crate::CommandError> {
+    let bytes = aggregate.get(field).and_then(Value::as_array).ok_or_else(|| {
+        crate::CommandError::Domain(format!("aggregate state missing '{field}' field"))
+    })?;
+    if bytes.len() != 16 {
+        return Err(crate::CommandError::Domain(format!("'{field}' field is not a 16-byte object id")));
+    }
+    let mut id = [0u8; 16];
+    for (index, byte) in bytes.iter().enumerate() {
+        id[index] = byte.as_u64().and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| crate::CommandError::Domain(format!("invalid '{field}' byte")))?;
+    }
+    Ok(ObjectId(id))
 }
 
 async fn append_command_audit(
