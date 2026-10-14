@@ -615,7 +615,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const semantic=validateCommandSemantics(envelope.command_type,previousState,commandPayload,session.sub);
   if(!semantic.allowed){
     const status=semantic.reason==="INVALID_COMMAND_PAYLOAD"?400:
-      semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"?409:403;
+      semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"||semantic.reason==="NO_PUBLISHED_VERSION"?409:403;
     return json({error:semantic.reason,category:status===403?"AUTHORITY":"DOMAIN",retryability:"NON_RETRYABLE"},status);
   }
   if(policy.ownerRequiredOnCreate&&policy.effect==="create"&&payloadOwnerIds(payload).length===0)
@@ -725,7 +725,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold"];
   const nextAuthority=existing&&authorityChangingActions.includes(envelope.command_type)?expectedAuthority+1:expectedAuthority;
   const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:commandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
-  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[event],result:{id:targetId,type:targetType,state:merged}};
+  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[event],result:{id:targetId,type:targetType,state:merged,...(semantic.commandResult?{command_result:semantic.commandResult}:{})}};
   // D1 batch is atomic. Conditional event/audit/idempotency inserts mean a
   // failed optimistic insert/update cannot leave partial side effects.
   const aggregateStatement=policy.effect==="create"
