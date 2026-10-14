@@ -877,7 +877,43 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const eventStatement=env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE changes()=1").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(eventPayload),Date.now(),"{}",envelope.operation_id,String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id);
   const idemStatement=env.DB.prepare("INSERT INTO idempotency(operation_id,result,created_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(envelope.operation_id,JSON.stringify(result),Date.now(),event.event_id,session.organization_id);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(session.organization_id,session.sub,envelope.command_type,String(envelope.correlation_id??envelope.operation_id),JSON.stringify({target:targetId}),Date.now(),event.event_id,session.organization_id);
-  const batch=await env.DB.batch([aggregateStatement,eventStatement,idemStatement,auditStatement]);
+  const notificationStatements:D1PreparedStatement[]=[];
+  const notificationRecipients=new Set<string>();
+  let notificationTitle:string|null=null;
+  let notificationMessage:string|null=null;
+  if(envelope.command_type==="staff_loan.EndStaffLoanEarly"&&previousState&&typeof previousState==="object"&&!Array.isArray(previousState)){
+    const loan=previousState as Json;
+    for(const id of [canonicalUserId(loan.real_owner_id),canonicalUserId(loan.staff_user_id),canonicalUserId(loan.borrowing_manager_id)])
+      if(id&&id!=="__allfather__")notificationRecipients.add(id);
+    notificationTitle="Staff loan returned early";
+    notificationMessage="The staff loan ended early. The staff member is returned to the owning team; review the assignment and notify any relevant people.";
+  }
+  if(envelope.command_type==="staff_loan.DeclineStaffLoan"&&previousState&&typeof previousState==="object"&&!Array.isArray(previousState)){
+    const loan=previousState as Json;
+    const realOwnerId=canonicalUserId(loan.real_owner_id);
+    if(realOwnerId){
+      const owner=await env.DB.prepare("SELECT parent_user_id FROM users WHERE id=? AND organization_id=? LIMIT 1")
+        .bind(realOwnerId,session.organization_id).first<{parent_user_id:string|null}>();
+      const higherManager=owner&&typeof owner.parent_user_id==="string"&&owner.parent_user_id!=="__allfather__"?owner.parent_user_id:null;
+      if(higherManager)notificationRecipients.add(higherManager);
+      notificationTitle="Staff loan request declined";
+      notificationMessage=`A staff loan request was declined. Reason: ${String(payload.reason??"No reason provided")}. Staff member: ${String(loan.staff_user_id??"unknown")}; borrowing manager: ${String(loan.borrowing_manager_id??"unknown")}. Review the interaction for oversight.`;
+    }
+  }
+  if(notificationTitle&&notificationMessage){
+    for(const recipientId of notificationRecipients){
+      const notificationId=uuid();
+      const notificationState={
+        public_id:notificationId,title:notificationTitle,message:notificationMessage,priority:"high",
+        status:"unacknowledged",recipient_id:recipientId,source_id:targetId,source_type:"staff_loan",
+        created_at:new Date().toISOString(),acknowledged_at:null,version:1,lifecycle_epoch:0,authority_epoch:0,
+      };
+      notificationStatements.push(env.DB.prepare(
+        "INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) SELECT ?, 'notification', 1,0,0,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)"
+      ).bind(notificationId,JSON.stringify(notificationState),Date.now(),session.organization_id,event.event_id,session.organization_id));
+    }
+  }
+  const batch=await env.DB.batch([aggregateStatement,eventStatement,idemStatement,auditStatement,...notificationStatements]);
   if(Number(batch[0]?.meta?.changes??0)!==1)
     return json({success:false,operation_id:envelope.operation_id,events:[],error:{code:"VERSION_CONFLICT",category:"CONCURRENCY",retryability:"RETRYABLE",safe_details:{expected},correlation_id:String(envelope.correlation_id??envelope.operation_id)}},409);
   return json(result);
