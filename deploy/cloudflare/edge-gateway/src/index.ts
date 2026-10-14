@@ -595,6 +595,56 @@ async function resolveListEscalationTarget(
   return {target:String(target.id)};
 }
 
+async function isAuthorizedListManager(env:Env,session:Session,state:unknown):Promise<boolean>{
+  if(!state||typeof state!=="object"||Array.isArray(state))return false;
+  const value=state as Record<string,unknown>;
+  const ownerId=canonicalUserId(value.owner??value.owner_id??value.owner_user_id);
+  if(!ownerId)return false;
+  const actor=await env.DB.prepare(
+    "SELECT id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(session.sub,session.organization_id).first<Record<string,unknown>>();
+  if(!actor||Number(actor.is_active)!==1||!isManagerUser(actor))return false;
+  const startId=value.status==="Escalated"?canonicalUserId(value.escalated_to):null;
+  const owner=await env.DB.prepare(
+    "SELECT id,parent_user_id FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(ownerId,session.organization_id).first<Record<string,unknown>>();
+  if(!owner)return false;
+  let nextId=startId??(typeof owner.parent_user_id==="string"?owner.parent_user_id:null);
+  const visited=new Set<string>();
+  for(let depth=0;nextId&&nextId!=="__allfather__"&&depth<32;depth++){
+    if(visited.has(nextId))return false;
+    visited.add(nextId);
+    if(nextId===session.sub)return true;
+    const manager=await env.DB.prepare(
+      "SELECT id,parent_user_id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+    ).bind(nextId,session.organization_id).first<Record<string,unknown>>();
+    if(!manager||Number(manager.is_active)!==1||!isManagerUser(manager))return false;
+    nextId=typeof manager.parent_user_id==="string"?manager.parent_user_id:null;
+  }
+  // An active staff-loan temporarily authorizes both managers to verify
+  // the borrowed staff member's lists, in addition to the reporting line.
+  const loans=await env.DB.prepare(
+    "SELECT state FROM aggregates WHERE organization_id=? AND aggregate_type='staff_loan'"
+  ).bind(session.organization_id).all<{state:string}>();
+  for(const row of loans.results??[]){
+    const loan=safeJson(row.state);
+    if(!loan||typeof loan!=="object"||Array.isArray(loan))continue;
+    const item=loan as Record<string,unknown>;
+    if(canonicalUserId(item.staff_user_id)!==ownerId||!["Active","Extended"].includes(String(item.status)))continue;
+    if(canonicalUserId(item.real_owner_id)===session.sub||canonicalUserId(item.borrowing_manager_id)===session.sub)return true;
+  }
+  return false;
+}
+async function requireTeamLeaderOrAdmin(env:Env,session:Session):Promise<boolean>{
+  if(session.role==="ORGANIZATION_ADMIN")return true;
+  const actor=await env.DB.prepare(
+    "SELECT role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(session.sub,session.organization_id).first<Record<string,unknown>>();
+  return Boolean(actor&&Number(actor.is_active)===1&&
+    (String(actor.role).toUpperCase()==="ORGANIZATION_ADMIN"||
+     String(actor.class??"").toLowerCase().replace(/[ -]/g,"_")==="team_leader"));
+}
+
 async function commandRoute(request:Request,env:Env,session:Session){
   const envelope=await request.json().catch(()=>null) as Json|null;
   if(!envelope||typeof envelope.command_id!=="string"||!envelope.command_id||envelope.command_id.length>128||
@@ -669,6 +719,13 @@ async function commandRoute(request:Request,env:Env,session:Session){
     if("error" in escalation)return json({error:escalation.error,category:escalation.status===403?"AUTHORITY":"DOMAIN",retryability:"NON_RETRYABLE"},escalation.status);
     effectiveCommandPayload={...payload,escalated_to:escalation.target};
   }
+  const listVerificationCommands=["todo_list.VerifyTodoList","todo_list.RejectTodoList","target_list.VerifyTargetList","target_list.RejectTargetList"];
+  if(listVerificationCommands.includes(envelope.command_type)&&
+     !await isAuthorizedListManager(env,session,previousState))
+    return json({error:"NOT_AUTHORIZED_VERIFIER",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  if((envelope.command_type==="todo_list.RecordTeamLeaderPreCheck"||envelope.command_type==="target_list.RecordTeamLeaderPreCheck")&&
+     !await requireTeamLeaderOrAdmin(env,session))
+    return json({error:"TEAM_LEADER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const semantic=validateCommandSemantics(envelope.command_type,previousState,effectiveCommandPayload,session.sub);
   if(!semantic.allowed){
     const status=semantic.reason==="INVALID_COMMAND_PAYLOAD"?400:
