@@ -1,0 +1,1 @@
+Temporary trigger for the Rust formatting and dependency remediation workflow. Remove this file after generated fixes are committed.
