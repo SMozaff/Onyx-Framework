@@ -861,8 +861,9 @@ async function commandRoute(request:Request,env:Env,session:Session){
   };
   const nextVersion=(existing?.version??0)+1;
   const currentStatus=previous&&typeof previous==="object"&&!Array.isArray(previous)?(previous as Json).status:null;
-  const nextLifecycle=existing&&semantic.nextStatus!==currentStatus?expectedLifecycle+1:expectedLifecycle;
-  const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold","staff_loan.ApproveStaffLoan","staff_loan.EndStaffLoanEarly"];
+  const lifecycleNeutralTransitions=["todo_list.EscalateTodoList","target_list.EscalateTargetList","staff_loan.ApproveStaffLoan"];
+  const nextLifecycle=existing&&semantic.nextStatus!==currentStatus&&!lifecycleNeutralTransitions.includes(envelope.command_type)?expectedLifecycle+1:expectedLifecycle;
+  const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold","todo_list.VerifyTodoList","target_list.VerifyTargetList","todo_list.EscalateTodoList","target_list.EscalateTargetList","staff_loan.ApproveStaffLoan","staff_loan.EndStaffLoanEarly"];
   const nextAuthority=existing&&authorityChangingActions.includes(envelope.command_type)?expectedAuthority+1:expectedAuthority;
   const eventPayload:Json=envelope.command_type==="EvaluatePolicy"&&semantic.commandResult
     ?{...effectiveCommandPayload,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
