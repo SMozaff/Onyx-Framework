@@ -113,8 +113,9 @@ pub enum TargetListCommand {
     },
     /// Submit the target for verification. Transitions `Draft` →
     /// `Submitted`. May be submitted before `time_window.end_at` is
-    /// reached; `VerifyTargetList` itself is what enforces the window
-    /// has actually closed (see `error::TargetError::WindowNotClosed`).
+    /// reached. An authorized manager may verify early when the
+    /// available evidence is sufficient; the fixed window remains
+    /// recorded for context but does not block that judgment.
     SubmitTargetList,
     /// Record an optional, non-gating Team Leader pre-check. Same
     /// semantics as `TodoListCommand::RecordTeamLeaderPreCheck`.
@@ -126,8 +127,8 @@ pub enum TargetListCommand {
     /// 2026-08-16: judged at verification time by the parent Manager —
     /// "Number two, I believe, is more reasonable" — not tracked live
     /// while the window is open. `outcome: Flawless` means the target
-    /// was hit; `WithDeficiencies` means it was missed. Only valid at
-    /// or after `time_window.end_at`.
+    /// was hit; `WithDeficiencies` means it was missed. May be used before or after `time_window.end_at` when the
+    /// authorized manager judges the available evidence sufficient.
     VerifyTargetList {
         /// Hit (`Flawless`) or missed (`WithDeficiencies`).
         outcome: VerificationOutcome,
@@ -180,28 +181,25 @@ pub enum StaffLoanCommand {
         /// resolved 2026-08-16: "they must be fixed at duration time").
         window: LoanWindow,
     },
-    /// The real owner approves a `Requested` loan. Transitions
-    /// `Requested` → `Active`. Only the real owner may invoke this —
-    /// enforced by the composing application's authority check
-    /// (`decide()` here only checks the generic authority stub, per
-    /// this crate's established precedent — see `aggregate.rs`'s
-    /// header comment).
+    /// The real owner approves a `Requested` loan, or approves a
+    /// pending extension requested by the borrowing manager. An initial
+    /// approval transitions `Requested` → `Active`; an extension
+    /// approval applies the pending end date and transitions to
+    /// `Extended`. The composing application enforces owner authority.
     ApproveStaffLoan,
-    /// The real owner declines a `Requested` loan. Transitions
-    /// `Requested` → `Declined`. Terminal.
+    /// The real owner declines a `Requested` loan, or declines a
+    /// pending extension. Initial decline is terminal; extension decline
+    /// leaves the current active loan and its existing end date intact.
     DeclineStaffLoan {
         /// Why.
         reason: String,
     },
-    /// Extend an `Active` (or already `Extended`) loan past its current
-    /// `end_at`. Design doc §2.1, resolved 2026-08-16: requires the
-    /// **staff member's own approval**, not either manager's — this
-    /// command itself represents that approval having been given (the
-    /// composing application is responsible for confirming the actor
-    /// invoking this is the staff member in question, same authority
-    /// precedent as `ApproveStaffLoan` above).
+    /// Request an extension to an `Active` or `Extended` loan. The
+    /// borrowing manager requests a later end time; the loan remains
+    /// active while the real owning manager decides using
+    /// `ApproveStaffLoan` or `DeclineStaffLoan`.
     ExtendStaffLoan {
-        /// The new, later end date-time.
+        /// The requested later end date-time.
         new_end_at: platform_kernel::Timestamp,
     },
     /// End an `Active` (or `Extended`) loan before its scheduled

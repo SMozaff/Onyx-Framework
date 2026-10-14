@@ -12,7 +12,7 @@
 //! kept as two distinct Rust types rather than one generic
 //! `List<Kind>` — a `TodoList` carries discrete `TodoItem`s with no
 //! time window; a `TargetList` carries a `TimeWindow` with no items at
-//! all, and additionally enforces `WindowNotClosed` before verification
+//! all, and supports manager-judged verification at any point in the target window
 //! (§4.0.2). The overlap is real but the content differs enough that a
 //! shared generic would need `Option`-typed fields on both sides to
 //! paper over the difference — two thin types with a shared
@@ -548,19 +548,12 @@ impl AggregateRoot for TargetList {
             TargetListCommand::VerifyTargetList { outcome, comment } => match self.status {
                 ListStatus::Submitted
                 | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => {
-                    // Design doc §4.0.2, resolved 2026-08-16: hit/miss
-                    // is judged only once the window has closed.
-                    if context.trusted_now < self.time_window.end_at {
-                        return Err(TargetError::WindowNotClosed);
-                    }
-                    Ok(vec![TargetListEvent::TargetListVerified {
-                        outcome,
-                        comment,
-                        verified_by: context.actor.user_id,
-                        verified_at: context.trusted_now,
-                    }])
-                }
+                | ListStatus::Escalated => Ok(vec![TargetListEvent::TargetListVerified {
+                    outcome,
+                    comment,
+                    verified_by: context.actor.user_id,
+                    verified_at: context.trusted_now,
+                }])
                 _ => Err(self.invalid("VerifyTargetList")),
             },
 
@@ -654,6 +647,8 @@ pub struct StaffLoan {
     real_owner_id: UserId,
     borrowing_manager_id: UserId,
     window: LoanWindow,
+    /// A borrowing-manager extension request awaiting the owning manager's decision.
+    pending_extension_end_at: Option<platform_kernel::Timestamp>,
     /// Who this loan's approval decision has been escalated to, if
     /// any. `None` unless `EscalateStaffLoan` has been applied. See
     /// `command::StaffLoanCommand::EscalateStaffLoan`'s doc comment.
@@ -731,6 +726,7 @@ impl StaffLoan {
             real_owner_id: *real_owner_id,
             borrowing_manager_id: *borrowing_manager_id,
             window: *window,
+            pending_extension_end_at: None,
             escalated_to: None,
         }
     }
@@ -790,12 +786,14 @@ impl StaffLoan {
     /// authority for this specific item" rule from the Todo/Target side
     /// of Phase E, applied here to the loan's own approval decision.
     pub fn grants_approval_authority_to(&self, manager_id: UserId) -> bool {
-        if self.status != StaffLoanStatus::Requested {
-            return false;
-        }
-        match self.escalated_to {
-            Some(target) => manager_id == target,
-            None => manager_id == self.real_owner_id,
+        match self.status {
+            StaffLoanStatus::Requested => match self.escalated_to {
+                Some(target) => manager_id == target,
+                None => manager_id == self.real_owner_id,
+            },
+            StaffLoanStatus::Active | StaffLoanStatus::Extended
+                if self.pending_extension_end_at.is_some() => manager_id == self.real_owner_id,
+            _ => false,
         }
     }
 
@@ -851,6 +849,16 @@ impl AggregateRoot for StaffLoan {
                     approved_by: context.actor.user_id,
                     approved_at: context.trusted_now,
                 }]),
+                StaffLoanStatus::Active | StaffLoanStatus::Extended => {
+                    let Some(new_end_at) = self.pending_extension_end_at else {
+                        return Err(self.invalid("ApproveStaffLoan"));
+                    };
+                    Ok(vec![StaffLoanEvent::StaffLoanExtensionApproved {
+                        new_end_at,
+                        approved_by: context.actor.user_id,
+                        approved_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("ApproveStaffLoan")),
             },
 
@@ -860,21 +868,27 @@ impl AggregateRoot for StaffLoan {
                     declined_by: context.actor.user_id,
                     declined_at: context.trusted_now,
                 }]),
+                StaffLoanStatus::Active | StaffLoanStatus::Extended if self.pending_extension_end_at.is_some() => {
+                    Ok(vec![StaffLoanEvent::StaffLoanExtensionDeclined {
+                        reason,
+                        declined_by: context.actor.user_id,
+                        declined_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("DeclineStaffLoan")),
             },
 
-            // Design doc §2.1, resolved 2026-08-16: represents the
-            // staff member's own approval, not either manager's —
-            // enforced by the composing application.
+            // The borrowing manager requests the extension. The real
+            // owning manager must approve or decline it separately.
             StaffLoanCommand::ExtendStaffLoan { new_end_at } => match self.status {
                 StaffLoanStatus::Active | StaffLoanStatus::Extended => {
-                    if new_end_at <= self.window.end_at {
+                    if self.pending_extension_end_at.is_some() || new_end_at <= self.window.end_at {
                         return Err(StaffLoanError::InvalidLoanWindow);
                     }
-                    Ok(vec![StaffLoanEvent::StaffLoanExtended {
+                    Ok(vec![StaffLoanEvent::StaffLoanExtensionRequested {
                         new_end_at,
-                        approved_by_staff: context.actor.user_id,
-                        extended_at: context.trusted_now,
+                        requested_by: context.actor.user_id,
+                        requested_at: context.trusted_now,
                     }])
                 }
                 _ => Err(self.invalid("ExtendStaffLoan")),
@@ -945,8 +959,21 @@ impl AggregateRoot for StaffLoan {
                 self.status = StaffLoanStatus::Extended;
                 self.window.end_at = *new_end_at;
             }
+            StaffLoanEvent::StaffLoanExtensionRequested { new_end_at, .. } => {
+                self.pending_extension_end_at = Some(*new_end_at);
+            }
+            StaffLoanEvent::StaffLoanExtensionApproved { new_end_at, .. } => {
+                self.status = StaffLoanStatus::Extended;
+                self.window.end_at = *new_end_at;
+                self.pending_extension_end_at = None;
+                self.authority_epoch = self.authority_epoch.advance();
+            }
+            StaffLoanEvent::StaffLoanExtensionDeclined { .. } => {
+                self.pending_extension_end_at = None;
+            }
             StaffLoanEvent::StaffLoanEndedEarly { .. } => {
                 self.status = StaffLoanStatus::Ended;
+                self.pending_extension_end_at = None;
                 // Ends the borrowing manager's verification authority —
                 // authority-relevant.
                 self.authority_epoch = self.authority_epoch.advance();
@@ -1478,19 +1505,19 @@ mod tests {
     }
 
     #[test]
-    fn verify_target_before_window_closes_is_rejected() {
-        let list = submitted_target_list();
+    fn authorized_manager_may_verify_target_before_window_closes() {
+        let mut list = submitted_target_list();
         let window = list.time_window();
         let ctx = test_context_at(Timestamp(window.end_at.0 - 1));
-        let result = list.decide(
+        let events = list.decide(
             TargetListCommand::VerifyTargetList {
                 outcome: VerificationOutcome::Flawless,
-                comment: None,
+                comment: Some("Evidence is already sufficient".to_string()),
             },
             &ctx,
-        );
-        assert!(matches!(result, Err(TargetError::WindowNotClosed)));
-        assert_eq!(list.status(), ListStatus::Submitted);
+        ).expect("early verification is permitted when the authorized manager has sufficient evidence");
+        apply_all(&mut list, &events);
+        assert_eq!(list.status(), ListStatus::Verified);
     }
 
     #[test]
@@ -1653,22 +1680,48 @@ mod tests {
     }
 
     #[test]
-    fn extend_active_loan_succeeds() {
+    fn extension_request_requires_owner_approval() {
         let mut loan = active_staff_loan();
         let ctx = test_context();
         let original_end = loan.window().end_at;
         let new_end = Timestamp(original_end.0 + 86_400_000_000_000);
-        let events = loan
-            .decide(
-                StaffLoanCommand::ExtendStaffLoan {
-                    new_end_at: new_end,
-                },
-                &ctx,
-            )
-            .expect("extend must succeed");
-        apply_all(&mut loan, &events);
+        let request = loan.decide(
+            StaffLoanCommand::ExtendStaffLoan { new_end_at: new_end },
+            &ctx,
+        ).expect("borrowing manager extension request must succeed");
+        apply_all(&mut loan, &request);
+        assert_eq!(loan.status(), StaffLoanStatus::Active);
+        assert_eq!(loan.window().end_at, original_end);
+        assert!(loan.grants_approval_authority_to(loan.real_owner_id()));
+
+        let approval = loan.decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
+            .expect("real owner must be able to approve a pending extension");
+        apply_all(&mut loan, &approval);
         assert_eq!(loan.status(), StaffLoanStatus::Extended);
         assert_eq!(loan.window().end_at, new_end);
+        assert!(!loan.grants_approval_authority_to(loan.real_owner_id()));
+    }
+
+    #[test]
+    fn owner_can_decline_extension_without_ending_the_existing_loan() {
+        let mut loan = active_staff_loan();
+        let ctx = test_context();
+        let original_end = loan.window().end_at;
+        let request = loan.decide(
+            StaffLoanCommand::ExtendStaffLoan {
+                new_end_at: Timestamp(original_end.0 + 86_400_000_000_000),
+            },
+            &ctx,
+        ).expect("extension request must succeed");
+        apply_all(&mut loan, &request);
+        let decline = loan.decide(
+            StaffLoanCommand::DeclineStaffLoan { reason: "Coverage no longer needed".to_string() },
+            &ctx,
+        ).expect("owner can decline extension");
+        apply_all(&mut loan, &decline);
+        assert_eq!(loan.status(), StaffLoanStatus::Active);
+        assert_eq!(loan.window().end_at, original_end);
+        assert!(!loan.grants_approval_authority_to(loan.real_owner_id()));
     }
 
     #[test]
@@ -1725,15 +1778,15 @@ mod tests {
     fn end_extended_loan_early_also_succeeds() {
         let mut loan = active_staff_loan();
         let ctx = test_context();
-        let extend_events = loan
-            .decide(
-                StaffLoanCommand::ExtendStaffLoan {
-                    new_end_at: Timestamp(loan.window().end_at.0 + 86_400_000_000_000),
-                },
-                &ctx,
-            )
-            .expect("extend must succeed");
-        apply_all(&mut loan, &extend_events);
+        let requested_end = Timestamp(loan.window().end_at.0 + 86_400_000_000_000);
+        let request_events = loan.decide(
+            StaffLoanCommand::ExtendStaffLoan { new_end_at: requested_end },
+            &ctx,
+        ).expect("extension request must succeed");
+        apply_all(&mut loan, &request_events);
+        let approve_events = loan.decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
+            .expect("extension must be approved before it changes the window");
+        apply_all(&mut loan, &approve_events);
 
         let end_events = loan
             .decide(StaffLoanCommand::EndStaffLoanEarly, &ctx)

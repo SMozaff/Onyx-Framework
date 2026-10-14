@@ -548,6 +548,126 @@ async function queryRoute(request:Request,env:Env,session:Session){
   return json({query_id:envelope.query_id,data:page,has_more:hasMore,next_cursor:hasMore?String(nextOffset):null,total_count:totalCount,freshness:freshnessDto(allRows)});
 }
 
+function canonicalUserId(value:unknown):string|null{
+  if(typeof value==="string"&&value.trim())return value;
+  if(Array.isArray(value)&&value.length===16&&value.every(v=>Number.isInteger(v)&&Number(v)>=0&&Number(v)<=255)){
+    const hex=value.map(v=>Number(v).toString(16).padStart(2,"0")).join("");
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
+  return null;
+}
+function isManagerUser(user:Record<string,unknown>):boolean{
+  const role=String(user.role??"").toUpperCase();
+  const cls=String(user.class??"").toLowerCase().replace(/[ -]/g,"_");
+  return role==="ORGANIZATION_ADMIN"||["top_level_manager","senior_manager","team_leader"].includes(cls);
+}
+async function resolveListEscalationTarget(
+  env:Env,session:Session,aggregateType:string,state:unknown,payload:Json
+):Promise<{target:string}|{error:string;status:number}>{
+  if(!state||typeof state!=="object"||Array.isArray(state))return {error:"RESOURCE_STATE_UNVERIFIED",status:409};
+  const value=state as Record<string,unknown>;
+  const ownerId=canonicalUserId(value.owner??value.owner_id??value.owner_user_id);
+  if(!ownerId)return {error:"RESOURCE_OWNER_UNVERIFIED",status:409};
+  const owner=await env.DB.prepare(
+    "SELECT id,parent_user_id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(ownerId,session.organization_id).first<Record<string,unknown>>();
+  if(!owner||Number(owner.is_active)!==1)return {error:"RESOURCE_OWNER_UNVERIFIED",status:409};
+  const priorTarget=value.status==="Escalated"?canonicalUserId(value.escalated_to):null;
+  const currentVerifierId=priorTarget??(typeof owner.parent_user_id==="string"?owner.parent_user_id:null);
+  if(!currentVerifierId||currentVerifierId==="__allfather__")return {error:"NO_ESCALATION_MANAGER",status:409};
+  if(session.sub!==currentVerifierId)return {error:"NOT_AUTHORIZED_VERIFIER",status:403};
+  const requested=payload.escalated_to;
+  let targetId:string|null=null;
+  if(typeof requested==="string"&&requested.trim()){
+    targetId=requested.trim();
+  }else{
+    const verifier=await env.DB.prepare(
+      "SELECT id,parent_user_id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+    ).bind(currentVerifierId,session.organization_id).first<Record<string,unknown>>();
+    if(!verifier||Number(verifier.is_active)!==1)return {error:"CURRENT_VERIFIER_UNVERIFIED",status:409};
+    targetId=typeof verifier.parent_user_id==="string"&&verifier.parent_user_id!=="__allfather__"?verifier.parent_user_id:null;
+  }
+  if(!targetId||targetId===currentVerifierId)return {error:"NO_ESCALATION_MANAGER",status:409};
+  const target=await env.DB.prepare(
+    "SELECT id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(targetId,session.organization_id).first<Record<string,unknown>>();
+  if(!target||Number(target.is_active)!==1||!isManagerUser(target))return {error:"INVALID_ESCALATION_TARGET",status:403};
+  return {target:String(target.id)};
+}
+
+async function isAuthorizedListManager(env:Env,session:Session,state:unknown):Promise<boolean>{
+  if(!state||typeof state!=="object"||Array.isArray(state))return false;
+  const value=state as Record<string,unknown>;
+  const ownerId=canonicalUserId(value.owner??value.owner_id??value.owner_user_id);
+  if(!ownerId)return false;
+  const actor=await env.DB.prepare(
+    "SELECT id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(session.sub,session.organization_id).first<Record<string,unknown>>();
+  if(!actor||Number(actor.is_active)!==1||!isManagerUser(actor))return false;
+  const startId=value.status==="Escalated"?canonicalUserId(value.escalated_to):null;
+  const owner=await env.DB.prepare(
+    "SELECT id,parent_user_id FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(ownerId,session.organization_id).first<Record<string,unknown>>();
+  if(!owner)return false;
+  let nextId=startId??(typeof owner.parent_user_id==="string"?owner.parent_user_id:null);
+  const visited=new Set<string>();
+  for(let depth=0;nextId&&nextId!=="__allfather__"&&depth<32;depth++){
+    if(visited.has(nextId))return false;
+    visited.add(nextId);
+    if(nextId===session.sub)return true;
+    const manager=await env.DB.prepare(
+      "SELECT id,parent_user_id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+    ).bind(nextId,session.organization_id).first<Record<string,unknown>>();
+    if(!manager||Number(manager.is_active)!==1||!isManagerUser(manager))return false;
+    nextId=typeof manager.parent_user_id==="string"?manager.parent_user_id:null;
+  }
+  // An active staff-loan temporarily authorizes both managers to verify
+  // the borrowed staff member's lists, in addition to the reporting line.
+  const loans=await env.DB.prepare(
+    "SELECT state FROM aggregates WHERE organization_id=? AND aggregate_type='staff_loan'"
+  ).bind(session.organization_id).all<{state:string}>();
+  for(const row of loans.results??[]){
+    const loan=safeJson(row.state);
+    if(!loan||typeof loan!=="object"||Array.isArray(loan))continue;
+    const item=loan as Record<string,unknown>;
+    if(canonicalUserId(item.staff_user_id)!==ownerId||!["Active","Extended"].includes(String(item.status)))continue;
+    if(canonicalUserId(item.real_owner_id)===session.sub||canonicalUserId(item.borrowing_manager_id)===session.sub)return true;
+  }
+  return false;
+}
+async function requireTeamLeaderOrAdmin(env:Env,session:Session):Promise<boolean>{
+  if(session.role==="ORGANIZATION_ADMIN")return true;
+  const actor=await env.DB.prepare(
+    "SELECT role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(session.sub,session.organization_id).first<Record<string,unknown>>();
+  return Boolean(actor&&Number(actor.is_active)===1&&
+    (String(actor.role).toUpperCase()==="ORGANIZATION_ADMIN"||
+     String(actor.class??"").toLowerCase().replace(/[ -]/g,"_")==="team_leader"));
+}
+
+function staffLoanActorAuthorized(session:Session,commandType:string,state:unknown):boolean{
+  if(!state||typeof state!=="object"||Array.isArray(state))return false;
+  const loan=state as Record<string,unknown>;
+  const actor=session.sub;
+  const realOwner=canonicalUserId(loan.real_owner_id);
+  const borrower=canonicalUserId(loan.borrowing_manager_id);
+  const escalated=canonicalUserId(loan.escalated_to);
+  const status=String(loan.status??"");
+  const extensionPending=loan.pending_extension_end_at!==undefined&&loan.pending_extension_end_at!==null;
+  switch(commandType){
+    case "staff_loan.ApproveStaffLoan":
+    case "staff_loan.DeclineStaffLoan":
+      if(extensionPending)return actor===realOwner;
+      if(status==="Requested")return actor===(escalated??realOwner);
+      return false;
+    case "staff_loan.ExtendStaffLoan":
+      return (status==="Active"||status==="Extended")&&!extensionPending&&actor===borrower;
+    case "staff_loan.EndStaffLoanEarly":
+      return (status==="Active"||status==="Extended")&&(actor===realOwner||actor===borrower);
+    default:return false;
+  }
+}
+
 async function commandRoute(request:Request,env:Env,session:Session){
   const envelope=await request.json().catch(()=>null) as Json|null;
   if(!envelope||typeof envelope.command_id!=="string"||!envelope.command_id||envelope.command_id.length>128||
@@ -589,7 +709,11 @@ async function commandRoute(request:Request,env:Env,session:Session){
       const actor=event.actor&&typeof event.actor==="object"?event.actor as Json:{};
       return event.organization_id===session.organization_id&&event.aggregate_id===targetId&&
         event.aggregate_type===targetType&&event.event_type===envelope.command_type&&
-        actor.user_id===session.sub&&JSON.stringify(event.payload)===JSON.stringify(commandPayload);
+        actor.user_id===session.sub&&(()=>{
+        const stored=event.payload&&typeof event.payload==="object"&&!Array.isArray(event.payload)?{...(event.payload as Json)}:{};
+        if((envelope.command_type==="todo_list.EscalateTodoList"||envelope.command_type==="target_list.EscalateTargetList")&&!Object.prototype.hasOwnProperty.call(commandPayload,"escalated_to"))delete stored.escalated_to;
+        return JSON.stringify(stored)===JSON.stringify(commandPayload);
+      })();
     });
     if(!sameActorReplay)return json({error:"IDEMPOTENCY_CONFLICT",category:"AUTHORITY",retryability:"NON_RETRYABLE"},409);
     return json(priorResult);
@@ -612,7 +736,23 @@ async function commandRoute(request:Request,env:Env,session:Session){
   if(existing&&(expected!==Number(existing.version)||expectedLifecycle!==Number(existing.lifecycle_epoch)||expectedAuthority!==Number(existing.authority_epoch)))
     return json({success:false,operation_id:envelope.operation_id,events:[],error:{code:"VERSION_CONFLICT",category:"CONCURRENCY",retryability:"RETRYABLE",safe_details:{expected,actual:existing.version},correlation_id:String(envelope.correlation_id??envelope.operation_id)}},409);
   const previousState=existing?safeJson(existing.state):null;
-  const semantic=validateCommandSemantics(envelope.command_type,previousState,commandPayload,session.sub);
+  let effectiveCommandPayload:Json=payload;
+  if(envelope.command_type==="todo_list.EscalateTodoList"||envelope.command_type==="target_list.EscalateTargetList"){
+    const escalation=await resolveListEscalationTarget(env,session,targetType,previousState,payload);
+    if("error" in escalation)return json({error:escalation.error,category:escalation.status===403?"AUTHORITY":"DOMAIN",retryability:"NON_RETRYABLE"},escalation.status);
+    effectiveCommandPayload={...payload,escalated_to:escalation.target};
+  }
+  if(envelope.command_type.startsWith("staff_loan.")&&
+     !staffLoanActorAuthorized(session,envelope.command_type,previousState))
+    return json({error:"NOT_AUTHORIZED_STAFF_LOAN_ACTOR",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const listVerificationCommands=["todo_list.VerifyTodoList","todo_list.RejectTodoList","target_list.VerifyTargetList","target_list.RejectTargetList"];
+  if(listVerificationCommands.includes(envelope.command_type)&&
+     !await isAuthorizedListManager(env,session,previousState))
+    return json({error:"NOT_AUTHORIZED_VERIFIER",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  if((envelope.command_type==="todo_list.RecordTeamLeaderPreCheck"||envelope.command_type==="target_list.RecordTeamLeaderPreCheck")&&
+     !await requireTeamLeaderOrAdmin(env,session))
+    return json({error:"TEAM_LEADER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const semantic=validateCommandSemantics(envelope.command_type,previousState,effectiveCommandPayload,session.sub);
   if(!semantic.allowed){
     const status=semantic.reason==="INVALID_COMMAND_PAYLOAD"?400:
       semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"||semantic.reason==="NO_PUBLISHED_VERSION"?409:403;
@@ -721,14 +861,15 @@ async function commandRoute(request:Request,env:Env,session:Session){
   };
   const nextVersion=(existing?.version??0)+1;
   const currentStatus=previous&&typeof previous==="object"&&!Array.isArray(previous)?(previous as Json).status:null;
-  const nextLifecycle=existing&&semantic.nextStatus!==currentStatus?expectedLifecycle+1:expectedLifecycle;
-  const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold"];
+  const lifecycleNeutralTransitions=["todo_list.EscalateTodoList","target_list.EscalateTargetList","staff_loan.ApproveStaffLoan"];
+  const nextLifecycle=existing&&semantic.nextStatus!==currentStatus&&!lifecycleNeutralTransitions.includes(envelope.command_type)?expectedLifecycle+1:expectedLifecycle;
+  const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold","todo_list.VerifyTodoList","target_list.VerifyTargetList","todo_list.EscalateTodoList","target_list.EscalateTargetList","staff_loan.ApproveStaffLoan","staff_loan.EndStaffLoanEarly"];
   const nextAuthority=existing&&authorityChangingActions.includes(envelope.command_type)?expectedAuthority+1:expectedAuthority;
   const eventPayload:Json=envelope.command_type==="EvaluatePolicy"&&semantic.commandResult
-    ?{...commandPayload,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
-    :commandPayload;
-  const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:commandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
-  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[event],result:{id:targetId,type:targetType,state:merged,...(semantic.commandResult?{command_result:semantic.commandResult}:{})}};
+    ?{...effectiveCommandPayload,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
+    :effectiveCommandPayload;
+  const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:effectiveCommandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
+  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[{...event,payload:eventPayload}],result:{id:targetId,type:targetType,state:merged,...(semantic.commandResult?{command_result:semantic.commandResult}:{})}};
   // D1 batch is atomic. Conditional event/audit/idempotency inserts mean a
   // failed optimistic insert/update cannot leave partial side effects.
   const aggregateStatement=policy.effect==="create"
@@ -737,7 +878,49 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const eventStatement=env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE changes()=1").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(eventPayload),Date.now(),"{}",envelope.operation_id,String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id);
   const idemStatement=env.DB.prepare("INSERT INTO idempotency(operation_id,result,created_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(envelope.operation_id,JSON.stringify(result),Date.now(),event.event_id,session.organization_id);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(session.organization_id,session.sub,envelope.command_type,String(envelope.correlation_id??envelope.operation_id),JSON.stringify({target:targetId}),Date.now(),event.event_id,session.organization_id);
-  const batch=await env.DB.batch([aggregateStatement,eventStatement,idemStatement,auditStatement]);
+  const notificationStatements:D1PreparedStatement[]=[];
+  const notificationRecipients=new Set<string>();
+  let notificationTitle:string|null=null;
+  let notificationMessage:string|null=null;
+  if(envelope.command_type==="staff_loan.EndStaffLoanEarly"&&previousState&&typeof previousState==="object"&&!Array.isArray(previousState)){
+    const loan=previousState as Json;
+    for(const id of [canonicalUserId(loan.real_owner_id),canonicalUserId(loan.staff_user_id),canonicalUserId(loan.borrowing_manager_id)])
+      if(id&&id!=="__allfather__")notificationRecipients.add(id);
+    notificationTitle="Staff loan returned early";
+    notificationMessage="The staff loan ended early. The staff member is returned to the owning team; review the assignment and notify any relevant people.";
+  }
+  if(envelope.command_type==="staff_loan.DeclineStaffLoan"&&previousState&&typeof previousState==="object"&&!Array.isArray(previousState)){
+    const loan=previousState as Json;
+    const realOwnerId=canonicalUserId(loan.real_owner_id);
+    if(realOwnerId){
+      const owner=await env.DB.prepare("SELECT parent_user_id FROM users WHERE id=? AND organization_id=? LIMIT 1")
+        .bind(realOwnerId,session.organization_id).first<{parent_user_id:string|null}>();
+      const higherManagerId=owner&&typeof owner.parent_user_id==="string"&&owner.parent_user_id!=="__allfather__"?owner.parent_user_id:null;
+      if(higherManagerId){
+        const higherManager=await env.DB.prepare(
+          "SELECT id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+        ).bind(higherManagerId,session.organization_id).first<Record<string,unknown>>();
+        if(higherManager&&Number(higherManager.is_active)===1&&isManagerUser(higherManager))
+          notificationRecipients.add(higherManagerId);
+      }
+      notificationTitle="Staff loan request declined";
+      notificationMessage=`A staff loan request was declined. Reason: ${String(payload.reason??"No reason provided")}. Staff member: ${canonicalUserId(loan.staff_user_id)??"unknown"}; borrowing manager: ${canonicalUserId(loan.borrowing_manager_id)??"unknown"}. Review the interaction for oversight.`;
+    }
+  }
+  if(notificationTitle&&notificationMessage){
+    for(const recipientId of notificationRecipients){
+      const notificationId=uuid();
+      const notificationState={
+        public_id:notificationId,title:notificationTitle,message:notificationMessage,priority:"high",
+        status:"unacknowledged",recipient_id:recipientId,source_id:targetId,source_type:"staff_loan",
+        created_at:new Date().toISOString(),acknowledged_at:null,version:1,lifecycle_epoch:0,authority_epoch:0,
+      };
+      notificationStatements.push(env.DB.prepare(
+        "INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) SELECT ?, 'notification', 1,0,0,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)"
+      ).bind(notificationId,JSON.stringify(notificationState),Date.now(),session.organization_id,event.event_id,session.organization_id));
+    }
+  }
+  const batch=await env.DB.batch([aggregateStatement,eventStatement,idemStatement,auditStatement,...notificationStatements]);
   if(Number(batch[0]?.meta?.changes??0)!==1)
     return json({success:false,operation_id:envelope.operation_id,events:[],error:{code:"VERSION_CONFLICT",category:"CONCURRENCY",retryability:"RETRYABLE",safe_details:{expected},correlation_id:String(envelope.correlation_id??envelope.operation_id)}},409);
   return json(result);

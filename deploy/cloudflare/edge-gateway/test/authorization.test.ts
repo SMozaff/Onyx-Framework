@@ -96,11 +96,37 @@ describe("explicit command payload and lifecycle semantics", () => {
       .toEqual({ allowed: false, reason: "INVALID_COMMAND_PAYLOAD" });
   });
 
-  it("fails closed where domain-specific authority/time preconditions are not yet provable", () => {
-    expect(validateCommandSemantics("staff_loan.ApproveStaffLoan", { status: "Requested" }, {}))
-      .toEqual({ allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" });
+  it("enables target verification and the core staff-loan lifecycle semantics", () => {
     expect(validateCommandSemantics("target_list.VerifyTargetList", { status: "Submitted" }, { outcome: "Flawless" }))
-      .toEqual({ allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" });
+      .toEqual({ allowed: true, nextStatus: "Verified", statePatch: { outcome: "Flawless", verification_comment: undefined } });
+    expect(validateCommandSemantics("staff_loan.ApproveStaffLoan", { status: "Requested" }, {}))
+      .toMatchObject({ allowed: true, nextStatus: "Active" });
+    expect(validateCommandSemantics("staff_loan.DeclineStaffLoan", { status: "Requested" }, { reason: "Not available" }))
+      .toMatchObject({ allowed: true, nextStatus: "Declined", statePatch: { decline_reason: "Not available" } });
+    expect(validateCommandSemantics("staff_loan.EndStaffLoanEarly", { status: "Extended" }, {}))
+      .toMatchObject({ allowed: true, nextStatus: "Ended" });
+  });
+
+  it("records a staff-loan extension request without applying it before owner approval", () => {
+    const end = 1_800_000_000_000_000_000;
+    const requested = end + 86_400_000_000_000;
+    expect(validateCommandSemantics("staff_loan.ExtendStaffLoan", {
+      status: "Active", window: { start_at: end - 1000, end_at: end }, pending_extension_end_at: null,
+    }, { new_end_at: requested })).toMatchObject({
+      allowed: true, nextStatus: "Active", statePatch: { pending_extension_end_at: requested },
+    });
+    expect(validateCommandSemantics("staff_loan.ApproveStaffLoan", {
+      status: "Active", window: { start_at: end - 1000, end_at: end }, pending_extension_end_at: requested,
+    }, {})).toMatchObject({
+      allowed: true, nextStatus: "Extended", statePatch: {
+        window: { start_at: end - 1000, end_at: requested }, pending_extension_end_at: null,
+      },
+    });
+    expect(validateCommandSemantics("staff_loan.DeclineStaffLoan", {
+      status: "Active", window: { start_at: end - 1000, end_at: end }, pending_extension_end_at: requested,
+    }, { reason: "Coverage no longer needed" })).toMatchObject({
+      allowed: true, nextStatus: "Active", statePatch: { pending_extension_end_at: null },
+    });
   });
 
   it("requires exact approved transition prerequisites", () => {

@@ -6,7 +6,7 @@
  * requiring domain-specific relationship checks that this gateway cannot yet
  * prove are deliberately disabled rather than approximated.
  */
-type PayloadKind = "string" | "boolean" | "array" | "object";
+type PayloadKind = "string" | "boolean" | "array" | "object" | "timestamp";
 interface PayloadField {
   kind: PayloadKind;
   required?: boolean;
@@ -22,7 +22,7 @@ type CommandSemantics = {
   stay?: readonly string[];
   disabled?: string;
   special?: "create-blueprint-revision" | "submit-blueprint" | "request-approval" | "reopen-task" | "task-add-dependency" | "todo-add-item" | "team-precheck" |
-    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope" | "policy-evaluate" | "policy-register-violation" | "todo-escalation";
+    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope" | "policy-evaluate" | "policy-register-violation" | "todo-escalation" | "staff-loan-approve" | "staff-loan-decline" | "staff-loan-extend" | "staff-loan-end-early";
   createPatch?: Record<string, unknown>;
 };
 export type SemanticDecision =
@@ -33,6 +33,7 @@ const string = (required = true): PayloadField => ({ kind: "string", required, n
 const bool = (required = true): PayloadField => ({ kind: "boolean", required });
 const array = (required = true, nonEmpty = false): PayloadField => ({ kind: "array", required, nonEmpty });
 const object = (required = true): PayloadField => ({ kind: "object", required });
+const timestamp = (): PayloadField => ({ kind: "timestamp", required: true });
 const noPayload: PayloadSchema = {};
 
 const TASK_NON_TERMINAL = ["Draft", "Ready", "Active", "Paused", "Blocked", "Reopened"] as const;
@@ -96,7 +97,7 @@ export const COMMAND_SEMANTICS: Readonly<Record<string, CommandSemantics>> = {
 
   "target_list.SubmitTargetList": { payload: noPayload, from: ["Draft"], to: "Submitted" },
   "target_list.RecordTeamLeaderPreCheck": { payload: { notes: string() }, from: ["Submitted"], to: "TeamLeaderPreChecked", special: "team-precheck" },
-  "target_list.VerifyTargetList": { payload: { outcome: { kind: "string", required: true, nonEmpty: true, oneOf: ["Flawless", "WithDeficiencies"] }, comment: string(false) }, disabled: "The Worker cannot yet prove the authoritative target-window end time and verifier relationship." },
+  "target_list.VerifyTargetList": { payload: { outcome: { kind: "string", required: true, nonEmpty: true, oneOf: ["Flawless", "WithDeficiencies"] }, comment: string(false) }, from: LIST_PENDING, to: "Verified" },
   "target_list.RejectTargetList": { payload: { reason: string() }, from: LIST_PENDING, to: "Rejected" },
   "target_list.EscalateTargetList": { payload: { reason: string(), escalated_to: string(false) }, stay: LIST_PENDING, special: "todo-escalation" },
 
@@ -104,10 +105,10 @@ export const COMMAND_SEMANTICS: Readonly<Record<string, CommandSemantics>> = {
   // requirements in the native domain model. The Worker cannot safely prove
   // those relationships from its present schema, so fail closed until parity
   // is implemented; never substitute the broad ORGANIZATION_ADMIN role.
-  "staff_loan.ApproveStaffLoan": { payload: noPayload, disabled: "The Worker cannot yet prove the canonical real-owner approval relationship." },
-  "staff_loan.DeclineStaffLoan": { payload: { reason: string() }, disabled: "The Worker cannot yet prove the canonical real-owner approval relationship." },
-  "staff_loan.ExtendStaffLoan": { payload: { new_end_at: string() }, disabled: "The Worker cannot yet prove that the actor is the loaned staff member or validate the canonical loan window." },
-  "staff_loan.EndStaffLoanEarly": { payload: noPayload, disabled: "The Worker cannot yet prove the real-owner or borrowing-manager relationship." },
+  "staff_loan.ApproveStaffLoan": { payload: noPayload, stay: ["Requested", "Active", "Extended"], special: "staff-loan-approve" },
+  "staff_loan.DeclineStaffLoan": { payload: { reason: string() }, stay: ["Requested", "Active", "Extended"], special: "staff-loan-decline" },
+  "staff_loan.ExtendStaffLoan": { payload: { new_end_at: timestamp() }, stay: ["Active", "Extended"], special: "staff-loan-extend" },
+  "staff_loan.EndStaffLoanEarly": { payload: noPayload, from: ["Active", "Extended"], to: "Ended", special: "staff-loan-end-early" },
 
   "CreatePolicy": { payload: { name: string(), scope: object() }, createStatus: "Active", createPatch: { versions: [] }, special: "policy-scope" },
   "CreatePolicyVersion": { payload: { rules: array() }, stay: ["Active"], special: "policy-create-version" },
@@ -142,6 +143,8 @@ function validatePayload(schema: PayloadSchema, payload: unknown): string | null
     const typeOkay =
       rule.kind === "array" ? Array.isArray(value) :
       rule.kind === "object" ? isRecord(value) :
+      rule.kind === "timestamp" ? (typeof value === "number" && Number.isFinite(value) && value >= 0) ||
+        (typeof value === "string" && Number.isFinite(Date.parse(value))) :
       rule.kind === "string" ? typeof value === "string" :
       typeof value === "boolean";
     if (!typeOkay) return "INVALID_COMMAND_PAYLOAD";
@@ -229,6 +232,70 @@ export function validateCommandSemantics(
       return { allowed: false, reason: "INVALID_STATE_TRANSITION" };
     }
     return { allowed: true, nextStatus: status, statePatch: { items: [...current.items, item] } };
+  }
+  if (semantics.special === "staff-loan-approve") {
+    if (status === "Requested") return {
+      allowed: true, nextStatus: "Active",
+      statePatch: { approved_by: actorId ?? null, approved_at: new Date().toISOString() },
+    };
+    const pendingEnd = current.pending_extension_end_at;
+    if ((status === "Active" || status === "Extended") &&
+        (typeof pendingEnd === "number" || (typeof pendingEnd === "string" && pendingEnd.trim()))) {
+      const window = isRecord(current.window) ? current.window : {};
+      return {
+        allowed: true, nextStatus: "Extended",
+        statePatch: {
+          window: { ...window, end_at: pendingEnd },
+          pending_extension_end_at: null,
+          extension_approved_by: actorId ?? null,
+          extension_approved_at: new Date().toISOString(),
+        },
+      };
+    }
+    return { allowed: false, reason: "INVALID_STATE_TRANSITION" };
+  }
+  if (semantics.special === "staff-loan-decline") {
+    const reason = (payload as Record<string, unknown>).reason as string;
+    if (status === "Requested") return {
+      allowed: true, nextStatus: "Declined",
+      statePatch: { decline_reason: reason, declined_by: actorId ?? null, declined_at: new Date().toISOString() },
+    };
+    if ((status === "Active" || status === "Extended") && current.pending_extension_end_at != null) return {
+      allowed: true, nextStatus: status,
+      statePatch: {
+        pending_extension_end_at: null,
+        extension_decline_reason: reason,
+        extension_declined_by: actorId ?? null,
+        extension_declined_at: new Date().toISOString(),
+      },
+    };
+    return { allowed: false, reason: "INVALID_STATE_TRANSITION" };
+  }
+  if (semantics.special === "staff-loan-extend") {
+    const requestedEnd = (payload as Record<string, unknown>).new_end_at;
+    const requestedNs = typeof requestedEnd === "number" ? requestedEnd :
+      typeof requestedEnd === "string" ? Date.parse(requestedEnd) * 1_000_000 : NaN;
+    const window = isRecord(current.window) ? current.window : null;
+    const existingEnd = window?.end_at;
+    const existingNs = typeof existingEnd === "number" ? existingEnd :
+      typeof existingEnd === "string" ? Date.parse(existingEnd) * 1_000_000 : NaN;
+    if (!Number.isFinite(requestedNs) || !Number.isFinite(existingNs) || requestedNs <= existingNs ||
+        current.pending_extension_end_at != null)
+      return { allowed: false, reason: "INVALID_COMMAND_PAYLOAD" };
+    return {
+      allowed: true, nextStatus: status,
+      statePatch: {
+        pending_extension_end_at: requestedNs,
+        extension_requested_by: actorId ?? null,
+        extension_requested_at: new Date().toISOString(),
+      },
+    };
+  }
+  if (semantics.special === "staff-loan-end-early") {
+    return {
+      allowed: true, nextStatus: "Ended",
+      statePatch: { ended_by: actorId ?? null, ended_at: new Date().toISOString(), pending_extension_end_at: null },
+    };
   }
   if (semantics.special === "team-precheck") {
     return { allowed: true, nextStatus: "TeamLeaderPreChecked", statePatch: { team_leader_precheck_notes: (payload as Record<string, unknown>).notes } };
