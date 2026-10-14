@@ -645,6 +645,29 @@ async function requireTeamLeaderOrAdmin(env:Env,session:Session):Promise<boolean
      String(actor.class??"").toLowerCase().replace(/[ -]/g,"_")==="team_leader"));
 }
 
+function staffLoanActorAuthorized(session:Session,commandType:string,state:unknown):boolean{
+  if(!state||typeof state!=="object"||Array.isArray(state))return false;
+  const loan=state as Record<string,unknown>;
+  const actor=session.sub;
+  const realOwner=canonicalUserId(loan.real_owner_id);
+  const borrower=canonicalUserId(loan.borrowing_manager_id);
+  const escalated=canonicalUserId(loan.escalated_to);
+  const status=String(loan.status??"");
+  const extensionPending=loan.pending_extension_end_at!==undefined&&loan.pending_extension_end_at!==null;
+  switch(commandType){
+    case "staff_loan.ApproveStaffLoan":
+    case "staff_loan.DeclineStaffLoan":
+      if(extensionPending)return actor===realOwner;
+      if(status==="Requested")return actor===(escalated??realOwner);
+      return false;
+    case "staff_loan.ExtendStaffLoan":
+      return (status==="Active"||status==="Extended")&&!extensionPending&&actor===borrower;
+    case "staff_loan.EndStaffLoanEarly":
+      return (status==="Active"||status==="Extended")&&(actor===realOwner||actor===borrower);
+    default:return false;
+  }
+}
+
 async function commandRoute(request:Request,env:Env,session:Session){
   const envelope=await request.json().catch(()=>null) as Json|null;
   if(!envelope||typeof envelope.command_id!=="string"||!envelope.command_id||envelope.command_id.length>128||
@@ -719,6 +742,9 @@ async function commandRoute(request:Request,env:Env,session:Session){
     if("error" in escalation)return json({error:escalation.error,category:escalation.status===403?"AUTHORITY":"DOMAIN",retryability:"NON_RETRYABLE"},escalation.status);
     effectiveCommandPayload={...payload,escalated_to:escalation.target};
   }
+  if(envelope.command_type.startsWith("staff_loan.")&&
+     !staffLoanActorAuthorized(session,envelope.command_type,previousState))
+    return json({error:"NOT_AUTHORIZED_STAFF_LOAN_ACTOR",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const listVerificationCommands=["todo_list.VerifyTodoList","todo_list.RejectTodoList","target_list.VerifyTargetList","target_list.RejectTargetList"];
   if(listVerificationCommands.includes(envelope.command_type)&&
      !await isAuthorizedListManager(env,session,previousState))
