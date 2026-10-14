@@ -22,7 +22,7 @@ type CommandSemantics = {
   stay?: readonly string[];
   disabled?: string;
   special?: "create-blueprint-revision" | "submit-blueprint" | "request-approval" | "reopen-task" | "task-add-dependency" | "todo-add-item" | "team-precheck" |
-    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope" | "policy-evaluate" | "policy-register-violation" | "todo-escalation";
+    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope" | "policy-evaluate" | "policy-register-violation" | "todo-escalation" | "staff-loan-approve" | "staff-loan-decline" | "staff-loan-extend" | "staff-loan-end-early";
   createPatch?: Record<string, unknown>;
 };
 export type SemanticDecision =
