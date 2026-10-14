@@ -878,9 +878,8 @@ impl AggregateRoot for StaffLoan {
                 _ => Err(self.invalid("DeclineStaffLoan")),
             },
 
-            // Design doc §2.1, resolved 2026-08-16: represents the
-            // staff member's own approval, not either manager's —
-            // enforced by the composing application.
+            // The borrowing manager requests the extension. The real
+            // owning manager must approve or decline it separately.
             StaffLoanCommand::ExtendStaffLoan { new_end_at } => match self.status {
                 StaffLoanStatus::Active | StaffLoanStatus::Extended => {
                     if self.pending_extension_end_at.is_some() || new_end_at <= self.window.end_at {
