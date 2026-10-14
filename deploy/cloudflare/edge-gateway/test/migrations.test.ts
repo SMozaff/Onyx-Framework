@@ -110,6 +110,7 @@ describe("migration sequence integrity", () => {
       "0004_auth_schema_repair.sql",
       "0005_admin_settings.sql",
       "0006_b1_admin_routes.sql",
+      "0007_file_asset_acl.sql",
     ]);
   });
 });
