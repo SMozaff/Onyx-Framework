@@ -973,6 +973,7 @@ impl AggregateRoot for StaffLoan {
             }
             StaffLoanEvent::StaffLoanEndedEarly { .. } => {
                 self.status = StaffLoanStatus::Ended;
+                self.pending_extension_end_at = None;
                 // Ends the borrowing manager's verification authority —
                 // authority-relevant.
                 self.authority_epoch = self.authority_epoch.advance();
