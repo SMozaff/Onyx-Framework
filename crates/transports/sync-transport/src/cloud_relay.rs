@@ -134,10 +134,7 @@ fn relay_websocket_url(endpoint: &str, target_id: uuid::Uuid) -> String {
     } else {
         ("wss://", endpoint)
     };
-    let authority = remainder
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or(remainder);
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or(remainder);
     format!("{scheme}{authority}/api/relay/{target_id}")
 }
 
