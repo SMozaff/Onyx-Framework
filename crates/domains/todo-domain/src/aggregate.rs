@@ -647,6 +647,8 @@ pub struct StaffLoan {
     real_owner_id: UserId,
     borrowing_manager_id: UserId,
     window: LoanWindow,
+    /// A borrowing-manager extension request awaiting the owning manager's decision.
+    pending_extension_end_at: Option<platform_kernel::Timestamp>,
     /// Who this loan's approval decision has been escalated to, if
     /// any. `None` unless `EscalateStaffLoan` has been applied. See
     /// `command::StaffLoanCommand::EscalateStaffLoan`'s doc comment.
@@ -724,6 +726,7 @@ impl StaffLoan {
             real_owner_id: *real_owner_id,
             borrowing_manager_id: *borrowing_manager_id,
             window: *window,
+            pending_extension_end_at: None,
             escalated_to: None,
         }
     }
@@ -844,6 +847,16 @@ impl AggregateRoot for StaffLoan {
                     approved_by: context.actor.user_id,
                     approved_at: context.trusted_now,
                 }]),
+                StaffLoanStatus::Active | StaffLoanStatus::Extended => {
+                    let Some(new_end_at) = self.pending_extension_end_at else {
+                        return Err(self.invalid("ApproveStaffLoan"));
+                    };
+                    Ok(vec![StaffLoanEvent::StaffLoanExtensionApproved {
+                        new_end_at,
+                        approved_by: context.actor.user_id,
+                        approved_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("ApproveStaffLoan")),
             },
 
@@ -853,6 +866,13 @@ impl AggregateRoot for StaffLoan {
                     declined_by: context.actor.user_id,
                     declined_at: context.trusted_now,
                 }]),
+                StaffLoanStatus::Active | StaffLoanStatus::Extended if self.pending_extension_end_at.is_some() => {
+                    Ok(vec![StaffLoanEvent::StaffLoanExtensionDeclined {
+                        reason,
+                        declined_by: context.actor.user_id,
+                        declined_at: context.trusted_now,
+                    }])
+                }
                 _ => Err(self.invalid("DeclineStaffLoan")),
             },
 
@@ -861,13 +881,13 @@ impl AggregateRoot for StaffLoan {
             // enforced by the composing application.
             StaffLoanCommand::ExtendStaffLoan { new_end_at } => match self.status {
                 StaffLoanStatus::Active | StaffLoanStatus::Extended => {
-                    if new_end_at <= self.window.end_at {
+                    if self.pending_extension_end_at.is_some() || new_end_at <= self.window.end_at {
                         return Err(StaffLoanError::InvalidLoanWindow);
                     }
-                    Ok(vec![StaffLoanEvent::StaffLoanExtended {
+                    Ok(vec![StaffLoanEvent::StaffLoanExtensionRequested {
                         new_end_at,
-                        approved_by_staff: context.actor.user_id,
-                        extended_at: context.trusted_now,
+                        requested_by: context.actor.user_id,
+                        requested_at: context.trusted_now,
                     }])
                 }
                 _ => Err(self.invalid("ExtendStaffLoan")),
@@ -937,6 +957,18 @@ impl AggregateRoot for StaffLoan {
             StaffLoanEvent::StaffLoanExtended { new_end_at, .. } => {
                 self.status = StaffLoanStatus::Extended;
                 self.window.end_at = *new_end_at;
+            }
+            StaffLoanEvent::StaffLoanExtensionRequested { new_end_at, .. } => {
+                self.pending_extension_end_at = Some(*new_end_at);
+            }
+            StaffLoanEvent::StaffLoanExtensionApproved { new_end_at, .. } => {
+                self.status = StaffLoanStatus::Extended;
+                self.window.end_at = *new_end_at;
+                self.pending_extension_end_at = None;
+                self.authority_epoch = self.authority_epoch.advance();
+            }
+            StaffLoanEvent::StaffLoanExtensionDeclined { .. } => {
+                self.pending_extension_end_at = None;
             }
             StaffLoanEvent::StaffLoanEndedEarly { .. } => {
                 self.status = StaffLoanStatus::Ended;
