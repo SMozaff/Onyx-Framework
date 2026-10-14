@@ -559,7 +559,7 @@ function canonicalUserId(value:unknown):string|null{
 function isManagerUser(user:Record<string,unknown>):boolean{
   const role=String(user.role??"").toUpperCase();
   const cls=String(user.class??"").toLowerCase().replace(/[ -]/g,"_");
-  return role==="ORGANIZATION_ADMIN"||["top_level_manager","senior_manager","team_leader","supervisor"].includes(cls);
+  return role==="ORGANIZATION_ADMIN"||["top_level_manager","senior_manager","team_leader"].includes(cls);
 }
 async function resolveListEscalationTarget(
   env:Env,session:Session,aggregateType:string,state:unknown,payload:Json
