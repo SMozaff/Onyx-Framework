@@ -479,14 +479,44 @@ async fn require_verifier_authority(
     )
     .await
     .map_err(|e| crate::CommandError::Persistence(e.to_string()))?;
-
     if authorized {
-        Ok(())
-    } else {
-        Err(crate::CommandError::Domain(
-            "actor is not an authorized verifier for this list's owner".to_string(),
-        ))
+        return Ok(());
     }
+
+    // The direct verifier remains the default. A higher-level manager
+    // in the same reporting chain may also verify, per the confirmed
+    // early/manager-judgment rule. On an escalated list, the chain
+    // starts at its selected escalation recipient.
+    let start_id = if let Some(target) = escalated_to {
+        Some(uuid::Uuid::from_bytes(target.0).to_string())
+    } else {
+        let owner_uuid = uuid::Uuid::from_bytes(owner_id.0);
+        state.user_store.find_by_id(&owner_uuid.to_string()).await
+            .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+            .and_then(|record| record.parent_user_id)
+    };
+    let actor_uuid = uuid::Uuid::from_bytes(actor.user_id.0).to_string();
+    let actor_org = uuid::Uuid::from_bytes(actor.organization_id.0).to_string();
+    let mut next_id = start_id;
+    let mut visited = std::collections::HashSet::new();
+    for _ in 0..32 {
+        let Some(user_id) = next_id else { break; };
+        if user_id == "__allfather__" || !visited.insert(user_id.clone()) { break; }
+        let Some(manager) = state.user_store.find_by_id(&user_id).await
+            .map_err(|e| crate::CommandError::Persistence(e.to_string()))? else { break; };
+        if !manager.is_active || manager.organization_id != actor_org { break; }
+        if manager.user_id == actor_uuid {
+            let can_verify = matches!(manager.class,
+                Some(security_application::UserClass::TopLevelManager)
+                | Some(security_application::UserClass::SeniorManager)
+                | Some(security_application::UserClass::TeamLeader));
+            if can_verify { return Ok(()); }
+        }
+        next_id = manager.parent_user_id;
+    }
+    Err(crate::CommandError::Domain(
+        "actor is not an authorized verifier for this list's owner".to_string(),
+    ))
 }
 
 /// Enforces design doc §2.1's actor-specific StaffLoan decision rules
