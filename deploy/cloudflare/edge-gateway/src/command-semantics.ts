@@ -22,11 +22,11 @@ type CommandSemantics = {
   stay?: readonly string[];
   disabled?: string;
   special?: "create-blueprint-revision" | "submit-blueprint" | "request-approval" | "reopen-task" | "task-add-dependency" | "todo-add-item" | "team-precheck" |
-    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope";
+    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope" | "policy-evaluate" | "policy-register-violation";
   createPatch?: Record<string, unknown>;
 };
 export type SemanticDecision =
-  | { allowed: true; nextStatus: string; statePatch?: Record<string, unknown> }
+  | { allowed: true; nextStatus: string; statePatch?: Record<string, unknown>; commandResult?: Record<string, unknown> }
   | { allowed: false; reason: string };
 
 const string = (required = true): PayloadField => ({ kind: "string", required, nonEmpty: required });
@@ -112,8 +112,8 @@ export const COMMAND_SEMANTICS: Readonly<Record<string, CommandSemantics>> = {
   "CreatePolicy": { payload: { name: string(), scope: object() }, createStatus: "Active", createPatch: { versions: [] }, special: "policy-scope" },
   "CreatePolicyVersion": { payload: { rules: array() }, stay: ["Active"], special: "policy-create-version" },
   "PublishPolicyVersion": { payload: noPayload, stay: ["Active"], special: "policy-publish-version" },
-  "EvaluatePolicy": { payload: { rule_key: string() }, disabled: "This Worker route does not yet return the domain policy evaluation result." },
-  "RegisterViolation": { payload: { rule_key: string(), reason: string() }, disabled: "This Worker route does not yet implement the native policy-violation projection and result." },
+  "EvaluatePolicy": { payload: { rule_key: string() }, stay: ["Active"], special: "policy-evaluate" },
+  "RegisterViolation": { payload: { rule_key: string(), reason: string() }, stay: ["Active"], special: "policy-register-violation" },
   "RetirePolicy": { payload: noPayload, from: ["Active"], to: "Retired" },
 
   "ApplyLegalHold": { payload: { target: object(), reason: string(), authorizing_policy: string(false) }, createStatus: "Applied" },
@@ -295,6 +295,37 @@ export function validateCommandSemantics(
     if (!versions || draftIndex < 0) return { allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" };
     const nextVersions = versions.map((version, index) => index === draftIndex ? { ...version, status: "Published" } : version);
     return { allowed: true, nextStatus: status, statePatch: { versions: nextVersions } };
+  }
+  if (semantics.special === "policy-evaluate" || semantics.special === "policy-register-violation") {
+    const versions = Array.isArray(current.versions) ? current.versions.filter(isRecord) : [];
+    const published = [...versions].reverse().find((version) => version.status === "Published");
+    if (!published) return { allowed: false, reason: "NO_PUBLISHED_VERSION" };
+    const ruleKey = (payload as Record<string, unknown>).rule_key as string;
+    if (semantics.special === "policy-evaluate") {
+      const rules = Array.isArray(published.rules) ? published.rules.filter(isRecord) : [];
+      const matchingRule = rules.find((rule) => rule.key === ruleKey);
+      return {
+        allowed: true,
+        nextStatus: status,
+        commandResult: {
+          rule_key: ruleKey,
+          result: matchingRule && Object.prototype.hasOwnProperty.call(matchingRule, "value") ? matchingRule.value : null,
+          evaluated_version: published.version_number,
+        },
+      };
+    }
+    // Rust records violations against the active published policy without
+    // requiring the supplied key to exist in that policy's rule list.
+    return {
+      allowed: true,
+      nextStatus: status,
+      commandResult: {
+        recorded: true,
+        rule_key: ruleKey,
+        reason: (payload as Record<string, unknown>).reason,
+        policy_version: published.version_number,
+      },
+    };
   }
   if (semantics.special === "policy-requires-published") {
     const versions = Array.isArray(current.versions) ? current.versions.filter(isRecord) : [];

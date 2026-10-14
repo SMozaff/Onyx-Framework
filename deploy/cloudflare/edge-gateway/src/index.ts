@@ -615,7 +615,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const semantic=validateCommandSemantics(envelope.command_type,previousState,commandPayload,session.sub);
   if(!semantic.allowed){
     const status=semantic.reason==="INVALID_COMMAND_PAYLOAD"?400:
-      semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"?409:403;
+      semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"||semantic.reason==="NO_PUBLISHED_VERSION"?409:403;
     return json({error:semantic.reason,category:status===403?"AUTHORITY":"DOMAIN",retryability:"NON_RETRYABLE"},status);
   }
   if(policy.ownerRequiredOnCreate&&policy.effect==="create"&&payloadOwnerIds(payload).length===0)
@@ -724,14 +724,17 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const nextLifecycle=existing&&semantic.nextStatus!==currentStatus?expectedLifecycle+1:expectedLifecycle;
   const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold"];
   const nextAuthority=existing&&authorityChangingActions.includes(envelope.command_type)?expectedAuthority+1:expectedAuthority;
+  const eventPayload:Json=envelope.command_type==="EvaluatePolicy"&&semantic.commandResult
+    ?{...commandPayload,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
+    :commandPayload;
   const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:commandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
-  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[event],result:{id:targetId,type:targetType,state:merged}};
+  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[event],result:{id:targetId,type:targetType,state:merged,...(semantic.commandResult?{command_result:semantic.commandResult}:{})}};
   // D1 batch is atomic. Conditional event/audit/idempotency inserts mean a
   // failed optimistic insert/update cannot leave partial side effects.
   const aggregateStatement=policy.effect==="create"
     ? env.DB.prepare("INSERT OR IGNORE INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,?,?,?,?,?,?,?)").bind(targetId,targetType,nextVersion,nextLifecycle,nextAuthority,JSON.stringify(merged),Date.now(),session.organization_id)
     : env.DB.prepare("UPDATE aggregates SET aggregate_type=?,version=?,lifecycle_epoch=?,authority_epoch=?,state=?,updated_at=? WHERE id=? AND organization_id=? AND aggregate_type=? AND version=? AND lifecycle_epoch=? AND authority_epoch=?").bind(targetType,nextVersion,nextLifecycle,nextAuthority,JSON.stringify(merged),Date.now(),targetId,session.organization_id,targetType,expected,expectedLifecycle,expectedAuthority);
-  const eventStatement=env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE changes()=1").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(commandPayload),Date.now(),"{}",envelope.operation_id,String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id);
+  const eventStatement=env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE changes()=1").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(eventPayload),Date.now(),"{}",envelope.operation_id,String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id);
   const idemStatement=env.DB.prepare("INSERT INTO idempotency(operation_id,result,created_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(envelope.operation_id,JSON.stringify(result),Date.now(),event.event_id,session.organization_id);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(session.organization_id,session.sub,envelope.command_type,String(envelope.correlation_id??envelope.operation_id),JSON.stringify({target:targetId}),Date.now(),event.event_id,session.organization_id);
   const batch=await env.DB.batch([aggregateStatement,eventStatement,idemStatement,auditStatement]);
