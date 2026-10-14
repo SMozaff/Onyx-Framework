@@ -786,12 +786,14 @@ impl StaffLoan {
     /// authority for this specific item" rule from the Todo/Target side
     /// of Phase E, applied here to the loan's own approval decision.
     pub fn grants_approval_authority_to(&self, manager_id: UserId) -> bool {
-        if self.status != StaffLoanStatus::Requested {
-            return false;
-        }
-        match self.escalated_to {
-            Some(target) => manager_id == target,
-            None => manager_id == self.real_owner_id,
+        match self.status {
+            StaffLoanStatus::Requested => match self.escalated_to {
+                Some(target) => manager_id == target,
+                None => manager_id == self.real_owner_id,
+            },
+            StaffLoanStatus::Active | StaffLoanStatus::Extended
+                if self.pending_extension_end_at.is_some() => manager_id == self.real_owner_id,
+            _ => false,
         }
     }
 
