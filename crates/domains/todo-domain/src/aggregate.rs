@@ -12,7 +12,7 @@
 //! kept as two distinct Rust types rather than one generic
 //! `List<Kind>` — a `TodoList` carries discrete `TodoItem`s with no
 //! time window; a `TargetList` carries a `TimeWindow` with no items at
-//! all, and additionally enforces `WindowNotClosed` before verification
+//! all, and supports manager-judged verification at any point in the target window
 //! (§4.0.2). The overlap is real but the content differs enough that a
 //! shared generic would need `Option`-typed fields on both sides to
 //! paper over the difference — two thin types with a shared
@@ -548,19 +548,12 @@ impl AggregateRoot for TargetList {
             TargetListCommand::VerifyTargetList { outcome, comment } => match self.status {
                 ListStatus::Submitted
                 | ListStatus::TeamLeaderPreChecked
-                | ListStatus::Escalated => {
-                    // Design doc §4.0.2, resolved 2026-08-16: hit/miss
-                    // is judged only once the window has closed.
-                    if context.trusted_now < self.time_window.end_at {
-                        return Err(TargetError::WindowNotClosed);
-                    }
-                    Ok(vec![TargetListEvent::TargetListVerified {
-                        outcome,
-                        comment,
-                        verified_by: context.actor.user_id,
-                        verified_at: context.trusted_now,
-                    }])
-                }
+                | ListStatus::Escalated => Ok(vec![TargetListEvent::TargetListVerified {
+                    outcome,
+                    comment,
+                    verified_by: context.actor.user_id,
+                    verified_at: context.trusted_now,
+                }])
                 _ => Err(self.invalid("VerifyTargetList")),
             },
 
@@ -1478,19 +1471,19 @@ mod tests {
     }
 
     #[test]
-    fn verify_target_before_window_closes_is_rejected() {
-        let list = submitted_target_list();
+    fn authorized_manager_may_verify_target_before_window_closes() {
+        let mut list = submitted_target_list();
         let window = list.time_window();
         let ctx = test_context_at(Timestamp(window.end_at.0 - 1));
-        let result = list.decide(
+        let events = list.decide(
             TargetListCommand::VerifyTargetList {
                 outcome: VerificationOutcome::Flawless,
-                comment: None,
+                comment: Some("Evidence is already sufficient".to_string()),
             },
             &ctx,
-        );
-        assert!(matches!(result, Err(TargetError::WindowNotClosed)));
-        assert_eq!(list.status(), ListStatus::Submitted);
+        ).expect("early verification is permitted when the authorized manager has sufficient evidence");
+        apply_all(&mut list, &events);
+        assert_eq!(list.status(), ListStatus::Verified);
     }
 
     #[test]
