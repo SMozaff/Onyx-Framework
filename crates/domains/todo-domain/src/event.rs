@@ -217,6 +217,33 @@ pub enum StaffLoanEvent {
         /// When.
         extended_at: Timestamp,
     },
+    /// The borrowing manager requested an extension; the current loan remains active pending owner decision.
+    StaffLoanExtensionRequested {
+        /// Requested later end time.
+        new_end_at: Timestamp,
+        /// Requesting borrowing manager.
+        requested_by: UserId,
+        /// When requested.
+        requested_at: Timestamp,
+    },
+    /// The real owning manager approved a pending extension.
+    StaffLoanExtensionApproved {
+        /// Approved later end time.
+        new_end_at: Timestamp,
+        /// Owning manager who approved it.
+        approved_by: UserId,
+        /// When approved.
+        approved_at: Timestamp,
+    },
+    /// The real owning manager declined a pending extension; the existing loan remains active.
+    StaffLoanExtensionDeclined {
+        /// Why the extension was declined.
+        reason: String,
+        /// Owning manager who declined it.
+        declined_by: UserId,
+        /// When declined.
+        declined_at: Timestamp,
+    },
     /// The loan was ended before its scheduled `end_at`. Design doc
     /// §2.1, resolved 2026-08-16: no approval required from anyone;
     /// either the real owner or the borrowing manager may end it.
