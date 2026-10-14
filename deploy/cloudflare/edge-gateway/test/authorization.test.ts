@@ -96,11 +96,11 @@ describe("explicit command payload and lifecycle semantics", () => {
       .toEqual({ allowed: false, reason: "INVALID_COMMAND_PAYLOAD" });
   });
 
-  it("fails closed where domain-specific authority/time preconditions are not yet provable", () => {
+  it("fails closed where domain-specific authority preconditions are not yet provable", () => {
     expect(validateCommandSemantics("staff_loan.ApproveStaffLoan", { status: "Requested" }, {}))
       .toEqual({ allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" });
     expect(validateCommandSemantics("target_list.VerifyTargetList", { status: "Submitted" }, { outcome: "Flawless" }))
-      .toEqual({ allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" });
+      .toEqual({ allowed: true, nextStatus: "Verified", statePatch: { outcome: "Flawless", verification_comment: undefined } });
   });
 
   it("requires exact approved transition prerequisites", () => {
