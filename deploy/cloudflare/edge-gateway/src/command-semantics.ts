@@ -22,7 +22,7 @@ type CommandSemantics = {
   stay?: readonly string[];
   disabled?: string;
   special?: "create-blueprint-revision" | "submit-blueprint" | "request-approval" | "reopen-task" | "task-add-dependency" | "todo-add-item" | "team-precheck" |
-    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope" | "policy-evaluate" | "policy-register-violation";
+    "policy-create-version" | "policy-publish-version" | "policy-requires-published" | "policy-scope" | "policy-evaluate" | "policy-register-violation" | "todo-escalation";
   createPatch?: Record<string, unknown>;
 };
 export type SemanticDecision =
@@ -92,13 +92,13 @@ export const COMMAND_SEMANTICS: Readonly<Record<string, CommandSemantics>> = {
   "todo_list.RecordTeamLeaderPreCheck": { payload: { notes: string() }, from: ["Submitted"], to: "TeamLeaderPreChecked", special: "team-precheck" },
   "todo_list.VerifyTodoList": { payload: { outcome: { kind: "string", required: true, nonEmpty: true, oneOf: ["Flawless", "WithDeficiencies"] }, comment: string(false) }, from: LIST_PENDING, to: "Verified" },
   "todo_list.RejectTodoList": { payload: { reason: string() }, from: LIST_PENDING, to: "Rejected" },
-  "todo_list.EscalateTodoList": { payload: { reason: string(), escalated_to: string() }, disabled: "The Worker cannot yet prove that the escalation target is the next authorized manager in the hierarchy." },
+  "todo_list.EscalateTodoList": { payload: { reason: string(), escalated_to: string(false) }, stay: LIST_PENDING, special: "todo-escalation" },
 
   "target_list.SubmitTargetList": { payload: noPayload, from: ["Draft"], to: "Submitted" },
   "target_list.RecordTeamLeaderPreCheck": { payload: { notes: string() }, from: ["Submitted"], to: "TeamLeaderPreChecked", special: "team-precheck" },
   "target_list.VerifyTargetList": { payload: { outcome: { kind: "string", required: true, nonEmpty: true, oneOf: ["Flawless", "WithDeficiencies"] }, comment: string(false) }, disabled: "The Worker cannot yet prove the authoritative target-window end time and verifier relationship." },
   "target_list.RejectTargetList": { payload: { reason: string() }, from: LIST_PENDING, to: "Rejected" },
-  "target_list.EscalateTargetList": { payload: { reason: string(), escalated_to: string() }, disabled: "The Worker cannot yet prove that the escalation target is the next authorized manager in the hierarchy." },
+  "target_list.EscalateTargetList": { payload: { reason: string(), escalated_to: string(false) }, stay: LIST_PENDING, special: "todo-escalation" },
 
   // These commands have actor-specific real-owner / borrowed-staff approval
   // requirements in the native domain model. The Worker cannot safely prove
@@ -232,6 +232,13 @@ export function validateCommandSemantics(
   }
   if (semantics.special === "team-precheck") {
     return { allowed: true, nextStatus: "TeamLeaderPreChecked", statePatch: { team_leader_precheck_notes: (payload as Record<string, unknown>).notes } };
+  }
+  if (semantics.special === "todo-escalation") {
+    const escalatedTo = (payload as Record<string, unknown>).escalated_to;
+    if (typeof escalatedTo !== "string" || !escalatedTo.trim()) {
+      return { allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" };
+    }
+    return { allowed: true, nextStatus: "Escalated", statePatch: { escalated_to: escalatedTo } };
   }
   if (commandType === "AssignOwner") {
     return { allowed: true, nextStatus: status, statePatch: { owner_id: (payload as Record<string, unknown>).owner_id } };
