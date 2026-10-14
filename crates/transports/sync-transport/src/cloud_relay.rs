@@ -91,7 +91,7 @@ impl Transport for CloudRelayTransport {
         // not assumed. Converting explicitly to the bare UUID string
         // instead, since that's what belongs in a URL path segment.
         let peer_uuid = uuid::Uuid::from_bytes(peer.id.0);
-        let ws_url = format!("wss://{}/relay/{}", self.endpoint, peer_uuid);
+        let ws_url = relay_websocket_url(&self.endpoint, peer_uuid);
         let socket = self
             .socket_factory
             .connect(&ws_url, &peer, &token, timeout)
@@ -112,6 +112,30 @@ impl Transport for CloudRelayTransport {
     fn max_message_size(&self) -> usize {
         10 * 1024 * 1024 // 10 MB
     }
+}
+
+/// Builds the WebSocket URL used by the Cloudflare Worker relay contract.
+///
+/// The endpoint may be a configured HTTP(S) API base, a WS(S) relay origin,
+/// or a bare host for compatibility with existing callers. The Worker route
+/// is always /api/relay/{target_id}, not /relay/{target_id}. Any base path or
+/// query is discarded because the Worker API is rooted at the origin.
+/// Preserve ws:// for local HTTP development and upgrade https:// to wss://.
+fn relay_websocket_url(endpoint: &str, target_id: uuid::Uuid) -> String {
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    let (scheme, remainder) = if let Some(rest) = endpoint.strip_prefix("https://") {
+        ("wss://", rest)
+    } else if let Some(rest) = endpoint.strip_prefix("http://") {
+        ("ws://", rest)
+    } else if let Some(rest) = endpoint.strip_prefix("wss://") {
+        ("wss://", rest)
+    } else if let Some(rest) = endpoint.strip_prefix("ws://") {
+        ("ws://", rest)
+    } else {
+        ("wss://", endpoint)
+    };
+    let authority = remainder.split(|character| character == '/' || character == '?' || character == '#').next().unwrap_or(remainder);
+    format!("{scheme}{authority}/api/relay/{target_id}")
 }
 
 struct CloudRelayConnection {
@@ -219,6 +243,32 @@ mod tests {
                 reply_queue: self.reply_queue.clone(),
             }))
         }
+    }
+
+    #[test]
+    fn relay_url_uses_worker_route_and_does_not_duplicate_scheme() {
+        let target = uuid::Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap();
+        assert_eq!(
+            relay_websocket_url("https://onyx.example.test", target),
+            "wss://onyx.example.test/api/relay/11111111-2222-4333-8444-555555555555"
+        );
+        assert_eq!(
+            relay_websocket_url("wss://onyx.example.test", target),
+            "wss://onyx.example.test/api/relay/11111111-2222-4333-8444-555555555555"
+        );
+    }
+
+    #[test]
+    fn relay_url_preserves_local_ws_and_strips_base_path() {
+        let target = uuid::Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap();
+        assert_eq!(
+            relay_websocket_url("http://127.0.0.1:8787/api", target),
+            "ws://127.0.0.1:8787/api/relay/11111111-2222-4333-8444-555555555555"
+        );
+        assert_eq!(
+            relay_websocket_url("onyx.example.test", target),
+            "wss://onyx.example.test/api/relay/11111111-2222-4333-8444-555555555555"
+        );
     }
 
     #[tokio::test]
