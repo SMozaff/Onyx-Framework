@@ -194,15 +194,12 @@ pub enum StaffLoanCommand {
         /// Why.
         reason: String,
     },
-    /// Extend an `Active` (or already `Extended`) loan past its current
-    /// `end_at`. Design doc §2.1, resolved 2026-08-16: requires the
-    /// **staff member's own approval**, not either manager's — this
-    /// command itself represents that approval having been given (the
-    /// composing application is responsible for confirming the actor
-    /// invoking this is the staff member in question, same authority
-    /// precedent as `ApproveStaffLoan` above).
+    /// Request an extension to an `Active` or `Extended` loan. The
+    /// borrowing manager requests a later end time; the loan remains
+    /// active while the real owning manager decides using
+    /// `ApproveStaffLoan` or `DeclineStaffLoan`.
     ExtendStaffLoan {
-        /// The new, later end date-time.
+        /// The requested later end date-time.
         new_end_at: platform_kernel::Timestamp,
     },
     /// End an `Active` (or `Extended`) loan before its scheduled
