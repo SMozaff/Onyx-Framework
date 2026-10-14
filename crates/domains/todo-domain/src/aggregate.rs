@@ -553,7 +553,7 @@ impl AggregateRoot for TargetList {
                     comment,
                     verified_by: context.actor.user_id,
                     verified_at: context.trusted_now,
-                }])
+                }]),
                 _ => Err(self.invalid("VerifyTargetList")),
             },
 
