@@ -181,15 +181,15 @@ pub enum StaffLoanCommand {
         /// resolved 2026-08-16: "they must be fixed at duration time").
         window: LoanWindow,
     },
-    /// The real owner approves a `Requested` loan. Transitions
-    /// `Requested` → `Active`. Only the real owner may invoke this —
-    /// enforced by the composing application's authority check
-    /// (`decide()` here only checks the generic authority stub, per
-    /// this crate's established precedent — see `aggregate.rs`'s
-    /// header comment).
+    /// The real owner approves a `Requested` loan, or approves a
+    /// pending extension requested by the borrowing manager. An initial
+    /// approval transitions `Requested` → `Active`; an extension
+    /// approval applies the pending end date and transitions to
+    /// `Extended`. The composing application enforces owner authority.
     ApproveStaffLoan,
-    /// The real owner declines a `Requested` loan. Transitions
-    /// `Requested` → `Declined`. Terminal.
+    /// The real owner declines a `Requested` loan, or declines a
+    /// pending extension. Initial decline is terminal; extension decline
+    /// leaves the current active loan and its existing end date intact.
     DeclineStaffLoan {
         /// Why.
         reason: String,
