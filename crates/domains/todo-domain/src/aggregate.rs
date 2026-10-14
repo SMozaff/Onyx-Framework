@@ -792,7 +792,10 @@ impl StaffLoan {
                 None => manager_id == self.real_owner_id,
             },
             StaffLoanStatus::Active | StaffLoanStatus::Extended
-                if self.pending_extension_end_at.is_some() => manager_id == self.real_owner_id,
+                if self.pending_extension_end_at.is_some() =>
+            {
+                manager_id == self.real_owner_id
+            }
             _ => false,
         }
     }
@@ -868,7 +871,9 @@ impl AggregateRoot for StaffLoan {
                     declined_by: context.actor.user_id,
                     declined_at: context.trusted_now,
                 }]),
-                StaffLoanStatus::Active | StaffLoanStatus::Extended if self.pending_extension_end_at.is_some() => {
+                StaffLoanStatus::Active | StaffLoanStatus::Extended
+                    if self.pending_extension_end_at.is_some() =>
+                {
                     Ok(vec![StaffLoanEvent::StaffLoanExtensionDeclined {
                         reason,
                         declined_by: context.actor.user_id,
@@ -1685,16 +1690,21 @@ mod tests {
         let ctx = test_context();
         let original_end = loan.window().end_at;
         let new_end = Timestamp(original_end.0 + 86_400_000_000_000);
-        let request = loan.decide(
-            StaffLoanCommand::ExtendStaffLoan { new_end_at: new_end },
-            &ctx,
-        ).expect("borrowing manager extension request must succeed");
+        let request = loan
+            .decide(
+                StaffLoanCommand::ExtendStaffLoan {
+                    new_end_at: new_end,
+                },
+                &ctx,
+            )
+            .expect("borrowing manager extension request must succeed");
         apply_all(&mut loan, &request);
         assert_eq!(loan.status(), StaffLoanStatus::Active);
         assert_eq!(loan.window().end_at, original_end);
         assert!(loan.grants_approval_authority_to(loan.real_owner_id()));
 
-        let approval = loan.decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
+        let approval = loan
+            .decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
             .expect("real owner must be able to approve a pending extension");
         apply_all(&mut loan, &approval);
         assert_eq!(loan.status(), StaffLoanStatus::Extended);
@@ -1707,17 +1717,23 @@ mod tests {
         let mut loan = active_staff_loan();
         let ctx = test_context();
         let original_end = loan.window().end_at;
-        let request = loan.decide(
-            StaffLoanCommand::ExtendStaffLoan {
-                new_end_at: Timestamp(original_end.0 + 86_400_000_000_000),
-            },
-            &ctx,
-        ).expect("extension request must succeed");
+        let request = loan
+            .decide(
+                StaffLoanCommand::ExtendStaffLoan {
+                    new_end_at: Timestamp(original_end.0 + 86_400_000_000_000),
+                },
+                &ctx,
+            )
+            .expect("extension request must succeed");
         apply_all(&mut loan, &request);
-        let decline = loan.decide(
-            StaffLoanCommand::DeclineStaffLoan { reason: "Coverage no longer needed".to_string() },
-            &ctx,
-        ).expect("owner can decline extension");
+        let decline = loan
+            .decide(
+                StaffLoanCommand::DeclineStaffLoan {
+                    reason: "Coverage no longer needed".to_string(),
+                },
+                &ctx,
+            )
+            .expect("owner can decline extension");
         apply_all(&mut loan, &decline);
         assert_eq!(loan.status(), StaffLoanStatus::Active);
         assert_eq!(loan.window().end_at, original_end);
@@ -1779,12 +1795,17 @@ mod tests {
         let mut loan = active_staff_loan();
         let ctx = test_context();
         let requested_end = Timestamp(loan.window().end_at.0 + 86_400_000_000_000);
-        let request_events = loan.decide(
-            StaffLoanCommand::ExtendStaffLoan { new_end_at: requested_end },
-            &ctx,
-        ).expect("extension request must succeed");
+        let request_events = loan
+            .decide(
+                StaffLoanCommand::ExtendStaffLoan {
+                    new_end_at: requested_end,
+                },
+                &ctx,
+            )
+            .expect("extension request must succeed");
         apply_all(&mut loan, &request_events);
-        let approve_events = loan.decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
+        let approve_events = loan
+            .decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
             .expect("extension must be approved before it changes the window");
         apply_all(&mut loan, &approve_events);
 
