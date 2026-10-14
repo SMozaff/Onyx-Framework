@@ -518,7 +518,7 @@ async fn require_staff_loan_authority(
         "staff_loan.ApproveStaffLoan"
         | "staff_loan.DeclineStaffLoan"
         | "staff_loan.EscalateStaffLoan" => loan.grants_approval_authority_to(actor.user_id),
-        "staff_loan.ExtendStaffLoan" => actor.user_id == loan.staff_user_id(),
+        "staff_loan.ExtendStaffLoan" => actor.user_id == loan.borrowing_manager_id(),
         "staff_loan.EndStaffLoanEarly" => {
             actor.user_id == loan.real_owner_id() || actor.user_id == loan.borrowing_manager_id()
         }
