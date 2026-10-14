@@ -1196,8 +1196,12 @@ async fn notify_staff_loan_lifecycle(
         }
         let reason = payload.get("DeclineStaffLoan").and_then(|v| v.get("reason"))
             .and_then(Value::as_str).unwrap_or("No reason provided");
+        let staff_id = parse_object_id_field(&aggregate, "staff_user_id")
+            .map(|id| uuid::Uuid::from_bytes(id.0).to_string()).unwrap_or_else(|_| "unknown".to_string());
+        let borrowing_manager_id = parse_object_id_field(&aggregate, "borrowing_manager_id")
+            .map(|id| uuid::Uuid::from_bytes(id.0).to_string()).unwrap_or_else(|_| "unknown".to_string());
         ("Staff loan request declined", format!(
-            "A staff loan request was declined. Reason: {reason}. Loan: {source_id}. The interaction is available for oversight."
+            "A staff loan request was declined. Reason: {reason}. Loan: {source_id}. Staff member: {staff_id}. Borrowing manager: {borrowing_manager_id}. The interaction is available for oversight."
         ))
     } else {
         for field in ["staff_user_id", "real_owner_id", "borrowing_manager_id"] {
