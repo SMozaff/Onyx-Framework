@@ -1188,9 +1188,9 @@ async fn notify_staff_loan_lifecycle(
             "priority": "high",
             "status": "unacknowledged",
             "recipient_id": recipient_id,
-            "source_id": source_id,
+            "source_id": source_id.clone(),
             "source_type": "staff_loan",
-            "created_at": now,
+            "created_at": now.clone(),
             "acknowledged_at": Value::Null,
             "version": 1,
             "lifecycle_epoch": 0,
@@ -1212,7 +1212,7 @@ async fn notify_staff_loan_lifecycle(
             "event_type": "notification.Created",
             "aggregate_id": notification_id.to_string(),
             "aggregate_type": "notification",
-            "organization_id": organization_id,
+            "organization_id": organization_id.clone(),
             "payload": state_json
         }));
     }
