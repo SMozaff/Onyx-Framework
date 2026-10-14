@@ -175,33 +175,51 @@ async fn resolve_escalation_recipient(
     actor: &ActorContext,
     current_verifier_id: ObjectId,
 ) -> Result<ObjectId, crate::CommandError> {
-    let requested = payload.get(variant).and_then(|v| v.get("escalated_to"))
-        .and_then(Value::as_str).filter(|value| !value.trim().is_empty());
+    let requested = payload
+        .get(variant)
+        .and_then(|v| v.get("escalated_to"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
     let Some(requested) = requested else {
-        return crate::escalation_resolution::resolve_escalation_target(current_verifier_id, &state.user_store)
-            .await.map_err(|e| crate::CommandError::Persistence(e.to_string()))?
-            .ok_or_else(|| crate::CommandError::Domain(
-                "nothing to escalate to -- the current verifier has no manager above them".to_string()
-            ));
+        return crate::escalation_resolution::resolve_escalation_target(
+            current_verifier_id,
+            &state.user_store,
+        )
+        .await
+        .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        .ok_or_else(|| {
+            crate::CommandError::Domain(
+                "nothing to escalate to -- the current verifier has no manager above them"
+                    .to_string(),
+            )
+        });
     };
     let target_uuid = uuid::Uuid::parse_str(requested).map_err(|_| {
         crate::CommandError::Domain("escalation recipient must be a valid user id".to_string())
     })?;
-    let target = state.user_store.find_by_id(&target_uuid.to_string()).await
+    let target = state
+        .user_store
+        .find_by_id(&target_uuid.to_string())
+        .await
         .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
         .ok_or_else(|| crate::CommandError::Domain("escalation recipient not found".to_string()))?;
     let organization_id = uuid::Uuid::from_bytes(actor.organization_id.0).to_string();
-    let can_verify = matches!(target.class,
+    let can_verify = matches!(
+        target.class,
         Some(security_application::UserClass::TopLevelManager)
-        | Some(security_application::UserClass::SeniorManager)
-        | Some(security_application::UserClass::TeamLeader));
+            | Some(security_application::UserClass::SeniorManager)
+            | Some(security_application::UserClass::TeamLeader)
+    );
     if !target.is_active || target.organization_id != organization_id || !can_verify {
         return Err(crate::CommandError::Domain(
-            "escalation recipient must be an active, authorized manager in the same organization".to_string()
+            "escalation recipient must be an active, authorized manager in the same organization"
+                .to_string(),
         ));
     }
     if target.user_id == uuid::Uuid::from_bytes(actor.user_id.0).to_string() {
-        return Err(crate::CommandError::Domain("cannot escalate a list to the current actor".to_string()));
+        return Err(crate::CommandError::Domain(
+            "cannot escalate a list to the current actor".to_string(),
+        ));
     }
     Ok(ObjectId(*target_uuid.as_bytes()))
 }
@@ -243,7 +261,14 @@ async fn resolve_todo_list_escalation_command(
         .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
         .ok_or(crate::CommandError::NotFound(target_id))?;
     let current_verifier_id = current_verifier_for_escalation(state, &loaded.aggregate).await?;
-    let escalated_to = resolve_escalation_recipient(state, payload, "EscalateTodoList", actor, current_verifier_id).await?;
+    let escalated_to = resolve_escalation_recipient(
+        state,
+        payload,
+        "EscalateTodoList",
+        actor,
+        current_verifier_id,
+    )
+    .await?;
     let reason = payload
         .get("EscalateTodoList")
         .and_then(|v| v.get("reason"))
@@ -271,7 +296,14 @@ async fn resolve_target_list_escalation_command(
         .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
         .ok_or(crate::CommandError::NotFound(target_id))?;
     let current_verifier_id = current_verifier_for_escalation(state, &loaded.aggregate).await?;
-    let escalated_to = resolve_escalation_recipient(state, payload, "EscalateTargetList", actor, current_verifier_id).await?;
+    let escalated_to = resolve_escalation_recipient(
+        state,
+        payload,
+        "EscalateTargetList",
+        actor,
+        current_verifier_id,
+    )
+    .await?;
     let reason = payload
         .get("EscalateTargetList")
         .and_then(|v| v.get("reason"))
@@ -491,7 +523,10 @@ async fn require_verifier_authority(
         Some(uuid::Uuid::from_bytes(target.0).to_string())
     } else {
         let owner_uuid = uuid::Uuid::from_bytes(owner_id.0);
-        state.user_store.find_by_id(&owner_uuid.to_string()).await
+        state
+            .user_store
+            .find_by_id(&owner_uuid.to_string())
+            .await
             .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
             .and_then(|record| record.parent_user_id)
     };
@@ -500,17 +535,33 @@ async fn require_verifier_authority(
     let mut next_id = start_id;
     let mut visited = std::collections::HashSet::new();
     for _ in 0..32 {
-        let Some(user_id) = next_id else { break; };
-        if user_id == "__allfather__" || !visited.insert(user_id.clone()) { break; }
-        let Some(manager) = state.user_store.find_by_id(&user_id).await
-            .map_err(|e| crate::CommandError::Persistence(e.to_string()))? else { break; };
-        if !manager.is_active || manager.organization_id != actor_org { break; }
+        let Some(user_id) = next_id else {
+            break;
+        };
+        if user_id == "__allfather__" || !visited.insert(user_id.clone()) {
+            break;
+        }
+        let Some(manager) = state
+            .user_store
+            .find_by_id(&user_id)
+            .await
+            .map_err(|e| crate::CommandError::Persistence(e.to_string()))?
+        else {
+            break;
+        };
+        if !manager.is_active || manager.organization_id != actor_org {
+            break;
+        }
         if manager.user_id == actor_uuid {
-            let can_verify = matches!(manager.class,
+            let can_verify = matches!(
+                manager.class,
                 Some(security_application::UserClass::TopLevelManager)
-                | Some(security_application::UserClass::SeniorManager)
-                | Some(security_application::UserClass::TeamLeader));
-            if can_verify { return Ok(()); }
+                    | Some(security_application::UserClass::SeniorManager)
+                    | Some(security_application::UserClass::TeamLeader)
+            );
+            if can_verify {
+                return Ok(());
+            }
         }
         next_id = manager.parent_user_id;
     }
@@ -1020,8 +1071,13 @@ pub async fn command_route(
                 let command: todo_domain::TodoListCommand = if envelope.command_type
                     == "todo_list.EscalateTodoList"
                 {
-                    resolve_todo_list_escalation_command(&state, target_id, &envelope.payload, &actor)
-                        .await?
+                    resolve_todo_list_escalation_command(
+                        &state,
+                        target_id,
+                        &envelope.payload,
+                        &actor,
+                    )
+                    .await?
                 } else {
                     serde_json::from_value(envelope.payload.clone())
                         .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?
@@ -1059,8 +1115,13 @@ pub async fn command_route(
                 let command: todo_domain::TargetListCommand = if envelope.command_type
                     == "target_list.EscalateTargetList"
                 {
-                    resolve_target_list_escalation_command(&state, target_id, &envelope.payload, &actor)
-                        .await?
+                    resolve_target_list_escalation_command(
+                        &state,
+                        target_id,
+                        &envelope.payload,
+                        &actor,
+                    )
+                    .await?
                 } else {
                     serde_json::from_value(envelope.payload.clone())
                         .map_err(|e| crate::CommandError::Domain(format!("invalid payload: {e}")))?
@@ -1138,11 +1199,21 @@ pub async fn command_route(
         }
     };
 
-    if !was_duplicate && matches!(envelope.command_type.as_str(),
-        "staff_loan.DeclineStaffLoan" | "staff_loan.EndStaffLoanEarly") {
+    if !was_duplicate
+        && matches!(
+            envelope.command_type.as_str(),
+            "staff_loan.DeclineStaffLoan" | "staff_loan.EndStaffLoanEarly"
+        )
+    {
         if let Err(error) = notify_staff_loan_lifecycle(
-            &state, &actor, target_id, &envelope.command_type, &envelope.payload,
-        ).await {
+            &state,
+            &actor,
+            target_id,
+            &envelope.command_type,
+            &envelope.payload,
+        )
+        .await
+        {
             tracing::error!(command_type = %envelope.command_type, error, "staff-loan notification failed");
         }
     }
@@ -1169,13 +1240,19 @@ async fn notify_staff_loan_lifecycle(
     command_type: &str,
     payload: &Value,
 ) -> Result<(), String> {
-    let loaded = state.staff_loan_repo.load(&target_id).await
+    let loaded = state
+        .staff_loan_repo
+        .load(&target_id)
+        .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "staff loan not found after command".to_string())?;
     let aggregate = loaded.aggregate;
     let real_owner_id = parse_real_owner_id_field(&aggregate).map_err(|e| format!("{e:?}"))?;
     let real_owner_uuid = uuid::Uuid::from_bytes(real_owner_id.0);
-    let owner = state.user_store.find_by_id(&real_owner_uuid.to_string()).await
+    let owner = state
+        .user_store
+        .find_by_id(&real_owner_uuid.to_string())
+        .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "staff loan real owner not found".to_string())?;
     let organization_id = uuid::Uuid::from_bytes(actor.organization_id.0).to_string();
@@ -1184,22 +1261,36 @@ async fn notify_staff_loan_lifecycle(
     let mut recipients = std::collections::BTreeSet::<String>::new();
     let (title, message) = if command_type == "staff_loan.DeclineStaffLoan" {
         if let Some(parent_id) = owner.parent_user_id.as_deref() {
-            if let Some(parent) = state.user_store.find_by_id(parent_id).await.map_err(|e| e.to_string())? {
-                if parent.is_active && parent.organization_id == organization_id &&
-                    matches!(parent.class,
+            if let Some(parent) = state
+                .user_store
+                .find_by_id(parent_id)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                if parent.is_active
+                    && parent.organization_id == organization_id
+                    && matches!(
+                        parent.class,
                         Some(security_application::UserClass::TopLevelManager)
-                        | Some(security_application::UserClass::SeniorManager)
-                        | Some(security_application::UserClass::TeamLeader)) {
+                            | Some(security_application::UserClass::SeniorManager)
+                            | Some(security_application::UserClass::TeamLeader)
+                    )
+                {
                     recipients.insert(parent.user_id);
                 }
             }
         }
-        let reason = payload.get("DeclineStaffLoan").and_then(|v| v.get("reason"))
-            .and_then(Value::as_str).unwrap_or("No reason provided");
+        let reason = payload
+            .get("DeclineStaffLoan")
+            .and_then(|v| v.get("reason"))
+            .and_then(Value::as_str)
+            .unwrap_or("No reason provided");
         let staff_id = parse_object_id_field(&aggregate, "staff_user_id")
-            .map(|id| uuid::Uuid::from_bytes(id.0).to_string()).unwrap_or_else(|_| "unknown".to_string());
+            .map(|id| uuid::Uuid::from_bytes(id.0).to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
         let borrowing_manager_id = parse_object_id_field(&aggregate, "borrowing_manager_id")
-            .map(|id| uuid::Uuid::from_bytes(id.0).to_string()).unwrap_or_else(|_| "unknown".to_string());
+            .map(|id| uuid::Uuid::from_bytes(id.0).to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
         ("Staff loan request declined", format!(
             "A staff loan request was declined. Reason: {reason}. Loan: {source_id}. Staff member: {staff_id}. Borrowing manager: {borrowing_manager_id}. The interaction is available for oversight."
         ))
@@ -1254,15 +1345,22 @@ async fn notify_staff_loan_lifecycle(
 }
 
 fn parse_object_id_field(aggregate: &Value, field: &str) -> Result<ObjectId, crate::CommandError> {
-    let bytes = aggregate.get(field).and_then(Value::as_array).ok_or_else(|| {
-        crate::CommandError::Domain(format!("aggregate state missing '{field}' field"))
-    })?;
+    let bytes = aggregate
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            crate::CommandError::Domain(format!("aggregate state missing '{field}' field"))
+        })?;
     if bytes.len() != 16 {
-        return Err(crate::CommandError::Domain(format!("'{field}' field is not a 16-byte object id")));
+        return Err(crate::CommandError::Domain(format!(
+            "'{field}' field is not a 16-byte object id"
+        )));
     }
     let mut id = [0u8; 16];
     for (index, byte) in bytes.iter().enumerate() {
-        id[index] = byte.as_u64().and_then(|n| u8::try_from(n).ok())
+        id[index] = byte
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
             .ok_or_else(|| crate::CommandError::Domain(format!("invalid '{field}' byte")))?;
     }
     Ok(ObjectId(id))
