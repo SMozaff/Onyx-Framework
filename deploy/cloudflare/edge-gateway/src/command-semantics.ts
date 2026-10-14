@@ -294,7 +294,7 @@ export function validateCommandSemantics(
   if (semantics.special === "staff-loan-end-early") {
     return {
       allowed: true, nextStatus: "Ended",
-      statePatch: { ended_by: actorId ?? null, ended_at: new Date().toISOString() },
+      statePatch: { ended_by: actorId ?? null, ended_at: new Date().toISOString(), pending_extension_end_at: null },
     };
   }
   if (semantics.special === "team-precheck") {
