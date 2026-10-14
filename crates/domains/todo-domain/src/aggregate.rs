@@ -1680,22 +1680,48 @@ mod tests {
     }
 
     #[test]
-    fn extend_active_loan_succeeds() {
+    fn extension_request_requires_owner_approval() {
         let mut loan = active_staff_loan();
         let ctx = test_context();
         let original_end = loan.window().end_at;
         let new_end = Timestamp(original_end.0 + 86_400_000_000_000);
-        let events = loan
-            .decide(
-                StaffLoanCommand::ExtendStaffLoan {
-                    new_end_at: new_end,
-                },
-                &ctx,
-            )
-            .expect("extend must succeed");
-        apply_all(&mut loan, &events);
+        let request = loan.decide(
+            StaffLoanCommand::ExtendStaffLoan { new_end_at: new_end },
+            &ctx,
+        ).expect("borrowing manager extension request must succeed");
+        apply_all(&mut loan, &request);
+        assert_eq!(loan.status(), StaffLoanStatus::Active);
+        assert_eq!(loan.window().end_at, original_end);
+        assert!(loan.grants_approval_authority_to(loan.real_owner_id()));
+
+        let approval = loan.decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
+            .expect("real owner must be able to approve a pending extension");
+        apply_all(&mut loan, &approval);
         assert_eq!(loan.status(), StaffLoanStatus::Extended);
         assert_eq!(loan.window().end_at, new_end);
+        assert!(!loan.grants_approval_authority_to(loan.real_owner_id()));
+    }
+
+    #[test]
+    fn owner_can_decline_extension_without_ending_the_existing_loan() {
+        let mut loan = active_staff_loan();
+        let ctx = test_context();
+        let original_end = loan.window().end_at;
+        let request = loan.decide(
+            StaffLoanCommand::ExtendStaffLoan {
+                new_end_at: Timestamp(original_end.0 + 86_400_000_000_000),
+            },
+            &ctx,
+        ).expect("extension request must succeed");
+        apply_all(&mut loan, &request);
+        let decline = loan.decide(
+            StaffLoanCommand::DeclineStaffLoan { reason: "Coverage no longer needed".to_string() },
+            &ctx,
+        ).expect("owner can decline extension");
+        apply_all(&mut loan, &decline);
+        assert_eq!(loan.status(), StaffLoanStatus::Active);
+        assert_eq!(loan.window().end_at, original_end);
+        assert!(!loan.grants_approval_authority_to(loan.real_owner_id()));
     }
 
     #[test]
@@ -1752,15 +1778,15 @@ mod tests {
     fn end_extended_loan_early_also_succeeds() {
         let mut loan = active_staff_loan();
         let ctx = test_context();
-        let extend_events = loan
-            .decide(
-                StaffLoanCommand::ExtendStaffLoan {
-                    new_end_at: Timestamp(loan.window().end_at.0 + 86_400_000_000_000),
-                },
-                &ctx,
-            )
-            .expect("extend must succeed");
-        apply_all(&mut loan, &extend_events);
+        let requested_end = Timestamp(loan.window().end_at.0 + 86_400_000_000_000);
+        let request_events = loan.decide(
+            StaffLoanCommand::ExtendStaffLoan { new_end_at: requested_end },
+            &ctx,
+        ).expect("extension request must succeed");
+        apply_all(&mut loan, &request_events);
+        let approve_events = loan.decide(StaffLoanCommand::ApproveStaffLoan, &ctx)
+            .expect("extension must be approved before it changes the window");
+        apply_all(&mut loan, &approve_events);
 
         let end_events = loan
             .decide(StaffLoanCommand::EndStaffLoanEarly, &ctx)
