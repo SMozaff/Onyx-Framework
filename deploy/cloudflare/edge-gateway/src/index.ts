@@ -904,7 +904,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
           notificationRecipients.add(higherManagerId);
       }
       notificationTitle="Staff loan request declined";
-      notificationMessage=`A staff loan request was declined. Reason: ${String(payload.reason??"No reason provided")}. Staff member: ${String(loan.staff_user_id??"unknown")}; borrowing manager: ${String(loan.borrowing_manager_id??"unknown")}. Review the interaction for oversight.`;
+      notificationMessage=`A staff loan request was declined. Reason: ${String(payload.reason??"No reason provided")}. Staff member: ${canonicalUserId(loan.staff_user_id)??"unknown"}; borrowing manager: ${canonicalUserId(loan.borrowing_manager_id)??"unknown"}. Review the interaction for oversight.`;
     }
   }
   if(notificationTitle&&notificationMessage){
