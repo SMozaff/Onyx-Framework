@@ -13,7 +13,7 @@ function b64u(input: string | Uint8Array): string {
   const bytes = typeof input === "string" ? encoder.encode(input) : input;
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 async function signAccessToken(): Promise<string> {
   const payload = {
@@ -140,8 +140,9 @@ describe("Worker Cloud Relay route integration", () => {
     expect(forwarded?.headers.get("x-onyx-relay-target")).toBe(TARGET);
 
     const replay = new Request(`https://worker.test/api/relay/${TARGET}?ticket=${encodeURIComponent(ticketBody.ticket!)}&self=${SELF}`);
+    const replayGet = replay.headers.get.bind(replay.headers);
     replay.headers.get = ((name: string) =>
-      name.toLowerCase() === "upgrade" ? "websocket" : originalGet(name)) as typeof replay.headers.get;
+      name.toLowerCase() === "upgrade" ? "websocket" : replayGet(name)) as typeof replay.headers.get;
     const replayResponse = await worker.fetch(replay, env);
     expect(replayResponse.status).toBe(401);
     expect(await replayResponse.json()).toMatchObject({ error: "RELAY_TICKET_REPLAYED" });
