@@ -96,7 +96,7 @@ export const COMMAND_SEMANTICS: Readonly<Record<string, CommandSemantics>> = {
 
   "target_list.SubmitTargetList": { payload: noPayload, from: ["Draft"], to: "Submitted" },
   "target_list.RecordTeamLeaderPreCheck": { payload: { notes: string() }, from: ["Submitted"], to: "TeamLeaderPreChecked", special: "team-precheck" },
-  "target_list.VerifyTargetList": { payload: { outcome: { kind: "string", required: true, nonEmpty: true, oneOf: ["Flawless", "WithDeficiencies"] }, comment: string(false) }, disabled: "The Worker cannot yet prove the authoritative target-window end time and verifier relationship." },
+  "target_list.VerifyTargetList": { payload: { outcome: { kind: "string", required: true, nonEmpty: true, oneOf: ["Flawless", "WithDeficiencies"] }, comment: string(false) }, from: LIST_PENDING, to: "Verified" },
   "target_list.RejectTargetList": { payload: { reason: string() }, from: LIST_PENDING, to: "Rejected" },
   "target_list.EscalateTargetList": { payload: { reason: string(), escalated_to: string(false) }, stay: LIST_PENDING, special: "todo-escalation" },
 
