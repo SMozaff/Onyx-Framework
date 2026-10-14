@@ -113,8 +113,9 @@ pub enum TargetListCommand {
     },
     /// Submit the target for verification. Transitions `Draft` →
     /// `Submitted`. May be submitted before `time_window.end_at` is
-    /// reached; `VerifyTargetList` itself is what enforces the window
-    /// has actually closed (see `error::TargetError::WindowNotClosed`).
+    /// reached. An authorized manager may verify early when the
+    /// available evidence is sufficient; the fixed window remains
+    /// recorded for context but does not block that judgment.
     SubmitTargetList,
     /// Record an optional, non-gating Team Leader pre-check. Same
     /// semantics as `TodoListCommand::RecordTeamLeaderPreCheck`.
@@ -126,8 +127,8 @@ pub enum TargetListCommand {
     /// 2026-08-16: judged at verification time by the parent Manager —
     /// "Number two, I believe, is more reasonable" — not tracked live
     /// while the window is open. `outcome: Flawless` means the target
-    /// was hit; `WithDeficiencies` means it was missed. Only valid at
-    /// or after `time_window.end_at`.
+    /// was hit; `WithDeficiencies` means it was missed. May be used before or after `time_window.end_at` when the
+    /// authorized manager judges the available evidence sufficient.
     VerifyTargetList {
         /// Hit (`Flawless`) or missed (`WithDeficiencies`).
         outcome: VerificationOutcome,
