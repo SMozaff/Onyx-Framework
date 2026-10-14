@@ -1214,7 +1214,7 @@ async fn notify_staff_loan_lifecycle(
         let state_json = json!({
             "public_id": notification_id.to_string(),
             "title": title,
-            "message": message,
+            "message": message.clone(),
             "priority": "high",
             "status": "unacknowledged",
             "recipient_id": recipient_id,
