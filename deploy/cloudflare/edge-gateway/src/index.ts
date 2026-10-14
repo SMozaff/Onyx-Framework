@@ -548,6 +548,53 @@ async function queryRoute(request:Request,env:Env,session:Session){
   return json({query_id:envelope.query_id,data:page,has_more:hasMore,next_cursor:hasMore?String(nextOffset):null,total_count:totalCount,freshness:freshnessDto(allRows)});
 }
 
+function canonicalUserId(value:unknown):string|null{
+  if(typeof value==="string"&&value.trim())return value;
+  if(Array.isArray(value)&&value.length===16&&value.every(v=>Number.isInteger(v)&&Number(v)>=0&&Number(v)<=255)){
+    const hex=value.map(v=>Number(v).toString(16).padStart(2,"0")).join("");
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
+  return null;
+}
+function isManagerUser(user:Record<string,unknown>):boolean{
+  const role=String(user.role??"").toUpperCase();
+  const cls=String(user.class??"").toLowerCase().replace(/[ -]/g,"_");
+  return role==="ORGANIZATION_ADMIN"||["top_level_manager","senior_manager","team_leader","supervisor"].includes(cls);
+}
+async function resolveListEscalationTarget(
+  env:Env,session:Session,aggregateType:string,state:unknown,payload:Json
+):Promise<{target:string}|{error:string;status:number}>{
+  if(!state||typeof state!=="object"||Array.isArray(state))return {error:"RESOURCE_STATE_UNVERIFIED",status:409};
+  const value=state as Record<string,unknown>;
+  const ownerId=canonicalUserId(value.owner??value.owner_id??value.owner_user_id);
+  if(!ownerId)return {error:"RESOURCE_OWNER_UNVERIFIED",status:409};
+  const owner=await env.DB.prepare(
+    "SELECT id,parent_user_id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(ownerId,session.organization_id).first<Record<string,unknown>>();
+  if(!owner||Number(owner.is_active)!==1)return {error:"RESOURCE_OWNER_UNVERIFIED",status:409};
+  const priorTarget=value.status==="Escalated"?canonicalUserId(value.escalated_to):null;
+  const currentVerifierId=priorTarget??(typeof owner.parent_user_id==="string"?owner.parent_user_id:null);
+  if(!currentVerifierId||currentVerifierId==="__allfather__")return {error:"NO_ESCALATION_MANAGER",status:409};
+  if(session.sub!==currentVerifierId)return {error:"NOT_AUTHORIZED_VERIFIER",status:403};
+  const requested=payload.escalated_to;
+  let targetId:string|null=null;
+  if(typeof requested==="string"&&requested.trim()){
+    targetId=requested.trim();
+  }else{
+    const verifier=await env.DB.prepare(
+      "SELECT id,parent_user_id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+    ).bind(currentVerifierId,session.organization_id).first<Record<string,unknown>>();
+    if(!verifier||Number(verifier.is_active)!==1)return {error:"CURRENT_VERIFIER_UNVERIFIED",status:409};
+    targetId=typeof verifier.parent_user_id==="string"&&verifier.parent_user_id!=="__allfather__"?verifier.parent_user_id:null;
+  }
+  if(!targetId||targetId===currentVerifierId)return {error:"NO_ESCALATION_MANAGER",status:409};
+  const target=await env.DB.prepare(
+    "SELECT id,organization_id,role,class,is_active FROM users WHERE id=? AND organization_id=? LIMIT 1"
+  ).bind(targetId,session.organization_id).first<Record<string,unknown>>();
+  if(!target||Number(target.is_active)!==1||!isManagerUser(target))return {error:"INVALID_ESCALATION_TARGET",status:403};
+  return {target:String(target.id)};
+}
+
 async function commandRoute(request:Request,env:Env,session:Session){
   const envelope=await request.json().catch(()=>null) as Json|null;
   if(!envelope||typeof envelope.command_id!=="string"||!envelope.command_id||envelope.command_id.length>128||
@@ -589,7 +636,11 @@ async function commandRoute(request:Request,env:Env,session:Session){
       const actor=event.actor&&typeof event.actor==="object"?event.actor as Json:{};
       return event.organization_id===session.organization_id&&event.aggregate_id===targetId&&
         event.aggregate_type===targetType&&event.event_type===envelope.command_type&&
-        actor.user_id===session.sub&&JSON.stringify(event.payload)===JSON.stringify(commandPayload);
+        actor.user_id===session.sub&&(()=>{
+        const stored=event.payload&&typeof event.payload==="object"&&!Array.isArray(event.payload)?{...(event.payload as Json)}:{};
+        if((envelope.command_type==="todo_list.EscalateTodoList"||envelope.command_type==="target_list.EscalateTargetList")&&!Object.prototype.hasOwnProperty.call(commandPayload,"escalated_to"))delete stored.escalated_to;
+        return JSON.stringify(stored)===JSON.stringify(commandPayload);
+      })();
     });
     if(!sameActorReplay)return json({error:"IDEMPOTENCY_CONFLICT",category:"AUTHORITY",retryability:"NON_RETRYABLE"},409);
     return json(priorResult);
@@ -612,7 +663,13 @@ async function commandRoute(request:Request,env:Env,session:Session){
   if(existing&&(expected!==Number(existing.version)||expectedLifecycle!==Number(existing.lifecycle_epoch)||expectedAuthority!==Number(existing.authority_epoch)))
     return json({success:false,operation_id:envelope.operation_id,events:[],error:{code:"VERSION_CONFLICT",category:"CONCURRENCY",retryability:"RETRYABLE",safe_details:{expected,actual:existing.version},correlation_id:String(envelope.correlation_id??envelope.operation_id)}},409);
   const previousState=existing?safeJson(existing.state):null;
-  const semantic=validateCommandSemantics(envelope.command_type,previousState,commandPayload,session.sub);
+  let effectiveCommandPayload:Json=payload;
+  if(envelope.command_type==="todo_list.EscalateTodoList"||envelope.command_type==="target_list.EscalateTargetList"){
+    const escalation=await resolveListEscalationTarget(env,session,targetType,previousState,payload);
+    if("error" in escalation)return json({error:escalation.error,category:escalation.status===403?"AUTHORITY":"DOMAIN",retryability:"NON_RETRYABLE"},escalation.status);
+    effectiveCommandPayload={...payload,escalated_to:escalation.target};
+  }
+  const semantic=validateCommandSemantics(envelope.command_type,previousState,effectiveCommandPayload,session.sub);
   if(!semantic.allowed){
     const status=semantic.reason==="INVALID_COMMAND_PAYLOAD"?400:
       semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"||semantic.reason==="NO_PUBLISHED_VERSION"?409:403;
@@ -725,10 +782,10 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold"];
   const nextAuthority=existing&&authorityChangingActions.includes(envelope.command_type)?expectedAuthority+1:expectedAuthority;
   const eventPayload:Json=envelope.command_type==="EvaluatePolicy"&&semantic.commandResult
-    ?{...commandPayload,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
-    :commandPayload;
-  const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:commandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
-  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[event],result:{id:targetId,type:targetType,state:merged,...(semantic.commandResult?{command_result:semantic.commandResult}:{})}};
+    ?{...effectiveCommandPayload,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
+    :effectiveCommandPayload;
+  const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:effectiveCommandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
+  const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[{...event,payload:eventPayload}],result:{id:targetId,type:targetType,state:merged,...(semantic.commandResult?{command_result:semantic.commandResult}:{})}};
   // D1 batch is atomic. Conditional event/audit/idempotency inserts mean a
   // failed optimistic insert/update cannot leave partial side effects.
   const aggregateStatement=policy.effect==="create"
