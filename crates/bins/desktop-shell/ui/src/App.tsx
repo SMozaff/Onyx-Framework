@@ -26,7 +26,7 @@ export default function App() {
   const [session, setSession] = useState<SessionWire | null | undefined>(undefined);
   const [startupError, setStartupError] = useState<UserFacingError | null>(null);
   const [retryToken, setRetryToken] = useState(0);
-  const [loginServerAddress, setLoginServerAddress] = useState("http://127.0.0.1:3000");
+  const [loginServerAddress, setLoginServerAddress] = useState("https://onyx-framework.soheil-mozaffari.workers.dev");
 
   useEffect(() => {
     let cancelled = false;
