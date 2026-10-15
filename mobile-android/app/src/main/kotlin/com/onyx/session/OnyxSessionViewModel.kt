@@ -134,7 +134,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             val accessToken = tokenStore.readAccessToken()
             if (accessToken != null) {
                 try {
-                    val hierarchyJson = AuthApi(sessionPrefs.serverAddress).fetchHierarchyJson(accessToken)
+                    val hierarchyJson = AuthApi().fetchHierarchyJson(accessToken)
                     MobileCoreBridge.nativeSetHierarchy(handle, hierarchyJson)
                 } catch (error: Exception) {
                     Log.w(TAG, "Best-effort hierarchy refresh failed at startup", error)
@@ -160,11 +160,11 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
      * persist non-secret identity -> open mobile-core -> best-effort
      * hierarchy -> Ready.
      */
-    fun login(serverAddress: String, username: String, password: String) {
+    fun login(username: String, password: String) {
         viewModelScope.launch {
             _loginError.value = null
             try {
-                val authApi = AuthApi(serverAddress)
+                val authApi = AuthApi()
                 val result = authApi.login(username, password)
 
                 tokenStore.save(accessToken = result.accessToken, refreshToken = result.refreshToken)
