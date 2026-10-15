@@ -5,7 +5,6 @@ import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
-import { getServerAddress } from "@/utils/serverAddress";
 import {
   AllfatherOAuthError,
   beginAllfatherSignIn,
@@ -26,7 +25,6 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showServerSettings, setShowServerSettings] = useState(false);
   const [googleAuthReady, setGoogleAuthReady] = useState(false);
 
   useEffect(() => {
@@ -116,8 +114,7 @@ export default function Login() {
       navigate("/", { replace: true });
     } catch (err) {
       if (isNetworkError(err)) {
-        setError(`Could not reach the server at ${getServerAddress()}. Check the connection setup below, or confirm the server is running and reachable.`);
-        setShowServerSettings(true);
+        setError("Could not connect to the ONYX Cloud service. Check your internet connection and try again.");
       } else {
         setError(t("auth.adminInvalidCredentials"));
       }
@@ -191,16 +188,6 @@ export default function Login() {
             </div>
           )}
 
-          <button
-            type="button"
-            className="mt-5 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4"
-            onClick={() => setShowServerSettings((value) => !value)}
-            aria-expanded={showServerSettings}
-          >
-            {showServerSettings ? t("auth.hideServerAddress") : t("auth.serverConnectionSettings")}
-          </button>
-          {showServerSettings && <ConnectionSettings />}
-          <p className="mt-3 text-xs text-onyx-text-dim">Current API: {getServerAddress()}</p>
         </div>
       </section>
     </div>
