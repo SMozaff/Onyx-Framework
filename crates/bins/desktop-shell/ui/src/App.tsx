@@ -26,7 +26,6 @@ export default function App() {
   const [session, setSession] = useState<SessionWire | null | undefined>(undefined);
   const [startupError, setStartupError] = useState<UserFacingError | null>(null);
   const [retryToken, setRetryToken] = useState(0);
-  const [loginServerAddress, setLoginServerAddress] = useState("https://onyx-framework.soheil-mozaffari.workers.dev");
 
   useEffect(() => {
     let cancelled = false;
@@ -40,14 +39,10 @@ export default function App() {
           // Drop sessions bound to a retired endpoint; credentials must be
           // re-established against the single supported Cloud API.
           await invoke("logout");
-          setLoginServerAddress("https://onyx-framework.soheil-mozaffari.workers.dev");
           setSession(null);
           return;
         }
         setSession(storedSession);
-        if (storedSession !== null) {
-          setLoginServerAddress("https://onyx-framework.soheil-mozaffari.workers.dev");
-        }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -62,19 +57,17 @@ export default function App() {
   }, [retryToken]);
 
   const logout = useCallback(
-    async (nextLoginAddress?: string) => {
+    async () => {
       await invoke("logout");
-      setLoginServerAddress(nextLoginAddress ?? session?.serverAddress ?? loginServerAddress);
       setSession(null);
     },
-    [loginServerAddress, session],
+    [],
   );
 
   if (session === undefined) return <LoadingSession />;
   if (startupError !== null) return <StartupError error={startupError} onRetry={() => setRetryToken((attempt) => attempt + 1)} />;
   if (session === null) {
     return <Login onAuthenticated={(authenticated) => {
-      setLoginServerAddress(authenticated.serverAddress);
       setSession(authenticated);
     }} />;
   }
