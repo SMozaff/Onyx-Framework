@@ -39,11 +39,8 @@ const SESSION_KEY: &str = "auth.session";
 
 /// A persisted, authenticated identity for this device.
 ///
-/// `server_address` travels with the session (not just the tokens)
-/// because a session is only meaningful in the context of the server it
-/// was issued by — reusing tokens issued by one server against a
-/// different `server_address` would be a real correctness bug, not
-/// just unlikely.
+/// The session records the canonical ONYX Cloud API origin alongside its
+/// tokens so persisted credentials are not reused against a retired endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredSession {
     pub server_address: String,
@@ -109,9 +106,8 @@ struct LoginUserWire {
 /// `AppState` has also been rebuilt, so a session is never saved
 /// half-applied).
 ///
-/// `server_address` must already include the scheme
-/// (`http://192.168.0.250:3000`), matching the same convention used by
-/// `admin-shell`'s `utils/serverAddress.ts::isPlausibleServerAddress`.
+/// `server_address` is supplied by the desktop shell's immutable canonical
+/// ONYX Cloud API constant; distributed clients must not accept endpoint overrides.
 pub async fn authenticate(
     server_address: &str,
     username: &str,
