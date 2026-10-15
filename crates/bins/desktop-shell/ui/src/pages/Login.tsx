@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate } from "react-router-dom";
@@ -9,8 +9,7 @@ import { userFacingMessage } from "@/utils/userFacingError";
 import type { SessionWire } from "@/hooks/useSession";
 import onyxLogo from "@/assets/onyx-logo.png";
 
-const DEFAULT_SERVER_ADDRESS = "http://127.0.0.1:3000";
-type ConnectionStatus = "idle" | "testing" | "reachable" | "unreachable";
+const DEFAULT_SERVER_ADDRESS = "https://onyx-framework.soheil-mozaffari.workers.dev";
 
 export default function Login({
   initialServerAddress,
@@ -22,29 +21,17 @@ export default function Login({
   const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [serverAddress, setServerAddress] = useState(initialServerAddress || DEFAULT_SERVER_ADDRESS);
-  const [showServerSettings, setShowServerSettings] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
-  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
+  const serverAddress = DEFAULT_SERVER_ADDRESS;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    setServerAddress(initialServerAddress || DEFAULT_SERVER_ADDRESS);
-  }, [initialServerAddress]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
 
-    const normalizedAddress = normalizeServerAddress(serverAddress);
-    if (!isPlausibleServerAddress(normalizedAddress)) {
-      setError(t("auth.fullServerAddressRequired"));
-      setShowServerSettings(true);
-      return;
-    }
-
+    const normalizedAddress = DEFAULT_SERVER_ADDRESS;
     setLoading(true);
     try {
       const session = await invoke<SessionWire>("login", {
@@ -55,8 +42,7 @@ export default function Login({
     } catch (caught: unknown) {
       const shellError = isShellError(caught) ? caught : null;
       if (shellError?.kind === "auth" && !isCredentialRejection(shellError)) {
-        setError(t("auth.serverUnreachableMessage", { address: normalizedAddress }));
-        setShowServerSettings(true);
+        setError("Could not connect to the ONYX Cloud service. Check your internet connection and try again.");
       } else if (shellError?.kind === "auth") {
         setError(t("auth.invalidCredentials"));
       } else {
@@ -67,26 +53,6 @@ export default function Login({
     }
   }
 
-  async function testConnection() {
-    const normalizedAddress = normalizeServerAddress(serverAddress);
-    if (!isPlausibleServerAddress(normalizedAddress)) {
-      setConnectionStatus("unreachable");
-      setConnectionMessage(t("auth.fullServerAddressRequired"));
-      return;
-    }
-
-    setConnectionStatus("testing");
-    setConnectionMessage(null);
-    try {
-      const response = await fetch(`${normalizedAddress}/health`, { signal: AbortSignal.timeout(5_000) });
-      if (!response.ok) throw new Error(`server returned HTTP ${response.status}`);
-      setConnectionStatus("reachable");
-      setConnectionMessage(t("auth.serverReachableSaved"));
-    } catch {
-      setConnectionStatus("unreachable");
-      setConnectionMessage(t("auth.serverUnreachableNotSaved"));
-    }
-  }
 
   return (
     <div className="onyx-auth-shell flex flex-col lg:flex-row">
@@ -136,35 +102,13 @@ export default function Login({
             <p className="mt-1 text-[0.68rem] leading-4 text-onyx-text-dim">{t("auth.tokensProtectedNative")}</p>
           </div>
 
-          <button type="button" onClick={() => setShowServerSettings((open) => !open)} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4 hover:text-[#174d7b]" aria-expanded={showServerSettings}>
-            {showServerSettings ? t("auth.hideServerAddress") : t("auth.serverConnectionSettings")}
-          </button>
 
-          {showServerSettings && (
-            <div className="mt-3 rounded-lg border border-onyx-border bg-slate-50 p-3">
-              <label htmlFor="serverAddress" className="block text-xs font-bold text-onyx-text">{t("auth.serverAddress")}</label>
-              <p className="mt-1 text-[0.68rem] leading-4 text-onyx-text-dim">{t("auth.serverAddressExample")}</p>
-              <div className="mt-2 flex gap-2">
-                <input id="serverAddress" value={serverAddress} onChange={(event) => { setServerAddress(event.target.value); setConnectionStatus("idle"); setConnectionMessage(null); }} placeholder={DEFAULT_SERVER_ADDRESS} required className="min-w-0 flex-1 rounded-md border border-onyx-border bg-white px-2.5 py-2 text-xs text-onyx-text focus:border-onyx-accent focus:outline-none" />
-                <button type="button" onClick={() => void testConnection()} disabled={connectionStatus === "testing"} className="shrink-0 rounded-md border border-onyx-border bg-white px-3 py-2 text-xs font-bold text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50">
-                  {connectionStatus === "testing" ? t("auth.testing") : t("auth.test")}
-                </button>
-              </div>
-              {connectionMessage && <p className={`mt-2 text-[0.68rem] leading-4 ${connectionStatus === "unreachable" ? "text-onyx-status-blocked" : "text-onyx-status-approved"}`}>{connectionMessage}</p>}
-            </div>
-          )}
         </form>
       </section>
     </div>
   );
 }
 
-function normalizeServerAddress(value: string): string {
-  return value.trim().replace(/\/+$/, "");
-}
-function isPlausibleServerAddress(value: string): boolean {
-  try { const url = new URL(value); return (url.protocol === "http:" || url.protocol === "https:") && url.host.length > 0; } catch { return false; }
-}
 function isCredentialRejection(error: ShellError): boolean {
   return error.message === "Invalid username or password";
 }
