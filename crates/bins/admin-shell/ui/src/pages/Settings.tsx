@@ -199,16 +199,6 @@ function MobileAccessPanel() {
   );
 }
 
-/**
- * Lets an admin point this app at a different backend server without
- * rebuilding — added because `admin-shell` previously had the server
- * address hardcoded at build time (`VITE_API_BASE` env var / defaulted
- * to `127.0.0.1:3000`), which meant every install on every PC could
- * only ever talk to a server running on that same machine. See
- * `utils/serverAddress.ts` for the storage layer and
- * `api/client.ts`'s request interceptor for how this takes effect
- * immediately, with no restart required.
- */
 function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
   const { t } = useI18n();
   const [raw, setRaw] = useState("");
