@@ -1,13 +1,11 @@
 import { useSession } from "@/hooks/useSession";
 import { useI18n } from "@/i18n/I18nContext";
 
-const CLOUD_API = "https://onyx-framework.soheil-mozaffari.workers.dev";
-
 /** Account-only settings. The service endpoint is fixed for every Staff client. */
 export default function Settings({
   onRequireReauthentication,
 }: {
-  onRequireReauthentication: (nextLoginAddress: string) => Promise<void>;
+  onRequireReauthentication: () => Promise<void>;
 }) {
   const session = useSession();
   const { t } = useI18n();
@@ -25,7 +23,7 @@ export default function Settings({
         </p>
         <button
           type="button"
-          onClick={() => void onRequireReauthentication(CLOUD_API)}
+          onClick={() => void onRequireReauthentication()}
           className="mt-5 rounded-md border border-onyx-border px-3 py-1.5 text-sm font-medium text-onyx-text"
         >
           {t("auth.logOut")}
