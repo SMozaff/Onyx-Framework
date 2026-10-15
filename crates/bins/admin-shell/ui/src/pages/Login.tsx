@@ -3,7 +3,6 @@ import { useI18n } from "@/i18n/I18nContext";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
-import ConnectionSettings from "@/components/ConnectionSettings";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 import { getServerAddress } from "@/utils/serverAddress";
