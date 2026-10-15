@@ -29,9 +29,6 @@ class SessionPreferences(context: Context) {
         get() = prefs.getString(KEY_USERNAME, null)
         set(value) = prefs.edit().putString(KEY_USERNAME, value).apply()
 
-    /** Fixed Cloud API endpoint; legacy saved server addresses are ignored. */
-    val serverAddress: String = DEFAULT_SERVER_ADDRESS
-
     var hasRealSession: Boolean
         get() = prefs.getBoolean(KEY_HAS_REAL_SESSION, false)
         set(value) = prefs.edit().putBoolean(KEY_HAS_REAL_SESSION, value).apply()
@@ -61,7 +58,6 @@ class SessionPreferences(context: Context) {
             .remove(KEY_ORGANIZATION_ID)
             .remove(KEY_USER_ID)
             .remove(KEY_USERNAME)
-            .remove(KEY_SERVER_ADDRESS)
             .putBoolean(KEY_HAS_REAL_SESSION, false)
             .apply()
     }
@@ -71,10 +67,8 @@ class SessionPreferences(context: Context) {
         private const val KEY_ORGANIZATION_ID = "organization_id"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_USERNAME = "username"
-        private const val KEY_SERVER_ADDRESS = "server_address"
         private const val KEY_HAS_REAL_SESSION = "has_real_session"
         private const val KEY_RELAY_ENDPOINT = "relay_endpoint"
-        const val DEFAULT_SERVER_ADDRESS = "https://onyx-framework.soheil-mozaffari.workers.dev"
         const val DEFAULT_RELAY_ENDPOINT = "wss://relay.onyx.invalid/v1"
     }
 }
