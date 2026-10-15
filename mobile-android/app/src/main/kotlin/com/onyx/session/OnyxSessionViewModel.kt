@@ -134,7 +134,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             val accessToken = tokenStore.readAccessToken()
             if (accessToken != null) {
                 try {
-                    val hierarchyJson = AuthApi(sessionPrefs.serverAddress).fetchHierarchyJson(accessToken)
+                    val hierarchyJson = AuthApi().fetchHierarchyJson(accessToken)
                     MobileCoreBridge.nativeSetHierarchy(handle, hierarchyJson)
                 } catch (error: Exception) {
                     Log.w(TAG, "Best-effort hierarchy refresh failed at startup", error)
@@ -160,15 +160,14 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
      * persist non-secret identity -> open mobile-core -> best-effort
      * hierarchy -> Ready.
      */
-    fun login(serverAddress: String, username: String, password: String) {
+    fun login(username: String, password: String) {
         viewModelScope.launch {
             _loginError.value = null
             try {
-                val authApi = AuthApi(serverAddress)
+                val authApi = AuthApi()
                 val result = authApi.login(username, password)
 
                 tokenStore.save(accessToken = result.accessToken, refreshToken = result.refreshToken)
-                sessionPrefs.serverAddress = serverAddress
                 sessionPrefs.username = result.username
                 sessionPrefs.organizationId = result.organizationId
                 sessionPrefs.userId = result.userId
@@ -200,7 +199,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             val refreshToken = tokenStore.readRefreshToken()
             if (refreshToken != null) {
                 try {
-                    AuthApi(sessionPrefs.serverAddress).logout(refreshToken)
+                    AuthApi().logout(refreshToken)
                 } catch (_: Exception) {
                     // Best-effort, mirrors AuthApi.logout's own
                     // fail-open-locally reasoning -- local state is
@@ -229,7 +228,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             while (true) {
                 val refreshToken = tokenStore.readRefreshToken() ?: return@launch
                 try {
-                    val result = AuthApi(sessionPrefs.serverAddress).refresh(refreshToken)
+                    val result = AuthApi().refresh(refreshToken)
                     tokenStore.save(accessToken = result.accessToken, refreshToken = result.refreshToken)
                     // Refresh at 80% of the token's real TTL, the same
                     // "well inside the TTL, not only reactively after a

@@ -53,13 +53,16 @@ class RefreshResult(val accessToken: String, val refreshToken: String, val expir
  * `MobileCoreBridge.nativeNew`/`nativeSetHierarchy`, exactly mirroring
  * Dart's `ffi_login_screen.dart` sequencing.
  */
-class AuthApi(private val serverAddress: String) {
+class AuthApi {
+    companion object {
+        private const val CLOUD_API_BASE = "https://onyx-framework.soheil-mozaffari.workers.dev"
+    }
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private fun url(path: String) = serverAddress.trimEnd('/') + path
+    private fun url(path: String) = CLOUD_API_BASE + path
 
     /**
      * Throws [MobileAccessRestrictedException] for that specific server

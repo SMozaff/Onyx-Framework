@@ -24,22 +24,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.onyx.session.SessionPreferences
-
-private const val CLOUD_DEFAULT_SERVER_ADDRESS = "https://onyx-framework.soheil-mozaffari.workers.dev"
-
-/** Every Android session uses the single deployed ONYX Cloud API. */
-fun defaultServerAddressFor(preferences: SessionPreferences): String = CLOUD_DEFAULT_SERVER_ADDRESS
 
 /** Real login screen using the single deployed ONYX Cloud API. */
 @Composable
 fun LoginScreen(
-    defaultServerAddress: String,
     isLoggingIn: Boolean,
     errorMessage: String?,
-    onLogin: (serverAddress: String, username: String, password: String) -> Unit,
+    onLogin: (username: String, password: String) -> Unit,
 ) {
-    val serverAddress = CLOUD_DEFAULT_SERVER_ADDRESS
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
@@ -59,7 +51,7 @@ fun LoginScreen(
             androidx.compose.foundation.layout.Spacer(Modifier.padding(6.dp))
             OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, modifier = Modifier.fillMaxWidth(), singleLine = true, visualTransformation = PasswordVisualTransformation())
             androidx.compose.foundation.layout.Spacer(Modifier.padding(12.dp))
-            Button(onClick = { onLogin(serverAddress, username.trim(), password) }, enabled = !isLoggingIn && username.isNotBlank() && password.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { onLogin(username.trim(), password) }, enabled = !isLoggingIn && username.isNotBlank() && password.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
                 if (isLoggingIn) CircularProgressIndicator(modifier = Modifier.padding(2.dp)) else Text("Sign in")
             }
         }

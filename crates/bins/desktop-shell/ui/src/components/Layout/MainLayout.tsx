@@ -156,7 +156,6 @@ export default function MainLayout({ children, onLogout }: { children: ReactNode
           </div>
           <div className="border-t border-white/15 px-2 pt-3">
             <p className="truncate text-xs font-semibold text-white" title={session.username}>{session.username}</p>
-            <p className="mt-1 truncate text-[0.64rem] text-sky-100/65" title={session.serverAddress}>{session.serverAddress}</p>
             <button
               type="button"
               onClick={() => void logout()}

@@ -23,11 +23,9 @@ import com.onyx.controller.OnyxController
 import com.onyx.p2p.P2pViewModel
 import com.onyx.session.OnyxSessionViewModel
 import com.onyx.session.OnyxUiState
-import com.onyx.session.SessionPreferences
 import com.onyx.ui.AppShell
 import com.onyx.ui.LoginScreen
 import com.onyx.ui.StartupErrorScreen
-import com.onyx.ui.defaultServerAddressFor
 
 /**
  * The real startup entry point: renders whichever screen
@@ -58,11 +56,10 @@ fun OnyxRoot(viewModel: OnyxSessionViewModel) {
             when (val current = state) {
                 is OnyxUiState.Loading -> LoadingScreen()
                 is OnyxUiState.NeedsLogin -> LoginScreen(
-                    defaultServerAddress = defaultServerAddressFor(SessionPreferences(context)),
                     isLoggingIn = false,
                     errorMessage = loginError,
-                    onLogin = { serverAddress, username, password ->
-                        viewModel.login(serverAddress, username, password)
+                    onLogin = { username, password ->
+                        viewModel.login(username, password)
                     },
                 )
                 is OnyxUiState.StartupError -> StartupErrorScreen(
