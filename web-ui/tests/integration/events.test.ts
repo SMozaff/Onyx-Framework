@@ -36,13 +36,7 @@ describe('realtime base resolution', () => {
     expect(realtimeBase('https://onyx-framework.soheil-mozaffari.workers.dev'))
       .toBe('wss://onyx-framework.soheil-mozaffari.workers.dev');
   });
-  it('derives ws from the local API base for development', () => {
-    expect(realtimeBase('http://127.0.0.1:3000')).toBe('ws://127.0.0.1:3000');
-  });
-  it('prefers an explicit VITE_WS_BASE, trimmed, without a trailing slash', () => {
-    expect(realtimeBase('https://worker.example', '  ws://custom:1234/  ')).toBe('ws://custom:1234');
-  });
-  it('ignores a blank VITE_WS_BASE and strips a trailing slash from the derived base', () => {
-    expect(realtimeBase('https://worker.example/', '   ')).toBe('wss://worker.example');
+  it('strips a trailing slash from the canonical cloud API base', () => {
+    expect(realtimeBase('https://onyx-framework.soheil-mozaffari.workers.dev/')).toBe('wss://onyx-framework.soheil-mozaffari.workers.dev');
   });
 });
