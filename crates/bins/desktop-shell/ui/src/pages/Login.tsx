@@ -12,7 +12,6 @@ import onyxLogo from "@/assets/onyx-logo.png";
 const DEFAULT_SERVER_ADDRESS = "https://onyx-framework.soheil-mozaffari.workers.dev";
 
 export default function Login({
-  initialServerAddress,
   onAuthenticated,
 }: {
   initialServerAddress: string;
