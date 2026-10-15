@@ -364,15 +364,14 @@ async fn get_current_session(
 /// login — they are properties of this physical device/install, not of
 /// who happens to be logged in, and a second login (e.g. after logout)
 /// should not fragment sync history for data already on this machine.
-/// The three real input values `login` needs from the caller, grouped
+/// The two real input values `login` needs from the caller, grouped
 /// into one struct so the command itself stays under Clippy's
 /// `too_many_arguments` limit (7) once the five injected Tauri state
 /// handles are also counted — confirmed via a real `cargo clippy
 /// --workspace -- -D warnings` failure (`8/7`) before this existed, not
 /// a speculative refactor. `#[serde(rename_all = "camelCase")]` so the
-/// frontend's `invoke("login", { credentials: { serverAddress, ... } })`
-/// call (camelCase, matching every other Tauri command's convention in
-/// this file) deserializes without a separate rename per field.
+/// frontend's `invoke("login", { credentials: { username, password } })` call
+/// deserializes using the same camelCase convention as other Tauri commands.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoginRequest {
