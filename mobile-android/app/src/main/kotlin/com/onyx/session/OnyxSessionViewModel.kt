@@ -168,7 +168,6 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
                 val result = authApi.login(username, password)
 
                 tokenStore.save(accessToken = result.accessToken, refreshToken = result.refreshToken)
-                sessionPrefs.serverAddress = serverAddress
                 sessionPrefs.username = result.username
                 sessionPrefs.organizationId = result.organizationId
                 sessionPrefs.userId = result.userId
