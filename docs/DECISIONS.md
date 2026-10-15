@@ -2870,3 +2870,24 @@ pull); `p2p/P2pChannel.kt` (deferred handshake);
    and append-only log entries use deterministic ordered storage. RGA traversal orders
    concurrent siblings by `ElementId` and visits every branch, preventing merge-order
    dependent loss of sibling subtrees.
+
+
+## Cloud-Only Client Connectivity
+
+**Ruling:** All installed and browser-based ONYX clients (Admin desktop, Staff desktop,
+Android, and PWA) use the single deployed ONYX Cloud API with Supabase Cloud
+authentication. Clients must not expose local-backend selection, editable API
+base URLs, local-server settings, or local-backend guidance.
+
+- Canonical API: `https://onyx-framework.soheil-mozaffari.workers.dev`
+- Localhost/loopback endpoints may be used only by developer tooling and isolated
+  CI tests; they must not be a runtime fallback or configurable endpoint in a
+  distributed client.
+- OAuth return handling must use the supported desktop callback/deep-link flow;
+  it must not require a development server at `localhost:3000`.
+- Offline PWA behavior must not silently redirect API calls to a loopback service.
+  Any offline capability must be explicit and compatible with the cloud-only API
+  contract.
+- This ruling applies across Admin, Staff, Android, and PWA. A UI-only removal is
+  insufficient: endpoint selection, persisted overrides, build-time defaults,
+  OAuth redirects, and tests must all enforce the same contract.
