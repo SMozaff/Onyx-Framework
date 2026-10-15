@@ -18,7 +18,6 @@
     <string name="auth_sign_out">Sign out</string>
     <string name="auth_username">Username</string>
     <string name="auth_password">Password</string>
-    <string name="auth_server_address">Server address</string>
     <string name="auth_use_credentials">Use your organization credentials.</string>
 
     <!-- Actions -->
