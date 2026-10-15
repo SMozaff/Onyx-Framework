@@ -1,12 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
-const configuredApiBase = import.meta.env.VITE_API_BASE?.trim();
-export const API_BASE = (configuredApiBase || (
-  import.meta.env.PROD
-    ? 'https://onyx-framework.soheil-mozaffari.workers.dev'
-    : 'http://127.0.0.1:3000'
-)).replace(/\/+$/, '');
+export const API_BASE = 'https://onyx-framework.soheil-mozaffari.workers.dev';
 
 type RetriableRequestConfig = AxiosRequestConfig & { _onyxRetried?: boolean };
 type RefreshResponse = { access_token: string; refresh_token: string; user: NonNullable<ReturnType<typeof useAuthStore.getState>['user']> };

@@ -36,16 +36,15 @@ Read-only ObserverClient for the `mobile_observer` client class, per
   `transitionLifecycle`, or any `/api/command` / admin mutation surface —
   by construction. See the contract's "must not expose" list.
 
-## Environment
+## Deployment configuration
+
+The PWA uses the single deployed ONYX Cloud API. Runtime users cannot select or configure a backend.
 
 ```bash
-VITE_API_BASE=http://127.0.0.1:3000   # api-server base (default; same as web-ui)
-VITE_ENABLE_SW_DEV=true               # register the SW under `vite dev`
 VITE_VAPID_PUBLIC_KEY=<base64url p-256 public key>
 ```
 
-`VITE_API_BASE` lets an iPhone on the LAN override to
-`http://<machine-LAN-IP>:3000`. `VITE_VAPID_PUBLIC_KEY` must be the VAPID
+`VITE_VAPID_PUBLIC_KEY` must be the VAPID
 *public* key published by the deployment (the private key lives only on the
 delivery worker: `ONYX_VAPID_PRIVATE_KEY_PKCS8_BASE64` in `crates/bins/
 worker`, i.e. the PKCS#8 DER base64url from `npx web-push

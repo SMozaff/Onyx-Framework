@@ -6,14 +6,6 @@ import { useQuery } from "@/hooks/useQuery";
 import { describeError } from "@/utils/errorHandler";
 import { useAuthStore } from "@/stores/authStore";
 import { useI18n } from "@/i18n/I18nContext";
-import {
-  getBackendAddress,
-  getBackendEnvironment,
-  setBackendEnvironment,
-  setServerAddress,
-  isPlausibleServerAddress,
-  isSecureEnoughForProduction,
-} from "@/utils/serverAddress";
 
 /**
  * Policy administration — ported from `desktop-shell`'s `Settings.tsx`
@@ -54,8 +46,6 @@ export default function Settings() {
       <p className="mt-1 text-sm text-onyx-text-dim">
         {t("settings.organizationPolicyDescription")}
       </p>
-
-      <ServerConnectionSettings />
 
       <IdLookup onLookup={(id) => navigate(`/settings/${id}`)} />
       <CreatePolicyForm onCreated={(id) => navigate(`/settings/${id}`)} />
@@ -219,79 +209,6 @@ function MobileAccessPanel() {
  * `api/client.ts`'s request interceptor for how this takes effect
  * immediately, with no restart required.
  */
-function ServerConnectionSettings() {
-  const { t } = useI18n();
-  const [environment, setEnvironment] = useState<"local" | "cloud">(() => getBackendEnvironment());
-  const [value, setValue] = useState(() => getBackendAddress());
-  const [status, setStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
-  const [message, setMessage] = useState<string | null>(null);
-
-  function chooseEnvironment(next: "local" | "cloud") {
-    setEnvironment(next);
-    setValue(getBackendAddress(next));
-    setStatus("idle");
-    setMessage(null);
-  }
-
-  async function testConnection(address: string): Promise<{ ok: boolean; message?: string }> {
-    const endpoint = `${address.trim().replace(/\/+$/, "")}/health`;
-    try {
-      const response = await fetch(endpoint, { signal: AbortSignal.timeout(8_000), mode: "cors" });
-      if (!response.ok) {
-        return { ok: false, message: `Health endpoint returned HTTP ${response.status}. Check the deployed API and its health route.` };
-      }
-      return { ok: true };
-    } catch (error) {
-      const timedOut = error instanceof DOMException && error.name === "TimeoutError";
-      return {
-        ok: false,
-        message: timedOut
-          ? "The health check timed out after 8 seconds."
-          : "The API may be running, but this app could not read its health response. Check CORS: ONYX_CORS_ALLOWED_ORIGINS must include this app's exact origin. DNS, TLS, or network failures can produce the same browser error.",
-      };
-    }
-  }
-
-  async function handleSave() {
-    if (!isPlausibleServerAddress(value)) {
-      setStatus("error"); setMessage(t("settings.invalidServerAddress")); return;
-    }
-    if (!isSecureEnoughForProduction(value)) {
-      setStatus("error");
-      setMessage(t("settings.cloudSecurityRequirement"));
-      return;
-    }
-    setStatus("testing"); setMessage(null);
-    const result = await testConnection(value);
-    if (!result.ok) {
-      setStatus("error");
-      setMessage(result.message ?? t("settings.backendUnreachable"));
-      return;
-    }
-    setBackendEnvironment(environment);
-    setServerAddress(value);
-    setStatus("ok");
-    setMessage(t("settings.backendSaved", { environment: environment === "cloud" ? "Cloud" : "Local" }));
-  }
-
-  return (
-    <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-      <h2 className="text-sm font-semibold text-onyx-text">{t("settings.backendConnection")}</h2>
-      <p className="mt-1 text-xs text-onyx-text-dim">{t("settings.backendConnectionDescription")}</p>
-      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t("settings.backendEnvironment")}>
-        <button type="button" aria-pressed={environment === "local"} onClick={() => chooseEnvironment("local")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "local" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>{t("settings.localBackend")}</button>
-        <button type="button" aria-pressed={environment === "cloud"} onClick={() => chooseEnvironment("cloud")} className={`rounded-md border px-3 py-1.5 text-sm ${environment === "cloud" ? "border-onyx-accent bg-onyx-accent/10 text-onyx-text" : "border-onyx-border text-onyx-text-dim"}`}>{t("settings.cloudBackend")}</button>
-      </div>
-      <label htmlFor="backend-address" className="mt-3 block text-xs font-medium text-onyx-text-dim">{environment === "cloud" ? t("settings.cloudApiUrl") : t("settings.localApiUrl")}</label>
-      <div className="mt-1 flex flex-wrap gap-2">
-        <input id="backend-address" value={value} onChange={(e) => { setValue(e.target.value); setStatus("idle"); setMessage(null); }} placeholder={environment === "cloud" ? "https://onyx-api-docker.onrender.com" : "http://127.0.0.1:3000"} className="min-w-0 flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none" />
-        <button type="button" onClick={() => void handleSave()} disabled={status === "testing"} className="rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{status === "testing" ? t("settings.checking") : t("settings.testAndSave")}</button>
-      </div>
-      {message && <p role="status" className={`mt-2 text-xs ${status === "error" ? "text-onyx-status-blocked" : "text-onyx-text-dim"}`}>{message}</p>}
-    </div>
-  );
-}
-
 function IdLookup({ onLookup }: { onLookup: (id: string) => void }) {
   const { t } = useI18n();
   const [raw, setRaw] = useState("");
