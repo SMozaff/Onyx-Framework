@@ -17,6 +17,11 @@ import android.content.Context
 class SessionPreferences(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
 
+    init {
+        // Delete the retired per-device server override from previous app versions.
+        prefs.edit().remove(LEGACY_KEY_SERVER_ADDRESS).apply()
+    }
+
     var organizationId: String?
         get() = prefs.getString(KEY_ORGANIZATION_ID, null)
         set(value) = prefs.edit().putString(KEY_ORGANIZATION_ID, value).apply()
@@ -68,6 +73,7 @@ class SessionPreferences(context: Context) {
         private const val KEY_USER_ID = "user_id"
         private const val KEY_USERNAME = "username"
         private const val KEY_HAS_REAL_SESSION = "has_real_session"
+        private const val LEGACY_KEY_SERVER_ADDRESS = "server_address"
         private const val KEY_RELAY_ENDPOINT = "relay_endpoint"
         const val DEFAULT_RELAY_ENDPOINT = "wss://relay.onyx.invalid/v1"
     }
