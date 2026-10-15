@@ -16,7 +16,6 @@
     <string name="auth_sign_out">خروج</string>
     <string name="auth_username">نام کاربری</string>
     <string name="auth_password">گذرواژه</string>
-    <string name="auth_server_address">نشانی سرور</string>
     <string name="auth_use_credentials">از اعتبار سازمانی خود استفاده کنید.</string>
 
     <string name="action_save">ذخیره</string>
