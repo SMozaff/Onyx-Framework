@@ -169,6 +169,50 @@ export function generateState(deps: OAuthDeps = {}): string {
  * `@supabase/auth-js`'s `_getUrlForProvider`: `provider`, `redirect_to`, then
  * the PKCE challenge, then `apikey`. Our CSRF nonce rides inside `redirect_to`.
  */
+/**
+ * Resolves the callback URI without allowing a packaged build to silently
+ * fall back to a local development server. Linux/macOS Tauri uses
+ * tauri://localhost; Windows Tauri may use http://tauri.localhost.
+ *
+ * Supabase Auth must separately allow the resulting URI in its redirect URL
+ * configuration. This guard fails closed rather than sending users to a
+ * loopback development server such as localhost:3000.
+ */
+export function resolveAllfatherRedirectTo(
+  origin: string,
+  pathname: string,
+  productionBuild: boolean,
+): string {
+  let target: URL;
+  try {
+    target = new URL(pathname, origin);
+  } catch {
+    throw new AllfatherOAuthError("MISSING_CONFIG", "desktop callback URI is invalid");
+  }
+
+  const isLoopbackHost =
+    target.hostname === "localhost" ||
+    target.hostname === "127.0.0.1" ||
+    target.hostname === "[::1]" ||
+    target.hostname === "::1";
+  const isTauriOrigin =
+    (target.protocol === "tauri:" && target.hostname === "localhost") ||
+    (target.protocol === "http:" && target.hostname === "tauri.localhost");
+
+  if (
+    productionBuild &&
+    ((isLoopbackHost && !isTauriOrigin) ||
+      (target.protocol !== "https:" && !isTauriOrigin))
+  ) {
+    throw new AllfatherOAuthError(
+      "MISSING_CONFIG",
+      "packaged desktop sign-in cannot use a local development callback",
+    );
+  }
+
+  return `${target.origin}${target.pathname}`;
+}
+
 export function buildAuthorizeUrl(
   options: AllfatherConfig & {
     redirectTo: string;
