@@ -36,9 +36,17 @@ export default function App() {
     void invoke<SessionWire | null>("get_current_session")
       .then((storedSession) => {
         if (cancelled) return;
+        if (storedSession !== null && storedSession.serverAddress !== "https://onyx-framework.soheil-mozaffari.workers.dev") {
+          // Drop sessions bound to a retired endpoint; credentials must be
+          // re-established against the single supported Cloud API.
+          await invoke("logout");
+          setLoginServerAddress("https://onyx-framework.soheil-mozaffari.workers.dev");
+          setSession(null);
+          return;
+        }
         setSession(storedSession);
         if (storedSession !== null) {
-          setLoginServerAddress(storedSession.serverAddress);
+          setLoginServerAddress("https://onyx-framework.soheil-mozaffari.workers.dev");
         }
       })
       .catch((error: unknown) => {
