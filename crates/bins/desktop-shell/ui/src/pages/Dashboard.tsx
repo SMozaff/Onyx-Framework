@@ -6,7 +6,7 @@ import { useSession } from "@/hooks/useSession";
 import { useI18n } from "@/i18n/I18nContext";
 
 export default function Dashboard() {
-  const { organizationIdText, serverAddress } = useSession();
+  const { organizationIdText } = useSession();
   const { t } = useI18n();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -76,9 +76,6 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      <p className="mt-8 text-xs text-onyx-text-dim">
-        {t("dashboard.connectedTo")} {serverAddress} {t("dashboard.forOrganization")} {organizationIdText}.
-      </p>
     </div>
   );
 }
