@@ -1,15 +1,12 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../stores/authStore';
-import { getServerAddress, isSecureEnoughForProduction } from '../utils/serverAddress';
+import { getServerAddress } from '../utils/serverAddress';
 
 type RetriableRequestConfig = AxiosRequestConfig & { _onyxRetried?: boolean };
 type RefreshResponse = { access_token: string; refresh_token: string; user: NonNullable<ReturnType<typeof useAuthStore.getState>['user']> };
 let refreshInFlight: Promise<boolean> | null = null;
 
-/**
- * Resolve the configurable backend URL on every request so changing the
- * connection settings takes effect immediately.
- */
+/** All Admin requests use the single deployed ONYX Cloud API. */
 export const apiClient = axios.create({
   timeout: 30_000,
   headers: { 'Content-Type': 'application/json' },
@@ -17,13 +14,6 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config) => {
   const address = getServerAddress();
-  if (!isSecureEnoughForProduction(address)) {
-    return Promise.reject(
-      new Error(
-        `Refusing to send a request to ${address}: only https:// (or http://127.0.0.1) is allowed. Update the server address in Settings.`,
-      ),
-    );
-  }
   config.baseURL = address;
   const token = useAuthStore.getState().accessToken;
   // Preserve explicit provider credentials for the Supabase -> ONYX exchange.
@@ -36,7 +26,7 @@ apiClient.interceptors.request.use((config) => {
 async function refreshSession(): Promise<boolean> {
   const refreshToken = useAuthStore.getState().refreshToken;
   const address = getServerAddress().replace(/\/+$/, '');
-  if (!refreshToken || !isSecureEnoughForProduction(address)) return false;
+  if (!refreshToken) return false;
   try {
     const response = await axios.post<RefreshResponse>(
       `${address}/api/auth/refresh`,
