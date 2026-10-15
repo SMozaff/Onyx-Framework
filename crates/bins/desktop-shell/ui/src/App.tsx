@@ -73,7 +73,7 @@ export default function App() {
   if (session === undefined) return <LoadingSession />;
   if (startupError !== null) return <StartupError error={startupError} onRetry={() => setRetryToken((attempt) => attempt + 1)} />;
   if (session === null) {
-    return <Login initialServerAddress={loginServerAddress} onAuthenticated={(authenticated) => {
+    return <Login onAuthenticated={(authenticated) => {
       setLoginServerAddress(authenticated.serverAddress);
       setSession(authenticated);
     }} />;
