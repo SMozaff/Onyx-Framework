@@ -9,18 +9,15 @@ import { userFacingMessage } from "@/utils/userFacingError";
 import type { SessionWire } from "@/hooks/useSession";
 import onyxLogo from "@/assets/onyx-logo.png";
 
-const DEFAULT_SERVER_ADDRESS = "https://onyx-framework.soheil-mozaffari.workers.dev";
 
 export default function Login({
   onAuthenticated,
 }: {
-  initialServerAddress: string;
   onAuthenticated: (session: SessionWire) => void;
 }) {
   const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const serverAddress = DEFAULT_SERVER_ADDRESS;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -30,11 +27,10 @@ export default function Login({
     event.preventDefault();
     setError(null);
 
-    const normalizedAddress = DEFAULT_SERVER_ADDRESS;
     setLoading(true);
     try {
       const session = await invoke<SessionWire>("login", {
-        credentials: { serverAddress: normalizedAddress, username, password },
+        credentials: { username, password },
       });
       onAuthenticated(session);
       navigate("/", { replace: true });
