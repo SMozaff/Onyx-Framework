@@ -31,7 +31,7 @@ function fromShellError(error: ShellError): UserFacingError {
     case "storage":
       return { code: "SESSION_UNAVAILABLE", title: "Secure session unavailable", message: "The secure session store is unavailable on this device. Confirm the device credential service is available, then retry.", retryable: true, action: "retry" };
     case "auth":
-      return { code: "INVALID_CREDENTIALS", title: "Sign-in could not be completed", message: "Check your username, password, and server address, then try again.", retryable: true, action: "edit-input" };
+      return { code: "INVALID_CREDENTIALS", title: "Sign-in could not be completed", message: "Check your username and password, then try again. If the problem continues, check your connection to ONYX Cloud.", retryable: true, action: "edit-input" };
     case "invalidArgument":
       return { code: "VALIDATION_FAILED", title: "Check the information provided", message: "The information could not be validated. Review it and try again.", retryable: false, action: "edit-input" };
     case "query":
