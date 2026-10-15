@@ -10,6 +10,7 @@ import {
   beginAllfatherSignIn,
   completeAllfatherCallback,
   parseCallback,
+  resolveAllfatherRedirectTo,
   stripOAuthParams,
 } from "@/auth/allfatherOAuth";
 
@@ -92,7 +93,7 @@ export default function Login() {
     void beginAllfatherSignIn({
       supabaseUrl,
       publishableKey,
-      redirectTo: window.location.origin + window.location.pathname,
+      redirectTo: resolveAllfatherRedirectTo(window.location.origin, window.location.pathname, import.meta.env.PROD),
     }).then(({ authorizeUrl }) => {
       window.location.assign(authorizeUrl);
     }).catch((err: unknown) => {
