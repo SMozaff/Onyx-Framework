@@ -34,7 +34,7 @@ export default function App() {
     setSession(undefined);
 
     void invoke<SessionWire | null>("get_current_session")
-      .then((storedSession) => {
+      .then(async (storedSession) => {
         if (cancelled) return;
         if (storedSession !== null && storedSession.serverAddress !== "https://onyx-framework.soheil-mozaffari.workers.dev") {
           // Drop sessions bound to a retired endpoint; credentials must be
