@@ -41,7 +41,7 @@ fn start_allfather_oauth(app: AppHandle, authorize_url: String) -> Result<(), St
     if !authorize_url.starts_with("https://")
         || !authorize_url.contains("/auth/v1/authorize?")
         || !authorize_url.contains("redirect_to=http%3A%2F%2F127.0.0.1%3A17645%2Fauth%2Fcallback")
-        || authorize_url.contains('\\r') || authorize_url.contains('\\n')
+        || authorize_url.contains('\r') || authorize_url.contains('\n')
     {
         return Err("Rejected invalid All-Father authorization URL".into());
     }
