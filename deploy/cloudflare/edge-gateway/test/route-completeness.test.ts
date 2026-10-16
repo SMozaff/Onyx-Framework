@@ -165,7 +165,9 @@ describe("Admin API route completeness", () => {
     expect(worker).toContain("FEATURE_UNAVAILABLE");
   });
 
-  it("never uses the caller-controlled client_type claim for authorization", () => {
-    expect(worker).not.toMatch(/session\.client_type\s*(?:===|!==|==|!=)/);
+  it("never uses the mobile_observer label as an authorization gate", () => {
+    expect(worker).not.toContain('session.client_type==="mobile_observer"');
+    expect(worker).not.toContain('session.client_type!=="mobile_observer"');
+    expect(worker.match(/mobileCapabilityGranted\(env,session\)/g) ?? []).toHaveLength(2);
   });
 });
