@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { SyncStatus } from "@/types/onyx";
-import { useSession } from "@/hooks/useSession";
 import { useI18n } from "@/i18n/I18nContext";
 
 export default function Dashboard() {
-  const { organizationIdText } = useSession();
   const { t } = useI18n();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
