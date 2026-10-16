@@ -59,6 +59,6 @@ describe('normalizeError', () => {
 
 describe('api base url', () => {
   it('defaults to the shared web-ui default', () => {
-    expect(API_BASE).toBe('http://127.0.0.1:3000');
+    expect(API_BASE).toBe('https://onyx-framework.soheil-mozaffari.workers.dev');
   });
 });
