@@ -17,7 +17,7 @@ function signAccessToken() {
     username: "relay-test-staff",
     organization_id: organizationId,
     is_admin: false,
-    class: "STAFF",
+    class: "staff",
     role: "STAFF",
     client_type: "desktop",
     exp: now + 300,
