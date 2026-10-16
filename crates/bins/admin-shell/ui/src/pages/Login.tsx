@@ -86,9 +86,11 @@ export default function Login() {
           .finally(() => { if (!cancelled) setLoading(false); });
       }).then((stop) => {
         if (cancelled) stop();
-        else unlisten = stop;
+        else {
+          unlisten = stop;
+          setGoogleAuthReady(true);
+        }
       }).catch(reportOAuthFailure);
-      setGoogleAuthReady(true);
     } else {
       void finishOAuthCallback(window.location.href)
         .catch(reportOAuthFailure)
@@ -211,7 +213,7 @@ export default function Login() {
               <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">{t("auth.googleThroughSupabase")}</h2>
               <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.allFatherReservedPath")}</p>
               <p className="mt-4 text-xs text-onyx-text-dim">{googleAuthReady ? t("auth.googleIdentityPrompt") : t("auth.checkingGoogleSignIn")}</p>
-              <button type="button" onClick={beginGoogleSignIn} disabled={loading} className="mt-4 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50">{loading ? t("auth.signingIn") : t("auth.continueWithGoogle")}</button>
+              <button type="button" onClick={beginGoogleSignIn} disabled={loading || !googleAuthReady} className="mt-4 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50">{loading ? t("auth.signingIn") : t("auth.continueWithGoogle")}</button>
               <button type="button" onClick={() => { setError(null); setMode("account"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 {t("auth.backToAdminLogin")}
               </button>
