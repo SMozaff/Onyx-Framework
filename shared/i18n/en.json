@@ -494,6 +494,7 @@
   "files.versionSummary": "v{version} · {size} bytes",
   "files.versions": "Versions",
   "settings.checking": "Checking…",
+  "settings.cloudServiceNote": "ONYX uses its managed Cloud service for authentication and data.",
   "settings.cloudRelay": "Cloud relay endpoint",
   "settings.cloudRelaySaved": "Cloud relay endpoint saved. Restart the app to apply it.",
   "settings.desktopConnectionNote": "Review the connection used by this staff desktop application.",
