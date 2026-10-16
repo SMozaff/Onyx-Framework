@@ -37,7 +37,7 @@ export default function Login({
     } catch (caught: unknown) {
       const shellError = isShellError(caught) ? caught : null;
       if (shellError?.kind === "auth" && !isCredentialRejection(shellError)) {
-        setError(t("auth.googleSignInFailed"));
+        setError(userFacingMessage(caught));
       } else if (shellError?.kind === "auth") {
         setError(t("auth.invalidCredentials"));
       } else {
