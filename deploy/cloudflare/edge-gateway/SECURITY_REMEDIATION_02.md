@@ -10,7 +10,7 @@ All protected routes require a verified ONYX access token. Role, active-user sta
 
 | Method/path | Role | Request | Success |
 |---|---|---|---|
-| `GET /api/admin/mobile-access` | `ORGANIZATION_ADMIN` or `ALL_FATHER`, scoped only to the caller's organization | No body | `200 {allowed_classes: string[], version: number, updated_at: number|null, enforcement_status: "disabled_untrusted_client_type"}` |
+| `GET /api/admin/mobile-access` | `ORGANIZATION_ADMIN` or `ALL_FATHER`, scoped only to the caller's organization | No body | `200 {allowed_classes: string[], version: number, updated_at: number|null, enforcement_status: "enabled_server_policy"}` |
 | `PUT /api/admin/mobile-access` | `ORGANIZATION_ADMIN`, own organization | `{allowed_classes: string[], expected_version?: number}` | `200` with the canonical saved representation |
 | `POST /api/admin/policies` | `ORGANIZATION_ADMIN` | `{name: string}` | `201 {policy_id, policy, version}` |
 | `POST /api/admin/legal-holds` | `ORGANIZATION_ADMIN` | `{target_id: UUID, target_type: supported resource type, reason: string}` | `201 {legal_hold_id, legal_hold, version}` |
@@ -31,7 +31,7 @@ The existing Rust mobile-access contract establishes the five values: `top_level
 
 ## Mobile policy enforcement — explicit release blocker
 
-The Worker persists the intended class grants, but **does not enforce them at login**. The API returns `enforcement_status: "disabled_untrusted_client_type"`, and the Admin Settings UI warns that the saved policy is not effective access control. This is deliberate: the client-supplied `client_type` is untrusted, and using it to deny or grant login would violate the P0 rule that authorization cannot depend on that label. A caller could change `"mobile"` to `"desktop"` to evade a label-based gate.
+The policy is not a login allow/deny control: caller-supplied `client_type` remains untrusted and is never an authorization input. The current Worker enforces `allowed_classes` against persisted `users.class` for relay-ticket issuance and todo/target/staff-loan creation. The API reports `enforcement_status: "enabled_server_policy"`. This means server-side class policy is active for those capability endpoints; it does **not** claim device attestation or prove which platform originated a request.
 
 The login path validates supported client-type values for request-contract hygiene, but the value does not decide authorization. Role and command permissions remain based on D1-backed server identity and policy. Secure mobile-only class gating needs a verifiable client identity/attestation design and client integration (including supported platforms) before enforcement can be enabled. Do not mark the mobile-access acceptance criterion complete until that mechanism and its negative tests exist.
 
