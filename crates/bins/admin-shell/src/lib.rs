@@ -114,8 +114,10 @@ fn open_system_browser(url: &str) -> std::io::Result<()> {
     };
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", "", url]);
+        // Avoid cmd /C start: the OAuth URL contains ampersands that would be
+        // interpreted as shell metacharacters.
+        let mut command = Command::new("rundll32");
+        command.args(["url.dll,FileProtocolHandler", url]);
         command
     };
     command.spawn().map(|_| ())
