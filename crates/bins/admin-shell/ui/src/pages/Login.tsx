@@ -52,7 +52,7 @@ export default function Login() {
       setLoading(true);
       setError(null);
 
-      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\\/+$/, "");
+      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, "");
       const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
       if (!supabaseUrl || !publishableKey) {
         throw new AllfatherOAuthError("MISSING_CONFIG", "Supabase is not configured in this build");
