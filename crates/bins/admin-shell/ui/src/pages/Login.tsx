@@ -3,6 +3,7 @@ import { useI18n } from "@/i18n/I18nContext";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
+import { describeError } from "@/utils/errorHandler";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 import {
@@ -115,7 +116,7 @@ export default function Login() {
       navigate("/", { replace: true });
     } catch (err) {
       if (isNetworkError(err)) {
-        setError(t("auth.googleSignInFailed"));
+        setError(describeError(err));
       } else {
         setError(t("auth.adminInvalidCredentials"));
       }
