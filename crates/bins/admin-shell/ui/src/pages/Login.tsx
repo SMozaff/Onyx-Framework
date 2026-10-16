@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "@/i18n/I18nContext";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
@@ -32,28 +34,30 @@ export default function Login() {
   useEffect(() => {
     if (mode !== "allfather") return;
     let cancelled = false;
-    async function finishOAuthCallback() {
-      // Capture the full callback URL (code + state) before rewriting the
-      // address bar, then strip the sensitive parameters immediately so the
-      // authorization code never lingers in history, a referrer, or a
-      // forwarded URL.
-      const callbackUrl = window.location.href;
+    let unlisten: (() => void) | undefined;
+    const desktop = isTauri();
+
+    async function finishOAuthCallback(callbackUrl: string) {
       const params = parseCallback(callbackUrl);
       if (!params.code && !params.error && !params.legacyTokenInFragment) {
         setGoogleAuthReady(true);
         return;
       }
-      window.history.replaceState({}, document.title, stripOAuthParams(callbackUrl));
+      // A loopback callback is delivered by the native shell, not navigated
+      // into the webview. Only rewrite browser URLs when the browser itself
+      // received the callback.
+      if (!desktop) {
+        window.history.replaceState({}, document.title, stripOAuthParams(callbackUrl));
+      }
       setLoading(true);
+      setError(null);
 
-      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, "");
+      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\\/+$/, "");
       const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
       if (!supabaseUrl || !publishableKey) {
         throw new AllfatherOAuthError("MISSING_CONFIG", "Supabase is not configured in this build");
       }
 
-      // PKCE: the stored verifier + state are validated here, then the code is
-      // exchanged for a Supabase session using only the publishable key.
       const { accessToken } = await completeAllfatherCallback({
         supabaseUrl,
         publishableKey,
@@ -69,15 +73,32 @@ export default function Login() {
       navigate("/", { replace: true });
     }
 
-    void finishOAuthCallback().catch((err: unknown) => {
-      // Generic, localized message only: the underlying cause (state mismatch,
-      // expired code, provider error body) is deliberately not surfaced.
+    function reportOAuthFailure(err: unknown) {
       if (!cancelled) setError(oauthErrorMessage(err, t));
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
+    }
 
-    return () => { cancelled = true; };
+    if (desktop) {
+      // The native shell launches the system browser and forwards the callback
+      // to this event. The PKCE verifier remains in this webview's storage.
+      void listen<string>("allfather-oauth-callback", (event) => {
+        void finishOAuthCallback(event.payload)
+          .catch(reportOAuthFailure)
+          .finally(() => { if (!cancelled) setLoading(false); });
+      }).then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      }).catch(reportOAuthFailure);
+      setGoogleAuthReady(true);
+    } else {
+      void finishOAuthCallback(window.location.href)
+        .catch(reportOAuthFailure)
+        .finally(() => { if (!cancelled) setLoading(false); });
+    }
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [mode, navigate, t]);
 
   function beginGoogleSignIn() {
@@ -91,12 +112,19 @@ export default function Login() {
     // Authorization Code Flow with PKCE: the verifier, its S256 challenge and
     // the CSRF nonce are created here and stored for this tab only. No secret
     // key is involved — the exchange later uses just the publishable key.
+    const desktop = isTauri();
     void beginAllfatherSignIn({
       supabaseUrl,
       publishableKey,
-      redirectTo: resolveAllfatherRedirectTo(window.location.origin, window.location.pathname, import.meta.env.PROD),
-    }).then(({ authorizeUrl }) => {
-      window.location.assign(authorizeUrl);
+      redirectTo: desktop
+        ? "http://127.0.0.1:17645/auth/callback"
+        : resolveAllfatherRedirectTo(window.location.origin, window.location.pathname, import.meta.env.PROD),
+    }).then(async ({ authorizeUrl }) => {
+      if (desktop) {
+        await invoke("start_allfather_oauth", { authorizeUrl });
+      } else {
+        window.location.assign(authorizeUrl);
+      }
     }).catch((err: unknown) => {
       setError(oauthErrorMessage(err, t));
     });
