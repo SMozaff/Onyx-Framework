@@ -23,7 +23,7 @@ async function signAccessToken(): Promise<string> {
     username: "staff",
     organization_id: ORG,
     is_admin: false,
-    class: "STAFF",
+    class: "staff",
     role: "STAFF",
     client_type: "desktop",
     exp: Math.floor(Date.now() / 1000) + 3600,
@@ -49,12 +49,16 @@ class RelayDb {
     const statement: any = {
       bind(...values: unknown[]) { params = values; return statement; },
       first: async () => {
+        if (sql.includes("FROM mobile_access_settings")) {
+          return { allowed_classes: JSON.stringify(["staff"]), version: 1, updated_at: Date.now() };
+        }
+        if (sql.includes("SELECT class FROM users")) return { class: "staff" };
         if (sql.includes("FROM users u JOIN organizations")) {
           if (String(params[0]) !== USER) return null;
           return {
             id: USER, username: "staff", email: "staff@example.test",
             organization_id: ORG, is_active: 1, is_admin: 0,
-            class: "STAFF", role: "STAFF", supabase_user_id: null,
+            class: "staff", role: "STAFF", supabase_user_id: null,
           };
         }
         if (sql.includes("FROM user_session_revocations")) return null;
