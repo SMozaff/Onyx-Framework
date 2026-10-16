@@ -37,7 +37,7 @@ export default function Login({
     } catch (caught: unknown) {
       const shellError = isShellError(caught) ? caught : null;
       if (shellError?.kind === "auth" && !isCredentialRejection(shellError)) {
-        setError("Could not connect to the ONYX Cloud service. Check your internet connection and try again.");
+        setError(t("auth.googleSignInFailed"));
       } else if (shellError?.kind === "auth") {
         setError(t("auth.invalidCredentials"));
       } else {
