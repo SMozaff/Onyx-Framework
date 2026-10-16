@@ -12,7 +12,7 @@ export function getBackendAddress(): string {
 
 export function isSecureEnoughForProduction(address: string): boolean {
   try {
-    return new URL(address).protocol === "https:" && address.replace(/\\/+$/, "") === CLOUD_API_BASE;
+    return new URL(address).protocol === "https:" && address.replace(/\/+$/, "") === CLOUD_API_BASE;
   } catch {
     return false;
   }
