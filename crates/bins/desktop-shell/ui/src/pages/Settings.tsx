@@ -19,7 +19,7 @@ export default function Settings({
           Signed in as <strong className="font-medium text-onyx-text">{session.username}</strong>.
         </p>
         <p className="mt-2 text-xs text-onyx-text-dim">
-          ONYX uses its managed Cloud service for authentication and data.
+          {t("settings.cloudServiceNote")}
         </p>
         <button
           type="button"
