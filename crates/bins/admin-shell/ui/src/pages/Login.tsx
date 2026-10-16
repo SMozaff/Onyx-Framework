@@ -115,7 +115,7 @@ export default function Login() {
       navigate("/", { replace: true });
     } catch (err) {
       if (isNetworkError(err)) {
-        setError("Could not connect to the ONYX Cloud service. Check your internet connection and try again.");
+        setError(t("auth.googleSignInFailed"));
       } else {
         setError(t("auth.adminInvalidCredentials"));
       }
