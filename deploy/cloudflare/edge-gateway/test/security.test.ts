@@ -670,7 +670,7 @@ describe("Worker authorization and session security", () => {
     expect(initial.status).toBe(200);
     expect(await initial.json()).toEqual({
       allowed_classes: [], version: 0, updated_at: null,
-      enforcement_status: "disabled_untrusted_client_type",
+      enforcement_status: "enabled_server_policy",
     });
 
     const invalid = await worker.fetch(request("PUT", { allowed_classes: ["unknown"], expected_version: 0 }), makeEnv(adminDb));
