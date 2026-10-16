@@ -494,6 +494,7 @@
   "files.versionSummary": "نسخه {version} · {size} بایت",
   "files.versions": "نسخه‌ها",
   "settings.checking": "در حال بررسی…",
+  "settings.cloudServiceNote": "ONYX برای احراز هویت و داده‌ها از سرویس ابری مدیریت‌شده خود استفاده می‌کند."
   "settings.cloudRelay": "نقطه پایانی رله ابری",
   "settings.cloudRelaySaved": "نقطه پایانی رله ابری ذخیره شد. برای اعمال، برنامه را مجدداً راه‌اندازی کنید.",
   "settings.desktopConnectionNote": "اتصال مورد استفاده این برنامه دسکتاپ پرسنل را بررسی کنید.",

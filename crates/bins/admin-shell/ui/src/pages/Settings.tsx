@@ -107,7 +107,7 @@ function MobileAccessPanel() {
     if (!Array.isArray(data.allowed_classes) ||
         !data.allowed_classes.every((value) => typeof value === "string") ||
         typeof data.version !== "number" || !Number.isSafeInteger(data.version) || data.version < 0 ||
-        !["disabled_untrusted_client_type", "enabled_attested_client"].includes(String(data.enforcement_status))) {
+        !["disabled_untrusted_client_type", "enabled_attested_client", "enabled_server_policy"].includes(String(data.enforcement_status))) {
       throw new Error("The server returned an invalid mobile-access configuration.");
     }
     setAllowed(new Set(data.allowed_classes as string[]));

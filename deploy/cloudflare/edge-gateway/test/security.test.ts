@@ -101,6 +101,10 @@ class SecurityDb {
       const row = this.mobileSettings.get(String(params[0]));
       return row ? { ...row } : null;
     }
+    if (sql.includes("SELECT class FROM users WHERE id=? AND organization_id=? AND is_active=1")) {
+      const user = this.users.get(String(params[0]));
+      return user && user.organization_id === params[1] && user.is_active === 1 ? { class: user.class } : null;
+    }
     if (sql.includes("FROM file_assets WHERE content_hash=? AND organization_id=?")) {
       this.fileAssetLookups += 1;
       const row = this.fileAssets.get(String(params[0]));
@@ -670,7 +674,7 @@ describe("Worker authorization and session security", () => {
     expect(initial.status).toBe(200);
     expect(await initial.json()).toEqual({
       allowed_classes: [], version: 0, updated_at: null,
-      enforcement_status: "disabled_untrusted_client_type",
+      enforcement_status: "enabled_server_policy",
     });
 
     const invalid = await worker.fetch(request("PUT", { allowed_classes: ["unknown"], expected_version: 0 }), makeEnv(adminDb));
@@ -1153,6 +1157,11 @@ describe("B1 client-call route contracts", () => {
 
   it("rejects Todo creation with an invalid owner instead of returning 501", async () => {
     const db = makeDb("STAFF");
+    db.users.get("staff-1")!.class = "staff";
+    db.mobileSettings.set(ORG, {
+      organization_id: ORG, allowed_classes: JSON.stringify(["staff"]), version: 1,
+      updated_by: "admin-1", updated_at: Date.now(), last_operation_id: "mobile-policy-fixture",
+    });
     const token = await signToken(sessionClaims({ role: "STAFF", is_admin: false }));
     const response = await worker.fetch(new Request("https://worker.test/api/todo/lists", {
       method: "POST",

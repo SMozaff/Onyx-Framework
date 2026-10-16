@@ -254,7 +254,7 @@ jobs:
           # Read defaults, reject malformed writes, then save and verify read-back.
           mobile="$(http 200 "$base/api/admin/mobile-access" -H "Authorization: Bearer $admin_token")"
           echo "Preview mobile-access GET contract: $mobile"
-          printf '%s' "$mobile" | jq -e '.version == 0 and .allowed_classes == [] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null || {
+          printf '%s' "$mobile" | jq -e '.version == 0 and .allowed_classes == [] and .enforcement_status == "enabled_server_policy"' >/dev/null || {
             echo "::error::Mobile-access default response contract mismatch."
             exit 1
           }
@@ -263,7 +263,7 @@ jobs:
           saved="$(http 200 "$base/api/admin/mobile-access" -X PUT -H "Authorization: Bearer $admin_token" \
             -H 'content-type: application/json' --data '{"allowed_classes":["staff"],"expected_version":0}')"
           echo "Preview mobile-access saved response: $saved"
-          printf '%s' "$saved" | jq -e '.version == 1 and .allowed_classes == ["staff"] and .enforcement_status == "disabled_untrusted_client_type"' >/dev/null || {
+          printf '%s' "$saved" | jq -e '.version == 1 and .allowed_classes == ["staff"] and .enforcement_status == "enabled_server_policy"' >/dev/null || {
             echo "::error::Mobile-access saved response contract mismatch."
             exit 1
           }

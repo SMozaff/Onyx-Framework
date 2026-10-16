@@ -89,7 +89,8 @@ jobs:
           ORG="11111111-2222-4333-8444-555555555555"
           USER="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
           npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --command "INSERT INTO organizations (id,name,is_active,created_at,updated_at) VALUES ('$ORG','relay-integration-org',1,unixepoch(),unixepoch())"
-          npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --command "INSERT INTO users (id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES ('$USER','relay-test-staff','relay-test@example.test','$ORG','not-used-for-token-auth',0,1,'STAFF','STAFF',NULL,unixepoch(),unixepoch())"
+          npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --command "INSERT INTO users (id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES ('$USER','relay-test-staff','relay-test@example.test','$ORG','not-used-for-token-auth',0,1,'staff','STAFF',NULL,unixepoch(),unixepoch())"
+          npx wrangler d1 execute onyx-free-db --local --config wrangler.test.toml --command "INSERT INTO mobile_access_settings (organization_id,allowed_classes,version,updated_by,updated_at,last_operation_id) VALUES ('$ORG','[\"staff\"]',1,'$USER',unixepoch()*1000,'relay-integration-policy')"
           printf 'ONYX_JWT_SECRET=relay-test-secret\n' > .dev.vars
           npx wrangler dev --local --config wrangler.test.toml --port 8787 > /tmp/onyx-relay-worker.log 2>&1 &
           worker_pid=$!
