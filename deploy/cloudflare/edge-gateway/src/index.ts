@@ -3,6 +3,7 @@ import { argon2id, argon2Verify } from "hash-wasm";
 import { getSupabaseUser, verifySupabaseJwt } from "./supabase";
 import { missingAuthSchema } from "./schema-contract";
 import { authorizeCommand, authorizeQuery, ONYX_ROLES, payloadOwnerIds, resourceOwnedBy } from "./authorization";
+import { mobileCapabilityGranted } from "./mobile-capability";
 import { validateCommandSemantics } from "./command-semantics";
 import { staffOwnedPredicateSql, staffOwnedBindings, resourceIdFromReference } from "./resource-scope";
 
@@ -202,10 +203,9 @@ async function authLogin(request:Request,env:Env){
   if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role==="ALL_FATHER"||String(user.id)==="__allfather__"||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const requestedClientType = clientType(body);
   if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
-  // client_type is caller-controlled metadata, never a trustworthy basis for an
-  // authorization decision. The persisted mobile class policy is exposed to
-  // administrators but is not enforced until the request carries a
-  // server-verifiable client identity/attestation.
+  // client_type is caller-controlled metadata and is never an authorization
+  // input. Capability endpoints enforce the persisted class policy from D1;
+  // this policy is server-side authorization, not device attestation.
   return json(await issuePair(env,user,requestedClientType));
 }
 async function authRefresh(request:Request,env:Env){
@@ -340,7 +340,7 @@ async function verifyRelayTicket(env:Env,token:string):Promise<RelayTicketClaims
   return c;
 }
 async function issueRelayTicket(request:Request,env:Env,session:Session){
-  if(session.client_type==="mobile_observer")return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  if(!await mobileCapabilityGranted(env,session))return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const body=await request.json().catch(()=>null) as Json|null;
   if(!body||Array.isArray(body)||Object.keys(body).some(key=>key!=="target_id"&&key!=="self_replica")||
      typeof body.target_id!=="string"||!looksLikeUuid(body.target_id)||typeof body.self_replica!=="string"||!looksLikeUuid(body.self_replica))
@@ -932,7 +932,7 @@ interface MobileAccessState {
   allowed_classes: MobileAccessClass[];
   version: number;
   updated_at: number | null;
-  enforcement_status: "disabled_untrusted_client_type";
+  enforcement_status: "enabled_server_policy";
 }
 function normalizeMobileClasses(value: unknown): MobileAccessClass[] | null {
   if (!Array.isArray(value) || value.length > MOBILE_ACCESS_CLASSES.length) return null;
@@ -953,7 +953,7 @@ async function readMobileAccess(env: Env, organizationId: string): Promise<Mobil
   const row = await env.DB.prepare(
     "SELECT organization_id,allowed_classes,version,updated_at FROM mobile_access_settings WHERE organization_id=? LIMIT 1"
   ).bind(organizationId).first<Record<string, unknown>>();
-  if (!row) return { allowed_classes: [], version: 0, updated_at: null, enforcement_status: "disabled_untrusted_client_type" };
+  if (!row) return { allowed_classes: [], version: 0, updated_at: null, enforcement_status: "enabled_server_policy" };
   let raw: unknown;
   try { raw = JSON.parse(String(row.allowed_classes)); } catch { return null; }
   const allowed = normalizeMobileClasses(raw);
@@ -961,7 +961,7 @@ async function readMobileAccess(env: Env, organizationId: string): Promise<Mobil
   const updatedAt = Number(row.updated_at);
   if (!allowed || !Number.isSafeInteger(version) || version < 1 ||
       !Number.isSafeInteger(updatedAt) || updatedAt < 0) return null;
-  return { allowed_classes: allowed, version, updated_at: updatedAt, enforcement_status: "disabled_untrusted_client_type" };
+  return { allowed_classes: allowed, version, updated_at: updatedAt, enforcement_status: "enabled_server_policy" };
 }
 async function getMobileAccess(env: Env, session: Session) {
   requireRole(session, "ALL_FATHER", "ORGANIZATION_ADMIN");
@@ -1290,7 +1290,7 @@ function validTimeWindow(body: Json): {start_at_ms:number;end_at_ms:number}|null
   return {start_at_ms:Number(start),end_at_ms:Number(end)};
 }
 async function createTodoAggregate(request: Request, env: Env, session: Session, kind: "todo_list"|"target_list"|"staff_loan") {
-  if(session.client_type==="mobile_observer")return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  if(!await mobileCapabilityGranted(env,session))return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const body=await request.json().catch(()=>null) as Json|null;
   if (!body || Array.isArray(body)) return json({error:"INVALID_TODO_REQUEST",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
   const id=uuid(), timestamp=Date.now(), operationId=uuid();
@@ -1656,6 +1656,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
+    if(url.pathname==="/api/admin/users"&&request.method==="POST")return await createUser(request,env,session,"STAFF");
     if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,false);
     if(/^\/api\/admin\/users\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,true);
     if(/^\/api\/admin\/users\/[^/]+\/password$/.test(url.pathname)&&request.method==="POST")return await setUserPassword(request,env,session,url.pathname.split("/").at(-2)!);
