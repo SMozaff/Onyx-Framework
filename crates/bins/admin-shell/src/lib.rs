@@ -40,14 +40,16 @@ const OAUTH_CALLBACK_PREFIX: &str = "http://127.0.0.1:17645/auth/callback";
 fn start_allfather_oauth(app: AppHandle, authorize_url: String) -> Result<(), String> {
     if !authorize_url.starts_with("https://uhpqjhbciimklheohvfr.supabase.co/auth/v1/authorize?")
         || !authorize_url.contains("redirect_to=http%3A%2F%2F127.0.0.1%3A17645%2Fauth%2Fcallback")
-        || authorize_url.contains('\r') || authorize_url.contains('\n')
+        || authorize_url.contains('\r')
+        || authorize_url.contains('\n')
     {
         return Err("Rejected invalid All-Father authorization URL".into());
     }
 
     // Bind before launching the browser so the callback cannot race startup.
-    let listener = TcpListener::bind(OAUTH_CALLBACK_ADDRESS)
-        .map_err(|_| "Could not start the local sign-in callback listener (port 17645 may be busy)".to_string())?;
+    let listener = TcpListener::bind(OAUTH_CALLBACK_ADDRESS).map_err(|_| {
+        "Could not start the local sign-in callback listener (port 17645 may be busy)".to_string()
+    })?;
     thread::spawn(move || {
         for incoming in listener.incoming() {
             let Ok(mut stream) = incoming else { continue };
@@ -56,7 +58,8 @@ fn start_allfather_oauth(app: AppHandle, authorize_url: String) -> Result<(), St
                 let body = "<!doctype html><title>ONYX Admin</title><p>Sign-in received. Return to ONYX Admin.</p>";
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(), body
+                    body.len(),
+                    body
                 );
                 let _ = stream.write_all(response.as_bytes());
                 let _ = app.emit("allfather-oauth-callback", callback_url);
@@ -65,7 +68,8 @@ fn start_allfather_oauth(app: AppHandle, authorize_url: String) -> Result<(), St
             let body = "Not found";
             let response = format!(
                 "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body
+                body.len(),
+                body
             );
             let _ = stream.write_all(response.as_bytes());
         }
@@ -95,7 +99,11 @@ fn read_oauth_callback(stream: &mut TcpStream) -> Option<String> {
     if host != OAUTH_CALLBACK_ADDRESS || !target.starts_with("/auth/callback?") {
         return None;
     }
-    Some(format!("{}{}", OAUTH_CALLBACK_PREFIX, &target["/auth/callback".len()..]))
+    Some(format!(
+        "{}{}",
+        OAUTH_CALLBACK_PREFIX,
+        &target["/auth/callback".len()..]
+    ))
 }
 
 fn open_system_browser(url: &str) -> std::io::Result<()> {
