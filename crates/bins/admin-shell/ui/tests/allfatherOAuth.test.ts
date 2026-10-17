@@ -403,6 +403,23 @@ describe("exchangeCodeForSession", () => {
   });
 });
 
+describe("resolveAllfatherRedirectTo", () => {
+  it("keeps the local Admin shell callback on its configured Vite origin", () => {
+    expect(resolveAllfatherRedirectTo("http://localhost:5174", "/login", false))
+      .toBe("http://localhost:5174/login");
+  });
+
+  it("refuses to start local OAuth from a different localhost port", () => {
+    expect(() => resolveAllfatherRedirectTo("http://localhost:3000", "/login", false))
+      .toThrow(expect.objectContaining({ code: "MISSING_CONFIG" }));
+  });
+
+  it("still allows the Windows Tauri development origin", () => {
+    expect(resolveAllfatherRedirectTo("http://tauri.localhost", "/login", false))
+      .toBe("http://tauri.localhost/login");
+  });
+});
+
 /* ------------------------------------------------------------------ *
  * Transaction storage
  * ------------------------------------------------------------------ */
