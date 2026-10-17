@@ -50,6 +50,11 @@ fn start_allfather_oauth(app: AppHandle, authorize_url: String) -> Result<(), St
     let listener = TcpListener::bind(OAUTH_CALLBACK_ADDRESS).map_err(|_| {
         "Could not start the local sign-in callback listener (port 17645 may be busy)".to_string()
     })?;
+    // Launch first; if browser launch fails, dropping this listener releases
+    // port 17645 immediately instead of leaving a detached thread holding it.
+    open_system_browser(&authorize_url)
+        .map_err(|error| format!("Could not open the system browser for Google sign-in: {error}"))?;
+
     thread::spawn(move || {
         for incoming in listener.incoming() {
             let Ok(mut stream) = incoming else { continue };
@@ -75,8 +80,7 @@ fn start_allfather_oauth(app: AppHandle, authorize_url: String) -> Result<(), St
         }
     });
 
-    open_system_browser(&authorize_url)
-        .map_err(|_| "Could not open the system browser for Google sign-in".to_string())
+    Ok(())
 }
 
 fn read_oauth_callback(stream: &mut TcpStream) -> Option<String> {
@@ -107,27 +111,53 @@ fn read_oauth_callback(stream: &mut TcpStream) -> Option<String> {
 }
 
 fn open_system_browser(url: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "linux")]
-    let mut command = {
-        let mut command = Command::new("xdg-open");
-        command.arg(url);
-        command
-    };
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = Command::new("open");
-        command.arg(url);
-        command
-    };
     #[cfg(target_os = "windows")]
-    let mut command = {
-        // Avoid cmd /C start: the OAuth URL contains ampersands that would be
-        // interpreted as shell metacharacters.
-        let mut command = Command::new("rundll32");
-        command.args(["url.dll,FileProtocolHandler", url]);
-        command
-    };
-    command.spawn().map(|_| ())
+    {
+        use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+
+        #[link(name = "shell32")]
+        unsafe extern "system" {
+            fn ShellExecuteW(
+                hwnd: *mut std::ffi::c_void,
+                operation: *const u16,
+                file: *const u16,
+                parameters: *const u16,
+                directory: *const u16,
+                show_command: i32,
+            ) -> *mut std::ffi::c_void;
+        }
+
+        let operation: Vec<u16> = OsStr::new("open").encode_wide().chain(Some(0)).collect();
+        let file: Vec<u16> = OsStr::new(url).encode_wide().chain(Some(0)).collect();
+        // Hand the URL directly to Windows' registered URL handler. Query
+        // ampersands stay data and cannot be parsed as shell operators.
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1, // SW_SHOWNORMAL
+            )
+        };
+        if (result as isize) <= 32 {
+            return Err(std::io::Error::other(format!(
+                "Windows could not open the default browser (ShellExecuteW result {})",
+                result as isize
+            )));
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open").arg(url).spawn().map(|_| ())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(url).spawn().map(|_| ())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
