@@ -38,9 +38,37 @@ const BROWSER_LAUNCH_ERROR: &str = "ALLFATHER_BROWSER_LAUNCH_FAILED";
 /// forwards the one-time loopback callback into the running Admin webview.
 /// The fixed callback must be allow-listed in Supabase Auth redirect URLs.
 #[tauri::command]
-fn start_allfather_oauth(app: AppHandle, authorize_url: String) -> Result<(), String> {
-    if !authorize_url.starts_with("https://uhpqjhbciimklheohvfr.supabase.co/auth/v1/authorize?")
-        || !authorize_url.contains("redirect_to=http%3A%2F%2F127.0.0.1%3A17645%2Fauth%2Fcallback")
+fn start_allfather_oauth(
+    app: AppHandle,
+    authorize_url: String,
+    supabase_url: String,
+) -> Result<(), String> {
+    // Bind the authorize endpoint to the same public project URL used by the
+    // frontend. Validate parsed URLs (not string prefixes) so alternate
+    // configured Supabase projects work without accepting lookalike hosts.
+    let expected = url::Url::parse(&supabase_url)
+        .map_err(|_| "Rejected invalid All-Father authorization URL".to_string())?;
+    let authorize = url::Url::parse(&authorize_url)
+        .map_err(|_| "Rejected invalid All-Father authorization URL".to_string())?;
+    let redirect_to = authorize
+        .query_pairs()
+        .find(|(key, _)| key == "redirect_to")
+        .map(|(_, value)| value.into_owned());
+    let valid_project = expected.scheme() == "https"
+        && expected.host_str().is_some()
+        && expected.username().is_empty()
+        && expected.password().is_none()
+        && expected.query().is_none()
+        && expected.fragment().is_none()
+        && authorize.scheme() == "https"
+        && authorize.host_str() == expected.host_str()
+        && authorize.port_or_known_default() == expected.port_or_known_default()
+        && authorize.path() == "/auth/v1/authorize"
+        && authorize.username().is_empty()
+        && authorize.password().is_none()
+        && authorize.fragment().is_none();
+    if !valid_project
+        || redirect_to.as_deref() != Some(OAUTH_CALLBACK_PREFIX)
         || authorize_url.contains('\r')
         || authorize_url.contains('\n')
     {
