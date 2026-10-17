@@ -58,6 +58,7 @@ fn start_allfather_oauth(
         && expected.host_str().is_some()
         && expected.username().is_empty()
         && expected.password().is_none()
+        && expected.path() == "/"
         && expected.query().is_none()
         && expected.fragment().is_none()
         && authorize.scheme() == "https"
