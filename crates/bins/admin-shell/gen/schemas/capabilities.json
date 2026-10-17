@@ -1,1 +1,1 @@
-{}
+{"admin-main":{"identifier":"admin-main","description":"Allows the Admin window to register and clean up its OAuth callback listener.","local":true,"windows":["main"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}}
