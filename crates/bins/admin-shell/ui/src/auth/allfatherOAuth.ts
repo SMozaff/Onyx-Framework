@@ -199,6 +199,16 @@ export function resolveAllfatherRedirectTo(
     (target.protocol === "tauri:" && target.hostname === "localhost") ||
     (target.protocol === "http:" && target.hostname === "tauri.localhost");
 
+  // Local web OAuth must start from the Admin shell's own Vite origin.
+  // sessionStorage is origin-scoped, so a different localhost port cannot
+  // read the PKCE verifier when the provider redirects back.
+  if (!productionBuild && isLoopbackHost && !isTauriOrigin && target.port !== "5174") {
+    throw new AllfatherOAuthError(
+      "MISSING_CONFIG",
+      "Admin shell sign-in must start from http://localhost:5174 so the PKCE callback returns to the same origin",
+    );
+  }
+
   if (
     productionBuild &&
     ((isLoopbackHost && !isTauriOrigin) ||
