@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "@/i18n/I18nContext";
@@ -8,6 +8,7 @@ import { apiClient } from "@/api/client";
 import { describeError } from "@/utils/errorHandler";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
+import { allfatherListenerReducer, canStartAllfatherSignIn } from "@/auth/allfatherListener";
 import {
   AllfatherOAuthError,
   beginAllfatherSignIn,
@@ -29,10 +30,12 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [googleAuthReady, setGoogleAuthReady] = useState(false);
+  const [listenerStatus, dispatchListenerStatus] = useReducer(allfatherListenerReducer, "checking");
+  const [listenerRetry, setListenerRetry] = useState(0);
 
   useEffect(() => {
     if (mode !== "allfather") return;
+    dispatchListenerStatus("retry");
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     const desktop = isTauri();
@@ -40,7 +43,7 @@ export default function Login() {
     async function finishOAuthCallback(callbackUrl: string) {
       const params = parseCallback(callbackUrl);
       if (!params.code && !params.error && !params.legacyTokenInFragment) {
-        setGoogleAuthReady(true);
+        dispatchListenerStatus("registered");
         return;
       }
       // A loopback callback is delivered by the native shell, not navigated
@@ -88,20 +91,36 @@ export default function Login() {
         if (cancelled) stop();
         else {
           unlisten = stop;
-          setGoogleAuthReady(true);
+          dispatchListenerStatus("registered");
         }
-      }).catch(reportOAuthFailure);
+      }).catch(() => {
+        if (!cancelled) {
+          dispatchListenerStatus("registration-failed");
+          setError(t("auth.googleListenerUnavailable"));
+        }
+      });
     } else {
       void finishOAuthCallback(window.location.href)
         .catch(reportOAuthFailure)
-        .finally(() => { if (!cancelled) setLoading(false); });
+        .finally(() => {
+          if (!cancelled) {
+            dispatchListenerStatus("registered");
+            setLoading(false);
+          }
+        });
     }
 
     return () => {
       cancelled = true;
       unlisten?.();
     };
-  }, [mode, navigate, t]);
+  }, [mode, navigate, t, listenerRetry]);
+
+  function retryCallbackListener() {
+    setError(null);
+    dispatchListenerStatus("retry");
+    setListenerRetry((attempt) => attempt + 1);
+  }
 
   function beginGoogleSignIn() {
     const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, "");
@@ -203,7 +222,7 @@ export default function Login() {
               <button type="submit" disabled={loading} className="mt-5 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
                 {loading ? t("auth.signingIn") : t("auth.signIn")}
               </button>
-              <button type="button" onClick={() => { setError(null); setGoogleAuthReady(false); setMode("allfather"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
+              <button type="button" onClick={() => { setError(null); dispatchListenerStatus("retry"); setMode("allfather"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 {t("auth.allFatherGoogleSignIn")}
               </button>
             </form>
@@ -212,8 +231,9 @@ export default function Login() {
               <p className="text-[0.66rem] font-extrabold tracking-[0.16em] text-onyx-accent">{t("auth.allFatherAuthority")}</p>
               <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-onyx-text">{t("auth.googleThroughSupabase")}</h2>
               <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.allFatherReservedPath")}</p>
-              <p className="mt-4 text-xs text-onyx-text-dim">{googleAuthReady ? t("auth.googleIdentityPrompt") : t("auth.checkingGoogleSignIn")}</p>
-              <button type="button" onClick={beginGoogleSignIn} disabled={loading || !googleAuthReady} className="mt-4 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50">{loading ? t("auth.signingIn") : t("auth.continueWithGoogle")}</button>
+              <p className="mt-4 text-xs text-onyx-text-dim">{listenerStatus === "ready" ? t("auth.googleIdentityPrompt") : listenerStatus === "failed" ? t("auth.googleListenerUnavailable") : t("auth.checkingGoogleSignIn")}</p>
+              {listenerStatus === "failed" && <button type="button" onClick={retryCallbackListener} className="mt-3 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">{t("auth.retryGoogleListener")}</button>}
+              <button type="button" onClick={beginGoogleSignIn} disabled={loading || !canStartAllfatherSignIn(listenerStatus)} className="mt-4 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50">{loading ? t("auth.signingIn") : t("auth.continueWithGoogle")}</button>
               <button type="button" onClick={() => { setError(null); setMode("account"); }} className="mt-4 w-full text-center text-xs font-semibold text-onyx-accent underline decoration-dotted underline-offset-4">
                 {t("auth.backToAdminLogin")}
               </button>
@@ -236,6 +256,9 @@ function isNetworkError(error: unknown): boolean {
  * never shown to the client, matching the Worker's stable-error-code contract.
  */
 function oauthErrorMessage(error: unknown, t: (key: string) => string): string {
+  const nativeCode = typeof error === "string" ? error : error instanceof Error ? error.message : null;
+  if (nativeCode === "ALLFATHER_BROWSER_LAUNCH_FAILED") return t("auth.googleBrowserLaunchFailed");
+  if (nativeCode === "ALLFATHER_CALLBACK_PORT_BUSY") return t("auth.googleCallbackPortBusy");
   if (!(error instanceof AllfatherOAuthError)) return t("auth.googleSignInFailed");
   if (error.code === "MISSING_CONFIG") return t("auth.googleSignInNotConfigured");
   if (error.code === "PROVIDER_DENIED") return t("auth.googleSignInCancelled");
