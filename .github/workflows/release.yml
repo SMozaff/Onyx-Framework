@@ -272,7 +272,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage"}
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "deb"}
           - {os: macos-14, target: aarch64-apple-darwin, bundles: "dmg"}
           - {os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "msi,nsis"}
     runs-on: ${{ matrix.os }}
@@ -362,7 +362,7 @@ jobs:
           find "$bundle_dir" -maxdepth 2 -type f
           mkdir -p artifacts
           find "$bundle_dir" -maxdepth 2 -type f \
-            \( -iname "*.deb" -o -iname "*.AppImage" -o -iname "*.dmg" \
+            \( -iname "*.deb" -o -iname "*.dmg" \
                -o -iname "*.msi" -o -iname "*.exe" \) \
             -exec cp {} artifacts/ \;
           shopt -s nullglob
