@@ -110,54 +110,53 @@ fn read_oauth_callback(stream: &mut TcpStream) -> Option<String> {
     ))
 }
 
+#[cfg(target_os = "windows")]
 fn open_system_browser(url: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
 
-        #[link(name = "shell32")]
-        unsafe extern "system" {
-            fn ShellExecuteW(
-                hwnd: *mut std::ffi::c_void,
-                operation: *const u16,
-                file: *const u16,
-                parameters: *const u16,
-                directory: *const u16,
-                show_command: i32,
-            ) -> *mut std::ffi::c_void;
-        }
-
-        let operation: Vec<u16> = OsStr::new("open").encode_wide().chain(Some(0)).collect();
-        let file: Vec<u16> = OsStr::new(url).encode_wide().chain(Some(0)).collect();
-        // Hand the URL directly to Windows' registered URL handler. Query
-        // ampersands stay data and cannot be parsed as shell operators.
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                1, // SW_SHOWNORMAL
-            )
-        };
-        if (result as isize) <= 32 {
-            return Err(std::io::Error::other(format!(
-                "Windows could not open the default browser (ShellExecuteW result {})",
-                result as isize
-            )));
-        }
-        return Ok(());
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut std::ffi::c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show_command: i32,
+        ) -> *mut std::ffi::c_void;
     }
 
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open").arg(url).spawn().map(|_| ())
+    let operation: Vec<u16> = OsStr::new("open").encode_wide().chain(Some(0)).collect();
+    let file: Vec<u16> = OsStr::new(url).encode_wide().chain(Some(0)).collect();
+    // Hand the URL directly to Windows' registered URL handler. Query
+    // ampersands stay data and cannot be parsed as shell operators.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1, // SW_SHOWNORMAL
+        )
+    };
+    if (result as isize) <= 32 {
+        return Err(std::io::Error::other(format!(
+            "Windows could not open the default browser (ShellExecuteW result {})",
+            result as isize
+        )));
     }
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open").arg(url).spawn().map(|_| ())
-    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn open_system_browser(url: &str) -> std::io::Result<()> {
+    std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn open_system_browser(url: &str) -> std::io::Result<()> {
+    std::process::Command::new("open").arg(url).spawn().map(|_| ())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
