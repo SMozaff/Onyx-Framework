@@ -411,7 +411,7 @@ describe("resolveAllfatherRedirectTo", () => {
 
   it("refuses to start local OAuth from a different localhost port", () => {
     expect(() => resolveAllfatherRedirectTo("http://localhost:3000", "/login", false))
-      .toThrow(expect.objectContaining({ code: "MISSING_CONFIG" }));
+      .toThrow("Admin shell sign-in must start from http://localhost:5174");
   });
 
   it("still allows the Windows Tauri development origin", () => {
