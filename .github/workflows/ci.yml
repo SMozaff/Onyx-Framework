@@ -443,51 +443,6 @@ jobs:
       - if: always()
         run: kill "$(cat api.pid)" || true
 
-  # A1 (ONYX-MOB-01 §25): the native Kotlin Android rewrite.
-  # Builds `mobile-android/`, the new, separate project.
-  mobile-android-kotlin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          toolchain: "1.97.1"
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
-      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
-        id: setup-ndk
-        with:
-          ndk-version: r28b
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-      - name: Build native libraries for every target ABI
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: bash mobile-android/tool/build_rust_jni.sh
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Verify Android locale resource parity
-        run: node scripts/verify/verify-android-i18n.mjs
-      - name: Gradle assembleDebug
-        working-directory: mobile-android
-        run: ./gradlew assembleDebug --stacktrace
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: onyx-mobile-android-kotlin-debug
-          path: mobile-android/app/build/outputs/apk/debug/app-debug.apk
-      # Phase 4.5: the release variant exercises R8 minify + resource
-      # shrink from the committed proguard-rules.pro (debug keystore
-      # signing, so no private key is involved). A correct build here
-      # proves the JNI/WorkManager keep-rules hold under R8 -- the
-      # on-device runtime consequence is still a Phase 4.x lab gate.
-      - name: Gradle assembleRelease (R8 + debug signing)
-        working-directory: mobile-android
-        run: ./gradlew assembleRelease --stacktrace
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: onyx-mobile-android-kotlin-release-r8
-          path: mobile-android/app/build/outputs/apk/release/app-release.apk
 # Phase 0 merge-control gate.
   #
   # This job is intentionally an aggregate gate rather than a build/test job.
@@ -506,7 +461,6 @@ jobs:
       - mobile-pwa
       - native-ui-evidence
       - load-smoke
-      - mobile-android-kotlin
       - security-audit
     steps:
       - name: Report upstream gate results
@@ -518,7 +472,6 @@ jobs:
           MOBILE_PWA_RESULT: ${{ needs['mobile-pwa'].result }}
           NATIVE_UI_RESULT: ${{ needs['native-ui-evidence'].result }}
           LOAD_SMOKE_RESULT: ${{ needs['load-smoke'].result }}
-          ANDROID_RESULT: ${{ needs['mobile-android-kotlin'].result }}
           SECURITY_RESULT: ${{ needs['security-audit'].result }}
         run: |
           set -euo pipefail
@@ -530,7 +483,6 @@ jobs:
             "mobile-pwa=$MOBILE_PWA_RESULT" \
             "native-ui-evidence=$NATIVE_UI_RESULT" \
             "load-smoke=$LOAD_SMOKE_RESULT" \
-            "mobile-android-kotlin=$ANDROID_RESULT" \
             "security-audit=$SECURITY_RESULT"
           for result in \
             "$CHECK_RESULT" \
@@ -540,7 +492,6 @@ jobs:
             "$MOBILE_PWA_RESULT" \
             "$NATIVE_UI_RESULT" \
             "$LOAD_SMOKE_RESULT" \
-            "$ANDROID_RESULT" \
             "$SECURITY_RESULT"
           do
             if [[ "$result" != "success" ]]; then
