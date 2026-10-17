@@ -142,7 +142,7 @@ export default function Login() {
         : resolveAllfatherRedirectTo(window.location.origin, window.location.pathname, import.meta.env.PROD),
     }).then(async ({ authorizeUrl }) => {
       if (desktop) {
-        await invoke("start_allfather_oauth", { authorizeUrl });
+        await invoke("start_allfather_oauth", { authorizeUrl, supabaseUrl });
       } else {
         window.location.assign(authorizeUrl);
       }
