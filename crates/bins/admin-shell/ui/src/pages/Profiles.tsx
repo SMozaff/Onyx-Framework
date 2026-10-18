@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n/I18nContext";
 import { apiClient } from "@/api/client";
 import { describeError } from "@/utils/errorHandler";
+import {
+  exportProfileFile,
+  importProfileFile,
+  type ProfileTransferFormat,
+} from "./profileTransfer";
 
 /**
  * Staff profile administration: list, single edit (upsert), and batch
@@ -299,29 +304,15 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState<ProfileTransferFormat | null>(null);
 
   async function handleFileChosen(file: File) {
     setLoading(true);
     setError(null);
     setSummary(null);
     try {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      // `apiClient`'s instance-level default sets Content-Type:
-      // application/json (see api/client.ts), which would otherwise
-      // silently override FormData's own multipart boundary — axios
-      // does not auto-detect FormData and skip a caller-set default the
-      // way some libraries do. Explicitly clearing it to `undefined`
-      // lets axios/the browser generate the correct
-      // `multipart/form-data; boundary=...` header instead. Confirmed
-      // by checking client.ts's actual defaults before writing this,
-      // not assumed to "just work."
-      const response = await apiClient.post<ImportSummary>(
-        "/api/admin/profiles/import",
-        form,
-        { headers: { "Content-Type": undefined } },
-      );
-      setSummary(response.data);
+      const imported = await importProfileFile<ImportSummary>(file);
+      setSummary(imported);
       onImported();
     } catch (e) {
       setError(describeError(e));
@@ -331,8 +322,16 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
     }
   }
 
-  function exportUrl(format: "csv" | "json") {
-    return `${apiClient.defaults.baseURL}/api/admin/profiles/export?format=${format}`;
+  async function handleExport(format: ProfileTransferFormat) {
+    setExporting(format);
+    setError(null);
+    try {
+      await exportProfileFile(format);
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setExporting(null);
+    }
   }
 
   return (
@@ -357,22 +356,23 @@ function ImportExportPanel({ onImported }: { onImported: () => void }) {
           className="text-xs text-onyx-text-dim"
         />
         {loading && <span className="text-xs text-onyx-text-dim">{t("common.importing")}</span>}
-        <a
-          href={exportUrl("csv")}
-          target="_blank"
-          rel="noreferrer"
+        {exporting && <span className="text-xs text-onyx-text-dim">{t("common.downloading")}</span>}
+        <button
+          type="button"
+          onClick={() => void handleExport("csv")}
+          disabled={loading || exporting !== null}
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover"
         >
           {t("common.exportCsv")}
-        </a>
-        <a
-          href={exportUrl("json")}
-          target="_blank"
-          rel="noreferrer"
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleExport("json")}
+          disabled={loading || exporting !== null}
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover"
         >
           {t("common.exportJson")}
-        </a>
+        </button>
       </div>
 
       {error && <p className="mt-2 text-xs text-onyx-status-blocked">{error}</p>}

@@ -57,6 +57,22 @@ impl PostgresUserStore {
         Self { pool }
     }
 
+    async fn user_exists_in_organization(
+        &self,
+        user_id: uuid::Uuid,
+        organization_id: uuid::Uuid,
+    ) -> Result<bool, UserStoreError> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND organization_id = $2)",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(infrastructure)?;
+        Ok(exists)
+    }
+
     /// Whether `candidate` appears in `start`'s ancestor chain (i.e.
     /// walking `parent_user_id` repeatedly from `start` eventually
     /// reaches `candidate`). Used by `set_parent` to reject an
@@ -71,6 +87,7 @@ impl PostgresUserStore {
         &self,
         candidate: uuid::Uuid,
         start: uuid::Uuid,
+        organization_id: uuid::Uuid,
     ) -> Result<bool, UserStoreError> {
         const MAX_DEPTH: u32 = 1000;
         let mut current = start;
@@ -78,13 +95,15 @@ impl PostgresUserStore {
             if current == candidate {
                 return Ok(true);
             }
-            let next: Option<uuid::Uuid> =
-                sqlx::query_scalar("SELECT parent_user_id FROM users WHERE id = $1")
-                    .bind(current)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(infrastructure)?
-                    .flatten();
+            let next: Option<uuid::Uuid> = sqlx::query_scalar(
+                "SELECT parent_user_id FROM users WHERE id = $1 AND organization_id = $2",
+            )
+            .bind(current)
+            .bind(organization_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(infrastructure)?
+            .flatten();
             match next {
                 Some(parent) => current = parent,
                 None => return Ok(false),
@@ -180,12 +199,39 @@ impl UserStore for PostgresUserStore {
         row.as_ref().map(record_from_pg_row).transpose()
     }
 
+    async fn find_by_id_in_organization(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+    ) -> Result<Option<UserRecord>, UserStoreError> {
+        let row = sqlx::query(
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, \
+             class, parent_user_id, is_active \
+             FROM users WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(parse_uuid(user_id, "user_id")?)
+        .bind(parse_uuid(organization_id, "organization_id")?)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(infrastructure)?;
+        row.as_ref().map(record_from_pg_row).transpose()
+    }
+
     async fn create(&self, user: NewUser) -> Result<UserRecord, UserStoreError> {
         let parent_uuid = user
             .parent_user_id
             .as_deref()
             .map(|p| parse_uuid(p, "parent_user_id"))
             .transpose()?;
+        let organization_id = parse_uuid(&user.organization_id, "organization_id")?;
+        if let Some(parent) = parent_uuid {
+            if !self
+                .user_exists_in_organization(parent, organization_id)
+                .await?
+            {
+                return Err(UserStoreError::ParentNotFound);
+            }
+        }
         sqlx::query(
             "INSERT INTO users (id, username, organization_id, password_hash, is_admin, \
              is_manager, class, parent_user_id) \
@@ -193,7 +239,7 @@ impl UserStore for PostgresUserStore {
         )
         .bind(parse_uuid(&user.user_id, "user_id")?)
         .bind(user.username.to_lowercase())
-        .bind(parse_uuid(&user.organization_id, "organization_id")?)
+        .bind(organization_id)
         .bind(&user.password_hash)
         .bind(user.is_admin)
         .bind(user.is_manager)
@@ -215,40 +261,58 @@ impl UserStore for PostgresUserStore {
         })
     }
 
-    async fn list(&self) -> Result<Vec<UserRecord>, UserStoreError> {
+    async fn list_in_organization(
+        &self,
+        organization_id: &str,
+    ) -> Result<Vec<UserRecord>, UserStoreError> {
         let rows = sqlx::query(
             "SELECT id, username, organization_id, password_hash, is_admin, is_manager, \
              class, parent_user_id, is_active \
-             FROM users ORDER BY username",
+             FROM users WHERE organization_id = $1 ORDER BY username",
         )
+        .bind(parse_uuid(organization_id, "organization_id")?)
         .fetch_all(&self.pool)
         .await
         .map_err(infrastructure)?;
         rows.iter().map(record_from_pg_row).collect()
     }
 
-    async fn set_active(&self, user_id: &str, is_active: bool) -> Result<(), UserStoreError> {
-        let result =
-            sqlx::query("UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1")
-                .bind(parse_uuid(user_id, "user_id")?)
-                .bind(is_active)
-                .execute(&self.pool)
-                .await
-                .map_err(infrastructure)?;
+    async fn set_active(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+        is_active: bool,
+    ) -> Result<(), UserStoreError> {
+        let result = sqlx::query(
+            "UPDATE users SET is_active = $3, updated_at = NOW() WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(parse_uuid(user_id, "user_id")?)
+        .bind(parse_uuid(organization_id, "organization_id")?)
+        .bind(is_active)
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
         Ok(())
     }
 
-    async fn set_manager(&self, user_id: &str, is_manager: bool) -> Result<(), UserStoreError> {
-        let result =
-            sqlx::query("UPDATE users SET is_manager = $2, updated_at = NOW() WHERE id = $1")
-                .bind(parse_uuid(user_id, "user_id")?)
-                .bind(is_manager)
-                .execute(&self.pool)
-                .await
-                .map_err(infrastructure)?;
+    async fn set_manager(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+        is_manager: bool,
+    ) -> Result<(), UserStoreError> {
+        let result = sqlx::query(
+            "UPDATE users SET is_manager = $3, updated_at = NOW() WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(parse_uuid(user_id, "user_id")?)
+        .bind(parse_uuid(organization_id, "organization_id")?)
+        .bind(is_manager)
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -258,14 +322,18 @@ impl UserStore for PostgresUserStore {
     async fn set_class(
         &self,
         user_id: &str,
+        organization_id: &str,
         class: Option<UserClass>,
     ) -> Result<(), UserStoreError> {
-        let result = sqlx::query("UPDATE users SET class = $2, updated_at = NOW() WHERE id = $1")
-            .bind(parse_uuid(user_id, "user_id")?)
-            .bind(class.map(|c| c.as_str()))
-            .execute(&self.pool)
-            .await
-            .map_err(infrastructure)?;
+        let result = sqlx::query(
+            "UPDATE users SET class = $3, updated_at = NOW() WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(parse_uuid(user_id, "user_id")?)
+        .bind(parse_uuid(organization_id, "organization_id")?)
+        .bind(class.map(|c| c.as_str()))
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -275,36 +343,45 @@ impl UserStore for PostgresUserStore {
     async fn set_parent(
         &self,
         user_id: &str,
+        organization_id: &str,
         parent_user_id: Option<&str>,
     ) -> Result<(), UserStoreError> {
         let target = parse_uuid(user_id, "user_id")?;
+        let organization = parse_uuid(organization_id, "organization_id")?;
         let parent = parent_user_id
             .map(|p| parse_uuid(p, "parent_user_id"))
             .transpose()?;
 
+        if !self
+            .user_exists_in_organization(target, organization)
+            .await?
+        {
+            return Err(UserStoreError::NotFound);
+        }
         if let Some(parent) = parent {
             if parent == target {
                 return Err(UserStoreError::ParentCycle);
             }
-            // Cycle check beyond the trivial self-reference case: walk
-            // the candidate parent's own ancestry and reject if `target`
-            // appears in it (which would make `target` its own
-            // ancestor once the edge target -> parent is added). No
-            // database constraint can express this (see this module's
-            // migration notes) — it is checked here, in application
-            // code, before the write.
-            if self.is_ancestor(target, parent).await? {
+            if !self
+                .user_exists_in_organization(parent, organization)
+                .await?
+            {
+                return Err(UserStoreError::ParentNotFound);
+            }
+            if self.is_ancestor(target, parent, organization).await? {
                 return Err(UserStoreError::ParentCycle);
             }
         }
 
-        let result =
-            sqlx::query("UPDATE users SET parent_user_id = $2, updated_at = NOW() WHERE id = $1")
-                .bind(target)
-                .bind(parent)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| insert_error_with_fk(e, "parent_user_id"))?;
+        let result = sqlx::query(
+            "UPDATE users SET parent_user_id = $3, updated_at = NOW() WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(target)
+        .bind(organization)
+        .bind(parent)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| insert_error_with_fk(e, "parent_user_id"))?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -314,15 +391,18 @@ impl UserStore for PostgresUserStore {
     async fn set_password_hash(
         &self,
         user_id: &str,
+        organization_id: &str,
         password_hash: &str,
     ) -> Result<(), UserStoreError> {
-        let result =
-            sqlx::query("UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1")
-                .bind(parse_uuid(user_id, "user_id")?)
-                .bind(password_hash)
-                .execute(&self.pool)
-                .await
-                .map_err(infrastructure)?;
+        let result = sqlx::query(
+            "UPDATE users SET password_hash = $3, updated_at = NOW() WHERE id = $1 AND organization_id = $2",
+        )
+        .bind(parse_uuid(user_id, "user_id")?)
+        .bind(parse_uuid(organization_id, "organization_id")?)
+        .bind(password_hash)
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -394,38 +474,45 @@ impl SqliteUserStore {
         Self { pool }
     }
 
-    /// Whether `user_id` exists. Used by `create`/`set_parent` to check
-    /// `parent_user_id` references a real row — SQLite's FK on this
-    /// column is unenforced in this project (no connection sets
-    /// `PRAGMA foreign_keys = ON`; see the SQLite migration's own
-    /// note), so this check is not optional here the way it might be on
-    /// Postgres.
-    async fn user_exists(&self, user_id: &str) -> Result<bool, UserStoreError> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = ?1")
-            .bind(user_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(infrastructure)?;
+    async fn user_exists_in_organization(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+    ) -> Result<bool, UserStoreError> {
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = ?1 AND organization_id = ?2")
+                .bind(user_id)
+                .bind(organization_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(infrastructure)?;
         Ok(count > 0)
     }
 
     /// Whether `candidate` appears in `start`'s ancestor chain. See
     /// `PostgresUserStore::is_ancestor`'s doc comment for the full
     /// rationale — identical logic, SQLite query syntax.
-    async fn is_ancestor(&self, candidate: &str, start: &str) -> Result<bool, UserStoreError> {
+    async fn is_ancestor(
+        &self,
+        candidate: &str,
+        start: &str,
+        organization_id: &str,
+    ) -> Result<bool, UserStoreError> {
         const MAX_DEPTH: u32 = 1000;
         let mut current = start.to_string();
         for _ in 0..MAX_DEPTH {
             if current == candidate {
                 return Ok(true);
             }
-            let next: Option<String> =
-                sqlx::query_scalar("SELECT parent_user_id FROM users WHERE id = ?1")
-                    .bind(&current)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(infrastructure)?
-                    .flatten();
+            let next: Option<String> = sqlx::query_scalar(
+                "SELECT parent_user_id FROM users WHERE id = ?1 AND organization_id = ?2",
+            )
+            .bind(&current)
+            .bind(organization_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(infrastructure)?
+            .flatten();
             match next {
                 Some(parent) => current = parent,
                 None => return Ok(false),
@@ -485,9 +572,30 @@ impl UserStore for SqliteUserStore {
         row.as_ref().map(record_from_sqlite_row).transpose()
     }
 
+    async fn find_by_id_in_organization(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+    ) -> Result<Option<UserRecord>, UserStoreError> {
+        let row = sqlx::query(
+            "SELECT id, username, organization_id, password_hash, is_admin, is_manager, \
+             class, parent_user_id, is_active \
+             FROM users WHERE id = ?1 AND organization_id = ?2",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(infrastructure)?;
+        row.as_ref().map(record_from_sqlite_row).transpose()
+    }
+
     async fn create(&self, user: NewUser) -> Result<UserRecord, UserStoreError> {
         if let Some(parent) = user.parent_user_id.as_deref() {
-            if !self.user_exists(parent).await? {
+            if !self
+                .user_exists_in_organization(parent, &user.organization_id)
+                .await?
+            {
                 return Err(UserStoreError::ParentNotFound);
             }
         }
@@ -522,40 +630,60 @@ impl UserStore for SqliteUserStore {
         })
     }
 
-    async fn list(&self) -> Result<Vec<UserRecord>, UserStoreError> {
+    async fn list_in_organization(
+        &self,
+        organization_id: &str,
+    ) -> Result<Vec<UserRecord>, UserStoreError> {
         let rows = sqlx::query(
             "SELECT id, username, organization_id, password_hash, is_admin, is_manager, \
              class, parent_user_id, is_active \
-             FROM users ORDER BY username",
+             FROM users WHERE organization_id = ?1 ORDER BY username",
         )
+        .bind(organization_id)
         .fetch_all(&self.pool)
         .await
         .map_err(infrastructure)?;
         rows.iter().map(record_from_sqlite_row).collect()
     }
 
-    async fn set_active(&self, user_id: &str, is_active: bool) -> Result<(), UserStoreError> {
-        let result = sqlx::query("UPDATE users SET is_active = ?2, updated_at = ?3 WHERE id = ?1")
-            .bind(user_id)
-            .bind(i64::from(is_active))
-            .bind(now_millis())
-            .execute(&self.pool)
-            .await
-            .map_err(infrastructure)?;
+    async fn set_active(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+        is_active: bool,
+    ) -> Result<(), UserStoreError> {
+        let result = sqlx::query(
+            "UPDATE users SET is_active = ?3, updated_at = ?4 WHERE id = ?1 AND organization_id = ?2",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .bind(i64::from(is_active))
+        .bind(now_millis())
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
         Ok(())
     }
 
-    async fn set_manager(&self, user_id: &str, is_manager: bool) -> Result<(), UserStoreError> {
-        let result = sqlx::query("UPDATE users SET is_manager = ?2, updated_at = ?3 WHERE id = ?1")
-            .bind(user_id)
-            .bind(i64::from(is_manager))
-            .bind(now_millis())
-            .execute(&self.pool)
-            .await
-            .map_err(infrastructure)?;
+    async fn set_manager(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+        is_manager: bool,
+    ) -> Result<(), UserStoreError> {
+        let result = sqlx::query(
+            "UPDATE users SET is_manager = ?3, updated_at = ?4 WHERE id = ?1 AND organization_id = ?2",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .bind(i64::from(is_manager))
+        .bind(now_millis())
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -565,15 +693,19 @@ impl UserStore for SqliteUserStore {
     async fn set_class(
         &self,
         user_id: &str,
+        organization_id: &str,
         class: Option<UserClass>,
     ) -> Result<(), UserStoreError> {
-        let result = sqlx::query("UPDATE users SET class = ?2, updated_at = ?3 WHERE id = ?1")
-            .bind(user_id)
-            .bind(class.map(|c| c.as_str()))
-            .bind(now_millis())
-            .execute(&self.pool)
-            .await
-            .map_err(infrastructure)?;
+        let result = sqlx::query(
+            "UPDATE users SET class = ?3, updated_at = ?4 WHERE id = ?1 AND organization_id = ?2",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .bind(class.map(|c| c.as_str()))
+        .bind(now_millis())
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -583,46 +715,59 @@ impl UserStore for SqliteUserStore {
     async fn set_parent(
         &self,
         user_id: &str,
+        organization_id: &str,
         parent_user_id: Option<&str>,
     ) -> Result<(), UserStoreError> {
-        if !self.user_exists(user_id).await? {
+        if !self
+            .user_exists_in_organization(user_id, organization_id)
+            .await?
+        {
             return Err(UserStoreError::NotFound);
         }
         if let Some(parent) = parent_user_id {
             if parent == user_id {
                 return Err(UserStoreError::ParentCycle);
             }
-            if !self.user_exists(parent).await? {
+            if !self
+                .user_exists_in_organization(parent, organization_id)
+                .await?
+            {
                 return Err(UserStoreError::ParentNotFound);
             }
-            if self.is_ancestor(user_id, parent).await? {
+            if self.is_ancestor(user_id, parent, organization_id).await? {
                 return Err(UserStoreError::ParentCycle);
             }
         }
 
-        sqlx::query("UPDATE users SET parent_user_id = ?2, updated_at = ?3 WHERE id = ?1")
-            .bind(user_id)
-            .bind(parent_user_id)
-            .bind(now_millis())
-            .execute(&self.pool)
-            .await
-            .map_err(infrastructure)?;
+        sqlx::query(
+            "UPDATE users SET parent_user_id = ?3, updated_at = ?4 WHERE id = ?1 AND organization_id = ?2",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .bind(parent_user_id)
+        .bind(now_millis())
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         Ok(())
     }
 
     async fn set_password_hash(
         &self,
         user_id: &str,
+        organization_id: &str,
         password_hash: &str,
     ) -> Result<(), UserStoreError> {
-        let result =
-            sqlx::query("UPDATE users SET password_hash = ?2, updated_at = ?3 WHERE id = ?1")
-                .bind(user_id)
-                .bind(password_hash)
-                .bind(now_millis())
-                .execute(&self.pool)
-                .await
-                .map_err(infrastructure)?;
+        let result = sqlx::query(
+            "UPDATE users SET password_hash = ?3, updated_at = ?4 WHERE id = ?1 AND organization_id = ?2",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .bind(password_hash)
+        .bind(now_millis())
+        .execute(&self.pool)
+        .await
+        .map_err(infrastructure)?;
         if result.rows_affected() == 0 {
             return Err(UserStoreError::NotFound);
         }
@@ -829,7 +974,10 @@ mod tests {
             .await
             .unwrap();
 
-        store.set_active(&user.user_id, false).await.unwrap();
+        store
+            .set_active(&user.user_id, &user.organization_id, false)
+            .await
+            .unwrap();
         assert!(
             !store
                 .find_by_id(&user.user_id)
@@ -840,7 +988,7 @@ mod tests {
         );
 
         store
-            .set_password_hash(&user.user_id, "new-hash")
+            .set_password_hash(&user.user_id, &user.organization_id, "new-hash")
             .await
             .unwrap();
         let reloaded = store.find_by_id(&user.user_id).await.unwrap().unwrap();
@@ -848,11 +996,17 @@ mod tests {
 
         let missing = uuid::Uuid::new_v4().to_string();
         assert_eq!(
-            store.set_active(&missing, true).await.unwrap_err(),
+            store
+                .set_active(&missing, &user.organization_id, true)
+                .await
+                .unwrap_err(),
             UserStoreError::NotFound
         );
         assert_eq!(
-            store.set_password_hash(&missing, "x").await.unwrap_err(),
+            store
+                .set_password_hash(&missing, &user.organization_id, "x")
+                .await
+                .unwrap_err(),
             UserStoreError::NotFound
         );
     }
@@ -866,7 +1020,10 @@ mod tests {
             .unwrap();
         assert!(!user.is_manager);
 
-        store.set_manager(&user.user_id, true).await.unwrap();
+        store
+            .set_manager(&user.user_id, &user.organization_id, true)
+            .await
+            .unwrap();
         assert!(
             store
                 .find_by_id(&user.user_id)
@@ -888,7 +1045,10 @@ mod tests {
 
         let missing = uuid::Uuid::new_v4().to_string();
         assert_eq!(
-            store.set_manager(&missing, true).await.unwrap_err(),
+            store
+                .set_manager(&missing, &user.organization_id, true)
+                .await
+                .unwrap_err(),
             UserStoreError::NotFound
         );
     }
@@ -900,7 +1060,11 @@ mod tests {
         assert_eq!(user.class, None);
 
         store
-            .set_class(&user.user_id, Some(UserClass::TeamLeader))
+            .set_class(
+                &user.user_id,
+                &user.organization_id,
+                Some(UserClass::TeamLeader),
+            )
             .await
             .unwrap();
         let reloaded = store.find_by_id(&user.user_id).await.unwrap().unwrap();
@@ -909,14 +1073,17 @@ mod tests {
         // Clearing back to None must also work — None is a real,
         // distinct state ("unclassified"), not just the zero value of
         // some other type.
-        store.set_class(&user.user_id, None).await.unwrap();
+        store
+            .set_class(&user.user_id, &user.organization_id, None)
+            .await
+            .unwrap();
         let cleared = store.find_by_id(&user.user_id).await.unwrap().unwrap();
         assert_eq!(cleared.class, None);
 
         let missing = uuid::Uuid::new_v4().to_string();
         assert_eq!(
             store
-                .set_class(&missing, Some(UserClass::Staff))
+                .set_class(&missing, &user.organization_id, Some(UserClass::Staff))
                 .await
                 .unwrap_err(),
             UserStoreError::NotFound
@@ -993,7 +1160,11 @@ mod tests {
         let staff = store.create(new_user("staff1", "h", false)).await.unwrap();
 
         store
-            .set_parent(&staff.user_id, Some(&manager.user_id))
+            .set_parent(
+                &staff.user_id,
+                &staff.organization_id,
+                Some(&manager.user_id),
+            )
             .await
             .unwrap();
         let reloaded = store.find_by_id(&staff.user_id).await.unwrap().unwrap();
@@ -1002,7 +1173,7 @@ mod tests {
         let missing = uuid::Uuid::new_v4().to_string();
         assert_eq!(
             store
-                .set_parent(&missing, Some(&manager.user_id))
+                .set_parent(&missing, &staff.organization_id, Some(&manager.user_id))
                 .await
                 .unwrap_err(),
             UserStoreError::NotFound
@@ -1017,7 +1188,7 @@ mod tests {
 
         assert_eq!(
             store
-                .set_parent(&staff.user_id, Some(&bogus_parent))
+                .set_parent(&staff.user_id, &staff.organization_id, Some(&bogus_parent))
                 .await
                 .unwrap_err(),
             UserStoreError::ParentNotFound
@@ -1031,7 +1202,7 @@ mod tests {
 
         assert_eq!(
             store
-                .set_parent(&user.user_id, Some(&user.user_id))
+                .set_parent(&user.user_id, &user.organization_id, Some(&user.user_id))
                 .await
                 .unwrap_err(),
             UserStoreError::ParentCycle
@@ -1051,17 +1222,17 @@ mod tests {
         let c = store.create(new_user("c", "h", false)).await.unwrap();
 
         store
-            .set_parent(&b.user_id, Some(&a.user_id))
+            .set_parent(&b.user_id, &b.organization_id, Some(&a.user_id))
             .await
             .unwrap();
         store
-            .set_parent(&c.user_id, Some(&b.user_id))
+            .set_parent(&c.user_id, &c.organization_id, Some(&b.user_id))
             .await
             .unwrap();
 
         assert_eq!(
             store
-                .set_parent(&a.user_id, Some(&c.user_id))
+                .set_parent(&a.user_id, &a.organization_id, Some(&c.user_id))
                 .await
                 .unwrap_err(),
             UserStoreError::ParentCycle
@@ -1077,11 +1248,18 @@ mod tests {
             .unwrap();
         let staff = store.create(new_user("staff1", "h", false)).await.unwrap();
         store
-            .set_parent(&staff.user_id, Some(&manager.user_id))
+            .set_parent(
+                &staff.user_id,
+                &staff.organization_id,
+                Some(&manager.user_id),
+            )
             .await
             .unwrap();
 
-        store.set_parent(&staff.user_id, None).await.unwrap();
+        store
+            .set_parent(&staff.user_id, &staff.organization_id, None)
+            .await
+            .unwrap();
         let reloaded = store.find_by_id(&staff.user_id).await.unwrap().unwrap();
         assert_eq!(reloaded.parent_user_id, None);
     }
@@ -1114,12 +1292,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tenant_bound_mutations_reject_foreign_users() {
+        let store = store().await;
+        let local = store.create(new_user("local", "h", false)).await.unwrap();
+        let mut foreign_new = new_user("foreign", "h", false);
+        foreign_new.organization_id = "33333333-3333-3333-3333-333333333333".to_string();
+        let foreign = store.create(foreign_new).await.unwrap();
+
+        assert_eq!(
+            store
+                .set_active(&foreign.user_id, &local.organization_id, false)
+                .await
+                .unwrap_err(),
+            UserStoreError::NotFound
+        );
+        assert_eq!(
+            store
+                .set_parent(
+                    &local.user_id,
+                    &local.organization_id,
+                    Some(&foreign.user_id),
+                )
+                .await
+                .unwrap_err(),
+            UserStoreError::ParentNotFound
+        );
+        assert!(store
+            .find_by_id_in_organization(&foreign.user_id, &local.organization_id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(
+            store
+                .find_by_id(&foreign.user_id)
+                .await
+                .unwrap()
+                .expect("foreign user remains present")
+                .is_active
+        );
+    }
+
+    #[tokio::test]
     async fn list_returns_all_users_sorted() {
         let store = store().await;
         store.create(new_user("zulu", "h", false)).await.unwrap();
         store.create(new_user("alpha", "h", true)).await.unwrap();
         let names: Vec<_> = store
-            .list()
+            .list_in_organization("11111111-1111-1111-1111-111111111111")
             .await
             .unwrap()
             .into_iter()

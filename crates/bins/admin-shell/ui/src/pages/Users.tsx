@@ -90,8 +90,8 @@ export default function Users() {
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useI18n();
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
   const [userClass, setUserClass] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,13 +102,13 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
     try {
       await apiClient.post("/api/admin/users", {
         username,
+        email,
         password,
-        is_admin: isAdmin,
         class: userClass || null,
       });
       setUsername("");
+      setEmail("");
       setPassword("");
-      setIsAdmin(false);
       setUserClass("");
       onCreated();
     } catch (e) {
@@ -129,7 +129,8 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <label className="block text-xs font-bold text-onyx-text">
-          {t("auth.username")}\n          <input
+          {t("auth.username")}
+          <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder={t("auth.username")}
@@ -137,7 +138,18 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
           />
         </label>
         <label className="block text-xs font-bold text-onyx-text">
-          {t("auth.initialPassword")}\n          <input
+          {t("common.contactEmail")}
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            required
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
+          />
+        </label>
+        <label className="block text-xs font-bold text-onyx-text">
+          {t("auth.initialPassword")}
+          <input
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             type="password"
@@ -146,7 +158,8 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
           />
         </label>
         <label className="block text-xs font-bold text-onyx-text">
-          {t("common.operationalClass")}\n          <select
+          {t("common.operationalClass")}
+          <select
             value={userClass}
             onChange={(e) => setUserClass(e.target.value)}
             className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
@@ -159,16 +172,12 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             ))}
           </select>
         </label>
-        <label className="mt-6 flex items-center gap-2 rounded-lg border border-onyx-border bg-slate-50 px-3 py-2.5 text-sm font-semibold text-onyx-text">
-          <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
-          {t("common.grantAdministratorAccess")}
-        </label>
       </div>
       {error && <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-onyx-status-blocked" role="alert">{error}</p>}
       <button
         type="button"
         onClick={() => void create()}
-        disabled={loading || !username || !password}
+        disabled={loading || !username.trim() || !email.trim() || !password}
         className="mt-5 rounded-lg bg-onyx-accent px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#174d7b] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? t("common.creating") : t("common.createUser")}

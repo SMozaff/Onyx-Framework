@@ -86,6 +86,12 @@ async fn refresh_token_yields_a_working_new_access_token_and_rotates() {
     let refreshed: serde_json::Value = refresh_response.json().await.unwrap();
     let new_access_token = refreshed["access_token"].as_str().unwrap().to_string();
     let new_refresh_token = refreshed["refresh_token"].as_str().unwrap().to_string();
+    assert_eq!(
+        refreshed["user"], login["user"],
+        "refresh must return the live, validated LoginUser contract Admin Shell restores"
+    );
+    assert_eq!(refreshed["user"]["username"], TEST_REFRESH_USERNAME);
+    assert_eq!(refreshed["user"]["is_admin"], true);
     assert_ne!(
         new_access_token, original_access_token,
         "refresh must issue a genuinely new access token"

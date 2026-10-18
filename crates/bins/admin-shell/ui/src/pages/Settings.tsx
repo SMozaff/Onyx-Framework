@@ -6,6 +6,19 @@ import { useQuery } from "@/hooks/useQuery";
 import { describeError } from "@/utils/errorHandler";
 import { useAuthStore } from "@/stores/authStore";
 import { useI18n } from "@/i18n/I18nContext";
+import {
+  detailPanelState,
+  detailProjection,
+  detailRequestFilters,
+  isAmbiguousCreateError,
+  legalHoldReleaseCommand,
+  newCreateOperation,
+  policyCommand,
+  postIdempotentCreation,
+  projectionConcurrency,
+  type IdempotentCreateOperation,
+  type ProjectionState,
+} from "./settingsHelpers";
 
 /**
  * Policy administration — ported from `desktop-shell`'s `Settings.tsx`
@@ -35,10 +48,10 @@ export default function Settings() {
   const targetId = policyId ?? null;
   const { data, loading, error, refetch } = useQuery<Record<string, unknown>>(
     "policy.detail",
-    targetId ? { id: targetId } : null,
+    targetId ? detailRequestFilters(targetId) : null,
   );
-  const policy = data?.data as Record<string, unknown>[] | undefined;
-  const policyRow = policy?.[0];
+  const policyRow = targetId ? detailProjection(data, targetId) : null;
+  const policyDetailState = detailPanelState(targetId, loading, error, policyRow);
 
   return (
     <div className="max-w-3xl">
@@ -52,12 +65,12 @@ export default function Settings() {
 
       {targetId && (
         <div className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-4">
-          {loading && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
-          {error && <p className="text-sm text-onyx-status-blocked">{error.message}</p>}
-          {!loading && !error && !policyRow && (
+          {policyDetailState === "loading" && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
+          {policyDetailState === "error" && <p className="text-sm text-onyx-status-blocked">{error?.message}</p>}
+          {policyDetailState === "empty" && (
             <p className="text-sm text-onyx-text-dim">{t("common.noPolicyFound")}</p>
           )}
-          {policyRow && (
+          {policyDetailState === "ready" && policyRow && (
             <PolicyPanel targetId={targetId} policy={policyRow} onChanged={() => void refetch()} />
           )}
         </div>
@@ -172,6 +185,9 @@ function MobileAccessPanel() {
       <p className="mt-1 text-sm text-onyx-text-dim">
         {t("settings.mobileAccessPolicyDescription")}
       </p>
+      <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        {t("settings.mobileAccessPolicyScope")}
+      </p>
       {enforcementStatus === "disabled_untrusted_client_type" && (
         <p role="alert" className="mt-3 rounded-md border border-onyx-border p-3 text-sm text-onyx-status-blocked">
           {t("settings.mobileAccessEnforcementDisabled")}
@@ -231,18 +247,36 @@ function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [operation, setOperation] = useState<IdempotentCreateOperation<{ name: string }> | null>(null);
+  const [retrySuggested, setRetrySuggested] = useState(false);
 
   async function create() {
-    if (name.trim().length === 0) return;
+    const trimmedName = name.trim();
+    if (trimmedName.length === 0) return;
+    // Editing the form starts a new logical submission. Until then, all
+    // retries retain the original key so the Worker can replay its result.
+    const pending = operation?.payload.name === trimmedName
+      ? operation
+      : newCreateOperation({ name: trimmedName });
     setLoading(true);
     setError(null);
+    setRetrySuggested(false);
     try {
-      const response = await apiClient.post<{ policy_id: string }>("/api/admin/policies", {
-        name,
-      });
+      const response = await postIdempotentCreation<{ name: string }, { policy_id: string }>(
+        apiClient,
+        "/api/admin/policies",
+        pending,
+      );
+      if (typeof response.policy_id !== "string" || response.policy_id.length === 0) {
+        throw new Error("The policy was created without a usable policy ID.");
+      }
       setName("");
-      onCreated(response.data.policy_id);
+      setOperation(null);
+      onCreated(response.policy_id);
     } catch (e) {
+      setOperation(pending);
+      const ambiguous = isAmbiguousCreateError(e);
+      setRetrySuggested(ambiguous);
       setError(describeError(e));
     } finally {
       setLoading(false);
@@ -255,7 +289,11 @@ function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
       <div className="mt-2 flex gap-2">
         <input
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setOperation(null);
+            setRetrySuggested(false);
+          }}
           placeholder={t("common.policyNameExample")}
           className="flex-1 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
@@ -269,6 +307,16 @@ function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
         </button>
       </div>
       {error && <p className="mt-1 text-xs text-onyx-status-blocked">{error}</p>}
+      {retrySuggested && operation && (
+        <button
+          type="button"
+          onClick={() => void create()}
+          disabled={loading}
+          className="mt-2 rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
+        >
+          Retry creation safely
+        </button>
+      )}
     </div>
   );
 }
@@ -289,10 +337,6 @@ const SUGGESTED_KEYS = [
   "message.retention_days",
 ];
 
-function baseCommandParams(targetId: string, organizationId: string, expectedVersion: number) {
-  return { targetId, targetType: "policy", organizationId, expectedVersion };
-}
-
 function PolicyPanel({
   targetId,
   policy,
@@ -304,7 +348,7 @@ function PolicyPanel({
 }) {
   const status = String(policy.status ?? "Unknown");
   const name = String(policy.name ?? "(unnamed)");
-  const version = typeof policy.version === "number" ? policy.version : 0;
+  const concurrency = projectionConcurrency(policy);
   const versions = Array.isArray(policy.versions)
     ? (policy.versions as { version_number?: number; status?: string; rules?: DraftRule[] }[])
     : [];
@@ -316,8 +360,16 @@ function PolicyPanel({
         <span className="text-xs text-onyx-text-dim">{status}</span>
       </div>
       <VersionHistory versions={versions} />
-      <DraftVersionForm targetId={targetId} version={version} onChanged={onChanged} />
-      <PolicyActions targetId={targetId} version={version} onChanged={onChanged} />
+      {concurrency ? (
+        <>
+          <DraftVersionForm targetId={targetId} policy={policy} onChanged={onChanged} />
+          <PolicyActions targetId={targetId} policy={policy} onChanged={onChanged} />
+        </>
+      ) : (
+        <p className="mt-3 text-xs text-onyx-status-blocked">
+          This projection is missing concurrency epochs. Refresh before changing this policy.
+        </p>
+      )}
     </div>
   );
 }
@@ -359,11 +411,11 @@ function VersionHistory({
 
 function DraftVersionForm({
   targetId,
-  version,
+  policy,
   onChanged,
 }: {
   targetId: string;
-  version: number;
+  policy: ProjectionState;
   onChanged: () => void;
 }) {
   const { t } = useI18n();
@@ -393,11 +445,15 @@ function DraftVersionForm({
       });
     if (parsed.length === 0) return;
 
-    await execute({
-      commandType: "CreatePolicyVersion",
-      ...baseCommandParams(targetId, organizationId, version),
-      payload: { CreatePolicyVersion: { rules: parsed } },
-    });
+    const command = policyCommand(
+      "CreatePolicyVersion",
+      targetId,
+      organizationId,
+      policy,
+      { rules: parsed },
+    );
+    if (!command) return;
+    await execute(command);
     setRules([{ rule_type: "FeatureToggle", key: "", value: "" }]);
     onChanged();
   }
@@ -462,11 +518,11 @@ function DraftVersionForm({
 
 function PolicyActions({
   targetId,
-  version,
+  policy,
   onChanged,
 }: {
   targetId: string;
-  version: number;
+  policy: ProjectionState;
   onChanged: () => void;
 }) {
   const { t } = useI18n();
@@ -482,15 +538,10 @@ function PolicyActions({
       <button
         type="button"
         disabled={publishCmd.loading}
-        onClick={() =>
-          void publishCmd
-            .execute({
-              commandType: "PublishPolicyVersion",
-              ...baseCommandParams(targetId, organizationId, version),
-              payload: { PublishPolicyVersion: null },
-            })
-            .then(onChanged)
-        }
+        onClick={() => {
+          const command = policyCommand("PublishPolicyVersion", targetId, organizationId, policy, {});
+          if (command) void publishCmd.execute(command).then(onChanged);
+        }}
         className="rounded-md bg-onyx-status-approved/15 px-3 py-1.5 text-xs text-onyx-status-approved hover:bg-onyx-status-approved/25 disabled:opacity-50"
       >
         {t("settings.publishDraft")}
@@ -498,15 +549,10 @@ function PolicyActions({
       <button
         type="button"
         disabled={retireCmd.loading}
-        onClick={() =>
-          void retireCmd
-            .execute({
-              commandType: "RetirePolicy",
-              ...baseCommandParams(targetId, organizationId, version),
-              payload: { RetirePolicy: null },
-            })
-            .then(onChanged)
-        }
+        onClick={() => {
+          const command = policyCommand("RetirePolicy", targetId, organizationId, policy, {});
+          if (command) void retireCmd.execute(command).then(onChanged);
+        }}
         className="rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
       >
         {t("settings.retirePolicy")}
@@ -521,15 +567,21 @@ function PolicyActions({
         <button
           type="button"
           disabled={evaluateCmd.loading || !evaluateKey}
-          onClick={() =>
-            void evaluateCmd
-              .execute({
-                commandType: "EvaluatePolicy",
-                ...baseCommandParams(targetId, organizationId, version),
-                payload: { EvaluatePolicy: { rule_key: evaluateKey } },
-              })
-              .then((result) => setEvaluateResult(JSON.stringify(result)))
-          }
+          onClick={() => {
+            const command = policyCommand(
+              "EvaluatePolicy",
+              targetId,
+              organizationId,
+              policy,
+              { rule_key: evaluateKey },
+            );
+            if (command) {
+              void evaluateCmd.execute(command).then((result) => {
+                setEvaluateResult(JSON.stringify(result));
+                onChanged();
+              });
+            }
+          }}
           className="rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
           {t("common.evaluate")}
@@ -549,33 +601,59 @@ function LegalHoldPanel() {
   const { t } = useI18n();
   const [holdIdRaw, setHoldIdRaw] = useState("");
   const targetId = holdIdRaw || null;
-  const { data, refetch } = useQuery<Record<string, unknown>>(
+  const { data, loading, error, refetch } = useQuery<Record<string, unknown>>(
     "legal_hold.detail",
-    targetId ? { id: targetId } : null,
+    targetId ? detailRequestFilters(targetId) : null,
   );
-  const holdRows = data?.data as Record<string, unknown>[] | undefined;
-  const hold = holdRows?.[0];
+  const hold = targetId ? detailProjection(data, targetId) : null;
+  const holdDetailState = detailPanelState(targetId, loading, error, hold);
 
   const [targetIdInput, setTargetIdInput] = useState("");
   const [targetTypeInput, setTargetTypeInput] = useState("task");
   const [reasonInput, setReasonInput] = useState("");
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [operation, setOperation] = useState<IdempotentCreateOperation<{
+    target_id: string;
+    target_type: string;
+    reason: string;
+  }> | null>(null);
+  const [retrySuggested, setRetrySuggested] = useState(false);
   const releaseCmd = useCommand();
   const organizationId = useAuthStore((s) => s.user?.organization_id) ?? "";
 
   async function apply() {
+    const payload = {
+      target_id: targetIdInput.trim(),
+      target_type: targetTypeInput.trim(),
+      reason: reasonInput.trim(),
+    };
+    if (!payload.target_id || !payload.target_type || !payload.reason) return;
+    const pending = operation
+      && operation.payload.target_id === payload.target_id
+      && operation.payload.target_type === payload.target_type
+      && operation.payload.reason === payload.reason
+      ? operation
+      : newCreateOperation(payload);
     setApplying(true);
     setApplyError(null);
+    setRetrySuggested(false);
     try {
-      const response = await apiClient.post<{ legal_hold_id: string }>(
+      const response = await postIdempotentCreation<typeof payload, { legal_hold_id: string }>(
+        apiClient,
         "/api/admin/legal-holds",
-        { target_id: targetIdInput, target_type: targetTypeInput, reason: reasonInput },
+        pending,
       );
-      setHoldIdRaw(response.data.legal_hold_id);
+      if (typeof response.legal_hold_id !== "string" || response.legal_hold_id.length === 0) {
+        throw new Error("The legal hold was created without a usable legal-hold ID.");
+      }
+      setHoldIdRaw(response.legal_hold_id);
       setTargetIdInput("");
       setReasonInput("");
+      setOperation(null);
     } catch (e) {
+      setOperation(pending);
+      setRetrySuggested(isAmbiguousCreateError(e));
       setApplyError(describeError(e));
     } finally {
       setApplying(false);
@@ -590,19 +668,31 @@ function LegalHoldPanel() {
       <div className="mt-2 grid grid-cols-2 gap-2">
         <input
           value={targetIdInput}
-          onChange={(e) => setTargetIdInput(e.target.value)}
+          onChange={(e) => {
+            setTargetIdInput(e.target.value);
+            setOperation(null);
+            setRetrySuggested(false);
+          }}
           placeholder={t("common.targetIdUuid")}
           className="rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <input
           value={targetTypeInput}
-          onChange={(e) => setTargetTypeInput(e.target.value)}
+          onChange={(e) => {
+            setTargetTypeInput(e.target.value);
+            setOperation(null);
+            setRetrySuggested(false);
+          }}
           placeholder={t("common.targetTypeExample")}
           className="rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
         <input
           value={reasonInput}
-          onChange={(e) => setReasonInput(e.target.value)}
+          onChange={(e) => {
+            setReasonInput(e.target.value);
+            setOperation(null);
+            setRetrySuggested(false);
+          }}
           placeholder={t("common.reason")}
           className="col-span-2 rounded-md border border-onyx-border bg-onyx-bg px-3 py-1.5 text-sm text-onyx-text focus:border-onyx-accent focus:outline-none"
         />
@@ -611,11 +701,21 @@ function LegalHoldPanel() {
       <button
         type="button"
         onClick={() => void apply()}
-        disabled={applying || !targetIdInput || !reasonInput}
+        disabled={applying || !targetIdInput.trim() || !targetTypeInput.trim() || !reasonInput.trim()}
         className="mt-2 rounded-md bg-onyx-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
       >
         {applying ? "Applying…" : "Apply legal hold"}
       </button>
+      {retrySuggested && operation && (
+        <button
+          type="button"
+          onClick={() => void apply()}
+          disabled={applying}
+          className="ml-2 mt-2 rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
+        >
+          Retry application safely
+        </button>
+      )}
 
       <div className="mt-4">
         <label className="block text-xs font-medium text-onyx-text-dim">{t("common.viewHoldById")}</label>
@@ -627,32 +727,43 @@ function LegalHoldPanel() {
         />
       </div>
 
-      {hold && (
+      {targetId && (
         <div className="mt-3 rounded-md border border-onyx-border bg-onyx-bg p-3">
-          <p className="text-sm text-onyx-text">Status: {status}</p>
-          {status === "Applied" && (
-            <button
-              type="button"
-              disabled={releaseCmd.loading}
-              onClick={() =>
-                void releaseCmd
-                  .execute({
-                    commandType: "ReleaseLegalHold",
-                    targetId: holdIdRaw,
-                    targetType: "legal_hold",
-                    organizationId,
-                    expectedVersion: typeof hold.version === "number" ? hold.version : 0,
-                    payload: { ReleaseLegalHold: { reason: "Released by administrator" } },
-                  })
-                  .then(() => void refetch())
-              }
-              className="mt-2 rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
-            >
-              {t("settings.release")}
-            </button>
+          {holdDetailState === "loading" && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
+          {holdDetailState === "error" && <p className="text-sm text-onyx-status-blocked">{error?.message}</p>}
+          {holdDetailState === "empty" && (
+            <p className="text-sm text-onyx-text-dim">No legal hold found for this ID.</p>
           )}
-          {releaseCmd.error && (
-            <p className="mt-1 text-xs text-onyx-status-blocked">{releaseCmd.error.message}</p>
+          {holdDetailState === "ready" && hold && (
+            <>
+              <p className="text-sm text-onyx-text">Status: {status}</p>
+              {status === "Applied" && projectionConcurrency(hold) && (
+                <button
+                  type="button"
+                  disabled={releaseCmd.loading}
+                  onClick={() => {
+                    const command = legalHoldReleaseCommand(
+                      targetId,
+                      organizationId,
+                      hold,
+                      "Released by administrator",
+                    );
+                    if (command) void releaseCmd.execute(command).then(() => void refetch());
+                  }}
+                  className="mt-2 rounded-md bg-onyx-status-blocked/15 px-3 py-1.5 text-xs text-onyx-status-blocked hover:bg-onyx-status-blocked/25 disabled:opacity-50"
+                >
+                  {t("settings.release")}
+                </button>
+              )}
+              {status === "Applied" && !projectionConcurrency(hold) && (
+                <p className="mt-1 text-xs text-onyx-status-blocked">
+                  This projection is missing concurrency epochs. Refresh before releasing the hold.
+                </p>
+              )}
+              {releaseCmd.error && (
+                <p className="mt-1 text-xs text-onyx-status-blocked">{releaseCmd.error.message}</p>
+              )}
+            </>
           )}
         </div>
       )}

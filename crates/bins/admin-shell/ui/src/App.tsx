@@ -3,11 +3,13 @@ import { useI18n } from "@/i18n/I18nContext";
 import { Navigate, Route, Routes } from "react-router-dom";
 import MainLayout from "@/components/Layout/MainLayout";
 import { useAuthStore } from "@/stores/authStore";
+import { canViewOrganizations } from "@/components/Layout/adminNavigation";
 
 const LoginPage = lazy(() => import("@/pages/Login"));
 const UsersPage = lazy(() => import("@/pages/Users"));
 const SettingsPage = lazy(() => import("@/pages/Settings"));
 const ProfilesPage = lazy(() => import("@/pages/Profiles"));
+const OrganizationsPage = lazy(() => import("@/pages/Organizations"));
 
 /**
  * Root layout + route table for the ONYX Admin platform. A deliberately
@@ -56,6 +58,11 @@ function AdminOnlyLayout() {
   return <MainLayout />;
 }
 
+function AllFatherOrganizationsRoute() {
+  const role = useAuthStore((state) => state.user?.role);
+  return canViewOrganizations(role) ? <OrganizationsPage /> : <Navigate to="/users" replace />;
+}
+
 export default function App() {
   const { t } = useI18n();
   return (
@@ -74,6 +81,7 @@ export default function App() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/:policyId" element={<SettingsPage />} />
           <Route path="profiles" element={<ProfilesPage />} />
+          <Route path="organizations" element={<AllFatherOrganizationsRoute />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

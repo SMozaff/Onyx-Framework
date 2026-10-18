@@ -343,13 +343,15 @@ impl ApiState {
         // retains the principal and authorization model; the principal has no
         // usable password and is reachable only through the Supabase exchange.
         let supabase_auth = supabase::SupabaseAuth::from_env()?.map(Arc::new);
-        if supabase_auth.is_some() {
+        if let Some(supabase_auth) = &supabase_auth {
             match user_store
-                .find_by_username(supabase::ALLFATHER_USERNAME)
+                .find_by_id(supabase_auth.allfather_principal_id())
                 .await?
             {
-                Some(existing) if !existing.is_admin || !existing.is_active => {
-                    anyhow::bail!("configured All-Father principal is not backed by an active ONYX administrator");
+                Some(existing) if !supabase_auth.is_canonical_principal(&existing) => {
+                    anyhow::bail!(
+                        "configured All-Father principal is not an active reserved ONYX administrator"
+                    );
                 }
                 Some(_) => {}
                 None => {
@@ -360,7 +362,7 @@ impl ApiState {
                         })?;
                     user_store
                         .create(security_application::NewUser {
-                            user_id: uuid::Uuid::new_v4().to_string(),
+                            user_id: supabase_auth.allfather_principal_id().to_owned(),
                             username: supabase::ALLFATHER_USERNAME.to_owned(),
                             organization_id: ORGANIZATION_ID.to_owned(),
                             password_hash,
@@ -370,7 +372,10 @@ impl ApiState {
                             parent_user_id: None,
                         })
                         .await?;
-                    tracing::info!("provisioned the designated Supabase identity as the ONYX master administrator");
+                    tracing::info!(
+                        principal_id = %supabase_auth.allfather_principal_id(),
+                        "provisioned the designated Supabase identity as the ONYX master administrator"
+                    );
                 }
             }
         }
@@ -500,6 +505,7 @@ pub fn router(state: ApiState) -> Router {
             "/api/admin/users",
             post(admin::create_user).get(admin::list_users),
         )
+        .route("/api/admin/users/:id", get(admin::get_user))
         .route(
             "/api/admin/users/:id/deactivate",
             post(admin::deactivate_user),

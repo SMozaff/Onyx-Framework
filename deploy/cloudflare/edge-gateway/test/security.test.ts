@@ -66,6 +66,8 @@ class SecurityDb {
   fileAssetLookups = 0;
   idempotency = new Map<string, string>();
   revokedTokens = new Set<string>();
+  sessionRevocations = new Map<string, { revoked_before_ms: number; updated_at: number }>();
+  failUserSessionRevocationWrite = false;
   domainEvents: Array<Record<string, unknown>> = [];
   auditRows: Array<Record<string, unknown>> = [];
   writes: Array<{ sql: string; params: unknown[] }> = [];
@@ -85,15 +87,39 @@ class SecurityDb {
   }
 
   async batch(statements: any[]) {
-    const results: Array<{ success: boolean; meta: { changes: number } }> = [];
-    let previousChanges = 0;
-    for (const statement of statements) {
-      const { sql, boundParams: params } = statement;
-      const result = this.runBatchStatement(sql, params, previousChanges);
-      results.push({ success: true, meta: { changes: result } });
-      previousChanges = result;
+    // D1Database.batch() is transactional. Preserve that behavior in the
+    // security double so a late statement failure cannot hide a partial write.
+    const snapshot = {
+      users: new Map([...this.users].map(([id, user]) => [id, { ...user }])),
+      aggregates: new Map([...this.aggregates].map(([id, row]) => [id, { ...row }])),
+      mobileSettings: new Map([...this.mobileSettings].map(([id, row]) => [id, { ...row }])),
+      sessionRevocations: new Map([...this.sessionRevocations].map(([id, row]) => [id, { ...row }])),
+      idempotency: new Map(this.idempotency),
+      domainEvents: this.domainEvents.map((event) => ({ ...event })),
+      auditRows: this.auditRows.map((row) => ({ ...row })),
+      writes: this.writes.map((write) => ({ sql: write.sql, params: [...write.params] })),
+    };
+    try {
+      const results: Array<{ success: boolean; meta: { changes: number } }> = [];
+      let previousChanges = 0;
+      for (const statement of statements) {
+        const { sql, boundParams: params } = statement;
+        const result = this.runBatchStatement(sql, params, previousChanges);
+        results.push({ success: true, meta: { changes: result } });
+        previousChanges = result;
+      }
+      return results;
+    } catch (error) {
+      this.users = snapshot.users;
+      this.aggregates = snapshot.aggregates;
+      this.mobileSettings = snapshot.mobileSettings;
+      this.sessionRevocations = snapshot.sessionRevocations;
+      this.idempotency = snapshot.idempotency;
+      this.domainEvents = snapshot.domainEvents;
+      this.auditRows = snapshot.auditRows;
+      this.writes = snapshot.writes;
+      throw error;
     }
-    return results;
   }
 
   private first(sql: string, params: unknown[]): any {
@@ -116,6 +142,10 @@ class SecurityDb {
     }
     if (sql.includes("FROM token_revocations")) {
       return this.revokedTokens.has(String(params[0])) ? { 1: 1 } : null;
+    }
+    if (sql.includes("FROM user_session_revocations")) {
+      const row = this.sessionRevocations.get(String(params[0]));
+      return row ? { ...row } : null;
     }
     if (sql.includes("FROM idempotency")) {
       const result = this.idempotency.get(String(params[0]));
@@ -238,6 +268,15 @@ class SecurityDb {
       this.writes.push({ sql, params });
       return 1;
     }
+    if (sql.startsWith("UPDATE users SET is_active=?")) {
+      const user = this.users.get(String(params[2]));
+      const requiredCurrentState = Number(params[4]);
+      if (!user || user.organization_id !== params[3] || user.role !== "STAFF" ||
+          user.id === "__allfather__" || user.is_active !== requiredCurrentState) return 0;
+      user.is_active = Number(params[0]);
+      this.writes.push({ sql, params });
+      return 1;
+    }
     if (sql.startsWith("INSERT INTO audit_log") && sql.includes("mobile_access_settings")) {
       const row = this.mobileSettings.get(String(params[6]));
       if (!row || row.last_operation_id !== String(params[7]) || row.version !== Number(params[8])) return 0;
@@ -248,6 +287,15 @@ class SecurityDb {
     if (sql.startsWith("INSERT INTO audit_log") && sql.includes("WHERE changes()=1")) {
       if (previousChanges !== 1) return 0;
       this.auditRows.push({ organization_id: params[0], user_id: params[1], action: params[2] });
+      this.writes.push({ sql, params });
+      return 1;
+    }
+    if (sql.startsWith("INSERT INTO user_session_revocations")) {
+      if (previousChanges !== 1) return 0;
+      if (this.failUserSessionRevocationWrite) throw new Error("simulated revocation watermark failure");
+      this.sessionRevocations.set(String(params[0]), {
+        revoked_before_ms: Number(params[1]), updated_at: Number(params[2]),
+      });
       this.writes.push({ sql, params });
       return 1;
     }
@@ -598,6 +646,62 @@ describe("Worker authorization and session security", () => {
     expect(first.status).toBe(200);
     const second = await worker.fetch(request(), makeEnv(db));
     expect(second.status).toBe(401);
+  });
+
+  it("rolls back Staff deactivation when its revocation watermark write fails", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    db.users.set("staff-2", {
+      id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
+      is_admin: 0, is_active: 1, class: "staff", role: "STAFF", supabase_user_id: null,
+    });
+    db.failUserSessionRevocationWrite = true;
+    const adminToken = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const response = await worker.fetch(new Request("https://worker.test/api/admin/users/staff-2/deactivate", {
+      method: "POST", headers: { authorization: "Bearer " + adminToken },
+    }), makeEnv(db));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: "USER_UPDATE_UNAVAILABLE" });
+    expect(db.users.get("staff-2")?.is_active).toBe(1);
+    expect(db.auditRows).toHaveLength(0);
+    expect(db.sessionRevocations.size).toBe(0);
+    expect(db.writes).toHaveLength(0);
+  });
+
+  it("keeps pre-deactivation access and refresh tokens revoked after Staff reactivation", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    db.users.set("staff-2", {
+      id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
+      is_admin: 0, is_active: 1, class: "staff", role: "STAFF", supabase_user_id: null,
+    });
+    const adminToken = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
+    const oldClaims = {
+      sub: "staff-2", username: "staff2", role: "STAFF", is_admin: false, class: "staff",
+      organization_id: ORG, sid: "staff-2-old-session", iat_ms: Date.now() - 60_000,
+    };
+    const oldAccess = await signToken(sessionClaims(oldClaims));
+    const oldRefresh = await signToken(sessionClaims({ ...oldClaims, typ: "refresh" }));
+    const setActive = (active: "deactivate" | "activate") => worker.fetch(
+      new Request(`https://worker.test/api/admin/users/staff-2/${active}`, {
+        method: "POST", headers: { authorization: "Bearer " + adminToken },
+      }), makeEnv(db),
+    );
+
+    expect((await setActive("deactivate")).status).toBe(200);
+    expect(db.users.get("staff-2")?.is_active).toBe(0);
+    expect(db.sessionRevocations.get("staff-2")?.revoked_before_ms).toBeGreaterThan(oldClaims.iat_ms);
+    expect((await setActive("activate")).status).toBe(200);
+    expect(db.users.get("staff-2")?.is_active).toBe(1);
+
+    const oldAccessAttempt = await worker.fetch(new Request("https://worker.test/api/users", {
+      headers: { authorization: "Bearer " + oldAccess },
+    }), makeEnv(db));
+    const oldRefreshAttempt = await worker.fetch(new Request("https://worker.test/api/auth/refresh", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refresh_token: oldRefresh }),
+    }), makeEnv(db));
+    expect(oldAccessAttempt.status).toBe(401);
+    expect(oldRefreshAttempt.status).toBe(401);
+    expect(db.revokedTokens.size).toBe(0);
   });
 
   it("prevents one user from reassigning another user's push-subscription ID", async () => {
@@ -966,6 +1070,21 @@ describe("Worker authorization and session security", () => {
     const desktopBody = await desktop.json() as { access_token: string; user: { role: string } };
     expect(mobileBody.user.role).toBe("STAFF");
     expect(desktopBody.user.role).toBe("STAFF");
+
+    // An empty class policy denies protected capability operations regardless
+    // of caller-controlled client_type; it is not a login block.
+    for (const accessToken of [mobileBody.access_token, desktopBody.access_token]) {
+      const protectedCapability = await worker.fetch(new Request("https://worker.test/api/todo/lists", {
+        method: "POST", headers: {
+          authorization: "Bearer " + accessToken,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ owner: "staff-1", origin: "staff_authored", items: [] }),
+      }), makeEnv(db));
+      expect(protectedCapability.status).toBe(403);
+      expect(await protectedCapability.json()).toMatchObject({ error: "CLIENT_CAPABILITY_REQUIRED" });
+    }
+    expect([...db.aggregates.values()].filter((row) => row.aggregate_type === "todo_list")).toHaveLength(0);
 
     const denied = await worker.fetch(new Request("https://worker.test/api/admin/policies", {
       method: "POST", headers: {

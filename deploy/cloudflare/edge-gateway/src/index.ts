@@ -218,6 +218,8 @@ async function authRefresh(request:Request,env:Env){
       "SELECT u.id,u.username,u.email,u.organization_id,u.is_admin,u.is_active,u.class,u.role,u.supabase_user_id FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
     ).bind(claims.sub).first<Record<string,unknown>>();
     if(!user)throw new Error("inactive user or organization");
+    const revocation=await env.DB.prepare("SELECT revoked_before_ms FROM user_session_revocations WHERE user_id=? LIMIT 1").bind(String(user.id)).first<{revoked_before_ms:number}>();
+    if(revocation && (!Number.isSafeInteger(claims.iat_ms) || Number(claims.iat_ms)<=Number(revocation.revoked_before_ms)))throw new Error("revoked session");
     const role=roleForUser(user);
     if(!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role!==claims.role||
        String(user.organization_id)!==claims.organization_id||
@@ -385,29 +387,121 @@ async function relaySocket(request:Request,env:Env):Promise<Response>{
 function requireRole(session:Session,...roles:string[]){if(!roles.includes(session.role))throw new Error("FORBIDDEN_ROLE");}
 function requiredString(body:Json,key:string):string{const value=body[key];if(typeof value!=="string"||!value.trim())throw new Error(`INVALID_${key.toUpperCase()}`);return value.trim();}
 function optionalEmail(body:Json):string|null{const value=typeof body.email==="string"?body.email.trim().toLowerCase():null;return value||null;}
+const SYSTEM_ORGANIZATION_ID="__allfather__";
+function exactBody(body:Json,keys:string[]):boolean{return Object.keys(body).every(key=>keys.includes(key));}
+function organizationName(body:Json):string|null{
+  const value=typeof body.name==="string"?body.name.trim():"";
+  return value&&value.length<=160?value:null;
+}
+function organizationDto(row:Record<string,unknown>){
+  return {id:String(row.id),name:String(row.name),is_active:Boolean(row.is_active),created_at:Number(row.created_at),updated_at:Number(row.updated_at)};
+}
+function successfulBatch(results:D1Result[],expected:number):boolean{
+  return results.length===expected&&results.every(result=>result?.success===true);
+}
 async function createOrganization(request:Request,env:Env,session:Session){
-  requireRole(session,"ALL_FATHER");const body=await request.json().catch(()=>null) as Json|null;if(!body)throw new Error("INVALID_BODY");
-  const name=requiredString(body,"name");const id=typeof body.id==="string"&&body.id.trim()?body.id.trim():uuid();const timestamp=Date.now();
-  const create=env.DB.prepare("INSERT INTO organizations(id,name,is_active,created_at,updated_at) VALUES(?,?,1,?,?)")
-    .bind(id,name,timestamp,timestamp);
+  requireRole(session,"ALL_FATHER");const body=await request.json().catch(()=>null) as Json|null;
+  if(!body||Array.isArray(body)||!exactBody(body,["name"]))return json({error:"INVALID_ORGANIZATION",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const name=organizationName(body);if(!name)return json({error:"INVALID_ORGANIZATION",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const id=uuid(),timestamp=Date.now();
+  // The duplicate predicate belongs to the write, not just a preceding read.
+  // D1 executes the batch atomically, so the audit cannot survive a rejected
+  // duplicate name or failed organization insertion.
+  const create=env.DB.prepare("INSERT INTO organizations(id,name,is_active,created_at,updated_at) SELECT ?,?,1,?,? WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE LOWER(name)=LOWER(?))")
+    .bind(id,name,timestamp,timestamp,name);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
     .bind(session.organization_id,session.sub,"organization.create",uuid(),JSON.stringify({target:id,name}),timestamp);
   try{
     const result=await env.DB.batch([create,auditStatement]);
+    if(!successfulBatch(result,2))throw new Error("ORGANIZATION_BATCH_FAILED");
     if(Number(result[0]?.meta?.changes??0)!==1)return json({error:"ORGANIZATION_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
-    return json({id,name,is_active:true});
+    if(Number(result[1]?.meta?.changes??0)!==1)throw new Error("ORGANIZATION_AUDIT_FAILED");
+    return json({id,name,is_active:true,created_at:timestamp,updated_at:timestamp},201);
   }catch(error){
     const message=error instanceof Error?error.message:"";
     if(/unique constraint|already exists/i.test(message))return json({error:"ORGANIZATION_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
     throw error;
   }
 }
+async function listOrganizations(env:Env,session:Session){
+  requireRole(session,"ALL_FATHER");
+  const rows=await env.DB.prepare("SELECT id,name,is_active,created_at,updated_at FROM organizations ORDER BY name").all<Record<string,unknown>>();
+  return json((rows.results??[]).map(organizationDto));
+}
+async function renameOrganization(request:Request,env:Env,session:Session,organizationId:string){
+  requireRole(session,"ALL_FATHER");
+  if(organizationId===SYSTEM_ORGANIZATION_ID)return json({error:"RESERVED_ORGANIZATION",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const body=await request.json().catch(()=>null) as Json|null;
+  if(!body||Array.isArray(body)||!exactBody(body,["name"]))return json({error:"INVALID_ORGANIZATION",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const name=organizationName(body);if(!name)return json({error:"INVALID_ORGANIZATION",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const current=await env.DB.prepare("SELECT id,name,is_active,created_at,updated_at FROM organizations WHERE id=? LIMIT 1").bind(organizationId).first<Record<string,unknown>>();
+  if(!current)return json({error:"ORGANIZATION_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const timestamp=Date.now(),operationId=uuid();
+  try{
+    const result=await env.DB.batch([
+      env.DB.prepare("UPDATE organizations SET name=?,updated_at=? WHERE id=? AND id<>? AND LOWER(name)<>LOWER(?) AND NOT EXISTS (SELECT 1 FROM organizations WHERE LOWER(name)=LOWER(?) AND id<>?)")
+        .bind(name,timestamp,organizationId,SYSTEM_ORGANIZATION_ID,name,name,organizationId),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
+        .bind(organizationId,session.sub,"organization.rename",operationId,JSON.stringify({target:organizationId,name}),timestamp),
+    ]);
+    if(!successfulBatch(result,2))throw new Error("ORGANIZATION_BATCH_FAILED");
+    if(Number(result[0]?.meta?.changes??0)!==1)return json({error:"ORGANIZATION_NAME_CONFLICT",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
+    if(Number(result[1]?.meta?.changes??0)!==1)throw new Error("ORGANIZATION_AUDIT_FAILED");
+    return json({...organizationDto(current),name,updated_at:timestamp});
+  }catch(error){
+    const message=error instanceof Error?error.message:"";
+    if(/unique constraint|already exists/i.test(message))return json({error:"ORGANIZATION_NAME_CONFLICT",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
+    throw error;
+  }
+}
+async function setOrganizationActive(env:Env,session:Session,organizationId:string,active:boolean){
+  requireRole(session,"ALL_FATHER");
+  if(organizationId===SYSTEM_ORGANIZATION_ID)return json({error:"RESERVED_ORGANIZATION",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  const current=await env.DB.prepare("SELECT id,name,is_active,created_at,updated_at FROM organizations WHERE id=? LIMIT 1").bind(organizationId).first<Record<string,unknown>>();
+  if(!current)return json({error:"ORGANIZATION_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const timestamp=Date.now(),operationId=uuid();
+  const update=env.DB.prepare("UPDATE organizations SET is_active=?,updated_at=? WHERE id=? AND id<>? AND is_active=?")
+    .bind(active?1:0,timestamp,organizationId,SYSTEM_ORGANIZATION_ID,active?0:1);
+  const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
+    .bind(organizationId,session.sub,active?"organization.activate":"organization.deactivate",operationId,JSON.stringify({target:organizationId}),timestamp);
+  // On deactivation every active member gets a watermark inside the same D1
+  // transaction. Accounts remain provisioned for later reactivation, but
+  // tokens issued before the organization transition can never become valid.
+  const revocations=env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) SELECT id,?,? FROM users WHERE organization_id=? AND is_active=1 AND changes()=1 ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=MAX(user_session_revocations.revoked_before_ms,excluded.revoked_before_ms),updated_at=excluded.updated_at")
+    .bind(timestamp,timestamp,organizationId);
+  try{
+    const statements=active?[update,auditStatement]:[update,auditStatement,revocations];
+    const result=await env.DB.batch(statements);
+    if(!successfulBatch(result,statements.length))throw new Error("ORGANIZATION_BATCH_FAILED");
+    if(Number(result[0]?.meta?.changes??0)!==1)return json({error:"ORGANIZATION_CHANGED",category:"CONCURRENCY",retryability:"RETRYABLE"},409);
+    if(Number(result[1]?.meta?.changes??0)!==1)throw new Error("ORGANIZATION_AUDIT_FAILED");
+    // A zero revocation count is valid for an empty organization; it is still
+    // checked explicitly so a failed D1 statement cannot be treated as success.
+    if(!active&&!Number.isSafeInteger(Number(result[2]?.meta?.changes??0)))throw new Error("ORGANIZATION_REVOCATION_FAILED");
+    return json({...organizationDto(current),is_active:active,updated_at:timestamp});
+  }catch(error){
+    if(error instanceof Error&&error.message==="ORGANIZATION_CHANGED")throw error;
+    return json({error:"ORGANIZATION_UPDATE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
+async function listOrganizationAdmins(env:Env,session:Session,organizationId:string){
+  requireRole(session,"ALL_FATHER");
+  const organization=await env.DB.prepare("SELECT id FROM organizations WHERE id=? LIMIT 1").bind(organizationId).first();
+  if(!organization)return json({error:"ORGANIZATION_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const rows=await env.DB.prepare("SELECT id,username,email,organization_id,is_active,created_at,updated_at FROM users WHERE organization_id=? AND role='ORGANIZATION_ADMIN' ORDER BY username")
+    .bind(organizationId).all<Record<string,unknown>>();
+  return json((rows.results??[]).map(row=>({id:String(row.id),username:String(row.username),email:row.email??null,organization_id:String(row.organization_id),is_active:Boolean(row.is_active),created_at:Number(row.created_at),updated_at:Number(row.updated_at)})));
+}
 async function createUser(request:Request,env:Env,session:Session,targetRole:"ORGANIZATION_ADMIN"|"STAFF"){
   requireRole(session,targetRole==="ORGANIZATION_ADMIN"?"ALL_FATHER":"ORGANIZATION_ADMIN");
-  const body=await request.json().catch(()=>null) as Json|null;if(!body)throw new Error("INVALID_BODY");
+  const body=await request.json().catch(()=>null) as Json|null;
+  const allowedKeys=targetRole==="ORGANIZATION_ADMIN"?["username","password","email","organization_id"]:["username","password","email","class"];
+  if(!body||Array.isArray(body)||!exactBody(body,allowedKeys)||(targetRole==="STAFF"&&!Object.prototype.hasOwnProperty.call(body,"class")))throw new Error("INVALID_BODY");
   const username=requiredString(body,"username"),password=requiredString(body,"password"),email=optionalEmail(body);
   if(password.length<8)throw new Error("PASSWORD_TOO_SHORT");
   if(!email)throw new Error("EMAIL_REQUIRED");
+  const userClass=targetRole==="STAFF"?body.class:null;
+  if(targetRole==="STAFF"&&userClass!==null&&(typeof userClass!=="string"||!MOBILE_ACCESS_CLASSES.includes(userClass as MobileAccessClass)))throw new Error("INVALID_USER_CLASS");
   const organizationId=targetRole==="STAFF"?session.organization_id:requiredString(body,"organization_id");
   const org=await env.DB.prepare("SELECT id FROM organizations WHERE id=? AND is_active=1 LIMIT 1").bind(organizationId).first();
   if(!org)throw new Error("ORGANIZATION_NOT_FOUND");
@@ -416,8 +510,10 @@ async function createUser(request:Request,env:Env,session:Session,targetRole:"OR
   const id=uuid(),timestamp=Date.now(),isAdmin=targetRole==="ORGANIZATION_ADMIN"?1:0,parent=targetRole==="STAFF"?session.sub:"__allfather__";
   const passwordHash=await hashPassword(password);
   const action=targetRole==="STAFF"?"staff.create":"admin.create";
-  const create=env.DB.prepare("INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id,username,email,organizationId,passwordHash,isAdmin,1,null,targetRole,parent,timestamp,timestamp);
+  // Re-check organization activity in the INSERT predicate so a concurrent
+  // deactivation cannot provision an admin into a disabled tenant.
+  const create=env.DB.prepare("INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM organizations WHERE id=? AND is_active=1)")
+    .bind(id,username,email,organizationId,passwordHash,isAdmin,1,userClass,targetRole,parent,timestamp,timestamp,organizationId);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
     .bind(session.organization_id,session.sub,action,uuid(),JSON.stringify({target:id,username,email,organization_id:organizationId}),timestamp);
   try{
@@ -430,6 +526,26 @@ async function createUser(request:Request,env:Env,session:Session,targetRole:"OR
   }
   return json({id,username,email,organization_id:organizationId,is_admin:Boolean(isAdmin),is_active:true,role:targetRole},201);
 }
+async function reactivateOrganizationAdmin(env:Env,session:Session,userId:string){
+  requireRole(session,"ALL_FATHER");
+  const target=await env.DB.prepare("SELECT id,organization_id,role,is_active FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
+  if(!target||roleForUser(target)!=="ORGANIZATION_ADMIN")return json({error:"USER_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const organizationId=String(target.organization_id),timestamp=Date.now(),operationId=uuid();
+  try{
+    const result=await env.DB.batch([
+      env.DB.prepare("UPDATE users SET is_active=1,updated_at=? WHERE id=? AND organization_id=? AND role='ORGANIZATION_ADMIN' AND is_active=0 AND EXISTS (SELECT 1 FROM organizations WHERE id=? AND is_active=1)")
+        .bind(timestamp,userId,organizationId,organizationId),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
+        .bind(organizationId,session.sub,"admin.reactivate",operationId,JSON.stringify({target:userId}),timestamp),
+    ]);
+    if(!successfulBatch(result,2))throw new Error("ADMIN_BATCH_FAILED");
+    if(Number(result[0]?.meta?.changes??0)!==1)return json({error:"USER_CHANGED",category:"CONCURRENCY",retryability:"RETRYABLE"},409);
+    if(Number(result[1]?.meta?.changes??0)!==1)throw new Error("ADMIN_AUDIT_FAILED");
+    return json({success:true,id:userId,is_active:true});
+  }catch{
+    return json({error:"ADMIN_UPDATE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
+}
 async function deactivateUser(request:Request,env:Env,session:Session,userId:string){
   requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");
   const target=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
@@ -438,22 +554,29 @@ async function deactivateUser(request:Request,env:Env,session:Session,userId:str
   if(session.role==="ALL_FATHER"&&role!=="ORGANIZATION_ADMIN")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(session.role==="ORGANIZATION_ADMIN"&&(role!=="STAFF"||String(target.organization_id)!==session.organization_id))return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(role==="ALL_FATHER")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-  // Apply the tenant/role predicate to the write itself, and commit the
-  // lifecycle update and audit record together. A concurrent role/tenant
-  // change cannot turn the earlier read into an out-of-scope write.
+  // Apply tenant, role, active-state, and (for organization administrators)
+  // last-admin predicates to the write itself. Update, audit, and watermark
+  // are one D1 transaction so no stale session survives a successful delete.
   const timestamp=Date.now();
   const details=JSON.stringify({target:userId,username:target.username,role});
   const update=session.role==="ORGANIZATION_ADMIN"
     ? env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND is_active=1")
         .bind(timestamp,userId,session.organization_id)
-    : env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=? AND role='ORGANIZATION_ADMIN' AND is_active=1")
-        .bind(timestamp,userId);
+    : env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=? AND organization_id=? AND role='ORGANIZATION_ADMIN' AND is_active=1 AND (SELECT COUNT(*) FROM users WHERE organization_id=? AND role='ORGANIZATION_ADMIN' AND is_active=1)>1")
+        .bind(timestamp,userId,String(target.organization_id),String(target.organization_id));
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
-    .bind(session.organization_id,session.sub,"user.deactivate",uuid(),details,timestamp);
-  const result=await env.DB.batch([update,auditStatement]);
-  if(Number(result[0]?.meta?.changes??0)!==1)
-    return json({error:"USER_CHANGED",category:"CONCURRENCY",retryability:"RETRYABLE"},409);
-  return json({success:true,id:userId,is_active:false});
+    .bind(String(target.organization_id),session.sub,"user.deactivate",uuid(),details,timestamp);
+  const revocation=env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) SELECT ?,?,? WHERE changes()=1 ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=MAX(user_session_revocations.revoked_before_ms,excluded.revoked_before_ms),updated_at=excluded.updated_at")
+    .bind(userId,timestamp,timestamp);
+  try{
+    const result=await env.DB.batch([update,auditStatement,revocation]);
+    if(!successfulBatch(result,3))throw new Error("USER_BATCH_FAILED");
+    if(Number(result[0]?.meta?.changes??0)!==1)return json({error:role==="ORGANIZATION_ADMIN"?"LAST_ORGANIZATION_ADMIN":"USER_CHANGED",category:"CONCURRENCY",retryability:"RETRYABLE"},409);
+    if(Number(result[1]?.meta?.changes??0)!==1||Number(result[2]?.meta?.changes??0)!==1)throw new Error("USER_BATCH_DEPENDENCY_FAILED");
+    return json({success:true,id:userId,is_active:false});
+  }catch{
+    return json({error:"USER_UPDATE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
+  }
 }
 async function audit(env:Env,session:Session,action:string,targetId:string,details:Json){await env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id,session.sub,action,uuid(),JSON.stringify({target:targetId,...details}),Date.now()).run();}
 
@@ -1181,13 +1304,32 @@ async function setUserActive(env: Env, session: Session, userId: string, active:
   if (userId === session.sub && !active) return json({ error: "CANNOT_DEACTIVATE_SELF", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
   const timestamp = Date.now(), operationId = uuid();
   try {
-    const batch = await env.DB.batch([
-      env.DB.prepare("UPDATE users SET is_active=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__'").bind(active ? 1 : 0, timestamp, userId, session.organization_id),
-      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, active ? "user.activate" : "user.deactivate", operationId, JSON.stringify({ target: userId }), timestamp),
-    ]);
-    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
-    if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_AUDIT_FAILED");
-    if (!active) await env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=excluded.revoked_before_ms,updated_at=excluded.updated_at").bind(userId, Date.now(), timestamp).run();
+    // Every transition is conditional on the prior state. On deactivation the
+    // audit depends on the user update, and the revocation watermark depends on
+    // the audit. D1 executes this batch in one transaction, so a failed
+    // watermark write rolls back the preceding user and audit writes.
+    const update = env.DB.prepare(
+      "UPDATE users SET is_active=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__' AND is_active=?"
+    ).bind(active ? 1 : 0, timestamp, userId, session.organization_id, active ? 0 : 1);
+    const audit = env.DB.prepare(
+      "INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1"
+    ).bind(session.organization_id, session.sub, active ? "user.activate" : "user.deactivate", operationId, JSON.stringify({ target: userId }), timestamp);
+    const statements = [update, audit];
+    if (!active) {
+      statements.push(env.DB.prepare(
+        "INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) SELECT ?,?,? WHERE changes()=1 ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=excluded.revoked_before_ms,updated_at=excluded.updated_at"
+      ).bind(userId, timestamp, timestamp));
+    }
+    const batch = await env.DB.batch(statements);
+    const changes = batch.map((result) => Number(result?.meta?.changes ?? 0));
+    if (batch.length !== statements.length || batch.some((result) => result?.success !== true)) throw new Error("USER_BATCH_FAILED");
+    if (changes[0] !== 1) {
+      if (changes.slice(1).every((count) => count === 0)) {
+        return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+      }
+      throw new Error("USER_BATCH_DEPENDENCY_FAILED");
+    }
+    if (changes.some((count) => count !== 1)) throw new Error("USER_BATCH_DEPENDENCY_FAILED");
     return json({ success: true });
   } catch {
     return json({ error: "USER_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
@@ -1203,10 +1345,13 @@ async function setUserPassword(request: Request, env: Env, session: Session, use
     const hash = await hashPassword(body.password), timestamp = Date.now(), operationId = uuid();
     const batch = await env.DB.batch([
       env.DB.prepare("UPDATE users SET password_hash=?,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF'").bind(hash, timestamp, userId, session.organization_id),
-      env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=excluded.revoked_before_ms,updated_at=excluded.updated_at").bind(userId, timestamp, timestamp),
-      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)").bind(session.organization_id, session.sub, "user.password.reset", operationId, JSON.stringify({ target: userId }), timestamp),
+      env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) SELECT ?,?,? WHERE changes()=1 ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=MAX(user_session_revocations.revoked_before_ms,excluded.revoked_before_ms),updated_at=excluded.updated_at").bind(userId, timestamp, timestamp),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.password.reset", operationId, JSON.stringify({ target: userId }), timestamp),
     ]);
-    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    const changes = batch.map((result) => Number(result?.meta?.changes ?? 0));
+    if (batch.length !== 3 || batch.some((result) => result?.success !== true)) throw new Error("USER_PASSWORD_BATCH_FAILED");
+    if (changes[0] !== 1) return json({ error: "USER_CHANGED", category: "CONCURRENCY", retryability: "RETRYABLE" }, 409);
+    if (changes.some((count) => count !== 1)) throw new Error("USER_PASSWORD_BATCH_DEPENDENCY_FAILED");
     return json({ success: true });
   } catch {
     return json({ error: "USER_PASSWORD_UPDATE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
@@ -1631,7 +1776,7 @@ async function websocketEvents(request: Request, env: Env): Promise<Response> {
 
 async function dispatch(request:Request,env:Env):Promise<Response>{
   const url=new URL(request.url);const origin=corsOrigin(request,env);
-  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
+  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,PATCH,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
   if(url.pathname==="/health")return json({status:"ok",service:"onyx-cloudflare-worker",runtime:"cloudflare-workers-free"},200,origin);
   if(url.pathname==="/ready"){
     try{
@@ -1682,8 +1827,19 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(fileAclMatch&&request.method==="DELETE"&&fileAclMatch[2])return await revokeFileAccess(env,session,decodeURIComponent(fileAclMatch[1]),decodeURIComponent(fileAclMatch[2]));
     if(url.pathname.startsWith("/api/files/")&&request.method==="GET")return await fileDownload(env,session,url.pathname.split("/").pop()!);
 
+    if(url.pathname==="/api/allfather/organizations"&&request.method==="GET")return await listOrganizations(env,session);
     if(url.pathname==="/api/allfather/organizations"&&request.method==="POST")return await createOrganization(request,env,session);
+    if(/^\/api\/allfather\/organizations\/[^/]+$/.test(url.pathname)&&request.method==="PATCH")return await renameOrganization(request,env,session,decodeURIComponent(url.pathname.split("/").pop()!));
+    if(/^\/api\/allfather\/organizations\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await setOrganizationActive(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!),false);
+    if(/^\/api\/allfather\/organizations\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setOrganizationActive(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!),true);
+    if(url.pathname==="/api/allfather/admins"&&request.method==="GET"){
+      if([...url.searchParams.keys()].some(key=>key!=="organization_id"))return json({error:"INVALID_ADMIN_QUERY",category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);
+      const organizationId=url.searchParams.get("organization_id")?.trim()??"";
+      if(!organizationId)return json({error:"INVALID_ADMIN_QUERY",category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);
+      return await listOrganizationAdmins(env,session,organizationId);
+    }
     if(url.pathname==="/api/allfather/admins"&&request.method==="POST")return await createUser(request,env,session,"ORGANIZATION_ADMIN");
+    if(/^\/api\/allfather\/admins\/[^/]+\/reactivate$/.test(url.pathname)&&request.method==="POST")return await reactivateOrganizationAdmin(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!));
     if(url.pathname==="/api/admin/staff"&&request.method==="POST")return await createUser(request,env,session,"STAFF");
     if(url.pathname.startsWith("/api/admin/users/")&&request.method==="DELETE")return await deactivateUser(request,env,session,url.pathname.split("/").pop()!);
     return json({error:"ROUTE_NOT_MIGRATED",route:url.pathname,method:request.method,message:"This feature is not available on the Cloudflare Worker yet. The equivalent Axum route exists but has not been ported with equivalent authorization and persistence semantics.",category:"FEATURE_UNAVAILABLE",retryability:"NON_RETRYABLE",correlation_id:uuid()},501,origin);

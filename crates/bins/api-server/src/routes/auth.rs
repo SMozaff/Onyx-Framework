@@ -113,6 +113,10 @@ pub struct RefreshResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: u64,
+    /// The principal revalidated from the store while redeeming the refresh
+    /// token. Admin Shell uses this to restore its user context after token
+    /// rotation without trusting stale token claims.
+    pub user: LoginUser,
 }
 
 /// `POST /api/auth/refresh` — redeems a still-valid `refresh` token for
@@ -356,6 +360,13 @@ pub async fn refresh(
         access_token,
         refresh_token,
         expires_in: 3600,
+        user: LoginUser {
+            id: user.user_id,
+            username: user.username,
+            organization_id: user.organization_id,
+            is_admin: user.is_admin,
+            class: user.class.map(|c| c.as_str().to_string()),
+        },
     }))
 }
 

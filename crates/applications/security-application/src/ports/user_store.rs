@@ -216,14 +216,37 @@ pub trait UserStore: Send + Sync {
 
     async fn find_by_id(&self, user_id: &str) -> Result<Option<UserRecord>, UserStoreError>;
 
+    /// Looks up a user only when it belongs to `organization_id`. Administrative
+    /// request handlers must use this rather than [`find_by_id`](Self::find_by_id)
+    /// for a caller-selected target, so a guessed UUID never crosses a tenant
+    /// boundary.
+    async fn find_by_id_in_organization(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+    ) -> Result<Option<UserRecord>, UserStoreError>;
+
     /// Persist a new user. Must return [`UserStoreError::DuplicateUsername`]
     /// on unique-constraint violation rather than a generic infrastructure
     /// error, so the API can map it to 409 rather than 500.
     async fn create(&self, user: NewUser) -> Result<UserRecord, UserStoreError>;
 
-    async fn list(&self) -> Result<Vec<UserRecord>, UserStoreError>;
+    /// Lists identities in exactly one tenant. This intentionally has no
+    /// unscoped counterpart: API directory and administration routes must not
+    /// fetch every tenant and rely on a later in-memory filter.
+    async fn list_in_organization(
+        &self,
+        organization_id: &str,
+    ) -> Result<Vec<UserRecord>, UserStoreError>;
 
-    async fn set_active(&self, user_id: &str, is_active: bool) -> Result<(), UserStoreError>;
+    /// Updates an account only if both its id and tenant match. A missing or
+    /// foreign target is deliberately returned as `NotFound`.
+    async fn set_active(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+        is_active: bool,
+    ) -> Result<(), UserStoreError>;
 
     /// Grants or revokes the Manager role. Admin-only, same as every other
     /// user-management mutation — see `api_server::routes::admin`'s
@@ -231,7 +254,12 @@ pub trait UserStore: Send + Sync {
     ///
     /// **Deprecated** — see [`UserRecord::is_manager`]'s doc comment.
     /// Superseded by [`set_class`](Self::set_class).
-    async fn set_manager(&self, user_id: &str, is_manager: bool) -> Result<(), UserStoreError>;
+    async fn set_manager(
+        &self,
+        user_id: &str,
+        organization_id: &str,
+        is_manager: bool,
+    ) -> Result<(), UserStoreError>;
 
     /// Assigns or clears a user's class. Admin-only (design doc §1: "no
     /// one else could add or remove users or change user's class and
@@ -241,6 +269,7 @@ pub trait UserStore: Send + Sync {
     async fn set_class(
         &self,
         user_id: &str,
+        organization_id: &str,
         class: Option<UserClass>,
     ) -> Result<(), UserStoreError>;
 
@@ -256,12 +285,14 @@ pub trait UserStore: Send + Sync {
     async fn set_parent(
         &self,
         user_id: &str,
+        organization_id: &str,
         parent_user_id: Option<&str>,
     ) -> Result<(), UserStoreError>;
 
     async fn set_password_hash(
         &self,
         user_id: &str,
+        organization_id: &str,
         password_hash: &str,
     ) -> Result<(), UserStoreError>;
 
