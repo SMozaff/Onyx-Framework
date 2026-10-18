@@ -434,6 +434,24 @@ describe("Worker authorization and session security", () => {
       headers: { authorization: "Bearer " + session.access_token },
     }), makeEnv(db));
     expect(protectedResponse.status).toBe(200);
+    const refreshResponse = await worker.fetch(new Request("https://worker.test/api/auth/refresh", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    }), makeEnv(db));
+    expect(refreshResponse.status).toBe(200);
+    const refreshed = await refreshResponse.json() as {
+      access_token: string; refresh_token: string;
+      user: { id: string; username: string; organization_id: string; role: string; is_admin: boolean };
+    };
+    expect(refreshed.user).toMatchObject({
+      id: "__allfather__", username: "allfather", organization_id: "__allfather__",
+      role: "ALL_FATHER", is_admin: true,
+    });
+    const refreshedProtected = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
+      headers: { authorization: "Bearer " + refreshed.access_token },
+    }), makeEnv(db));
+    expect(refreshedProtected.status).toBe(200);
+
 
     expect((await login(db, { username: "allfather", password: password + "x", client_type: "admin" })).status).toBe(401);
     for (const body of [{ username: "allfather" }, { password, client_type: "admin" }]) {

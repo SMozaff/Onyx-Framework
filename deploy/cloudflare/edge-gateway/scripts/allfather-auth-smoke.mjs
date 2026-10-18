@@ -108,6 +108,21 @@ VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.
       headers: { authorization: `Bearer ${session.access_token}` },
     });
     if (protectedResponse.status !== 200) fail(`Canonical All-Father protected operation returned HTTP ${protectedResponse.status}.`);
+    const refreshResponse = await fetch(`${base}/api/auth/refresh`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    const refreshed = await refreshResponse.json().catch(() => null);
+    if (refreshResponse.status !== 200 || typeof refreshed?.access_token !== "string" ||
+        typeof refreshed?.refresh_token !== "string" || refreshed?.user?.id !== "__allfather__" ||
+        refreshed?.user?.role !== "ALL_FATHER" || refreshed?.user?.is_admin !== true) {
+      fail(`Canonical All-Father refresh returned HTTP ${refreshResponse.status} or invalid authority.`);
+    }
+    const refreshedProtected = await fetch(`${base}/api/allfather/admins?organization_id=__allfather__`, {
+      headers: { authorization: `Bearer ${refreshed.access_token}` },
+    });
+    if (refreshedProtected.status !== 200) fail(`Refreshed All-Father session failed protected access (HTTP ${refreshedProtected.status}).`);
+
 
     const invalid = await requestJson("/api/auth/login", { username, password: password + "x", client_type: "admin" }, "invalid password");
     if (invalid.response.status !== 401 || invalid.value?.access_token !== undefined) fail("Invalid All-Father password was not safely rejected.");
