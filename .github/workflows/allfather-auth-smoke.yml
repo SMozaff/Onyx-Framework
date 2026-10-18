@@ -1,0 +1,105 @@
+name: All-Father live authentication smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare/edge-gateway/src/**'
+      - '.github/workflows/allfather-auth-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  allfather-auth:
+    name: Verify provisioned All-Father login against deployed Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate required Actions secrets
+        shell: bash
+        env:
+          ONYX_ALLFATHER_USERNAME: ${{ secrets.ONYX_ALLFATHER_USERNAME }}
+          ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ONYX_ALLFATHER_USERNAME" || { echo "::error::Add ONYX_ALLFATHER_USERNAME in GitHub Actions secrets (the designated Supabase email)."; exit 1; }
+          test -n "$ONYX_ALLFATHER_PASSWORD" || { echo "::error::Add ONYX_ALLFATHER_PASSWORD in GitHub Actions secrets (the designated Supabase account password)."; exit 1; }
+          test -n "$SUPABASE_PUBLISHABLE_KEY" || { echo "::error::SUPABASE_PUBLISHABLE_KEY is missing."; exit 1; }
+
+      - name: Authenticate through Supabase and exchange for ONYX All-Father session
+        shell: bash
+        env:
+          ONYX_ALLFATHER_USERNAME: ${{ secrets.ONYX_ALLFATHER_USERNAME }}
+          ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_URL: https://uhpqjhbciimklheohvfr.supabase.co
+          ONYX_WORKER_URL: https://onyx-framework.soheil-mozaff.workers.dev
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fail = (message) => { console.error(`::error::${message}`); process.exit(1); };
+          const username = process.env.ONYX_ALLFATHER_USERNAME;
+          const password = process.env.ONYX_ALLFATHER_PASSWORD;
+          const apiKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+          const supabaseUrl = process.env.SUPABASE_URL;
+          const workerUrl = process.env.ONYX_WORKER_URL;
+
+          async function jsonRequest(url, options, label) {
+            let response;
+            try {
+              response = await fetch(url, options);
+            } catch {
+              fail(`${label}: network request failed.`);
+            }
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) fail(`${label}: HTTP ${response.status}; inspect service configuration without printing credentials or tokens.`);
+            return body;
+          }
+
+          (async () => {
+            const auth = await jsonRequest(
+              `${supabaseUrl}/auth/v1/token?grant_type=password`,
+              {
+                method: 'POST',
+                headers: {
+                  apikey: apiKey,
+                  authorization: `Bearer ${apiKey}`,
+                  'content-type': 'application/json',
+                },
+                body: JSON.stringify({ email: username, password }),
+              },
+              'Supabase credential authentication',
+            );
+            if (typeof auth.access_token !== 'string' || !auth.access_token || auth.user?.email_confirmed_at == null) {
+              fail('Supabase did not return a confirmed authenticated user.');
+            }
+
+            const session = await jsonRequest(
+              `${workerUrl}/api/auth/supabase`,
+              {
+                method: 'POST',
+                headers: { authorization: `Bearer ${auth.access_token}` },
+              },
+              'ONYX All-Father session exchange',
+            );
+            if (
+              typeof session.access_token !== 'string' ||
+              typeof session.refresh_token !== 'string' ||
+              session.user?.role !== 'ALL_FATHER' ||
+              session.user?.username !== 'allfather'
+            ) {
+              fail('ONYX did not issue the expected canonical All-Father session.');
+            }
+
+            const protectedResponse = await fetch(`${workerUrl}/api/users/hierarchy`, {
+              headers: { authorization: `Bearer ${session.access_token}` },
+            });
+            if (!protectedResponse.ok) {
+              fail(`Authenticated protected API request failed with HTTP ${protectedResponse.status}.`);
+            }
+            console.log('PASS: Supabase credentials authenticated; Worker issued the canonical All-Father session; protected API accepted it.');
+          })().catch(() => fail('Authentication smoke test failed unexpectedly; tokens and credential values were suppressed.'));
+          NODE
