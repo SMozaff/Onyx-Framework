@@ -17,4 +17,4 @@ Create a repository Actions secret named `ONYX_CORS_ORIGINS` containing the exac
 
 ## Validation limitation
 
-The workflow YAML files were parsed successfully. This package has not been executed by GitHub Actions, and it does not prove that a live deployment or authentication flow succeeds. After replacing the files and adding the required secret, run the Cloudflare Worker CI and deployment workflows in GitHub Actions.
+The workflow YAML files were parsed successfully. This package has not been executed by GitHub Actions, and it does not prove that a live deployment or authentication flow succeeds. After replacing the files and adding the required secret, run the Cloudflare Worker CI an
