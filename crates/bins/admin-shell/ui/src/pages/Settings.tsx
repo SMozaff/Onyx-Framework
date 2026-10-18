@@ -346,6 +346,7 @@ function PolicyPanel({
   policy: Record<string, unknown>;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const status = String(policy.status ?? "Unknown");
   const name = String(policy.name ?? "(unnamed)");
   const concurrency = projectionConcurrency(policy);
