@@ -51,6 +51,7 @@ describe("ONYX All-Father password provisioning contract", () => {
     expect(sql).toContain("o.is_active=1");
     expect(sql).toContain("allfather.password_provision");
     expect(sql).not.toContain("plain-text-password");
+    expect(sql).not.toMatch(/supabase|google|identity_sub/i);
     expect(() => buildProvisionSql("plain-text-password", "test")).toThrow();
     expect(() => buildProvisionSql(hash, "remote")).toThrow();
   });

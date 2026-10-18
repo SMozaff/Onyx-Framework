@@ -149,12 +149,12 @@ async function requireSession(request:Request,env:Env){
     "SELECT u.id,u.username,u.organization_id,u.is_active,u.role,u.is_admin,u.class FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
   ).bind(session.sub).first<Record<string,unknown>>();
   const currentRole=current?roleForUser(current):"";
-  if(!current||!ONYX_ROLES.includes(currentRole as typeof ONYX_ROLES[number])||(String(current.id)==="__allfather__"&&currentRole!=="ALL_FATHER"))throw new Error("AUTH_REQUIRED");
+  if(!current||!ONYX_ROLES.includes(currentRole as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(current,currentRole)&&!isCanonicalAllFather(current,currentRole)))throw new Error("AUTH_REQUIRED");
   const revocation=await env.DB.prepare("SELECT revoked_before_ms FROM user_session_revocations WHERE user_id=? LIMIT 1").bind(String(current.id)).first<{revoked_before_ms:number}>();
   if(revocation && (!Number.isSafeInteger(session.iat_ms) || Number(session.iat_ms)<=Number(revocation.revoked_before_ms)))throw new Error("revoked session");
   if(String(current.username)!==session.username||String(current.organization_id)!==session.organization_id||currentRole!==session.role||
      Boolean(current.is_admin)!==Boolean(session.is_admin))throw new Error("AUTH_REQUIRED");
-  if(currentRole==="ALL_FATHER"&&(String(current.id)!=="__allfather__"||!current.is_admin))throw new Error("AUTH_REQUIRED");
+  if(currentRole==="ALL_FATHER"&&!isCanonicalAllFather(current,currentRole))throw new Error("AUTH_REQUIRED");
   return session;
 }
 function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return null;return configured.includes(origin)&&!configured.includes("*")?origin:null;}
@@ -168,6 +168,17 @@ async function hashPassword(password:string):Promise<string>{
   return String(await argon2id({password,salt,parallelism:1,iterations:3,memorySize:65536,hashLength:32,outputType:"encoded"}));
 }
 function clientType(payload:Json|null){return validClientType(payload);}
+function hasReservedAllFatherIdentity(user:Record<string,unknown>,role:string):boolean{
+  return String(user.id)==="__allfather__"||
+    (typeof user.username==="string"&&user.username.trim().toLowerCase()==="allfather")||
+    role==="ALL_FATHER";
+}
+function isCanonicalAllFather(user:Record<string,unknown>,role:string):boolean{
+  return String(user.id)==="__allfather__"&&
+    typeof user.username==="string"&&user.username.trim().toLowerCase()==="allfather"&&
+    String(user.organization_id)==="__allfather__"&&role==="ALL_FATHER"&&
+    Boolean(user.is_admin)&&Number(user.is_active)===1;
+}
 function roleForUser(user:Record<string,unknown>):string{
   // Never infer a role from mutable profile values or the legacy is_admin bit.
   // Invalid/missing D1 roles fail closed and cannot receive a usable session.
@@ -187,7 +198,7 @@ async function authLogin(request:Request,env:Env){
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
   const role=user?roleForUser(user):"";
-  if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||((role==="ALL_FATHER"||String(user.id)==="__allfather__")&&(String(user.id)!=="__allfather__"||role!=="ALL_FATHER"||!user.is_admin))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const requestedClientType = clientType(body);
   if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
   // client_type is caller-controlled metadata and is never an authorization
@@ -210,8 +221,9 @@ async function authRefresh(request:Request,env:Env){
     const role=roleForUser(user);
     if(!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role!==claims.role||
        String(user.username)!==claims.username||String(user.organization_id)!==claims.organization_id||
-       Boolean(user.is_admin)!==Boolean(claims.is_admin))throw new Error("session authority changed");
-    if(role==="ALL_FATHER"&&(String(user.id)!=="__allfather__"||!user.is_admin))throw new Error("All-Father principal changed");
+       Boolean(user.is_admin)!==Boolean(claims.is_admin)||
+       (hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role)))throw new Error("session authority changed");
+    if(role==="ALL_FATHER"&&!isCanonicalAllFather(user,role))throw new Error("All-Father principal changed");
     // Consume the refresh token exactly once. Fail closed if D1 cannot prove
     // this invocation inserted the revocation record (including replay races).
     const consumed=await env.DB.prepare(
