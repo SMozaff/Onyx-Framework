@@ -242,7 +242,7 @@ async fn tenant_admin_cannot_create_or_mutate_foreign_accounts() {
 
     let foreign_after = fixture
         .http
-        .get(format!("{foreign_path}"))
+        .get(&foreign_path)
         .bearer_auth(&fixture.tenant_b_token)
         .send()
         .await
