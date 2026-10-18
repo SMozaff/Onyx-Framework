@@ -28,7 +28,7 @@
 - The full CI failure identified two concrete source defects: stale references to the removed `super::supabase::ALLFATHER_USERNAME` constant in `routes/admin.rs`, and a rustfmt-only extra blank line in `routes/auth.rs`. Those are fixed in the current change.
 - The smoke workflow correctly failed before running tests because the configured Actions username secret does not match the repository’s reserved canonical username `allfather`. The secret value is intentionally not logged or reproduced. The cleanup step also ran before checkout when that validation failed; checkout is moved ahead of validation.
 - The earlier main-branch live smoke [run #39135600185](https://github.com/SMozaff/Onyx-Framework/actions/runs/39135600185) attempted the production Worker and received HTTP 401. That does not distinguish a missing/unusable production password hash from a secret/account mismatch. This branch does not repeat that production request.
-- Rust container builds also reported that Cargo wanted to update the lockfile despite `--locked`; the repository manifests and lockfile are unchanged from base. This must be rechecked on the new candidate and treated as unresolved if it persists.
+- Root cause of the Rust container build failure: the All-Father OAuth removal deleted `url.workspace = true` from `crates/bins/admin-shell/Cargo.toml`, but the `admin-shell` dependency array in `Cargo.lock` still listed `url`. That stale lock entry made `cargo build --locked` fail. The current fix removes only that obsolete `url` entry; the `url` package itself remains in the lockfile for other crates that still use it. Re-run full CI and Security on the exact final SHA to verify.
 
 ## Provisioning and production boundary
 
