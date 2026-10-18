@@ -161,6 +161,54 @@ async fn event_websocket_rejects_token_after_account_deactivation() {
 }
 
 #[tokio::test]
+async fn relay_ticket_redemption_rejects_token_after_account_deactivation() {
+    let fixture = start("relay-deactivated").await;
+    let access_token = login(&fixture).await;
+    let target_id = uuid::Uuid::new_v4().to_string();
+    let self_replica = uuid::Uuid::new_v4().to_string();
+
+    let issue = fixture
+        .http
+        .post(format!("{}/api/relay-ticket", fixture.base))
+        .bearer_auth(&access_token)
+        .json(&serde_json::json!({
+            "target_id": target_id,
+            "self_replica": self_replica
+        }))
+        .send()
+        .await
+        .expect("issue relay ticket");
+    assert_eq!(issue.status(), StatusCode::OK);
+    let ticket = issue
+        .json::<serde_json::Value>()
+        .await
+        .expect("relay ticket JSON")["ticket"]
+        .as_str()
+        .expect("relay ticket")
+        .to_owned();
+
+    fixture
+        .state
+        .user_store
+        .set_active(&fixture.user_id, ORG_A, false)
+        .await
+        .expect("deactivate user after ticket issuance");
+
+    let websocket_url = format!(
+        "{}/api/relay/{}?ticket={}&self={}",
+        fixture.base, target_id, ticket, self_replica
+    )
+    .replacen("http://", "ws://", 1);
+    match tokio_tungstenite::connect_async(websocket_url).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status().as_u16(), 401);
+        }
+        Err(error) => panic!("expected HTTP 401 for inactive relay principal, got {error}"),
+        Ok(_) => panic!("inactive user unexpectedly redeemed a relay ticket"),
+    }
+}
+
+#[tokio::test]
 async fn signed_access_token_is_rejected_after_tenant_binding_changes() {
     let fixture = start("tenant-change").await;
     let token = login(&fixture).await;
