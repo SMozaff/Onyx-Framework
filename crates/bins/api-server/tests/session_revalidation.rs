@@ -21,7 +21,6 @@ struct Fixture {
     base: String,
     http: Client,
     user_id: String,
-    database_url: String,
 }
 
 async fn start(label: &str) -> Fixture {
@@ -67,7 +66,6 @@ async fn start(label: &str) -> Fixture {
         base: format!("http://{addr}"),
         http: Client::new(),
         user_id: user.user_id,
-        database_url,
     }
 }
 
