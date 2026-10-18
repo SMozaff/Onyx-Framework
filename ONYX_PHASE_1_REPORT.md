@@ -64,6 +64,7 @@ This does **not** deploy production. Cloudflare Build `270fa199-fbec-4840-9b31-8
 | `deploy/cloudflare/edge-gateway/test/security.test.ts` | Add concurrent refresh rotation regression | Test one-winner semantics for the same refresh token. |
 | `deploy/cloudflare/edge-gateway/test/auth-phase1-regressions.test.ts` | Add password-hash and identity/role spoofing regressions | Verify fail-closed authentication and canonical All-Father rules. |
 | `deploy/cloudflare/edge-gateway/test/route-completeness.test.ts` | Align route expectation with current ONYX-managed All-Father credentials | Avoid restoring the superseded Worker Supabase exchange route to satisfy a stale test. |
+| `.github/workflows/cloudflare-worker-check.yml` | Add a separate `npx vitest run test/relay-route.test.ts` step before the full suite | Produce the required isolated relay-ticket regression result in CI. |
 | Cloudflare Workers Build settings for the remediation branch | Correct root directory and preview command/config | Ensure the preview build loads the actual nested Worker configuration. |
 | `ONYX_PHASE_1_REPORT.md` | Update evidence and unresolved audit items | Preserve reproducible evidence and avoid overstating completion. |
 
@@ -135,7 +136,7 @@ The Tauri desktop shell, Admin Shell, web UI, PWA and Android clients use indepe
   - disposable local D1 migrations: passed;
   - mobile-access migration verification: passed;
   - local Worker + real RelayHub WebSocket integration: passed.
-- The relay-ticket test passed as part of the complete suite, but at this point **an independent relay-only CI command has not yet been recorded**. A dedicated `npx vitest run test/relay-route.test.ts` step is being added to the Worker workflow so the final head records the required isolated result.
+- The relay-ticket test passed as part of the complete suite, but at this point **an independent relay-only CI command has not yet been recorded**. A dedicated `npx vitest run test/relay-route.test.ts` step is now configured in the Worker workflow; its result on the current exact head is pending.
 
 ### Cloudflare Builds
 
