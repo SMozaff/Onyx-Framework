@@ -1,28 +1,22 @@
 # ONYX Authentication System
 
-All ONYX user classes authenticate using ONYX-managed credentials. All-Father no longer uses Google or Supabase to log in.
+All ONYX user classes authenticate with ONYX-managed credentials. All-Father no longer uses Google or Supabase to log in.
 
 ## All-Father
 
-- Canonical principal ID: `__allfather__`
+- Canonical principal: `__allfather__`
 - Canonical username: `allfather`
-- Login: ONYX username + password
-- Password verification: Argon2id hash stored in D1
-- CI secrets: `ONYX_ALLFATHER_USERNAME` and `ONYX_ALLFATHER_PASSWORD` are used by GitHub Actions to call `POST /api/auth/login`.
-- GitHub Actions secrets are available to the workflow, not the Worker. The D1 account must already be provisioned with a matching Argon2id hash using a trusted owner-controlled process. CI secrets do not automatically provision D1.
+- Login endpoint: Cloudflare Worker `POST /api/auth/login`
+- Password storage: salted PHC Argon2id hash in D1
+- Required authority: active principal, active system organization, explicit `ALL_FATHER` role, and `is_admin=1`
+- CI inputs: GitHub Actions secrets `ONYX_ALLFATHER_USERNAME` and `ONYX_ALLFATHER_PASSWORD`. These are passed only to the isolated local smoke workflow; they do not automatically update the deployed Worker or D1.
 
-The Worker issues an ONYX access/refresh token pair only after verifying that the principal is active, belongs to an active organization, has explicit `ALL_FATHER` role and admin status, and has a valid password hash. Protected requests re-check current authority in D1.
+The repeatable `npm run provision:allfather-password` command validates the existing canonical principal, hashes the provided password with the Worker-compatible Argon2id parameters, writes only the hash and a non-sensitive audit event, then verifies the stored hash. Test mode can touch only local D1. Production mode requires explicit `--approve-production __allfather__ --expect-database onyx-free-db` flags and must only be run after owner authorization. No production data is modified by CI.
 
 ## Organization administrators and Staff
 
-Admins and Staff use ONYX username/email + password. Passwords are stored as salted Argon2id hashes in D1. Admins manage Staff within their own organization. Staff cannot self-register or elevate their own role.
+Admins and Staff continue to use ONYX username/email plus password. Passwords remain salted Argon2id hashes in D1. The Worker revalidates current account, organization, role, tenant, and revocation state for protected requests. Client-provided role/admin flags are never authoritative.
 
-## Endpoints
+## Retired authentication paths
 
-```
-POST /api/auth/login   → ONYX username/email + password → ONYX session
-POST /api/auth/refresh → rotate an ONYX refresh token
-POST /api/auth/logout  → revoke ONYX session/token
-```
-
-There is no All-Father Google/Supabase login or token-exchange endpoint in the Worker.
+The Worker and Axum no longer expose an All-Father Supabase exchange route. The Admin Shell no longer contains the Google/OAuth helper or Tauri callback command, and build/deployment configuration no longer injects Supabase authentication settings. Historical D1 migrations and their legacy column are retained for migration compatibility only; the current authentication path does not read or write that mapping.

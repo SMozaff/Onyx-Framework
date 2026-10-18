@@ -12,7 +12,7 @@ Cloudflare Worker (free workers.dev)
         |
         +---- D1 (free SQLite-compatible database)
         |
-        +---- Supabase Auth (Google for All-Father; email/password for Admin/Staff)
+        +---- ONYX username/password authentication (Argon2id hashes in D1)
         |
         +---- Hugging Face object storage for existing blob data
 ```
@@ -23,7 +23,7 @@ Cloudflare Workers Free is the runtime boundary. No custom domain is required: t
 
 This model is binding for the migration:
 
-- **All-Father only:** Google sign-in through Supabase Auth. The Worker verifies the signed Supabase JWT, resolves the bearer token through Supabase Auth, requires the returned user ID to match the JWT subject, requires a confirmed email, and matches the configured All-Father email. Supabase identity is not used to authenticate Admin or Staff accounts.
+- **All-Father:** ONYX username + password verified against the Argon2id hash stored on the canonical D1 principal. The account and its organization must be active, with explicit `ALL_FATHER` role and `is_admin=1`.
 - **Organization Admin:** ONYX username or email plus password. Credentials are verified against the Argon2id password hash stored in D1.
 - **Staff:** ONYX username or email plus password. Accounts are created, deactivated, and managed by an authorized organization Admin; staff cannot self-register or elevate roles.
 - **D1 is authoritative** for ONYX users, password hashes, account status, roles, organization membership, and application authorization.
@@ -31,14 +31,13 @@ This model is binding for the migration:
 
 Authentication endpoints:
 
-- `POST /api/auth/supabase`: exchange a valid Supabase All-Father bearer token for an ONYX session.
 - `POST /api/auth/login`: verify an ONYX username/email and password against D1, then issue an ONYX session.
 - `POST /api/auth/refresh`: rotate a valid ONYX refresh token.
 - `POST /api/auth/logout`: revoke supplied ONYX tokens.
 
-All-Father and other user classes authenticate using ONYX-managed credentials through `POST /api/auth/login`. The Worker verifies the D1 Argon2id password hash and revalidates role, active status, and organization on protected requests. No Google/Supabase token exchange is part of the Worker login path.
+All-Father and other user classes authenticate through `POST /api/auth/login`. The Worker verifies the D1 Argon2id hash, issues the existing ONYX token pair, and revalidates role, active status, tenant, organization, and revocation state on protected requests.
 
-The D1 migrations own this model: `0001_foundation.sql` creates the base tables, `0002_auth_hierarchy.sql` adds `email`/`role` and seeds the single inert `__allfather__` principal, `0003_supabase_identity.sql` owns `users.supabase_user_id`, and `0004_auth_schema_repair.sql` idempotently reconciles the canonical indexes and principal (see `reports/auth-repair/03-d1-migrations.md`). Admin and Staff passwords are Argon2id hashes in D1; their accounts are not provisioned in Supabase.
+The D1 migrations own the canonical principal and role. The historical `0003_supabase_identity.sql` migration and `users.supabase_user_id` column remain only for migration-ledger compatibility; current runtime authentication does not read or write them. Admin, Staff, and All-Father passwords are Argon2id hashes in D1.
 
 ## Trust boundary: external claims vs ONYX-assigned privileges
 
@@ -62,93 +61,15 @@ Public authentication failures return stable error codes only (`INVALID_CREDENTI
 a structured event (`allfather_subject_rejected`, `allfather_token_rejected`) that never contains
 tokens, passwords, OAuth codes, or secrets.
 
-## All-Father subject provisioning (owner-only, out-of-band)
+## All-Father password provisioning (owner-controlled)
 
-`users.supabase_user_id` is the trust binding between a verified Supabase subject and the single
-ONYX All-Father principal. The migrations create it `NULL`, and the only supported writer is the
-administrative command `scripts/provision-allfather.mjs` (alias `npm run provision:allfather`).
-Login never writes it, no migration writes it, and no client can supply it.
+GitHub Actions secrets are inputs to the smoke workflow; they do not provision D1. The canonical principal is seeded with a non-usable placeholder hash until an owner-controlled password provisioning operation replaces it.
 
-The command is fail-closed. It refuses to run when:
+Run `npm run provision:allfather-password -- --environment test` only against the local D1 database after applying migrations. The command validates the unique canonical principal, explicit role/admin flags, active account and active system organization, writes a salted Argon2id hash and a non-sensitive audit event, and verifies the stored hash.
 
-- the canonical principal `__allfather__` is missing, duplicated, inactive, not `is_admin`, or its
-  `role` is not the explicit `ALL_FATHER` value (a username/email/Google identity alone never grants it);
-- the supplied subject is not a Supabase Auth user UUID (an email address is rejected before any SQL);
-- the subject is already mapped to a *different* ONYX principal (no double-binding);
-- the principal already has a different subject and `--rebind` is not passed;
-- `--environment production` is used without `--approve-production <subject>` (or `__allfather__` for a revoke);
-- `--expect-database` does not match `--database`.
+Production provisioning is never run by CI or deployment. It requires explicit authorization and both `--approve-production __allfather__` and `--expect-database onyx-free-db`; it changes only the existing canonical account's password hash and does not create or reactivate accounts. Do not run production provisioning without owner approval.
 
-Every accepted change writes an `audit_log` row (`allfather.provision` / `allfather.revoke`) and is
-idempotent: re-running with the same subject is a no-op that reports `already-provisioned`.
-Credentials, tokens, and `password_hash` values are never read, written, or logged.
-
-The npm alias runs the same script from this directory (`deploy/cloudflare/edge-gateway`), so it
-inherits the same working-directory assumption. Pass the script flags after `--`:
-
-```bash
-npm run provision:allfather -- --environment production --config wrangler.deploy.toml \
-  --database onyx-free-db --expect-database onyx-free-db \
-  --supabase-user-id <SUPABASE_UUID> --dry-run --json
-```
-
-The `node scripts/provision-allfather.mjs ...` examples below are equivalent (and are the form to use
-when this directory is not the current working directory).
-
-### Runbook — first-time production provisioning
-
-1. **Read-only preflight** (never prints hashes/tokens). Confirm exactly one privileged row and no
-   existing mapping:
-
-   ```bash
-   npx wrangler d1 execute onyx-free-db --remote --config wrangler.deploy.toml --json \
-     --command "SELECT id, username, role, is_active, is_admin, supabase_user_id FROM users"
-   ```
-
-   If there is more than one `ALL_FATHER` row or the row is not `__allfather__`, **stop** and resolve
-   it manually; the command will refuse (`PRINCIPAL_AMBIGUOUS`) rather than merge or delete rows.
-
-2. **Obtain the Supabase user UUID** from the owner's Supabase project (Authentication → Users) for
-   the Google identity. Do not derive it from the email address.
-
-3. **Dry run** (preflight + plan, no writes):
-
-   ```bash
-   node scripts/provision-allfather.mjs --environment production --config wrangler.deploy.toml \
-     --database onyx-free-db --expect-database onyx-free-db \
-     --supabase-user-id <SUPABASE_UUID> --dry-run --json
-   ```
-
-4. **Apply with explicit owner approval** (required only after the D1 migrations and the Worker are
-   deployed, since login stays denied until this mapping exists):
-
-   ```bash
-   node scripts/provision-allfather.mjs --environment production --config wrangler.deploy.toml \
-     --database onyx-free-db --expect-database onyx-free-db \
-     --supabase-user-id <SUPABASE_UUID> --approve-production <SUPABASE_UUID> \
-     --operator "<owner>"
-   ```
-
-5. **Expected success indicators:** `status: provisioned`; `SELECT supabase_user_id FROM users WHERE
-   id='__allfather__'` returns the UUID; `audit_log` contains one `allfather.provision` row; the
-   Google sign-in then returns an ONYX session instead of `403 ALLFATHER_NOT_PROVISIONED`.
-
-### Runbook — identity replacement (break-glass)
-
-For a lost or replaced Google identity, revoke first, then provision the new subject. Both steps are
-audited and require approval:
-
-```bash
-node scripts/provision-allfather.mjs --environment production --action revoke \
-  --approve-production __allfather__ --operator "<owner>"
-node scripts/provision-allfather.mjs --environment production --config wrangler.deploy.toml \
-  --database onyx-free-db --supabase-user-id <NEW_UUID> --rebind \
-  --approve-production <NEW_UUID> --operator "<owner>"
-```
-
-Note: local Wrangler D1 state is keyed by the `database_id` in the config, not the database name —
-use a distinct `database_id` for each disposable environment, and never point `--remote` at a
-database you have not identified with `--expect-database`.
+The historical `users.supabase_user_id` column and migrations remain for schema-history compatibility only. They are not read or written by the current authentication flow.
 
 ## Current state
 
@@ -186,8 +107,7 @@ npm run dev        # serve the Worker with the local D1 binding
 deploy workflow runs. `npm run check` (used by CI) validates the bundle built from
 this config.
 
-Do not commit secrets. `ONYX_JWT_SECRET`, `SUPABASE_SECRET_KEY`,
-`SUPABASE_PUBLISHABLE_KEY`, `HF_S3_ACCESS_KEY_ID`, and `HF_S3_SECRET_ACCESS_KEY`
+Do not commit secrets. `ONYX_JWT_SECRET`, `HF_S3_ACCESS_KEY_ID`, and `HF_S3_SECRET_ACCESS_KEY`
 belong in an untracked `.dev.vars` (see `.dev.vars.example`); production sets them
 with `wrangler secret put`. Remote commands (`npm run d1:remote`, `npm run deploy`)
 use the CI-materialized `wrangler.deploy.toml`, which is not committed.

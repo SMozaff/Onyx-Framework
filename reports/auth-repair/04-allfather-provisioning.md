@@ -1,3 +1,5 @@
+> **Historical report — superseded 2026-10-18.** The All-Father Google/Supabase subject-provisioning process below is retired. Do not run its commands. The supported flow is ONYX username/password with the `npm run provision:allfather-password` command documented in `docs/Onyx Auth system.md`.
+
 # ONYX Authentication Repair — Phase 4: All-Father Identity Definition and Safe Provisioning
 
 **Assessment date:** 2026-10-11
