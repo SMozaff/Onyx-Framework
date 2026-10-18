@@ -534,5 +534,10 @@
   "settings.signingOut": "Signing out…",
   "settings.title": "Settings",
   "language.note": "Interface language. Applies instantly and is remembered on this device.",
-  "language.title": "Language"
+  "language.title": "Language",
+  "settings.noLegalHoldFound": "No legal hold found for this ID.",
+  "settings.retryCreationSafely": "Retry creation safely",
+  "settings.retryApplicationSafely": "Retry application safely",
+  "settings.policyMissingConcurrencyEpochs": "This projection is missing concurrency epochs. Refresh before changing this policy.",
+  "settings.legalHoldMissingConcurrencyEpochs": "This projection is missing concurrency epochs. Refresh before releasing the hold."
 }
