@@ -32,6 +32,8 @@ jobs:
         run: npm install
       - name: Validate Worker bundle
         run: npm run check
+      - name: Run relay-ticket test independently
+        run: npx vitest run test/relay-route.test.ts
       - name: Run Worker authentication and migration tests
         run: npm test
       - name: Apply migrations to a disposable local D1
