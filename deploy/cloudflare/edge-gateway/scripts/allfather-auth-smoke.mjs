@@ -5,7 +5,7 @@
  * logs credentials/tokens, and removes the disposable user/organization.
  */
 import { argon2id } from "hash-wasm";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,12 +76,15 @@ async function main() {
     iterations: 3, memorySize: 65536, hashLength: 32, outputType: "encoded",
   }));
   const now = Math.floor(Date.now() / 1000);
-  localSql(`INSERT INTO organizations(id,name,is_active,created_at,updated_at)
+  let fixtureMayExist = false;
+  let consumedRefreshHash = null;
+  try {
+    fixtureMayExist = true;
+    localSql(`INSERT INTO organizations(id,name,is_active,created_at,updated_at)
 VALUES(${quote(orgId)},'All-Father smoke disposable org',1,${now},${now});
 INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at)
 VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.invalid")},${quote(orgId)},${quote(staffHash)},0,1,'staff','STAFF',NULL,${now},${now});`);
 
-  try {
     const ready = await fetch(`${base}/ready`);
     if (ready.status !== 200) fail(`Local Worker readiness failed with HTTP ${ready.status}.`);
 
@@ -115,6 +118,7 @@ VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.
       headers: { authorization: `Bearer ${session.access_token}` },
     });
     if (protectedResponse.status !== 200) fail(`Canonical All-Father protected operation returned HTTP ${protectedResponse.status}.`);
+    consumedRefreshHash = createHash("sha256").update(session.refresh_token).digest("hex");
     const refreshResponse = await fetch(`${base}/api/auth/refresh`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ refresh_token: session.refresh_token }),
@@ -162,8 +166,13 @@ VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.
 
     console.log("PASS: canonical All-Father login, token claims/expiry, protected operation, invalid credentials, retired exchange, and anti-escalation checks.");
   } finally {
-    localSql(`DELETE FROM users WHERE id=${quote(userId)};
-DELETE FROM organizations WHERE id=${quote(orgId)};`);
+    if (fixtureMayExist) {
+      const cleanup = [];
+      if (consumedRefreshHash) cleanup.push(`DELETE FROM token_revocations WHERE token_hash=${quote(consumedRefreshHash)};`);
+      cleanup.push(`DELETE FROM users WHERE id=${quote(userId)};`);
+      cleanup.push(`DELETE FROM organizations WHERE id=${quote(orgId)};`);
+      localSql(cleanup.join("\\n"));
+    }
   }
 }
 
