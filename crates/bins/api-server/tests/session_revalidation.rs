@@ -6,8 +6,8 @@
 use std::net::SocketAddr;
 
 use api_server::routes::{ApiState, TokenClaims, ONYX_API_TOKEN_AUDIENCE, ONYX_API_TOKEN_ISSUER};
-use security_adapter::Ed25519JwtCodec;
 use reqwest::{Client, StatusCode};
+use security_adapter::Ed25519JwtCodec;
 use security_application::{NewUser, SecretProvider};
 use sqlx::SqlitePool;
 
@@ -37,10 +37,7 @@ async fn start(label: &str) -> Fixture {
             user_id: uuid::Uuid::new_v4().to_string(),
             username: USERNAME.to_owned(),
             organization_id: ORG_A.to_owned(),
-            password_hash: state
-                .password_hasher
-                .hash(PASSWORD)
-                .expect("password hash"),
+            password_hash: state.password_hasher.hash(PASSWORD).expect("password hash"),
             is_admin: true,
             is_manager: false,
             class: None,
@@ -70,7 +67,6 @@ async fn start(label: &str) -> Fixture {
     }
 }
 
-
 async fn resign_with_claims(fixture: &Fixture, token: &str, iss: &str, aud: &str) -> String {
     let secret = fixture
         .state
@@ -98,8 +94,10 @@ async fn login(fixture: &Fixture) -> String {
         .await
         .expect("login request");
     assert_eq!(response.status(), StatusCode::OK);
-    response.json::<serde_json::Value>().await.expect("login JSON")
-        ["access_token"]
+    response
+        .json::<serde_json::Value>()
+        .await
+        .expect("login JSON")["access_token"]
         .as_str()
         .expect("access token")
         .to_owned()
@@ -174,7 +172,8 @@ async fn admin_role_revocation_takes_effect_for_existing_access_token() {
 async fn access_token_with_wrong_issuer_is_rejected_even_when_signature_is_valid() {
     let fixture = start("wrong-issuer").await;
     let token = login(&fixture).await;
-    let token = resign_with_claims(&fixture, &token, "other-service", ONYX_API_TOKEN_AUDIENCE).await;
+    let token =
+        resign_with_claims(&fixture, &token, "other-service", ONYX_API_TOKEN_AUDIENCE).await;
 
     let response = fixture
         .http
@@ -202,7 +201,6 @@ async fn access_token_with_wrong_audience_is_rejected_even_when_signature_is_val
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
-
 #[tokio::test]
 async fn refresh_token_is_rejected_after_tenant_binding_changes() {
     let fixture = start("refresh-tenant-change").await;
@@ -219,7 +217,10 @@ async fn refresh_token_is_rejected_after_tenant_binding_changes() {
         .expect("login request");
     assert_eq!(response.status(), StatusCode::OK);
     let login: serde_json::Value = response.json().await.expect("login JSON");
-    let refresh_token = login["refresh_token"].as_str().expect("refresh token").to_owned();
+    let refresh_token = login["refresh_token"]
+        .as_str()
+        .expect("refresh token")
+        .to_owned();
 
     sqlx::query("UPDATE users SET organization_id = ?1 WHERE id = ?2")
         .bind(ORG_B)
