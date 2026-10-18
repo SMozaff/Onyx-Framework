@@ -12,8 +12,6 @@ pub mod profiles;
 pub mod push;
 pub mod query;
 pub mod relay;
-#[path = "../supabase.rs"]
-pub mod supabase;
 pub mod todo_admin;
 
 use std::{
