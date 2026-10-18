@@ -1,141 +1,28 @@
-The ONYX authentication/identity model should be:
+# ONYX Authentication System
+
+All ONYX user classes authenticate using ONYX-managed credentials. All-Father no longer uses Google or Supabase to log in.
+
+## All-Father
+
+- Canonical principal ID: `__allfather__`
+- Canonical username: `allfather`
+- Login: ONYX username + password
+- Password verification: Argon2id hash stored in D1
+- CI secrets: `ONYX_ALLFATHER_USERNAME` and `ONYX_ALLFATHER_PASSWORD` are used by GitHub Actions to call `POST /api/auth/login`.
+- GitHub Actions secrets are available to the workflow, not the Worker. The D1 account must already be provisioned with a matching Argon2id hash using a trusted owner-controlled process. CI secrets do not automatically provision D1.
+
+The Worker issues an ONYX access/refresh token pair only after verifying that the principal is active, belongs to an active organization, has explicit `ALL_FATHER` role and admin status, and has a valid password hash. Protected requests re-check current authority in D1.
+
+## Organization administrators and Staff
+
+Admins and Staff use ONYX username/email + password. Passwords are stored as salted Argon2id hashes in D1. Admins manage Staff within their own organization. Staff cannot self-register or elevate their own role.
+
+## Endpoints
 
 ```
-ALL-FATHER
-  │
-  │ Google account
-  │ so.muzaff@gmail.com
-  │
-  ▼
-Supabase authentication
-  │
-  │ authenticated All-Father identity
-  ▼
-ONYX
-  │
-  ├── Creates Organizations
-  │
-  ├── Creates/controls Admin accounts
-  │       ├── username + password
-  │       └── email + password
-  │
-  └── Admins manage Staff accounts
-          ├── register staff
-          ├── remove staff
-          └── manage staff access
+POST /api/auth/login   → ONYX username/email + password → ONYX session
+POST /api/auth/refresh → rotate an ONYX refresh token
+POST /api/auth/logout  → revoke ONYX session/token
 ```
 
-So there are actually three distinct authentication/authorization layers.
-
-**1. All-Father authentication**
-
-The All-Father does not use an ONYX username/password.
-
-The All-Father signs in with the Google identity:
-
-`so.muzaff@gmail.com`
-
-Supabase authenticates that Google identity. ONYX then verifies the Supabase identity and recognizes that specific verified identity as the All-Father authority.
-
-The existing code already implements the important part of this model: Supabase verifies the token, retrieves the verified primary email, and compares it with the designated All-Father identity.
-
-**2. Organization/Admin authentication**
-
-The All-Father creates organizations and provisions their administrators.
-
-Admins are ONYX-managed identities. They can authenticate using either:
-
-```
-username + password
-```
-
-or:
-
-```
-email + password
-```
-
-Their authorization comes from the ONYX organization/user records, not from the All-Father's Supabase Google identity.
-
-This means we should retain the ONYX password authentication mechanism for Admins. The current Worker migration already has Argon2id verification implemented, so we do not need to invent a weaker password scheme.
-
-**3. Staff lifecycle**
-
-Staff accounts are not self-service accounts.
-
-An administrator creates/registers them, and administrators can remove/deactivate them.
-
-Therefore:
-
-```
-Staff cannot independently create an ONYX account.
-Staff cannot promote themselves.
-Staff cannot create organizations.
-Staff cannot create administrators.
-Staff lifecycle is controlled by Admin authority.
-```
-
-This is an important authorization boundary and should be enforced server-side in the Worker, not merely hidden in the UI.
-
-The final Cloudflare implementation should therefore have two authentication paths:
-
-```
-                    ┌─────────────────────┐
-                    │       Supabase         │
-                    │ Google identity     │
-                    │ so.muzaff@gmail.com │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                       All-Father session
-                               │
-                     Organization/Admin
-                         provisioning
-                               │
-              ┌────────────────┴────────────────┐
-              ▼                                 ▼
-       Admin username/email              Staff management
-             + password                   by Admin only
-              │                                 │
-              └──────────────┬──────────────────┘
-                             ▼
-                         ONYX D1
-```
-
-This also means the Cloudflare Worker should expose separate operations conceptually like:
-
-```
-POST /api/auth/Supabase
-    → Supabase token
-    → verify All-Father
-    → issue ONYX All-Father session
-
-POST /api/auth/login
-    → username/email + password
-    → Admin/Staff lookup in D1
-    → issue ONYX session
-
-POST /api/auth/refresh
-    → refresh ONYX session
-
-POST /api/auth/logout
-    → revoke ONYX session
-```
-
-Then authorization must distinguish at least:
-
-```
-ALL_FATHER
-ORGANIZATION_ADMIN
-STAFF
-```
-
-with organization/tenant boundaries applied to Admin and Staff sessions.
-
-lock this in as the ONYX security model before making further migration changes:
-
-**Supabase/Google → All-Father only.**  
-**ONYX username/email + password → Admins and Staff.**  
-**All-Father → Organizations + Admin provisioning.**  
-**Admins → Staff provisioning/removal.**  
-**D1 → authoritative ONYX users, roles, organization membership and authorization.**
+There is no All-Father Google/Supabase login or token-exchange endpoint in the Worker.
