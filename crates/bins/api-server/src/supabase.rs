@@ -11,6 +11,7 @@ use axum::{
     Json,
 };
 use reqwest::Client;
+use security_application::UserRecord;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -23,7 +24,8 @@ pub const ALLFATHER_EMAIL: &str = "so.muzaff@gmail.com";
 pub struct SupabaseAuth {
     url: String,
     publishable_key: String,
-    allfather_user_id: String,
+    allfather_provider_subject: String,
+    allfather_principal_id: String,
     client: Client,
 }
 
@@ -53,28 +55,49 @@ impl SupabaseAuth {
             .ok()
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
-        let allfather_user_id = std::env::var("ONYX_ALLFATHER_SUPABASE_USER_ID")
+        let allfather_provider_subject = std::env::var("ONYX_ALLFATHER_SUPABASE_USER_ID")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        let allfather_principal_id = std::env::var("ONYX_ALLFATHER_PRINCIPAL_ID")
             .ok()
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
 
-        match (url, publishable_key, allfather_user_id) {
-            (None, None, None) => Ok(None),
-            (Some(url), Some(publishable_key), Some(allfather_user_id)) => {
+        match (
+            url,
+            publishable_key,
+            allfather_provider_subject,
+            allfather_principal_id,
+        ) {
+            (None, None, None, None) => Ok(None),
+            (Some(url), Some(publishable_key), Some(allfather_provider_subject), Some(principal_id)) => {
                 if !url.starts_with("https://") {
                     anyhow::bail!("SUPABASE_URL must use HTTPS");
                 }
+                let allfather_principal_id = uuid::Uuid::parse_str(&principal_id)
+                    .map_err(|_| anyhow::anyhow!("ONYX_ALLFATHER_PRINCIPAL_ID must be a UUID"))?
+                    .to_string();
                 Ok(Some(Self {
                     url,
                     publishable_key,
-                    allfather_user_id,
+                    allfather_provider_subject,
+                    allfather_principal_id,
                     client: Client::new(),
                 }))
             }
             _ => anyhow::bail!(
-                "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, and ONYX_ALLFATHER_SUPABASE_USER_ID must be configured together"
+                "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, ONYX_ALLFATHER_SUPABASE_USER_ID, and ONYX_ALLFATHER_PRINCIPAL_ID must be configured together"
             ),
         }
+    }
+
+    pub(crate) fn allfather_principal_id(&self) -> &str {
+        &self.allfather_principal_id
+    }
+
+    pub(crate) fn is_canonical_principal(&self, user: &UserRecord) -> bool {
+        is_canonical_principal(user, &self.allfather_principal_id)
     }
 
     async fn verified_user(&self, headers: &HeaderMap) -> Result<SupabaseUser, ApiError> {
@@ -132,6 +155,17 @@ fn is_designated_identity(identity: &SupabaseUser, expected_subject: &str) -> bo
         && identity.id == expected_subject
 }
 
+/// The external provider subject is checked separately above. This check binds
+/// the resulting session to a preconfigured ONYX UUID, not to a mutable display
+/// name. The reserved username is an integrity assertion for the provisioned
+/// principal, never a lookup key for authorization.
+fn is_canonical_principal(user: &UserRecord, expected_principal_id: &str) -> bool {
+    user.user_id == expected_principal_id
+        && user.username.eq_ignore_ascii_case(ALLFATHER_USERNAME)
+        && user.is_active
+        && user.is_admin
+}
+
 fn auth_error(code: &str) -> ApiError {
     let (status, category, retryability) = match code {
         "SUPABASE_AUTH_UNAVAILABLE"
@@ -164,7 +198,7 @@ pub async fn login(
         .as_ref()
         .ok_or_else(|| auth_error("SUPABASE_AUTH_NOT_CONFIGURED"))?;
     let identity = auth.verified_user(&headers).await?;
-    if !is_designated_identity(&identity, &auth.allfather_user_id) {
+    if !is_designated_identity(&identity, &auth.allfather_provider_subject) {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "SUPABASE_IDENTITY_NOT_AUTHORIZED",
@@ -177,10 +211,10 @@ pub async fn login(
 
     let user = state
         .user_store
-        .find_by_username(ALLFATHER_USERNAME)
+        .find_by_id(auth.allfather_principal_id())
         .await
         .map_err(|_| auth_error("USER_STORE_UNAVAILABLE"))?
-        .filter(|user| user.is_active)
+        .filter(|user| auth.is_canonical_principal(user))
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::FORBIDDEN,
@@ -226,7 +260,12 @@ pub async fn login(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_designated_identity, SupabaseUser, ALLFATHER_EMAIL};
+    use security_application::UserRecord;
+
+    use super::{
+        is_canonical_principal, is_designated_identity, SupabaseUser, ALLFATHER_EMAIL,
+        ALLFATHER_USERNAME,
+    };
 
     fn user(id: &str, email: &str, confirmed: Option<&str>) -> SupabaseUser {
         SupabaseUser {
@@ -275,5 +314,26 @@ mod tests {
             ),
             "supabase-user-123"
         ));
+    }
+
+    #[test]
+    fn canonical_principal_requires_the_configured_onyx_uuid_not_just_username() {
+        let principal = UserRecord {
+            user_id: "22222222-2222-2222-2222-222222222222".to_string(),
+            username: ALLFATHER_USERNAME.to_string(),
+            organization_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            password_hash: "unusable".to_string(),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+            is_active: true,
+        };
+
+        assert!(is_canonical_principal(&principal, &principal.user_id));
+        assert!(
+            !is_canonical_principal(&principal, "33333333-3333-3333-3333-333333333333"),
+            "the reserved username alone must never select the All-Father principal"
+        );
     }
 }

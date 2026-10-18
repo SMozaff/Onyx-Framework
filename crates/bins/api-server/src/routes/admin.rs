@@ -7,7 +7,7 @@ use security_application::{NewUser, UserClass, UserRecord, UserStoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{authenticate_headers, ApiError, ApiState, AuthenticatedUser, ORGANIZATION_ID};
+use super::{authenticate_headers, ApiError, ApiState, AuthenticatedUser};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
@@ -30,9 +30,6 @@ pub struct CreateUserRequest {
     /// reporting-line tree, if known at creation time.
     #[serde(default)]
     pub parent_user_id: Option<String>,
-    /// Defaults to the deployment's default tenant when omitted.
-    #[serde(default)]
-    pub organization_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,9 +350,9 @@ pub async fn create_user(
     headers: HeaderMap,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserDto>), ApiError> {
-    require_admin_mutation(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     let is_admin = payload.is_admin;
-    let created = create_user_record(&state, payload, is_admin).await?;
+    let created = create_user_record(&state, payload, is_admin, &admin.organization_id).await?;
     Ok((StatusCode::CREATED, Json(created)))
 }
 
@@ -365,6 +362,7 @@ async fn create_user_record(
     state: &ApiState,
     payload: CreateUserRequest,
     is_admin: bool,
+    organization_id: &str,
 ) -> Result<UserDto, ApiError> {
     let username = payload.username.trim().to_string();
     if username.eq_ignore_ascii_case(super::supabase::ALLFATHER_USERNAME) {
@@ -391,10 +389,6 @@ async fn create_user_record(
         .password_hasher
         .hash(&payload.password)
         .map_err(password_error)?;
-    let organization_id = payload
-        .organization_id
-        .unwrap_or_else(|| ORGANIZATION_ID.to_string());
-
     // is_manager always comes from the payload, even for bootstrap — unlike
     // is_admin (forced true for bootstrap so the very first account can
     // administer the system), there is no equivalent reason to force the
@@ -407,7 +401,7 @@ async fn create_user_record(
         .create(NewUser {
             user_id: uuid::Uuid::new_v4().to_string(),
             username,
-            organization_id,
+            organization_id: organization_id.to_owned(),
             password_hash,
             is_admin,
             is_manager,
@@ -457,10 +451,10 @@ pub async fn set_manager(
     Path(user_id): Path<String>,
     Json(payload): Json<SetManagerRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin_mutation(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     state
         .user_store
-        .set_manager(&user_id, payload.is_manager)
+        .set_manager(&user_id, &admin.organization_id, payload.is_manager)
         .await
         .map_err(store_error)?;
     Ok(Json(json!({"success": true})))
@@ -476,11 +470,11 @@ pub async fn set_class(
     Path(user_id): Path<String>,
     Json(payload): Json<SetClassRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin_mutation(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     let class = parse_class_field(payload.class.as_deref())?;
     state
         .user_store
-        .set_class(&user_id, class)
+        .set_class(&user_id, &admin.organization_id, class)
         .await
         .map_err(store_error)?;
     Ok(Json(json!({"success": true})))
@@ -551,10 +545,14 @@ pub async fn set_parent(
     Path(user_id): Path<String>,
     Json(payload): Json<SetParentRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin_mutation(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     state
         .user_store
-        .set_parent(&user_id, payload.parent_user_id.as_deref())
+        .set_parent(
+            &user_id,
+            &admin.organization_id,
+            payload.parent_user_id.as_deref(),
+        )
         .await
         .map_err(store_error)?;
     Ok(Json(json!({"success": true})))
@@ -582,10 +580,14 @@ pub async fn list_picker_users(
     headers: HeaderMap,
 ) -> Result<Json<Vec<PickerUserDto>>, ApiError> {
     let authenticated = authenticate_headers(&state, &headers).await?;
-    let users = state.user_store.list().await.map_err(store_error)?;
+    let users = state
+        .user_store
+        .list_in_organization(&authenticated.organization_id)
+        .await
+        .map_err(store_error)?;
     let visible = users
         .into_iter()
-        .filter(|user| user.organization_id == authenticated.organization_id && user.is_active)
+        .filter(|user| user.is_active)
         .map(|user| PickerUserDto {
             id: user.user_id,
             username: user.username,
@@ -634,10 +636,14 @@ pub async fn list_hierarchy_users(
     headers: HeaderMap,
 ) -> Result<Json<Vec<HierarchyUserDto>>, ApiError> {
     let authenticated = authenticate_headers(&state, &headers).await?;
-    let users = state.user_store.list().await.map_err(store_error)?;
+    let users = state
+        .user_store
+        .list_in_organization(&authenticated.organization_id)
+        .await
+        .map_err(store_error)?;
     let visible = users
         .into_iter()
-        .filter(|user| user.organization_id == authenticated.organization_id && user.is_active)
+        .filter(|user| user.is_active)
         .map(|user| HierarchyUserDto {
             id: user.user_id,
             parent_user_id: user.parent_user_id,
@@ -652,9 +658,29 @@ pub async fn list_users(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<UserDto>>, ApiError> {
-    require_admin(&state, &headers).await?;
-    let users = state.user_store.list().await.map_err(store_error)?;
+    let admin = require_admin(&state, &headers).await?;
+    let users = state
+        .user_store
+        .list_in_organization(&admin.organization_id)
+        .await
+        .map_err(store_error)?;
     Ok(Json(users.into_iter().map(UserDto::from).collect()))
+}
+
+/// `GET /api/admin/users/:id` — admin-only, same-organization identity read.
+pub async fn get_user(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+) -> Result<Json<UserDto>, ApiError> {
+    let admin = require_admin(&state, &headers).await?;
+    let user = state
+        .user_store
+        .find_by_id_in_organization(&user_id, &admin.organization_id)
+        .await
+        .map_err(store_error)?
+        .ok_or_else(|| store_error(UserStoreError::NotFound))?;
+    Ok(Json(user.into()))
 }
 
 /// `POST /api/admin/users/:id/deactivate`
@@ -677,7 +703,7 @@ pub async fn deactivate_user(
     }
     state
         .user_store
-        .set_active(&user_id, false)
+        .set_active(&user_id, &admin.organization_id, false)
         .await
         .map_err(store_error)?;
     // H-02: deactivation must invalidate every session this user
@@ -701,10 +727,10 @@ pub async fn activate_user(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin_mutation(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     state
         .user_store
-        .set_active(&user_id, true)
+        .set_active(&user_id, &admin.organization_id, true)
         .await
         .map_err(store_error)?;
     Ok(Json(json!({"success": true})))
@@ -717,10 +743,10 @@ pub async fn set_user_password(
     Path(user_id): Path<String>,
     Json(payload): Json<SetPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin_mutation(&state, &headers).await?;
+    let admin = require_admin_mutation(&state, &headers).await?;
     let target = state
         .user_store
-        .find_by_id(&user_id)
+        .find_by_id_in_organization(&user_id, &admin.organization_id)
         .await
         .map_err(store_error)?
         .ok_or_else(|| {
@@ -752,7 +778,7 @@ pub async fn set_user_password(
         .map_err(password_error)?;
     state
         .user_store
-        .set_password_hash(&user_id, &hash)
+        .set_password_hash(&user_id, &admin.organization_id, &hash)
         .await
         .map_err(store_error)?;
     // H-02, closed: a password reset must invalidate every session this

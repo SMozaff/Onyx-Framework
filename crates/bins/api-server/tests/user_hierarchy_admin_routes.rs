@@ -9,7 +9,7 @@ use security_application::NewUser;
 
 /// Boots an api-server on an ephemeral port against a throwaway SQLite
 /// file and authenticates its intentionally seeded test-drive administrator.
-async fn start_server(db_label: &str) -> (SocketAddr, String) {
+async fn start_server(db_label: &str) -> (SocketAddr, String, api_server::routes::ApiState) {
     let db_path = std::env::temp_dir().join(format!("onyx-user-hierarchy-test-{db_label}.db"));
     let _ = std::fs::remove_file(&db_path);
     let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -37,7 +37,7 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
         })
         .await
         .expect("create dedicated user-hierarchy test administrator");
-    let app = api_server::routes::router(state);
+    let app = api_server::routes::router(state.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -69,7 +69,7 @@ async fn start_server(db_label: &str) -> (SocketAddr, String) {
         .as_str()
         .unwrap_or_else(|| panic!("access_token missing from successful login response: {login:?}"))
         .to_string();
-    (addr, token)
+    (addr, token, state)
 }
 
 /// Creates a user via the admin API and returns its id.
@@ -121,7 +121,7 @@ async fn login_token(http: &reqwest::Client, base: &str, username: &str) -> Stri
 
 #[tokio::test]
 async fn class_can_be_set_at_creation_and_read_back() {
-    let (addr, token) = start_server("class-creation").await;
+    let (addr, token, _state) = start_server("class-creation").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -153,7 +153,7 @@ async fn class_can_be_set_at_creation_and_read_back() {
 
 #[tokio::test]
 async fn set_class_updates_and_can_clear_to_null() {
-    let (addr, token) = start_server("class-update").await;
+    let (addr, token, _state) = start_server("class-update").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -207,7 +207,7 @@ async fn set_class_updates_and_can_clear_to_null() {
 
 #[tokio::test]
 async fn set_class_rejects_unrecognized_value() {
-    let (addr, token) = start_server("class-invalid").await;
+    let (addr, token, _state) = start_server("class-invalid").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -225,7 +225,7 @@ async fn set_class_rejects_unrecognized_value() {
 
 #[tokio::test]
 async fn set_parent_links_and_reports_in_listing() {
-    let (addr, token) = start_server("parent-link").await;
+    let (addr, token, _state) = start_server("parent-link").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -256,7 +256,7 @@ async fn set_parent_links_and_reports_in_listing() {
 
 #[tokio::test]
 async fn set_parent_rejects_self_reference_over_http() {
-    let (addr, token) = start_server("parent-self").await;
+    let (addr, token, _state) = start_server("parent-self").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -274,7 +274,7 @@ async fn set_parent_rejects_self_reference_over_http() {
 
 #[tokio::test]
 async fn set_parent_rejects_nonexistent_parent_over_http() {
-    let (addr, token) = start_server("parent-missing").await;
+    let (addr, token, _state) = start_server("parent-missing").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -292,7 +292,7 @@ async fn set_parent_rejects_nonexistent_parent_over_http() {
 
 #[tokio::test]
 async fn class_and_parent_routes_reject_unauthenticated_requests() {
-    let (addr, token) = start_server("auth-required").await;
+    let (addr, token, _state) = start_server("auth-required").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -317,7 +317,7 @@ async fn class_and_parent_routes_reject_unauthenticated_requests() {
 
 #[tokio::test]
 async fn authenticated_user_can_list_reduced_active_picker_identities() {
-    let (addr, admin_token) = start_server("picker-identities").await;
+    let (addr, admin_token, state) = start_server("picker-identities").await;
     let http = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -337,14 +337,27 @@ async fn authenticated_user_can_list_reduced_active_picker_identities() {
         serde_json::json!({}),
     )
     .await;
-    let foreign_user_id = create_user(
-        &http,
-        &base,
-        &admin_token,
-        "picker-foreign",
-        serde_json::json!({"organization_id": "33333333-3333-3333-3333-333333333333"}),
-    )
-    .await;
+    // The HTTP creation route intentionally derives organization from the
+    // authenticated admin. Seed a second-tenant account through storage so this
+    // test continues proving the picker directory cannot leak it.
+    let foreign_user_id = state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: "picker-foreign".to_string(),
+            organization_id: "33333333-3333-3333-3333-333333333333".to_string(),
+            password_hash: state
+                .password_hasher
+                .hash("a-fine-password-1")
+                .expect("foreign test user password hash"),
+            is_admin: false,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create foreign picker user")
+        .user_id;
 
     let deactivation = http
         .post(format!(

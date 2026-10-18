@@ -2,12 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useI18n } from "@/i18n/I18nContext";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useAuthStore } from "@/stores/authStore";
-
-const NAV_ITEMS = [
-  { to: "/users", label: "nav.users", end: false },
-  { to: "/settings", label: "nav.policySettings", end: false },
-  { to: "/profiles", label: "nav.staffProfiles", end: false },
-];
+import { navigationForRole } from "./adminNavigation";
 
 /**
  * Header + sidebar shell for the Admin platform. The visual structure matches
@@ -32,7 +27,7 @@ export default function MainLayout() {
         </div>
 
         <nav className="space-y-1" aria-label={t("common.administrativeWorkspace")}>
-          {NAV_ITEMS.map((item) => (
+          {navigationForRole(user?.role).map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className="onyx-nav-link">
               {t(item.label)}
             </NavLink>

@@ -10,8 +10,8 @@ export interface UseCommandResult<TPayload> {
     targetType: string;
     organizationId: string;
     expectedVersion: number;
-    expectedLifecycleEpoch?: number;
-    expectedAuthorityEpoch?: number;
+    expectedLifecycleEpoch: number;
+    expectedAuthorityEpoch: number;
     payload: TPayload;
   }) => Promise<unknown>;
   loading: boolean;
@@ -33,8 +33,8 @@ export function useCommand<TPayload = unknown>(): UseCommandResult<TPayload> {
         schema_version: "1.0",
         target: { id: params.targetId, type: params.targetType, organization_id: params.organizationId },
         expected_version: params.expectedVersion,
-        expected_lifecycle_epoch: params.expectedLifecycleEpoch ?? 0,
-        expected_authority_epoch: params.expectedAuthorityEpoch ?? 0,
+        expected_lifecycle_epoch: params.expectedLifecycleEpoch,
+        expected_authority_epoch: params.expectedAuthorityEpoch,
         issued_at: new Date().toISOString(),
         vector_clock: { entries: {} },
         correlation_id: crypto.randomUUID(),

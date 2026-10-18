@@ -6,6 +6,8 @@ export interface AuthUser {
   id: string;
   username: string;
   organization_id: string;
+  /** Role returned by the Worker after its authoritative D1 session check. */
+  role: "ALL_FATHER" | "ORGANIZATION_ADMIN" | "STAFF";
   /// Added for the Admin platform's client-side "you're not an admin"
   /// check — see `LoginUser::is_admin`'s doc comment in api-server for
   /// the full rationale (this is additive on the shared endpoint;
@@ -38,7 +40,14 @@ export function getStoredUser(): AuthUser | null {
   const raw = sessionStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as AuthUser;
+    const user = JSON.parse(raw) as Partial<AuthUser>;
+    if (!user || typeof user.id !== "string" || typeof user.username !== "string" ||
+      typeof user.organization_id !== "string" || typeof user.is_admin !== "boolean" ||
+      !["ALL_FATHER", "ORGANIZATION_ADMIN", "STAFF"].includes(String(user.role))) {
+      clearSession();
+      return null;
+    }
+    return user as AuthUser;
   } catch {
     clearSession();
     return null;
