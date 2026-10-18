@@ -68,13 +68,14 @@ These are source observations, not claims that the requirements are fully implem
 - No local build, test, or dependency download was performed.
 - **Observed Worker CI run #289** on initial PR head eaa87ad8701b90d289ea39bb94e9b8483eda95a2: bundle dry-run passed; tests reported 149 passed / 3 failed (152 total). New Phase 1 regression tests passed 5/5. Failures were the stale Supabase route expectation, stale Supabase identity-mapping test, and relay test returning 503 instead of 200.
 - **Observed Worker CI run #291** on later PR head 5dd06e8508dfe0edf60d70af1e18b01cf8ce8e0d: bundle dry-run passed; tests reported 151 passed / 1 failed (152 total). The route-contract and security-test failures were resolved; relay-ticket test still returned 503. Its test double was then updated, and the assertion now includes the response body for diagnosis.
-- **Latest head verification:** a new completed test result for 326c280504412be852d3768c1d7b0dea116e59f4 was not yet available when this report update was prepared. Do not count that run as passing.
+- **Observed Worker CI run #293** on code/test commit 326c280504412be852d3768c1d7b0dea116e59f4: bundle dry-run passed; tests reported 151 passed / 1 failed (152 total). Eight test files passed and one failed. The sole failure is the relay-ticket test, which returns 503 RELAY_TICKET_UNAVAILABLE instead of 200. The failure remains after adding schema metadata support to the test double; its underlying cause is unresolved.
+- **Security run #1228** and full CI run #1686 were queued/pending at the last status read; they are not passes.
 - **Skipped in failed Worker runs:** disposable D1 migrations, mobile-access migration verification, and relay WebSocket integration steps, because the test step failed.
 - **Skipped/unverified:** live Cloudflare Worker behavior, production D1 state, live credentials, session lifecycle end-to-end, Axum alternate entry points, and full cross-tenant/resource matrix.
 
 ## 6. Known gaps and residual risks
 
-1. Runtime implementation has not yet been changed; the branch currently adds regression tests and this report only. No source-code vulnerability fix is claimed.
+1. Runtime authentication/authorization implementation has not yet been changed; the branch currently adds/updates regression tests and this report only. No source-code vulnerability fix is claimed.
 2. The new tests must run in GitHub Actions and their test double must be reconciled with the actual D1 schema contract.
 3. Full route-by-route authorization review is still required for every admin endpoint, command handler, resource lookup, and alternate API entry point.
 4. Session lifecycle needs explicit tests for malformed/expired/revoked tokens, inactive accounts and organizations, refresh rotation races/replay, logout, and session revocation.
