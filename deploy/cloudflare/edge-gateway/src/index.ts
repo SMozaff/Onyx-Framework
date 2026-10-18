@@ -1,6 +1,5 @@
 export { EventHub, RelayHub } from "./event-hub";
 import { argon2id, argon2Verify } from "hash-wasm";
-import { getSupabaseUser, verifySupabaseJwt } from "./supabase";
 import { missingAuthSchema } from "./schema-contract";
 import { authorizeCommand, authorizeQuery, ONYX_ROLES, payloadOwnerIds, resourceOwnedBy } from "./authorization";
 import { mobileCapabilityGranted } from "./mobile-capability";
@@ -15,11 +14,6 @@ interface Env {
   RELAY_HUB: DurableObjectNamespace;
   ONYX_JWT_SECRET?: string;
   ONYX_CORS_ORIGINS?: string;
-  ONYX_ALLFATHER_EMAIL?: string;
-  SUPABASE_URL?: string;
-  SUPABASE_JWKS_URL?: string;
-  SUPABASE_PUBLISHABLE_KEY?: string;
-  SUPABASE_SECRET_KEY?: string;
   HF_S3_ENDPOINT?: string;
   HF_S3_BUCKET?: string;
   HF_S3_ACCESS_KEY_ID?: string;
@@ -39,8 +33,6 @@ interface Session {
   jti: string;
   sid: string;
   typ: "access" | "refresh";
-  /** Verified Supabase subject; present only on All-Father sessions. */
-  identity_sub?: string;
   iss?: string;
   aud?: string | string[];
 }
@@ -160,14 +152,7 @@ async function requireSession(request:Request,env:Env){
   if(revocation && (!Number.isSafeInteger(session.iat_ms) || Number(session.iat_ms)<=Number(revocation.revoked_before_ms)))throw new Error("revoked session");
   if(String(current.organization_id)!==session.organization_id||currentRole!==session.role||
      Boolean(current.is_admin)!==Boolean(session.is_admin))throw new Error("AUTH_REQUIRED");
-  // All-Father sessions are bound to the canonical ONYX principal and exact
-  // provisioned Supabase subject. Removed/rebound mappings invalidate sessions.
-  if(currentRole==="ALL_FATHER"){
-    if(String(current.id)!=="__allfather__"||!current.is_admin||!current.supabase_user_id||
-       session.identity_sub!==String(current.supabase_user_id))throw new Error("AUTH_REQUIRED");
-  }else if(session.identity_sub){
-    throw new Error("AUTH_REQUIRED");
-  }
+  if(currentRole==="ALL_FATHER"&&(String(current.id)!=="__allfather__"||!current.is_admin))throw new Error("AUTH_REQUIRED");
   return session;
 }
 function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return null;return configured.includes(origin)&&!configured.includes("*")?origin:null;}
@@ -187,9 +172,9 @@ function roleForUser(user:Record<string,unknown>):string{
   const explicit=typeof user.role==="string"?user.role:"";
   return ONYX_ROLES.includes(explicit as typeof ONYX_ROLES[number])?explicit:"";
 }
-async function issuePair(env:Env,user:Record<string,unknown>,type:string,identitySub?:string,sessionId?:string){
+async function issuePair(env:Env,user:Record<string,unknown>,type:string,sessionId?:string){
   const role=roleForUser(user);
-  const base={sub:String(user.id),username:String(user.username),organization_id:String(user.organization_id),is_admin:Boolean(user.is_admin),class:(user.class as string|null)??null,role,client_type:type,sid:sessionId??uuid(),...(role==="ALL_FATHER"&&identitySub?{identity_sub:identitySub}:{})};
+  const base={sub:String(user.id),username:String(user.username),organization_id:String(user.organization_id),is_admin:Boolean(user.is_admin),class:(user.class as string|null)??null,role,client_type:type,sid:sessionId??uuid()};
   const access=await jwtSign(env,{...base,exp:now()+3600,typ:"access"}); const refresh=await jwtSign(env,{...base,exp:now()+7*86400,typ:"refresh"});
   return {access_token:access,refresh_token:refresh,expires_in:3600,user:{id:user.id,username:user.username,email:user.email??null,organization_id:user.organization_id,is_admin:Boolean(user.is_admin),class:user.class??null,role}};
 }
@@ -200,7 +185,7 @@ async function authLogin(request:Request,env:Env){
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role,u.supabase_user_id FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
   const role=user?roleForUser(user):"";
-  if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role==="ALL_FATHER"||String(user.id)==="__allfather__"||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||((role==="ALL_FATHER"||String(user.id)==="__allfather__")&&(String(user.id)!=="__allfather__"||role!=="ALL_FATHER"||!user.is_admin))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const requestedClientType = clientType(body);
   if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
   // client_type is caller-controlled metadata and is never an authorization
@@ -224,18 +209,14 @@ async function authRefresh(request:Request,env:Env){
     if(!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role!==claims.role||
        String(user.organization_id)!==claims.organization_id||
        Boolean(user.is_admin)!==Boolean(claims.is_admin))throw new Error("session authority changed");
-    if(role==="ALL_FATHER"){
-      if(String(user.id)!=="__allfather__"||!user.is_admin||!user.supabase_user_id||
-         claims.identity_sub!==String(user.supabase_user_id))throw new Error("All-Father mapping changed");
-    }else if(claims.identity_sub)throw new Error("unexpected external identity");
+    if(role==="ALL_FATHER"&&(String(user.id)!=="__allfather__"||!user.is_admin))throw new Error("All-Father principal changed");
     // Consume the refresh token exactly once. Fail closed if D1 cannot prove
     // this invocation inserted the revocation record (including replay races).
     const consumed=await env.DB.prepare(
       "INSERT OR IGNORE INTO token_revocations(token_hash,revoked_at) VALUES(?,?)"
     ).bind(await sha256(token),now()).run();
     if(Number(consumed.meta?.changes??0)!==1)throw new Error("refresh token replayed");
-    return json(await issuePair(env,user,typeof claims.client_type==="string"?claims.client_type:"web",
-      role==="ALL_FATHER"?String(user.supabase_user_id):undefined,claims.sid));
+    return json(await issuePair(env,user,typeof claims.client_type==="string"?claims.client_type:"web",claims.sid));
   }catch{
     return json({error:"INVALID_REFRESH_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   }
@@ -269,60 +250,6 @@ async function authLogout(request:Request,env:Env){
   return json({success:true});
 }
 
-async function authSupabaseAllFather(request:Request,env:Env){
-  const token=authorization(request);
-  if(!token)return json({error:"AUTH_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  try{
-    const claims=await verifySupabaseJwt(env,token);
-    const identity=await getSupabaseUser(env,token);
-    const email=(identity.email||"").trim().toLowerCase();
-    const expected=(env.ONYX_ALLFATHER_EMAIL||ALLFATHER_EMAIL).trim().toLowerCase();
-    // The signed JWT alone does not prove that the current Supabase user
-    // still has a confirmed email. Resolve the bearer token through Supabase
-    // Auth and bind the returned user ID to the JWT subject before granting
-    // the All-Father role.
-    if(identity.id!==claims.sub||!identity.email_confirmed_at||!email||email!==expected)
-      return json({error:"ALLFATHER_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-    // Use the immutable canonical principal ID. Username/email are mutable
-    // profile attributes and must never select the privileged identity.
-    const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.supabase_user_id,u.organization_id,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1").bind("__allfather__").first<Record<string,unknown>>();
-    if(!user?.is_active||roleForUser(user)!=="ALL_FATHER"||!user.is_admin)return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-    // Contract (docs/SECURITY_AUTHENTICATION_MODEL.md): the Supabase subject
-    // mapping is written only by an owner-controlled provisioning process.
-    // Login must never create, update, or replace users.supabase_user_id; an
-    // unmapped or mismatched subject is denied without a database write.
-    if(!user.supabase_user_id||String(user.supabase_user_id)!==String(claims.sub)){
-      console.warn(JSON.stringify({event:"allfather_subject_rejected",reason:user.supabase_user_id?"SUBJECT_MISMATCH":"SUBJECT_UNMAPPED",principal_id:String(user.id)}));
-      return json({error:"ALLFATHER_NOT_PROVISIONED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
-    }
-    return json(await issuePair(env,user,"allfather",String(claims.sub)));
-  }catch(error){
-    // A bad/expired token is an authentication failure. Provider outages and
-    // missing runtime configuration are infrastructure failures and must not
-    // mislead clients into treating them as invalid credentials.
-    const rawReason=error instanceof Error?error.message:"";
-    const infrastructureReasons=[
-      "SUPABASE_AUTH_UNAVAILABLE",
-      "SUPABASE_URL is not configured",
-      "SUPABASE_PUBLISHABLE_KEY is not configured",
-      "ONYX_JWT_SECRET is not configured",
-      "SUPABASE_JWKS_URL is not configured",
-    ];
-    const infrastructureFailure=infrastructureReasons.includes(rawReason)||error instanceof TypeError;
-    // Log only an allowlisted classification, never raw provider/error text
-    // that might accidentally contain request credentials or token material.
-    const reasonCode=infrastructureReasons.includes(rawReason)?rawReason:
-      error instanceof TypeError?"PROVIDER_OR_TOKEN_PARSING_ERROR":"AUTHENTICATION_FAILURE";
-    console.error(JSON.stringify({event:"allfather_exchange_failed",reason:reasonCode}));
-    if(infrastructureFailure){
-      return json({error:"AUTHENTICATION_SERVICE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},502);
-    }
-    return json({error:"INVALID_SUPABASE_TOKEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  }
-}
-
-const RELAY_TICKET_TTL_SECONDS=30;
-type RelayTicketClaims={sub:string;organization_id:string;typ:"relay_ticket";target_id:string;self_replica:string;iat:number;exp:number;jti:string};
 async function signRelayTicket(env:Env,claims:RelayTicketClaims):Promise<string>{
   if(!env.ONYX_JWT_SECRET)throw new Error("ONYX_JWT_SECRET is not configured");
   const header=b64u(JSON.stringify({alg:"HS256",typ:"JWT"})),payload=b64u(JSON.stringify(claims)),input=header+"."+payload;
@@ -1791,7 +1718,6 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/events"&&request.method==="GET")return await websocketEvents(request,env);
     if(url.pathname.startsWith("/api/relay/")&&request.method==="GET")return await relaySocket(request,env);
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return await authLogin(request,env);
-    if(url.pathname==="/api/auth/supabase"&&request.method==="POST")return await authSupabaseAllFather(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return await authRefresh(request,env);
     if(url.pathname==="/api/auth/logout"&&request.method==="POST")return await authLogout(request,env);
     const session=await requireSession(request,env);

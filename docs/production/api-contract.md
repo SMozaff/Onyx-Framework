@@ -12,8 +12,8 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 |---|---|---|---|
 | GET | `/health` | None | Reachability only; `{status:"ok",service,runtime}`. |
 | GET | `/ready` | None | `200` when required D1 schema is present; otherwise `503` with missing schema items. |
-| POST | `/api/auth/login` | None | `{username|email,password,client_type?}` → access/refresh token pair; All-Father is excluded from password login. |
-| POST | `/api/auth/supabase` | Supabase bearer token | All-Father exchange; verified Supabase subject must match the provisioned canonical `__allfather__` principal. |
+| POST | `/api/auth/login` | None | `{username|email,password,client_type?}` → access/refresh token pair; All-Father is allowed only for canonical `__allfather__` with explicit `ALL_FATHER` role and admin flag. |
+
 | POST | `/api/auth/refresh` | Refresh token in body | Single-use refresh token → rotated pair; replay is rejected. |
 | POST | `/api/auth/logout` | Optional bearer and/or refresh token | Revokes supplied valid token/session family; returns `{success:true}`. |
 | GET | `/api/query` | ONYX access session; role and ownership policy | Base64url query envelope → query result page. |
@@ -64,4 +64,4 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 
 ## Verification boundary
 
-This contract and the accompanying route-completeness test validate source-level expectations. They do not prove production D1 migration state, deployed Worker behavior, native OAuth, relay peer synchronization, or packaged client end-to-end success. Those remain release gates.
+This contract and the accompanying route-completeness test validate source-level expectations. They do not prove production D1 migration state, deployed Worker behavior, relay peer synchronization, or packaged client end-to-end success. Those remain release gates.

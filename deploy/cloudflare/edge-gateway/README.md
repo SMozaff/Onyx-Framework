@@ -36,7 +36,7 @@ Authentication endpoints:
 - `POST /api/auth/refresh`: rotate a valid ONYX refresh token.
 - `POST /api/auth/logout`: revoke supplied ONYX tokens.
 
-Browser sign-in uses Supabase's **Authorization Code Flow with PKCE** (`crates/bins/admin-shell/ui/src/auth/allfatherOAuth.ts`): the Admin shell creates the verifier, its S256 challenge and a CSRF nonce, exchanges the code with the publishable key only, and scrubs the code from the URL. The Worker exchange endpoint is unchanged — it still accepts a bearer token and never learns any OAuth secret.
+All-Father and other user classes authenticate using ONYX-managed credentials through `POST /api/auth/login`. The Worker verifies the D1 Argon2id password hash and revalidates role, active status, and organization on protected requests. No Google/Supabase token exchange is part of the Worker login path.
 
 The D1 migrations own this model: `0001_foundation.sql` creates the base tables, `0002_auth_hierarchy.sql` adds `email`/`role` and seeds the single inert `__allfather__` principal, `0003_supabase_identity.sql` owns `users.supabase_user_id`, and `0004_auth_schema_repair.sql` idempotently reconciles the canonical indexes and principal (see `reports/auth-repair/03-d1-migrations.md`). Admin and Staff passwords are Argon2id hashes in D1; their accounts are not provisioned in Supabase.
 

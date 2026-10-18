@@ -6,14 +6,14 @@ This document governs the ONYX authentication migration. Do not replace this des
 
 ## Identity and authority boundaries
 
-### All-Father: Supabase Auth + Google only
+### All-Father: ONYX-managed credentials
 
-- The designated All-Father signs in using the Google identity `so.muzaff@gmail.com`.
-- Supabase Auth authenticates that Google identity.
-- The backend verifies the Supabase token's signature, issuer, expiry, and subject, then checks the verified email against the designated All-Father identity.
-- Only that verified identity may receive the `ALL_FATHER` ONYX role.
-- The All-Father does not sign in with an ONYX username/password.
-- The All-Father provisions organizations and organization administrators.
+- All-Father signs in with the canonical ONYX username and password for principal `__allfather__`.
+- The Worker verifies the supplied password against the Argon2id hash stored in D1.
+- The account must be active, belong to an active organization, have explicit `ALL_FATHER` role, and have the admin flag enabled.
+- GitHub Actions secrets `ONYX_ALLFATHER_USERNAME` and `ONYX_ALLFATHER_PASSWORD` are used only by CI to exercise `POST /api/auth/login`; they do not provision the D1 account or become Worker secrets.
+- Google and Supabase are not part of All-Father authentication.
+- All-Father provisions organizations and organization administrators.
 
 ### Organization administrators: ONYX-managed credentials
 
@@ -31,10 +31,7 @@ This document governs the ONYX authentication migration. Do not replace this des
 
 ### Render/Axum API configuration
 
-- The Axum API server exposes the same designated-identity exchange at `POST /api/auth/supabase`.
-- Configure `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `ONYX_ALLFATHER_SUPABASE_USER_ID` together. The API server asks Supabase Auth to validate the bearer token, then requires a confirmed designated email and an exact match to the configured Supabase subject ID before issuing an ONYX session.
-- These are deployment settings, not source defaults. If any setting is missing while another is present, startup fails closed. If all are absent, the external identity exchange remains unavailable.
-- Render's `sync: false` declarations do not set hosted values by themselves. Configure the values in Render before relying on this route.
+The Cloudflare Worker All-Father login path is ONYX-managed credentials. Any separate Axum deployment must be evaluated against this same contract before release; do not reintroduce Google/Supabase login for All-Father.
 
 ## Roles and authorization
 
@@ -48,12 +45,10 @@ Every protected operation must enforce role and organization boundaries server-s
 
 ## Cloudflare Worker authentication endpoints
 
-- `POST /api/auth/supabase`: accept a Supabase bearer token, verify the Supabase identity, enforce the designated verified All-Father email, map to the provisioned ONYX All-Father account in D1, and issue an ONYX session.
-- `POST /api/auth/login`: accept `username` or `email` plus password; find the ONYX account in D1, verify its Argon2id password hash, reject inactive accounts and the All-Father account, then issue an ONYX session.
-- `POST /api/auth/refresh`: validate and rotate an ONYX refresh token; reject revoked tokens and inactive accounts.
-- `POST /api/auth/logout`: revoke the presented ONYX session/refresh token.
-
-Supabase Auth is used only for the All-Father Google identity. Admins and Staff authenticate against ONYX-managed username/email and Argon2id password hashes in D1.
+- `POST /api/auth/login`: accepts ONYX username/email and password, verifies the Argon2id hash, and issues an ONYX session for an active account. All-Father is eligible only when the account ID is `__allfather__`, the explicit role is `ALL_FATHER`, and the admin flag is true.
+- `POST /api/auth/refresh`: rotates an ONYX refresh token after re-checking account, role, organization, and revocation state.
+- `POST /api/auth/logout`: revokes ONYX tokens/session.
+- There is no Worker `POST /api/auth/supabase` route.
 
 ## Authoritative data and safe migration
 
