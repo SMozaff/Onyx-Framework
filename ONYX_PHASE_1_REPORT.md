@@ -176,7 +176,7 @@ At the time of this evidence refresh, full CI run #1695 and Security run #1237 f
 
 **Continuation starting head:** `fdb86532e88c4e1b5a6de0eb6986d7e399d4f57c`  
 **Starting base/main SHA verified:** `54221e10f1dff46730aef33826db0c631c3d293d`  
-**Branch head at addendum authoring:** `bda03cc1d9aa394dd456815872932d95d49d347b` (report update itself will create a later head).  
+**Latest code/test head before this report refresh:** `7631040e2b3f66db45e85e7dbce50557420f0361` (this report refresh creates a new head).  
 **PR state at start:** #268 open, draft, unmerged; base `main`; 18 commits ahead and 0 behind at initial comparison. The report update adds another commit.
 
 ## A. Axum production-role decision — evidence and limits
@@ -188,7 +188,7 @@ At the time of this evidence refresh, full CI run #1695 and Security run #1237 f
 - `deploy/helm/onyx-api/templates/deployment.yaml` defines an API-server rollout, container port, probes, and environment from a secret.
 - `.github/workflows/release.yml` builds the `api-server` binary and container images. Its comments also say the real production server is a Windows 10 office machine and that Linux/macOS native server binaries are not currently deployed.
 - `docs/DECISIONS.md` describes Cloud-Only Client Connectivity and says browser/desktop/mobile clients use a deployed ONYX Cloud API. The Admin Shell source says it is a thin HTTP client that talks directly to `api-server`.
-- `crates/bins/admin-shell/ui/src/auth/allfatherOAuth.ts`, `crates/bins/admin-shell/src/lib.rs`, and the Admin Shell API client contain an actual Google/Supabase sign-in and exchange flow; this is a real code caller, not a dead route proven unused.
+- The current `crates/bins/admin-shell/ui/src/pages/Login.tsx` posts username/password to `/api/auth/login`. The OAuth helper and registered Tauri `start_allfather_oauth` command remain in source, but repository search found no active UI call site invoking `beginAllfatherSignIn` or `start_allfather_oauth`. That is evidence of stale/unused in-repository wiring, **not** proof that no older external client calls the public endpoint.
 
 These artifacts conflict about the *currently live* hosting path (Render/Helm versus the Windows-office deployment note). I do not have authorized live Render/Kubernetes deployment metadata in this task, so **actual live deployment is unverified**. However, the production manifests and supported client wiring are sufficient to classify Axum as production-configured and to require its auth boundary to be secured. Do not disable or remove it on an assumption.
 
@@ -205,7 +205,7 @@ Changed `crates/bins/api-server/src/routes/mod.rs`:
 - After cryptographic validation, expiry/type checks and token/session revocation checks, `authenticate_headers` now re-reads the subject from the authoritative `UserStore` on every access-token protected request.
 - It rejects missing/inactive principals and rejects a token whose signed username or organization ID no longer matches the current stored user.
 - It uses the current database identity in the returned `AuthenticatedUser`, not stale token identity fields.
-- Added required JWT `iss=onyx-api-server` and `aud=onyx-api` claims and validate both before accepting Axum tokens. Relay tickets minted by Axum carry the same explicit issuer/audience and retain their distinct token-type/target checks. Because older Axum tokens lack these claims, they now fail closed and users must sign in again after this change is deployed; this is an intentional session invalidation, not backward-compatible token acceptance.
+- Added required JWT `iss=onyx-api-server` and `aud=onyx-api` claims and validate both before accepting Axum tokens. Relay tickets minted by Axum carry the same explicit issuer/audience and retain their distinct token-type/target checks. Refresh now also rejects a token when its current stored username or organization no longer matches the refresh claims. Because older Axum tokens lack issuer/audience claims, they now fail closed and users must sign in again after this change is deployed; this is an intentional session invalidation, not backward-compatible token acceptance.
 - If the user store is unavailable, the request fails closed with generic `503 AUTHORIZATION_STATE_UNAVAILABLE`; no database error details are returned to the client.
 - This function is called by the route-layer auth middleware and by handlers that explicitly authenticate headers, so it covers both common paths without adding route-specific duplicate checks.
 
@@ -215,6 +215,7 @@ Added `crates/bins/api-server/tests/session_revalidation.rs`, a real local HTTP 
 3. Admin authorization after the stored admin flag is revoked.
 4. A correctly signed token with a wrong issuer.
 5. A correctly signed token with a wrong audience.
+6. A refresh token after the principal's organization binding changes.
 
 These are code/test changes; their CI results must be taken from the current exact head’s completed workflow, not inferred from the test source.
 
@@ -258,8 +259,8 @@ The shared protected-router middleware calls `authenticate_headers`; the fix the
 
 ## F. Verification status for this continuation
 
-- Starting branch `fdb86532e88c4e1b5a6de0eb6986d7e399d4f57c`; current code/test commit before this report update: `bda03cc1d9aa394dd456815872932d95d49d347b`.
-- Current branch commits include runtime principal revalidation, explicit Axum JWT issuer/audience validation, relay-ticket issuer/audience binding, and a five-case HTTP/SQLite integration test.
+- Starting branch `fdb86532e88c4e1b5a6de0eb6986d7e399d4f57c`; latest code/test commit before this report refresh: `7631040e2b3f66db45e85e7dbce50557420f0361`.
+- Current branch commits include runtime principal revalidation, explicit Axum JWT issuer/audience validation, relay-ticket issuer/audience binding, refresh tenant-change rejection, and a six-case HTTP/SQLite integration test.
 - The previous Worker CI #303 passed on `fdb8653…`; the previous Cloudflare preview build succeeded on that same earlier head. New Worker CI and Cloudflare preview runs are triggered for this continuation and must be checked by exact SHA.
 - The previous Security run #1238 passed on `fdb8653…`, but is not evidence for the new Rust changes.
 - At this point, the current-head full CI / Security / Worker / preview outcomes are pending or running. No current-head Rust test, formatting, lint, or full-suite pass is claimed until the completed logs are read. This assistant did not execute a local checkout/working-tree test run.
