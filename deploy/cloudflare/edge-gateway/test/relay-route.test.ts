@@ -136,7 +136,7 @@ describe("Worker Cloud Relay route integration", () => {
       headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
       body: JSON.stringify({ target_id: TARGET, self_replica: SELF }),
     }), env);
-    expect(ticketResponse.status).toBe(200);
+    expect(ticketResponse.status, await ticketResponse.clone().text()).toBe(200);
     const ticketBody = await ticketResponse.json() as { ticket?: string };
     expect(typeof ticketBody.ticket).toBe("string");
     expect(ticketBody.ticket!.length).toBeGreaterThan(20);
