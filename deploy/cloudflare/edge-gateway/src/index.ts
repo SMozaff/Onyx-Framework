@@ -38,6 +38,8 @@ interface Session {
 }
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+// Match the Axum relay-ticket contract: a ticket is single-use and valid for 30 seconds.
+const RELAY_TICKET_TTL_SECONDS = 30;
 const ALLFATHER_EMAIL = "so.muzaff@gmail.com";
 const OBSERVER_QUERIES: Record<string, string> = {
   "mission.list":"mission", "mission.detail":"mission", "task.list":"task", "task.detail":"task",
@@ -276,18 +278,14 @@ async function issueRelayTicket(request:Request,env:Env,session:Session){
     return json({error:"INVALID_REPLICA_ID",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
   if(!looksLikeUuid(session.sub)||!looksLikeUuid(session.organization_id))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const self=body.self_replica.toLowerCase(),target=body.target_id.toLowerCase(),timestamp=Date.now();
-  let stage:"ownership-insert"|"ownership-read"|"ticket-sign"="ownership-insert";
   try{
     await env.DB.prepare("INSERT INTO replica_ownership(replica_id,user_id,organization_id,claimed_at) VALUES(?,?,?,?) ON CONFLICT(replica_id) DO NOTHING")
       .bind(self,session.sub,session.organization_id,now()).run();
-    stage="ownership-read";
     const owner=await env.DB.prepare("SELECT user_id,organization_id FROM replica_ownership WHERE replica_id=? LIMIT 1").bind(self).first<{user_id:string;organization_id:string}>();
     if(!owner||owner.user_id!==session.sub||owner.organization_id!==session.organization_id)return json({error:"REPLICA_OWNERSHIP_REJECTED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
     const claims:RelayTicketClaims={sub:session.sub,organization_id:session.organization_id,typ:"relay_ticket",target_id:target,self_replica:self,iat:now(),exp:now()+RELAY_TICKET_TTL_SECONDS,jti:uuid()};
-    stage="ticket-sign";
     return json({ticket:await signRelayTicket(env,claims),expires_in:RELAY_TICKET_TTL_SECONDS});
-  }catch(error){
-    console.error("relay ticket issuance failed", {stage, errorType:error instanceof Error?error.name:"unknown"});
+  }catch{
     return json({error:"RELAY_TICKET_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
   }
 }
