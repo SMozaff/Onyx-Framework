@@ -12,7 +12,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'deploy/cloudflare/edge-gateway/**'
+      - 'deploy/cloudflare/edge-gateway/src/**'
+      - 'deploy/cloudflare/edge-gateway/migrations/**'
+      - 'deploy/cloudflare/edge-gateway/scripts/**'
+      - 'deploy/cloudflare/edge-gateway/test/**'
+      - 'deploy/cloudflare/edge-gateway/wrangler.dev.toml'
+      - 'crates/bins/api-server/src/routes/auth.rs'
+      - 'crates/bins/api-server/src/routes/mod.rs'
       - '.github/workflows/allfather-auth-smoke.yml'
 
 permissions:
