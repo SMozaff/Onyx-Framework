@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
+import { AUTH_SCHEMA_CONTRACT } from "../src/schema-contract";
 
 const SECRET = "relay-route-test-secret";
 const ORG = "11111111-2222-4333-8444-555555555555";
@@ -47,6 +48,21 @@ class RelayDb {
     let params: unknown[] = [];
     const db = this;
     const statement: any = {
+      all: async () => {
+        const tablePrefix = "PRAGMA table_info(";
+        if (sql.toLowerCase().startsWith(tablePrefix.toLowerCase()) && sql.endsWith(")")) {
+          const table = sql.slice(tablePrefix.length, -1);
+          return { results: (AUTH_SCHEMA_CONTRACT.tables[table] ?? []).map((name) => ({ name })) };
+        }
+        const compact = sql.toLowerCase().replaceAll(" ", "");
+        const indexPrefix = "pragmaindex_list(";
+        if (compact.startsWith(indexPrefix) && compact.endsWith(")")) {
+          const table = compact.slice(indexPrefix.length, -1);
+          const indexes = table === "users" ? AUTH_SCHEMA_CONTRACT.indexes : AUTH_SCHEMA_CONTRACT.tableIndexes[table] ?? [];
+          return { results: indexes.map((name) => ({ name })) };
+        }
+        return { results: [] };
+      },
       bind(...values: unknown[]) { params = values; return statement; },
       first: async () => {
         if (sql.includes("FROM mobile_access_settings")) {
