@@ -64,7 +64,7 @@ npm run dev
 
 - `npm test` — Worker auth, authorization, relay, schema, and migration tests.
 - `npm run check` — Worker bundle dry-run.
-- `npm run smoke:allfather` — smoke against the local Worker; requires the local D1 migrations, local password provisioning, and a loopback Worker to be running.
+- `npm run smoke:allfather` — smoke against the local Worker; requires local D1 migrations, local password provisioning, and a loopback Worker to be running.
 - `.github/workflows/allfather-auth-smoke.yml` runs the smoke in isolated local D1 and never sends credential tests to production.
 - `.github/workflows/deploy-cloudflare-edge.yml` configures the Cloudflare Worker and D1 using Cloudflare/JWT/CORS and optional Hugging Face credentials. Supabase authentication secrets are no longer required by this workflow. The workflow is deployment-capable; do not dispatch it or merge to `main` without the required deployment authorization.
 
