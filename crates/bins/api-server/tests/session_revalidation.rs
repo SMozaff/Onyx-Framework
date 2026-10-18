@@ -7,6 +7,10 @@ use std::net::SocketAddr;
 
 use api_server::routes::{ApiState, TokenClaims, ONYX_API_TOKEN_AUDIENCE, ONYX_API_TOKEN_ISSUER};
 use reqwest::{Client, StatusCode};
+use tokio_tungstenite::tungstenite::{
+    client::IntoClientRequest,
+    http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderValue},
+};
 use security_adapter::Ed25519JwtCodec;
 use security_application::NewUser;
 use sqlx::SqlitePool;
@@ -123,6 +127,37 @@ async fn signed_access_token_is_rejected_after_account_deactivation() {
         .await
         .expect("protected request");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn event_websocket_rejects_token_after_account_deactivation() {
+    let fixture = start("events-deactivated").await;
+    let token = login(&fixture).await;
+
+    fixture
+        .state
+        .user_store
+        .set_active(&fixture.user_id, ORG_A, false)
+        .await
+        .expect("deactivate user");
+
+    let websocket_url = format!("{}/api/events", fixture.base).replacen("http://", "ws://", 1);
+    let mut request = websocket_url
+        .into_client_request()
+        .expect("event WebSocket request");
+    request.headers_mut().insert(
+        SEC_WEBSOCKET_PROTOCOL,
+        HeaderValue::from_str(&format!("onyx-bearer, {token}"))
+            .expect("WebSocket bearer subprotocol"),
+    );
+
+    match tokio_tungstenite::connect_async(request).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status().as_u16(), 401);
+        }
+        Err(error) => panic!("expected HTTP 401 for inactive user, got {error}"),
+        Ok(_) => panic!("inactive user unexpectedly opened the event WebSocket"),
+    }
 }
 
 #[tokio::test]
