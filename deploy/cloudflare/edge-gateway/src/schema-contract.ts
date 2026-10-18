@@ -5,7 +5,8 @@
  * for the tables, columns, and indexes the Worker's authentication and
  * authorization paths require. `missingAuthSchema` reports which contract
  * items are absent from a connected database; it performs read-only PRAGMA
- * and no writes.
+ * and no writes. Historical provider-mapping columns are intentionally not
+ * required by the current ONYX username/password authentication contract.
  *
  * The Worker's `/ready` route uses this check before reporting database
  * readiness. `PRAGMA table_info` and `PRAGMA index_list` are read-only

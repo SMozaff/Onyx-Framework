@@ -13,8 +13,10 @@ use super::{
     validate_token, ApiError, ApiState,
 };
 
+pub const ALLFATHER_USERNAME: &str = "allfather";
+
 fn is_reserved_allfather_username(username: &str) -> bool {
-    username.eq_ignore_ascii_case("allfather")
+    username.eq_ignore_ascii_case(ALLFATHER_USERNAME)
 }
 
 /// Single failure response for every authentication failure mode.
@@ -404,7 +406,6 @@ pub async fn logout(
         .map_err(revoke_err)?;
     Ok(Json(json!({"success":true})))
 }
-
 
 #[cfg(test)]
 mod reserved_identity_tests {
