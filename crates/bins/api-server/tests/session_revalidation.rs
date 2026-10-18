@@ -5,9 +5,10 @@
 
 use std::net::SocketAddr;
 
-use api_server::routes::ApiState;
+use api_server::routes::{ApiState, TokenClaims, ONYX_API_TOKEN_AUDIENCE, ONYX_API_TOKEN_ISSUER};
+use security_adapter::Ed25519JwtCodec;
 use reqwest::{Client, StatusCode};
-use security_application::NewUser;
+use security_application::{NewUser, SecretProvider};
 use sqlx::SqlitePool;
 
 const ORG_A: &str = "11111111-1111-1111-1111-111111111111";
@@ -67,6 +68,21 @@ async fn start(label: &str) -> Fixture {
         http: Client::new(),
         user_id: user.user_id,
     }
+}
+
+
+async fn resign_with_claims(fixture: &Fixture, token: &str, iss: &str, aud: &str) -> String {
+    let secret = fixture
+        .state
+        .secret_provider
+        .get("ONYX_AUTHORITY_SIGNING_KEY")
+        .await
+        .expect("test signing secret");
+    let codec = Ed25519JwtCodec::from_rotating_secret(&secret).expect("test token codec");
+    let mut claims: TokenClaims = codec.decode(token).expect("decode signed access token");
+    claims.iss = iss.to_owned();
+    claims.aud = aud.to_owned();
+    codec.encode(&claims).expect("sign modified test claims")
 }
 
 async fn login(fixture: &Fixture) -> String {
@@ -153,3 +169,36 @@ async fn admin_role_revocation_takes_effect_for_existing_access_token() {
         .expect("admin-only request");
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn access_token_with_wrong_issuer_is_rejected_even_when_signature_is_valid() {
+    let fixture = start("wrong-issuer").await;
+    let token = login(&fixture).await;
+    let token = resign_with_claims(&fixture, &token, "other-service", ONYX_API_TOKEN_AUDIENCE).await;
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/users/hierarchy", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("protected request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn access_token_with_wrong_audience_is_rejected_even_when_signature_is_valid() {
+    let fixture = start("wrong-audience").await;
+    let token = login(&fixture).await;
+    let token = resign_with_claims(&fixture, &token, ONYX_API_TOKEN_ISSUER, "other-api").await;
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/users/hierarchy", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("protected request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
