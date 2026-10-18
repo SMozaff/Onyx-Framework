@@ -48,7 +48,7 @@ use sync_transport::SyncMessage;
 use tokio::sync::{mpsc, RwLock};
 
 use super::{
-    authenticate_headers, unix_seconds, validate_token, ApiError, ApiState, ProjectionPool,
+    authenticate_headers, revalidate_token_principal, unix_seconds, validate_token, ApiError, ApiState, ProjectionPool,
     TokenClaims, TokenScope,
 };
 
@@ -432,6 +432,7 @@ pub async fn relay_route(
 ) -> Result<Response, ApiError> {
     let correlation_id = uuid::Uuid::new_v4().to_string();
     let claims = validate_token(&state, &params.ticket, RELAY_TICKET_TOKEN_TYPE).await?;
+    let current_user = revalidate_token_principal(&state, &claims).await?;
 
     let invalid = |what: &str| {
         ApiError::new(
@@ -492,7 +493,7 @@ pub async fn relay_route(
         return Err(ApiError::unauthorized(correlation_id));
     }
 
-    let organization_id = claims.organization_id;
+    let organization_id = current_user.organization_id;
     Ok(ws.on_upgrade(move |socket| {
         serve_relay(socket, state, organization_id, self_replica, default_target)
     }))
