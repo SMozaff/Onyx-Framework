@@ -184,7 +184,8 @@ pub async fn login(
                 "TRANSIENT",
                 uuid::Uuid::new_v4().to_string(),
                 json!({}),
-            )        })?;
+            )
+        })?;
 
     let user: UserRecord = match candidate {
         Some(user) if user.is_active => {
