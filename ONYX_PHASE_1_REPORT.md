@@ -205,13 +205,16 @@ Changed `crates/bins/api-server/src/routes/mod.rs`:
 - After cryptographic validation, expiry/type checks and token/session revocation checks, `authenticate_headers` now re-reads the subject from the authoritative `UserStore` on every access-token protected request.
 - It rejects missing/inactive principals and rejects a token whose signed username or organization ID no longer matches the current stored user.
 - It uses the current database identity in the returned `AuthenticatedUser`, not stale token identity fields.
+- Added required JWT `iss=onyx-api-server` and `aud=onyx-api` claims and validate both before accepting Axum tokens. Relay tickets minted by Axum carry the same explicit issuer/audience and retain their distinct token-type/target checks. Because older Axum tokens lack these claims, they now fail closed and users must sign in again after this change is deployed; this is an intentional session invalidation, not backward-compatible token acceptance.
 - If the user store is unavailable, the request fails closed with generic `503 AUTHORIZATION_STATE_UNAVAILABLE`; no database error details are returned to the client.
 - This function is called by the route-layer auth middleware and by handlers that explicitly authenticate headers, so it covers both common paths without adding route-specific duplicate checks.
 
 Added `crates/bins/api-server/tests/session_revalidation.rs`, a real local HTTP + SQLite integration fixture with regressions for:
 1. An already-issued signed access token after user deactivation.
-2. An already-issued signed access token after the user's authoritative organization binding changes.
+2. An already-issued signed access token after the authoritative organization binding changes.
 3. Admin authorization after the stored admin flag is revoked.
+4. A correctly signed token with a wrong issuer.
+5. A correctly signed token with a wrong audience.
 
 These are code/test changes; their CI results must be taken from the current exact head’s completed workflow, not inferred from the test source.
 
@@ -256,7 +259,7 @@ The shared protected-router middleware calls `authenticate_headers`; the fix the
 ## F. Verification status for this continuation
 
 - Starting branch `fdb86532e88c4e1b5a6de0eb6986d7e399d4f57c`; current code/test commit before this report update: `bda03cc1d9aa394dd456815872932d95d49d347b`.
-- Current branch commits include the runtime principal revalidation and a three-case HTTP/SQLite integration test.
+- Current branch commits include runtime principal revalidation, explicit Axum JWT issuer/audience validation, relay-ticket issuer/audience binding, and a five-case HTTP/SQLite integration test.
 - The previous Worker CI #303 passed on `fdb8653…`; the previous Cloudflare preview build succeeded on that same earlier head. New Worker CI and Cloudflare preview runs are triggered for this continuation and must be checked by exact SHA.
 - The previous Security run #1238 passed on `fdb8653…`, but is not evidence for the new Rust changes.
 - At this point, the current-head full CI / Security / Worker / preview outcomes are pending or running. No current-head Rust test, formatting, lint, or full-suite pass is claimed until the completed logs are read. This assistant did not execute a local checkout/working-tree test run.
@@ -270,4 +273,4 @@ The shared protected-router middleware calls `authenticate_headers`; the fix the
 4. Design and implement the Axum organization/membership active-state store contract with migrations and fail-closed tests.
 5. Complete route-by-route authorization matrices for Axum special WebSockets/relay, commands, Admin Shell/Tauri, web/PWA, Desktop Shell and Android before release.
 
-**Continuation decision: PHASE INCOMPLETE.** The API is production-configured and must be treated as an in-scope protected entry point. The stale-principal defect has a targeted fix and integration regressions, but its new CI evidence is pending, the organization-active-state model is absent, and the All-Father client/API contract migration plus the full cross-client audit remain outstanding.
+**Continuation decision: PHASE INCOMPLETE.** The API is production-configured and must be treated as an in-scope protected entry point. The stale-principal and missing issuer/audience checks have targeted fixes and integration regressions, but their new CI evidence is pending, the organization-active-state model is absent, and the All-Father client/API contract migration plus the full cross-client audit remain outstanding.
