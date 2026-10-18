@@ -202,3 +202,38 @@ async fn access_token_with_wrong_audience_is_rejected_even_when_signature_is_val
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+
+#[tokio::test]
+async fn refresh_token_is_rejected_after_tenant_binding_changes() {
+    let fixture = start("refresh-tenant-change").await;
+    let response = fixture
+        .http
+        .post(format!("{}/api/auth/login", fixture.base))
+        .json(&serde_json::json!({
+            "username": USERNAME,
+            "password": PASSWORD,
+            "client_type": "web"
+        }))
+        .send()
+        .await
+        .expect("login request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let login: serde_json::Value = response.json().await.expect("login JSON");
+    let refresh_token = login["refresh_token"].as_str().expect("refresh token").to_owned();
+
+    sqlx::query("UPDATE users SET organization_id = ?1 WHERE id = ?2")
+        .bind(ORG_B)
+        .bind(&fixture.user_id)
+        .execute(&fixture.pool)
+        .await
+        .expect("move user to a different authoritative tenant");
+
+    let refresh = fixture
+        .http
+        .post(format!("{}/api/auth/refresh", fixture.base))
+        .json(&serde_json::json!({ "refresh_token": refresh_token }))
+        .send()
+        .await
+        .expect("refresh request");
+    assert_eq!(refresh.status(), StatusCode::UNAUTHORIZED);
+}
