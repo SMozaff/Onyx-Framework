@@ -4,7 +4,7 @@
  * It refuses non-loopback targets, seeds a disposable ordinary user, never
  * logs credentials/tokens, and removes the disposable user/organization.
  */
-import { argon2id } from "hash-wasm";
+import { argon2id, argon2Verify } from "hash-wasm";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -87,6 +87,27 @@ VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.
 
     const ready = await fetch(`${base}/ready`);
     if (ready.status !== 200) fail(`Local Worker readiness failed with HTTP ${ready.status}.`);
+
+    // Cross-check the exact row the Worker login query should resolve. Emit
+    // only boolean diagnostics; never print credential or hash material.
+    const lookup = localSql(`SELECT u.id,u.username,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.role
+      FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1
+      WHERE (LOWER(u.username)=LOWER('allfather') OR LOWER(u.email)=LOWER('allfather'))
+        AND u.is_active=1 LIMIT 1;`);
+    const row = lookup[0];
+    const diagnostics = {
+      found: Boolean(row),
+      canonicalId: row?.id === "__allfather__",
+      canonicalUsername: typeof row?.username === "string" && row.username.trim().toLowerCase() === "allfather",
+      canonicalOrganization: row?.organization_id === "__allfather__",
+      canonicalRole: row?.role === "ALL_FATHER",
+      active: Number(row?.is_active) === 1,
+      admin: Number(row?.is_admin) === 1,
+      argon2idHashPresent: typeof row?.password_hash === "string" && row.password_hash.startsWith("$argon2id$"),
+      passwordHashVerifies: typeof row?.password_hash === "string" &&
+        await argon2Verify({ password, hash: row.password_hash }).catch(() => false),
+    };
+    console.log(`All-Father login preflight: ${JSON.stringify(diagnostics)}`);
 
     const requestJson = async (route, body, label) => {
       const response = await fetch(`${base}${route}`, {
