@@ -14,7 +14,7 @@
 # with the real D1 database_id and the deployment [vars], then sets secrets with
 # `wrangler secret put`.
 #
-# Secrets (ONYX_JWT_SECRET, SUPABASE_SECRET_KEY, HF_S3_ACCESS_KEY_ID,
+# Secrets (ONYX_JWT_SECRET, HF_S3_ACCESS_KEY_ID,
 # HF_S3_SECRET_ACCESS_KEY) must NOT appear here. Put them in an untracked
 # .dev.vars file for local development - see .dev.vars.example.
 
@@ -54,9 +54,6 @@ new_sqlite_classes = ["RelayHub"]
 [vars]
 # Public, non-secret configuration. Keep in sync with the deploy workflow's
 # materialized [vars].
-ONYX_ALLFATHER_EMAIL = "so.muzaff@gmail.com"
-SUPABASE_URL = "https://uhpqjhbciimklheohvfr.supabase.co"
-SUPABASE_JWKS_URL = "https://uhpqjhbciimklheohvfr.supabase.co/auth/v1/.well-known/jwks.json"
 HF_S3_ENDPOINT = "https://s3.hf.co/Arronthemalkavian"
 HF_S3_BUCKET = "onyx"
 

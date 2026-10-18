@@ -7,10 +7,6 @@
 # Generate a strong JWT secret, e.g.:  openssl rand -hex 32
 
 ONYX_JWT_SECRET=""
-# Supabase project keys for the All-Father exchange path. The publishable key is
-# safe to expose to browsers; the secret key must stay server-side only.
-SUPABASE_PUBLISHABLE_KEY=""
-SUPABASE_SECRET_KEY=""
 # Optional: only needed to exercise file downloads (signed Hugging Face S3 GETs).
 HF_S3_ACCESS_KEY_ID=""
 HF_S3_SECRET_ACCESS_KEY=""
