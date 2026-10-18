@@ -9,7 +9,7 @@
 
 - **Starting main/base SHA:** `54221e10f1dff46730aef33826db0c631c3d293d`.
 - **Starting branch head from the prior handoff:** `24cbb960c41fd7bf78aa2c811c8986681c35e40b`.
-- **Last observed code/test head while authoring this report:** `99e7ac19d71fabdad108aecfda34cfb24ce577f2`.
+- **Last tested source/workflow head before this report-only evidence refresh:** `faac00ea430ef946ab3d8fc245ea753b3caa1969` (the report-only commit that follows is the PR head; this report cannot self-reference its own commit SHA).
 - This report update creates a new report-only commit; the exact current PR head is recorded by PR #268 metadata and is stated again in the final handoff. The report commit cannot contain its own SHA.
 - PR #268 remains open, draft, and unmerged. No production deployment, production D1 mutation, credential rotation, or production secret change was performed.
 
@@ -130,8 +130,9 @@ The Tauri desktop shell, Admin Shell, web UI, PWA and Android clients use indepe
 
 - **Failing baseline run:** [39136910881](https://github.com/SMozaff/Onyx-Framework/actions/runs/39136910881), SHA `24cbb960c41fd7bf78aa2c811c8986681c35e40b`: 151 passed / 1 failed; relay ticket returned 503.
 - **Root-cause diagnostic run:** [39137682683](https://github.com/SMozaff/Onyx-Framework/actions/runs/39137682683), SHA `ac23092269cc667bb8335ddba89a8638cbf823c9`: 151 passed / 1 failed; actual log showed `ReferenceError: RELAY_TICKET_TTL_SECONDS is not defined`.
-- **Passing Worker run:** [39137849084](https://github.com/SMozaff/Onyx-Framework/actions/runs/39137849084), SHA `99e7ac19d71fabdad108aecfda34cfb24ce577f2`:
+- **Passing Worker run on the pre-report source/workflow head:** [39138102100](https://github.com/SMozaff/Onyx-Framework/actions/runs/39138102100), SHA `faac00ea430ef946ab3d8fc245ea753b3caa1969`:
   - bundle dry-run: passed;
+  - isolated `npx vitest run test/relay-route.test.ts`: **1 test passed, 0 failed**;
   - `npm test` / `vitest run`: **9 test files passed, 153 tests passed, 0 failed**;
   - disposable local D1 migrations: passed;
   - mobile-access migration verification: passed;
@@ -144,11 +145,12 @@ The Tauri desktop shell, Admin Shell, web UI, PWA and Android clients use indepe
 - Failed build `3749f3d7-3590-4dc1-99e8-5a0bc701d97f`, SHA `d8039de6ef2dd387a3418c8816c5d59bd712ed7d`: also captured the old root/command settings at build start, before the configuration update was in effect.
 - Successful preview build `270fa199-fbec-4840-9b31-8d4eaec9647f`, SHA `6fd90265f6e6e39a5733b08dc884d0066aef3faa`.
 - Successful preview build `d1590685-720f-440f-9ba2-541ab05db6e2`, SHA `154336a8fbff8a8a8dbf3a79b59bc5f65f823bf3`.
+- Successful preview build `058c1094-c545-4d3a-91ff-0c681046ab7c`, SHA `faac00ea430ef946ab3d8fc245ea753b3caa1969`; log confirms preview URL creation and “Build completed.”
 - Both successful logs show the configured nested Worker root, the intended preview command, preview URL creation, and “Build completed.” The build for the final report-containing head must be checked separately.
 
 ### Full CI / Security
 
-At the time this report was authored, full CI and Security workflows for the latest code head were still in progress. They must not be described as passed until their final exact-head runs finish. No local test command was run by this assistant; test and build counts above come from GitHub Actions logs.
+At the time of this evidence refresh, full CI run #1695 and Security run #1237 for source/workflow SHA `faac00ea430ef946ab3d8fc245ea753b3caa1969` were still in progress (no failed jobs observed in the latest status snapshot). They must not be described as passed until completed. This report-only commit triggers new final-head runs; verify their outcomes separately. No local test command was run by this assistant; test and build counts above come from GitHub Actions logs.
 
 ## 8. Residual risks and required approvals
 
