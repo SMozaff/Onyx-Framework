@@ -38,7 +38,6 @@ const REQUIRED_ROUTES: RequiredRoute[] = [
   { method: "POST", path: "/api/auth/login", source: "Admin/Staff login" },
   { method: "POST", path: "/api/auth/refresh", source: "HTTP client interceptor" },
   { method: "POST", path: "/api/auth/logout", source: "All shells logout" },
-  { method: "POST", path: "/api/auth/supabase", source: "All-Father OAuth" },
   { method: "GET", path: "/api/query", source: "useQuery hook" },
   { method: "POST", path: "/api/todo/lists", source: "Staff todo creation" },
   { method: "GET", path: "/api/events", source: "Realtime client" },
@@ -137,6 +136,12 @@ describe("Admin API route completeness", () => {
       .toContain("let wire: Vec<HierarchyUserWire>");
     expect(read("mobile-android/app/src/main/kotlin/com/onyx/net/AuthApi.kt"))
       .toContain("Fetches the org's reporting-line tree");
+  });
+
+  it("matches the current ONYX-managed All-Father credential contract", () => {
+    const implemented = extractImplementedRoutes(worker);
+    expect(implemented).toContainEqual({ method: "POST", pattern: "/api/auth/login" });
+    expect(implemented.some((route) => route.method === "POST" && route.pattern === "/api/auth/supabase")).toBe(false);
   });
 
   it("extracts representative routes from dispatch()", () => {

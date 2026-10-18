@@ -48,8 +48,8 @@ use sync_transport::SyncMessage;
 use tokio::sync::{mpsc, RwLock};
 
 use super::{
-    authenticate_headers, unix_seconds, validate_token, ApiError, ApiState, ProjectionPool,
-    TokenClaims, TokenScope,
+    authenticate_headers, revalidate_token_principal, unix_seconds, validate_token, ApiError,
+    ApiState, ProjectionPool, TokenClaims, TokenScope,
 };
 
 /// One connected replica's inbound mailbox, plus the tenant it authenticated
@@ -342,6 +342,8 @@ pub async fn issue_ticket(
 
     let now = unix_seconds();
     let claims = TokenClaims {
+        iss: super::ONYX_API_TOKEN_ISSUER.to_string(),
+        aud: super::ONYX_API_TOKEN_AUDIENCE.to_string(),
         sub: actor.user_id,
         username: actor.username,
         organization_id: actor.organization_id,
@@ -430,6 +432,7 @@ pub async fn relay_route(
 ) -> Result<Response, ApiError> {
     let correlation_id = uuid::Uuid::new_v4().to_string();
     let claims = validate_token(&state, &params.ticket, RELAY_TICKET_TOKEN_TYPE).await?;
+    let current_user = revalidate_token_principal(&state, &claims).await?;
 
     let invalid = |what: &str| {
         ApiError::new(
@@ -490,7 +493,7 @@ pub async fn relay_route(
         return Err(ApiError::unauthorized(correlation_id));
     }
 
-    let organization_id = claims.organization_id;
+    let organization_id = current_user.organization_id;
     Ok(ws.on_upgrade(move |socket| {
         serve_relay(socket, state, organization_id, self_replica, default_target)
     }))

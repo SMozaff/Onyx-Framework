@@ -1,0 +1,323 @@
+//! HTTP integration regressions for live principal revalidation.
+//!
+//! A correctly signed access token must stop working when its account is
+//! disabled or when the authoritative tenant binding changes after issuance.
+
+use std::net::SocketAddr;
+
+use api_server::routes::{ApiState, TokenClaims, ONYX_API_TOKEN_AUDIENCE, ONYX_API_TOKEN_ISSUER};
+use reqwest::{Client, StatusCode};
+use security_adapter::Ed25519JwtCodec;
+use security_application::NewUser;
+use sqlx::SqlitePool;
+use tokio_tungstenite::tungstenite::{
+    client::IntoClientRequest,
+    http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderValue},
+};
+
+const ORG_A: &str = "11111111-1111-1111-1111-111111111111";
+const ORG_B: &str = "33333333-3333-3333-3333-333333333333";
+const USERNAME: &str = "live-principal-test";
+const PASSWORD: &str = "live-principal-test-password";
+
+struct Fixture {
+    state: ApiState,
+    pool: SqlitePool,
+    base: String,
+    http: Client,
+    user_id: String,
+}
+
+async fn start(label: &str) -> Fixture {
+    let db_path = std::env::temp_dir().join(format!(
+        "onyx-live-principal-{label}-{}.db",
+        uuid::Uuid::new_v4()
+    ));
+    let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
+    let state = ApiState::new(&database_url).await.expect("API state");
+    let user = state
+        .user_store
+        .create(NewUser {
+            user_id: uuid::Uuid::new_v4().to_string(),
+            username: USERNAME.to_owned(),
+            organization_id: ORG_A.to_owned(),
+            password_hash: state.password_hasher.hash(PASSWORD).expect("password hash"),
+            is_admin: true,
+            is_manager: false,
+            class: None,
+            parent_user_id: None,
+        })
+        .await
+        .expect("create test user");
+
+    let app = api_server::routes::router(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener");
+    let addr: SocketAddr = listener.local_addr().expect("listener address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let pool = SqlitePool::connect(&database_url)
+        .await
+        .expect("test database connection");
+    Fixture {
+        state,
+        pool,
+        base: format!("http://{addr}"),
+        http: Client::new(),
+        user_id: user.user_id,
+    }
+}
+
+async fn resign_with_claims(fixture: &Fixture, token: &str, iss: &str, aud: &str) -> String {
+    let secret = fixture
+        .state
+        .secret_provider
+        .get("ONYX_AUTHORITY_SIGNING_KEY")
+        .await
+        .expect("test signing secret");
+    let codec = Ed25519JwtCodec::from_rotating_secret(&secret).expect("test token codec");
+    let mut claims: TokenClaims = codec.decode(token).expect("decode signed access token");
+    claims.iss = iss.to_owned();
+    claims.aud = aud.to_owned();
+    codec.encode(&claims).expect("sign modified test claims")
+}
+
+async fn login(fixture: &Fixture) -> String {
+    let response = fixture
+        .http
+        .post(format!("{}/api/auth/login", fixture.base))
+        .json(&serde_json::json!({
+            "username": USERNAME,
+            "password": PASSWORD,
+            "client_type": "web"
+        }))
+        .send()
+        .await
+        .expect("login request");
+    assert_eq!(response.status(), StatusCode::OK);
+    response
+        .json::<serde_json::Value>()
+        .await
+        .expect("login JSON")["access_token"]
+        .as_str()
+        .expect("access token")
+        .to_owned()
+}
+
+#[tokio::test]
+async fn signed_access_token_is_rejected_after_account_deactivation() {
+    let fixture = start("deactivated").await;
+    let token = login(&fixture).await;
+
+    fixture
+        .state
+        .user_store
+        .set_active(&fixture.user_id, ORG_A, false)
+        .await
+        .expect("deactivate user");
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/users/hierarchy", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("protected request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn event_websocket_rejects_token_after_account_deactivation() {
+    let fixture = start("events-deactivated").await;
+    let token = login(&fixture).await;
+
+    fixture
+        .state
+        .user_store
+        .set_active(&fixture.user_id, ORG_A, false)
+        .await
+        .expect("deactivate user");
+
+    let websocket_url = format!("{}/api/events", fixture.base).replacen("http://", "ws://", 1);
+    let mut request = websocket_url
+        .into_client_request()
+        .expect("event WebSocket request");
+    request.headers_mut().insert(
+        SEC_WEBSOCKET_PROTOCOL,
+        HeaderValue::from_str(&format!("onyx-bearer, {token}"))
+            .expect("WebSocket bearer subprotocol"),
+    );
+
+    match tokio_tungstenite::connect_async(request).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status().as_u16(), 401);
+        }
+        Err(error) => panic!("expected HTTP 401 for inactive user, got {error}"),
+        Ok(_) => panic!("inactive user unexpectedly opened the event WebSocket"),
+    }
+}
+
+#[tokio::test]
+async fn relay_ticket_redemption_rejects_token_after_account_deactivation() {
+    let fixture = start("relay-deactivated").await;
+    let access_token = login(&fixture).await;
+    let target_id = uuid::Uuid::new_v4().to_string();
+    let self_replica = uuid::Uuid::new_v4().to_string();
+
+    let issue = fixture
+        .http
+        .post(format!("{}/api/relay-ticket", fixture.base))
+        .bearer_auth(&access_token)
+        .json(&serde_json::json!({
+            "target_id": target_id,
+            "self_replica": self_replica
+        }))
+        .send()
+        .await
+        .expect("issue relay ticket");
+    assert_eq!(issue.status(), StatusCode::OK);
+    let ticket = issue
+        .json::<serde_json::Value>()
+        .await
+        .expect("relay ticket JSON")["ticket"]
+        .as_str()
+        .expect("relay ticket")
+        .to_owned();
+
+    fixture
+        .state
+        .user_store
+        .set_active(&fixture.user_id, ORG_A, false)
+        .await
+        .expect("deactivate user after ticket issuance");
+
+    let websocket_url = format!(
+        "{}/api/relay/{}?ticket={}&self={}",
+        fixture.base, target_id, ticket, self_replica
+    )
+    .replacen("http://", "ws://", 1);
+    match tokio_tungstenite::connect_async(websocket_url).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status().as_u16(), 401);
+        }
+        Err(error) => panic!("expected HTTP 401 for inactive relay principal, got {error}"),
+        Ok(_) => panic!("inactive user unexpectedly redeemed a relay ticket"),
+    }
+}
+
+#[tokio::test]
+async fn signed_access_token_is_rejected_after_tenant_binding_changes() {
+    let fixture = start("tenant-change").await;
+    let token = login(&fixture).await;
+
+    sqlx::query("UPDATE users SET organization_id = ?1 WHERE id = ?2")
+        .bind(ORG_B)
+        .bind(&fixture.user_id)
+        .execute(&fixture.pool)
+        .await
+        .expect("move user to a different authoritative tenant");
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/users/hierarchy", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("protected request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn admin_role_revocation_takes_effect_for_existing_access_token() {
+    let fixture = start("role-revoked").await;
+    let token = login(&fixture).await;
+
+    sqlx::query("UPDATE users SET is_admin = 0 WHERE id = ?1")
+        .bind(&fixture.user_id)
+        .execute(&fixture.pool)
+        .await
+        .expect("revoke current admin role");
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/admin/users", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("admin-only request");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn access_token_with_wrong_issuer_is_rejected_even_when_signature_is_valid() {
+    let fixture = start("wrong-issuer").await;
+    let token = login(&fixture).await;
+    let token =
+        resign_with_claims(&fixture, &token, "other-service", ONYX_API_TOKEN_AUDIENCE).await;
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/users/hierarchy", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("protected request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn access_token_with_wrong_audience_is_rejected_even_when_signature_is_valid() {
+    let fixture = start("wrong-audience").await;
+    let token = login(&fixture).await;
+    let token = resign_with_claims(&fixture, &token, ONYX_API_TOKEN_ISSUER, "other-api").await;
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/users/hierarchy", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("protected request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn refresh_token_is_rejected_after_tenant_binding_changes() {
+    let fixture = start("refresh-tenant-change").await;
+    let response = fixture
+        .http
+        .post(format!("{}/api/auth/login", fixture.base))
+        .json(&serde_json::json!({
+            "username": USERNAME,
+            "password": PASSWORD,
+            "client_type": "web"
+        }))
+        .send()
+        .await
+        .expect("login request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let login: serde_json::Value = response.json().await.expect("login JSON");
+    let refresh_token = login["refresh_token"]
+        .as_str()
+        .expect("refresh token")
+        .to_owned();
+
+    sqlx::query("UPDATE users SET organization_id = ?1 WHERE id = ?2")
+        .bind(ORG_B)
+        .bind(&fixture.user_id)
+        .execute(&fixture.pool)
+        .await
+        .expect("move user to a different authoritative tenant");
+
+    let refresh = fixture
+        .http
+        .post(format!("{}/api/auth/refresh", fixture.base))
+        .json(&serde_json::json!({ "refresh_token": refresh_token }))
+        .send()
+        .await
+        .expect("refresh request");
+    assert_eq!(refresh.status(), StatusCode::UNAUTHORIZED);
+}
