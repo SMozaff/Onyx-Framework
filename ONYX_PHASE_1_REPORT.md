@@ -275,3 +275,90 @@ The shared protected-router middleware calls `authenticate_headers`; the fix the
 5. Complete route-by-route authorization matrices for Axum special WebSockets/relay, commands, Admin Shell/Tauri, web/PWA, Desktop Shell and Android before release.
 
 **Continuation decision: PHASE INCOMPLETE.** The API is production-configured and must be treated as an in-scope protected entry point. The stale-principal and missing issuer/audience checks have targeted fixes and integration regressions, but their new CI evidence is pending, the organization-active-state model is absent, and the All-Father client/API contract migration plus the full cross-client audit remain outstanding.
+
+
+---
+
+## H. Phase 1 continuation — Clippy root cause and special-entry-point hardening
+
+**Continuation starting head:** `ee8c2bbf5ec8ba56811844adfdff15d791144398`  
+**Base/main:** `54221e10f1dff46730aef33826db0c631c3d293d`
+
+### H.1 Exact Clippy failure and fix
+
+Full CI run [39139582550](https://github.com/SMozaff/Onyx-Framework/actions/runs/39139582550), job `check` / job ID `117711145542`, failed in the `Clippy` step while compiling `api-server` integration target `session_revalidation`.
+
+The compiler diagnostic was exact: `crates/bins/api-server/tests/session_revalidation.rs:11` imported `SecretProvider` but never used. The workspace treats warnings as errors (`-D warnings`), so this unused import prevented compilation. It was not a missing trait implementation or a runtime-test failure.
+
+The smallest correction removed only `SecretProvider` from `use security_application::{NewUser, SecretProvider};`. Commit: [`9efc58f0fc6f3ac2269160cd22955485de26e2eb`](https://github.com/SMozaff/Onyx-Framework/commit/9efc58f0fc6f3ac2269160cd22955485de26e2eb). On that exact SHA, Full CI reported **Format passed** and **Clippy passed**; Build and tests had not completed when the subsequent special-entry-point work began. Worker CI passed on that SHA and Security was still running at the last check. These results are not treated as evidence for later SHAs.
+
+### H.2 Additional Axum WebSocket and relay findings/fixes
+
+Source inspection confirmed that `/api/events` used `validate_token` directly and then trusted `claims.organization_id`, bypassing the current-user revalidation performed by ordinary HTTP authentication. Relay-ticket redemption likewise validated signature, issuer/audience, expiry, type, revocation, target binding, and one-time use, but did not re-resolve the current principal before the WebSocket upgrade.
+
+The branch now extracts the current-principal lookup into `revalidate_token_principal` and invokes it from:
+- the ordinary protected HTTP authentication path;
+- the `/api/events` WebSocket handshake; and
+- relay-ticket redemption before the relay WebSocket upgrade.
+
+The integration target adds regressions that deactivate a user after access-token issuance and after relay-ticket issuance, then expect the corresponding WebSocket handshake/redemption to return HTTP 401. These are code changes; the final exact-head workflow result must be read before they are considered verified. This check covers the handshake boundary only; an already-established WebSocket is not actively disconnected by a distributed account-deactivation event, and the intended live-connection revocation SLA remains to be specified.
+
+### H.3 Organization and membership authority — blocked architecture decision
+
+The current Axum `UserStore` contract and both adapters model a user with one `organization_id`, `is_active`, user-level `is_admin`, and class/parent fields. The port has no organization lookup, organization-active state, or membership lookup. The checked-in Axum SQLite/PostgreSQL model therefore cannot currently distinguish:
+- a valid active organization from a missing or inactive organization; or
+- an active membership from a missing or revoked membership.
+
+The repository documents a one-organization-per-user shape for the existing Axum identity record, while the requested contract explicitly requires authoritative membership records. Introducing a table without resolving whether membership is a single row per user or a multi-organization relation—and whether role/class is user-level or membership-scoped—would invent a product authorization model.
+
+**Required owner decision before implementing the schema/port migration:**
+1. Confirm whether an ONYX principal can belong to more than one organization.
+2. Confirm whether role/admin/class authority belongs to the principal or to each organization membership.
+3. Confirm whether the migration must preserve the existing one-organization model or normalize it into membership rows.
+4. Approve an existing-data inventory and activation policy. No existing organization may be marked active merely because a user row contains its ID. If an approved backfill cannot prove organization status, the safe migration must leave the record inactive and deny access until explicit provisioning.
+5. Define rollback behavior and the operational plan for users denied while organizations/memberships are absent or inactive.
+
+Until those decisions exist, no organization/membership schema was added and no database was migrated. Missing organization or membership cannot be represented as authorized by a default-true fallback.
+
+### H.4 All-Father authentication contract — external-usage decision required
+
+The current Admin Shell login page `crates/bins/admin-shell/ui/src/pages/Login.tsx` posts ONYX username/password to `POST /api/auth/login`. The legacy `crates/bins/admin-shell/ui/src/auth/allfatherOAuth.ts`, the Tauri `start_allfather_oauth` command, the Supabase configuration, and Axum `POST /api/auth/supabase` remain in source. The visible current login page does not invoke the OAuth helper, and repository search did not find a direct call to `start_allfather_oauth`. This establishes the in-repository login screen's current behavior; it does **not** establish that no deployed/third-party client uses the public Axum route.
+
+The documented ONYX-managed All-Father target and the legacy Axum Supabase exchange are not yet reconciled. The Axum exchange verifies a designated Supabase subject and maps it to a configured UUID principal with username `allfather` and admin status; it does not use the Worker contract's canonical `__allfather__` principal plus explicit `ALL_FATHER` role. Axum's `UserRecord` has no explicit role field. The Worker Supabase route must not be restored.
+
+**Required owner decision:** confirm whether any deployed or externally supported caller uses Axum `POST /api/auth/supabase` or the Tauri OAuth command, and whether Supabase has any supported purpose beyond that All-Father login. Then approve one coordinated outcome:
+- migrate All-Father to ONYX-managed credentials and a canonical identity/role representation, update all supported clients and provisioning, and retire the Axum exchange/OAuth command only after compatibility is verified; or
+- explicitly retain a separate Supabase identity boundary, document its approved scope and canonical ONYX mapping, and reconcile it with the ONYX-managed-credentials requirement.
+
+Do not silently remove the route, assume external callers do not exist, or provision a production identity from guessed data.
+
+### H.5 Cross-client authorization entry-point matrix
+
+| Entry point | Authoritative checks evidenced in source | Negative coverage / remaining gap |
+|---|---|---|
+| Axum ordinary protected HTTP routes | JWT signature, issuer, audience, expiry, type, token/session revocation; fresh user-store lookup; account active; signed username and tenant binding match current record. | No authoritative organization-active or membership lookup. Not every handler has a completed per-operation role/ownership matrix. |
+| Axum login and refresh | ONYX password-hash verification; refresh token validation/rotation; current user lookup and username/tenant binding on refresh. | Organization/membership policy missing. All-Father Supabase route conflicts with the target contract. |
+| Axum admin/user-management routes | Current admin flag is re-read by route guards; tenant-scoped user lookup/update methods are present. | Complete route-by-route role, target ownership, org-state and membership-negative test matrix remains outstanding. |
+| Axum `GET /api/query` | Ordinary current-principal authentication; envelope organization must equal authenticated organization. | Each query's resource ownership predicate and payload-derived target must be independently mapped and negatively tested. |
+| Axum `POST /api/command` | Ordinary current-principal authentication and command dispatch-specific checks. | Exhaustive command-by-command review of actor fields, target resource, ownership, role/class, tenant, and mutation capability is incomplete; client-supplied actor/role metadata must never be authoritative. |
+| Axum `GET /api/events` WebSocket | Token issuer/audience/expiry/type/revocation plus current-principal revalidation at handshake after this change; subscription tenant is bound to the verified principal. | New inactive-account handshake regression awaits exact-head CI. Existing sockets are not actively terminated on later revocation; semantics/SLA remain undefined. |
+| Axum `POST /api/relay-ticket` and `GET /api/relay/:target_id` | Issuance uses authenticated principal, server-side client capability and replica ownership; redemption checks ticket signature, issuer/audience/expiry/type/revocation, target, self-replica binding and single use, plus current-principal revalidation after this change. | New deactivation-after-issuance regression awaits exact-head CI. Organization/membership state is unavailable. Live-connection revocation semantics remain undefined. |
+| Query/command dispatch and aggregate resources | Query envelope tenant binding and existing route/aggregate guards are present. | No completed exhaustive dispatch matrix; tests must cover spoofed actor IDs, target ownership, cross-tenant reads/writes, role revocation, and reassignment for every command family. |
+| Admin Shell | Current login UI calls `/api/auth/login` with ONYX username/password; HTTP client carries session credentials. | Legacy OAuth helper/Tauri command still exists. No proof that external callers are absent; canonical All-Father migration is blocked on owner decision. |
+| Tauri / Desktop Shell local and remote execution | Admin Shell is documented as a thin HTTP client; Desktop Shell has a separate local-first `client-composition` path. | Full Tauri command and local mutation audit is incomplete. Local UI/command permissions cannot replace server authorization for shared/protected data. |
+| Web UI / PWA | First-party clients send a declared client type; API auth is server-validated. | Full endpoint-to-handler matrix and deployed backend mapping are incomplete. Client-provided capability metadata is only an input to server policy, never proof of authorization. |
+| Android/mobile | Client type/capability metadata exists and server-side capability ceilings are implemented for relevant API routes. | Full endpoint-by-endpoint server mapping, stale-session/deactivation/membership/reassignment regressions, and client-to-backend deployment mapping remain incomplete. |
+| Cloudflare Worker | Its independent D1 model has organization active state, role and user state; its CI suite is separate from Axum. | Worker green does not establish Axum authorization or live production behavior. Do not assume the two identity schemas are interchangeable. |
+
+### H.6 Verification ledger and current status
+
+- Starting SHA for this continuation: `ee8c2bbf5ec8ba56811844adfdff15d791144398`.
+- Clippy-fix SHA: `9efc58f0fc6f3ac2269160cd22955485de26e2eb`; exact Full CI Format and Clippy passed, but that SHA is not the final candidate.
+- Latest source candidate before this report append: `af63721d4dd5c4f913147525ca3bd5168a345cf5`.
+- Worker CI [run 39144256137](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256137) passed on `af63721d4dd5c4f913147525ca3bd5168a345cf5).
+- Security [run 39144256212](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256212) and Full CI [run 39144256232](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256232) were queued when this section was authored. The new WebSocket and relay integration tests therefore have no pass claim yet.
+- The earlier Cloudflare preview build `27bd0c31-9116-47ff-87ed-ecf8741510c0` is for the earlier `ee8c2bbf5ec8ba56811844adfdff15d791144398` candidate, not this continuation's final source. It is preview-build evidence, not production runtime evidence.
+- The report-containing commit necessarily has a new SHA; its own CI/Security/Worker status must be read from the checks associated with the actual PR head. Results on any earlier SHA are not proof for that final candidate.
+- No production deployment, production database migration/data mutation, production secret change, or credential rotation was performed. PR #268 must remain open and draft.
+
+**Decision: BLOCKED.** The Clippy defect was identified precisely and corrected; special WebSocket and relay-ticket handshake revalidation was added with regression tests. Phase 1 cannot be declared complete because the authoritative organization/membership schema and backfill/activation policy, the All-Father legacy-route compatibility decision, the complete cross-client authorization matrix, and exact-final-head verification remain unresolved.
