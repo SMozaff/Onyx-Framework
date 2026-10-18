@@ -469,7 +469,7 @@ describe("Worker authorization and session security", () => {
     expect(ordinarySession.user).toMatchObject({
       id: "staff-1", organization_id: ORG, role: "STAFF", is_admin: false,
     });
-    const forbidden = await worker.fetch(new Request("https://worker.test/api/allfather/admins", {
+    const forbidden = await worker.fetch(new Request("https://worker.test/api/allfather/admins?organization_id=__allfather__", {
       headers: { authorization: "Bearer " + ordinarySession.access_token },
     }), makeEnv(ordinary));
     expect(forbidden.status).toBe(403);
