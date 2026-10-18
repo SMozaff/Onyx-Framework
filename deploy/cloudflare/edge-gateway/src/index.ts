@@ -13,6 +13,7 @@ interface Env {
   EVENTS_HUB: DurableObjectNamespace;
   RELAY_HUB: DurableObjectNamespace;
   ONYX_JWT_SECRET?: string;
+  ONYX_AUTH_DEBUG?: string;
   ONYX_CORS_ORIGINS?: string;
   HF_S3_ENDPOINT?: string;
   HF_S3_BUCKET?: string;
@@ -159,9 +160,13 @@ async function requireSession(request:Request,env:Env){
 }
 function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return null;return configured.includes(origin)&&!configured.includes("*")?origin:null;}
 
-async function verifyPassword(password:string,encoded:string):Promise<boolean>{
+async function verifyPassword(password:string,encoded:string,debug=false):Promise<boolean>{
   if(!encoded.startsWith("$argon2id$")) return false;
-  try { return await argon2Verify({password,hash:encoded}); } catch { return false; }
+  try { return await argon2Verify({password,hash:encoded}); }
+  catch (error) {
+    if(debug) console.error("Argon2id verifier runtime error", error instanceof Error ? error.name : "unknown");
+    return false;
+  }
 }
 async function hashPassword(password:string):Promise<string>{
   const salt=crypto.getRandomValues(new Uint8Array(16));
@@ -198,7 +203,16 @@ async function authLogin(request:Request,env:Env){
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
   const role=user?roleForUser(user):"";
-  if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  const roleRecognized=ONYX_ROLES.includes(role as typeof ONYX_ROLES[number]);
+  const reservedIdentity=Boolean(user)&&hasReservedAllFatherIdentity(user!,role);
+  const canonicalIdentity=Boolean(user)&&isCanonicalAllFather(user!,role);
+  const prechecks=Boolean(user)&&Boolean(user!.is_active)&&roleRecognized&&(!reservedIdentity||canonicalIdentity)&&typeof user!.password_hash==="string";
+  const passwordMatches=prechecks?await verifyPassword(password,String(user!.password_hash),env.ONYX_AUTH_DEBUG==="1"):false;
+  if(env.ONYX_AUTH_DEBUG==="1")console.log("All-Father login diagnostics",JSON.stringify({
+    found:Boolean(user),active:Boolean(user?.is_active),roleRecognized,reservedIdentity,canonicalIdentity,
+    passwordHashPresent:typeof user?.password_hash==="string",passwordMatches
+  }));
+  if(!prechecks||!passwordMatches)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const requestedClientType = clientType(body);
   if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
   // client_type is caller-controlled metadata and is never an authorization
