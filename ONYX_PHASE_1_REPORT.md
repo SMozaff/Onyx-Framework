@@ -354,7 +354,7 @@ Do not silently remove the route, assume external callers do not exist, or provi
 
 - Starting SHA for this continuation: `ee8c2bbf5ec8ba56811844adfdff15d791144398`.
 - Clippy-fix SHA: `9efc58f0fc6f3ac2269160cd22955485de26e2eb`; exact Full CI Format and Clippy passed, but that SHA is not the final candidate.
-- Latest source candidate before this report append: `af63721d4dd5c4f913147525ca3bd5168a345cf5`.
+- Latest source candidate before the report update: `af63721d4dd5c4f913147525ca3bd5168a345cf5`; the report update itself was committed at `8e62ddc45844cef286b6bc246cd769e27f3d6698`.
 - Worker CI [run 39144256137](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256137) passed on `af63721d4dd5c4f913147525ca3bd5168a345cf5).
 - Security [run 39144256212](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256212) and Full CI [run 39144256232](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256232) were queued when this section was authored. The new WebSocket and relay integration tests therefore have no pass claim yet.
 - The earlier Cloudflare preview build `27bd0c31-9116-47ff-87ed-ecf8741510c0` is for the earlier `ee8c2bbf5ec8ba56811844adfdff15d791144398` candidate, not this continuation's final source. It is preview-build evidence, not production runtime evidence.
@@ -362,3 +362,10 @@ Do not silently remove the route, assume external callers do not exist, or provi
 - No production deployment, production database migration/data mutation, production secret change, or credential rotation was performed. PR #268 must remain open and draft.
 
 **Decision: BLOCKED.** The Clippy defect was identified precisely and corrected; special WebSocket and relay-ticket handshake revalidation was added with regression tests. Phase 1 cannot be declared complete because the authoritative organization/membership schema and backfill/activation policy, the All-Father legacy-route compatibility decision, the complete cross-client authorization matrix, and exact-final-head verification remain unresolved.
+
+
+### H.7 Cross-client tenant-reassignment regression
+
+The Cloudflare Worker already re-resolves its D1 user and organization state on protected requests. Added a focused regression to `deploy/cloudflare/edge-gateway/test/security.test.ts`: it signs an access token for a user in organization `org-1`, changes the authoritative user row to `org-2`, and verifies that a query using the old token receives HTTP 401 with no writes. This test does not create or modify production data; it runs against the disposable in-memory security test double.
+
+The Worker test addition and this report update are committed together so the exact report-containing candidate also triggers Worker CI. At commit time, Full CI, Security, and Worker CI results for that candidate must be checked from the exact PR-head workflow runs; no result from a parent SHA is treated as proof for the final candidate.

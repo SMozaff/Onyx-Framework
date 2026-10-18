@@ -599,6 +599,25 @@ describe("Worker authorization and session security", () => {
     expect(inactiveOrgDb.writes).toHaveLength(0);
   });
 
+  it("rejects a previously issued access token after the user is reassigned to another organization", async () => {
+    const db = makeDb();
+    const token = await signToken(sessionClaims());
+    db.users.get("staff-1")!.organization_id = "org-2";
+
+    const envelope = b64u(JSON.stringify({
+      query_id: "q-reassigned",
+      query_type: "dashboard.summary",
+      organization_id: ORG,
+    }));
+    const response = await worker.fetch(new Request(
+      "https://worker.test/api/query?envelope=" + encodeURIComponent(envelope),
+      { headers: { authorization: `Bearer ${token}` } },
+    ), makeEnv(db));
+
+    expect(response.status).toBe(401);
+    expect(db.writes).toHaveLength(0);
+  });
+
   it("rejects All-Father access tokens when the canonical D1 principal no longer has All-Father authority", async () => {
     const db = new SecurityDb();
     db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
