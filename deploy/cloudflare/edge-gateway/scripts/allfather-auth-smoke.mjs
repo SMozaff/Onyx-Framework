@@ -16,6 +16,13 @@ const workerRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const DATABASE_NAME = "onyx-free-db";
 const CONFIG = "wrangler.dev.toml";
 
+function wranglerEnvironment() {
+  const env = { ...process.env };
+  delete env.ONYX_ALLFATHER_USERNAME;
+  delete env.ONYX_ALLFATHER_PASSWORD;
+  return env;
+}
+
 function fail(message) {
   console.error(`::error::${message}`);
   process.exitCode = 1;
@@ -35,7 +42,7 @@ function localSql(sql) {
     writeFileSync(file, sql, { mode: 0o600 });
     const output = execFileSync("npx", [
       "wrangler", "d1", "execute", DATABASE_NAME, "--local", "--config", CONFIG, "--file", file, "--json",
-    ], { cwd: workerRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    ], { cwd: workerRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: wranglerEnvironment() });
     const parsed = JSON.parse(output);
     const list = Array.isArray(parsed) ? parsed : [parsed];
     return list.find((item) => Array.isArray(item?.results))?.results ?? [];

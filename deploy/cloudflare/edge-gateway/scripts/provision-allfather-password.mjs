@@ -22,6 +22,13 @@ const CANONICAL_ID = "__allfather__";
 const CANONICAL_USERNAME = "allfather";
 const DATABASE_NAME = "onyx-free-db";
 
+function wranglerEnvironment() {
+  const env = { ...process.env };
+  delete env.ONYX_ALLFATHER_USERNAME;
+  delete env.ONYX_ALLFATHER_PASSWORD;
+  return env;
+}
+
 export function isCanonicalUsername(value) {
   return typeof value === "string" && value.trim().toLowerCase() === CANONICAL_USERNAME;
 }
@@ -88,7 +95,7 @@ function runD1(sql, { remote, config }) {
       cwd: workerRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: wranglerEnvironment(),
     });
     return parseRows(output);
   } catch {
@@ -110,7 +117,7 @@ function parseWranglerDatabaseList(output) {
 
 function createProductionConfig() {
   const output = execFileSync("npx", ["wrangler", "d1", "list", "--json"], {
-    cwd: workerRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: process.env,
+    cwd: workerRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: wranglerEnvironment(),
   });
   const matches = parseWranglerDatabaseList(output).filter((database) => database?.name === DATABASE_NAME);
   if (matches.length !== 1) throw new Error("expected exactly one configured production D1 database named onyx-free-db");

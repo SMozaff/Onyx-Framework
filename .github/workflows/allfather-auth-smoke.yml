@@ -76,7 +76,7 @@ jobs:
           printf 'ONYX_JWT_SECRET="%s"\n' "$JWT_SECRET" > .dev.vars
           unset JWT_SECRET
           log_file="$RUNNER_TEMP/onyx-worker-smoke.log"
-          npx wrangler dev --local --config wrangler.dev.toml --ip 127.0.0.1 --port 8787 >"$log_file" 2>&1 &
+          env -u ONYX_ALLFATHER_USERNAME -u ONYX_ALLFATHER_PASSWORD npx wrangler dev --local --config wrangler.dev.toml --ip 127.0.0.1 --port 8787 >"$log_file" 2>&1 &
           worker_pid=$!
           cleanup() {
             kill "$worker_pid" 2>/dev/null || true
