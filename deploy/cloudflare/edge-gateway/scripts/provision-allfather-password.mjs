@@ -57,7 +57,7 @@ WHERE id='__allfather__' AND username='allfather' COLLATE NOCASE
   AND EXISTS (SELECT 1 FROM organizations o WHERE o.id=users.organization_id AND o.is_active=1);
 INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at)
 SELECT organization_id,'__allfather__','allfather.password_provision',${quote(correlationId)},${quote(details)},unixepoch()
-FROM users WHERE id='__allfather__' AND password_hash=${quote(passwordHash)} AND changes()=1;
+FROM users WHERE id='__allfather__' AND password_hash=${quote(passwordHash)};
 `;
 }
 
@@ -141,6 +141,12 @@ async function main(args = process.argv.slice(2)) {
     throw new Error("pass --environment test or --environment production");
   }
 
+  const username = process.env.ONYX_ALLFATHER_USERNAME ?? "";
+  const password = process.env.ONYX_ALLFATHER_PASSWORD ?? "";
+  if (!isCanonicalUsername(username) || !password) {
+    throw new Error("ONYX_ALLFATHER_USERNAME must name the reserved account and ONYX_ALLFATHER_PASSWORD must be set");
+  }
+
   let remote = false;
   let config = "wrangler.dev.toml";
   let generatedProductionConfig = null;
@@ -157,12 +163,6 @@ async function main(args = process.argv.slice(2)) {
     remote = true;
     generatedProductionConfig = createProductionConfig();
     config = path.basename(generatedProductionConfig);
-  }
-
-  const username = process.env.ONYX_ALLFATHER_USERNAME ?? "";
-  const password = process.env.ONYX_ALLFATHER_PASSWORD ?? "";
-  if (!isCanonicalUsername(username) || !password) {
-    throw new Error("ONYX_ALLFATHER_USERNAME must name the reserved account and ONYX_ALLFATHER_PASSWORD must be set");
   }
 
   try {
