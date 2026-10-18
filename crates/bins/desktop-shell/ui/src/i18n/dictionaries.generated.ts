@@ -24,7 +24,12 @@ export const localeMetadata: Record<Locale, LocaleMetadata> = {
 } as Record<Locale, LocaleMetadata>;
 export const defaultLocale: Locale = "en";
 export const en: Record<string, string> = {
+  "settings.legalHoldMissingConcurrencyEpochs": "This projection is missing concurrency epochs. Refresh before releasing the hold.",
+  "settings.noLegalHoldFound": "No legal hold found for this ID.",
+  "settings.policyMissingConcurrencyEpochs": "This projection is missing concurrency epochs. Refresh before changing this policy.",
+  "settings.retryApplicationSafely": "Retry application safely",
 } as Record<string, string>;
+  "settings.retryCreationSafely": "Retry creation safely",
   "app.name": "ONYX",
   "app.observer": "ONYX Observer",
   "app.remoteOperator": "Remote Operator",
@@ -567,7 +572,12 @@ export const en: Record<string, string> = {
   "tasks.unavailableBackToTasks": "Task unavailable — back to tasks",
   "settings.retryCreationSafely": "Retry creation safely",
 export const fa: Record<string, string> = {
+  "settings.legalHoldMissingConcurrencyEpochs": "دوره‌های هم‌زمانی در این نمای داده وجود ندارند. پیش از آزادسازی نگهداشت، تازه‌سازی کنید.",
+  "settings.noLegalHoldFound": "برای این شناسه هیچ نگهداشت قانونی پیدا نشد.",
+  "settings.policyMissingConcurrencyEpochs": "دوره‌های هم‌زمانی در این نمای داده وجود ندارند. پیش از تغییر این سیاست، تازه‌سازی کنید.",
+  "settings.retryApplicationSafely": "اعمال را با اطمینان دوباره تلاش کنید",
 } as Record<string, string>;
+  "settings.retryCreationSafely": "ایجاد را با اطمینان دوباره تلاش کنید",
   "app.name": "ONYX",
   "app.observer": "ناظر ONYX",
   "app.remoteOperator": "اپراتور راه‌دور",
