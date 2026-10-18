@@ -49,8 +49,7 @@ export function buildProvisionSql(passwordHash, environment, correlationId = ran
   }
   if (!["test", "production"].includes(environment)) throw new Error("unsupported environment");
   const details = JSON.stringify({ method: "argon2id", source: "owner-controlled-password-provisioning", environment });
-  return `BEGIN TRANSACTION;
-UPDATE users
+  return `UPDATE users
 SET password_hash=${quote(passwordHash)}, updated_at=unixepoch()
 WHERE id='__allfather__' AND username='allfather' COLLATE NOCASE
   AND organization_id='__allfather__' AND role='ALL_FATHER'
@@ -59,7 +58,6 @@ WHERE id='__allfather__' AND username='allfather' COLLATE NOCASE
 INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at)
 SELECT organization_id,'__allfather__','allfather.password_provision',${quote(correlationId)},${quote(details)},unixepoch()
 FROM users WHERE id='__allfather__' AND password_hash=${quote(passwordHash)} AND changes()=1;
-COMMIT;
 `;
 }
 
