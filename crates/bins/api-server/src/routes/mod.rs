@@ -985,10 +985,37 @@ pub async fn authenticate_headers(
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(|| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
     let claims = validate_token(state, token, "access").await?;
+
+    // A valid signature proves only that ONYX issued the token at some point.
+    // It does not prove that the account is still active or still belongs to
+    // the tenant named in the token. Resolve the principal from the current
+    // authoritative UserStore on every protected request; never authorize from
+    // stale identity claims after an account change.
+    let current_user = state
+        .user_store
+        .find_by_id(&claims.sub)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "AUTHORIZATION_STATE_UNAVAILABLE",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?
+        .filter(|user| {
+            user.is_active
+                && user.username == claims.username
+                && user.organization_id == claims.organization_id
+        })
+        .ok_or_else(|| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
+
     Ok(AuthenticatedUser {
-        user_id: claims.sub,
-        username: claims.username,
-        organization_id: claims.organization_id,
+        user_id: current_user.user_id,
+        username: current_user.username,
+        organization_id: current_user.organization_id,
         token: token.to_string(),
         scope: claims.scope,
         client_type: claims.client_type,
