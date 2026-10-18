@@ -171,7 +171,7 @@ VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.
       if (consumedRefreshHash) cleanup.push(`DELETE FROM token_revocations WHERE token_hash=${quote(consumedRefreshHash)};`);
       cleanup.push(`DELETE FROM users WHERE id=${quote(userId)};`);
       cleanup.push(`DELETE FROM organizations WHERE id=${quote(orgId)};`);
-      localSql(cleanup.join("\\n"));
+      localSql(cleanup.join("\n"));
     }
   }
 }
