@@ -215,8 +215,8 @@ describe("readiness schema contract (Phase 6 input)", () => {
     expect(missing).toContain("table:organizations");
     expect(missing).toContain("users.email");
     expect(missing).toContain("users.role");
-    expect(missing).toContain("users.supabase_user_id");
-    expect(missing).toContain("index:idx_users_supabase_user");
+    expect(missing).not.toContain("users.supabase_user_id");
+    expect(missing).not.toContain("index:idx_users_supabase_user");
   });
 
   it("reports nothing missing after the full sequence", async () => {

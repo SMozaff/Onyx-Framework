@@ -100,6 +100,11 @@ function routeMatches(requiredPath: string, implementedPattern: string): boolean
 }
 
 describe("Admin API route completeness", () => {
+  it("does not register the retired All-Father Supabase exchange", () => {
+    expect(worker).not.toContain("/api/auth/supabase");
+    expect(REQUIRED_ROUTES.some((route) => route.path === "/api/auth/supabase")).toBe(false);
+  });
+
   it("keeps every required Admin Settings endpoint registered with its expected method", () => {
     for (const [method, path] of [
       ["GET", "/api/admin/mobile-access"],

@@ -1,3 +1,5 @@
+> **Historical / superseded 2026-10-18.** This document records the pre-migration Google/Supabase All-Father flow. Do not use its OAuth, subject-mapping, provisioning, or deployment instructions. The current contract is ONYX username/password with the owner-controlled `npm run provision:allfather-password` command; see [the current migration report](06-onyx-credentials-migration.md) and [authentication contract](../../docs/SECURITY_AUTHENTICATION_MODEL.md).
+
 # Remediation 01 — Worker Authorization and Session Security
 
 Status: implementation on a feature branch; not a production deployment. Treat this document as an implementation inventory, not a release approval.

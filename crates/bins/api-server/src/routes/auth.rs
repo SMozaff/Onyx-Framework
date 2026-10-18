@@ -207,11 +207,10 @@ pub async fn login(
         }
     };
 
-    // The designated All-Father identity is deliberately passwordless.
-    // Its ONYX principal may exist in the ordinary user store so the
-    // Supabase identity exchange can mint an ONYX session, but it must never
-    // acquire a password-login path through an admin password reset.
-    if user.username == super::supabase::ALLFATHER_USERNAME {
+    // The canonical All-Father principal authenticates only through the
+    // Cloudflare Worker credential contract. This Axum account store is not
+    // an alternate path to master authority; reserve the username here too.
+    if is_reserved_allfather_username(&user.username) {
         return Err(invalid_credentials());
     }
 
@@ -404,4 +403,16 @@ pub async fn logout(
         .await
         .map_err(revoke_err)?;
     Ok(Json(json!({"success":true})))
+}
+
+#[cfg(test)]
+mod reserved_identity_tests {
+    use super::is_reserved_allfather_username;
+
+    #[test]
+    fn reserved_allfather_username_is_case_insensitive() {
+        assert!(is_reserved_allfather_username("allfather"));
+        assert!(is_reserved_allfather_username("AllFather"));
+        assert!(!is_reserved_allfather_username("staff"));
+    }
 }

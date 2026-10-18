@@ -18,7 +18,6 @@ interface UserRow {
   class: string | null;
   parent_user_id?: string | null;
   role: string;
-  supabase_user_id?: string | null;
 }
 interface OrgRow { id: string; is_active: number }
 interface AggregateRow {
@@ -356,7 +355,7 @@ function makeDb(role = "STAFF") {
   db.users.set("staff-1", {
     id: "staff-1", username: "staff", email: "staff@example.test", organization_id: ORG,
     is_admin: role === "ORGANIZATION_ADMIN" ? 1 : 0, is_active: 1,
-    class: role, role, supabase_user_id: null,
+    class: role, role,
   });
   db.aggregates.set("task-1", {
     id: "task-1", aggregate_type: "task", version: 1, lifecycle_epoch: 0,
@@ -388,6 +387,112 @@ async function postCommand(clientType: string, db: SecurityDb, extra: Record<str
 }
 
 describe("Worker authorization and session security", () => {
+  it("authenticates only the canonical All-Father using ONYX Argon2id credentials", async () => {
+    const password = "allfather-auth-test-password";
+    const passwordHash = String(await argon2id({
+      password, salt: new Uint8Array(16).fill(7), parallelism: 1,
+      iterations: 3, memorySize: 65536, hashLength: 32, outputType: "encoded",
+    }));
+    const canonicalDb = () => {
+      const db = new SecurityDb();
+      db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
+      db.users.set("__allfather__", {
+        id: "__allfather__", username: "allfather", email: "owner@example.test",
+        organization_id: "__allfather__", password_hash: passwordHash,
+        is_admin: 1, is_active: 1, class: "ALL_FATHER", role: "ALL_FATHER",
+      });
+      return db;
+    };
+    const login = (db: SecurityDb, body: Record<string, unknown>) => worker.fetch(
+      new Request("https://worker.test/api/auth/login", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      }), makeEnv(db),
+    );
+
+    const db = canonicalDb();
+    const valid = await login(db, {
+      username: "allfather", password, client_type: "admin",
+      id: "ordinary-user", organization_id: ORG, role: "STAFF", is_admin: false, admin: false,
+    });
+    expect(valid.status).toBe(200);
+    const session = await valid.json() as {
+      access_token: string; refresh_token: string;
+      user: { id: string; username: string; organization_id: string; role: string; is_admin: boolean };
+    };
+    expect(session.user).toMatchObject({
+      id: "__allfather__", username: "allfather", organization_id: "__allfather__",
+      role: "ALL_FATHER", is_admin: true,
+    });
+    const claims = JSON.parse(Buffer.from(session.access_token.split(".")[1], "base64url").toString("utf8")) as Record<string, unknown>;
+    expect(claims).toMatchObject({
+      iss: "onyx-cloudflare-worker", aud: "onyx-api", sub: "__allfather__",
+      username: "allfather", organization_id: "__allfather__", role: "ALL_FATHER",
+      is_admin: true, typ: "access",
+    });
+    expect(Number(claims.exp)).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    const protectedResponse = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
+      headers: { authorization: "Bearer " + session.access_token },
+    }), makeEnv(db));
+    expect(protectedResponse.status).toBe(200);
+    const refreshResponse = await worker.fetch(new Request("https://worker.test/api/auth/refresh", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    }), makeEnv(db));
+    expect(refreshResponse.status).toBe(200);
+    const refreshed = await refreshResponse.json() as {
+      access_token: string; refresh_token: string;
+      user: { id: string; username: string; organization_id: string; role: string; is_admin: boolean };
+    };
+    expect(refreshed.user).toMatchObject({
+      id: "__allfather__", username: "allfather", organization_id: "__allfather__",
+      role: "ALL_FATHER", is_admin: true,
+    });
+    const refreshedProtected = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
+      headers: { authorization: "Bearer " + refreshed.access_token },
+    }), makeEnv(db));
+    expect(refreshedProtected.status).toBe(200);
+
+
+    expect((await login(db, { username: "allfather", password: password + "x", client_type: "admin" })).status).toBe(401);
+    for (const body of [{ username: "allfather" }, { password, client_type: "admin" }]) {
+      expect((await login(db, body)).status).toBe(401);
+    }
+
+    const inactiveAccount = canonicalDb();
+    inactiveAccount.users.get("__allfather__")!.is_active = 0;
+    expect((await login(inactiveAccount, { username: "allfather", password, client_type: "admin" })).status).toBe(401);
+    const inactiveOrganization = canonicalDb();
+    inactiveOrganization.organizations.get("__allfather__")!.is_active = 0;
+    expect((await login(inactiveOrganization, { username: "allfather", password, client_type: "admin" })).status).toBe(401);
+
+    const impostor = new SecurityDb();
+    impostor.organizations.set(ORG, { id: ORG, is_active: 1 });
+    impostor.users.set("ordinary-user", {
+      id: "ordinary-user", username: "allfather", email: "ordinary@example.test",
+      organization_id: ORG, password_hash: passwordHash,
+      is_admin: 0, is_active: 1, class: "STAFF", role: "STAFF",
+    });
+    expect((await login(impostor, { username: "allfather", password, client_type: "admin" })).status).toBe(401);
+
+    const ordinary = makeDb();
+    ordinary.users.get("staff-1")!.password_hash = passwordHash;
+    const ordinaryLogin = await login(ordinary, {
+      username: "staff", password, client_type: "admin",
+      id: "__allfather__", organization_id: "__allfather__", role: "ALL_FATHER", is_admin: true, admin: true,
+    });
+    expect(ordinaryLogin.status).toBe(200);
+    const ordinarySession = await ordinaryLogin.json() as {
+      access_token: string; user: { id: string; organization_id: string; role: string; is_admin: boolean };
+    };
+    expect(ordinarySession.user).toMatchObject({
+      id: "staff-1", organization_id: ORG, role: "STAFF", is_admin: false,
+    });
+    const forbidden = await worker.fetch(new Request("https://worker.test/api/allfather/admins?organization_id=__allfather__", {
+      headers: { authorization: "Bearer " + ordinarySession.access_token },
+    }), makeEnv(ordinary));
+    expect(forbidden.status).toBe(403);
+  });
+
   it("does not let client_type change a Staff command decision", async () => {
     const desktopDb = makeDb();
     const observerDb = makeDb();
@@ -491,15 +596,15 @@ describe("Worker authorization and session security", () => {
       let token: string;
       if (role === "ALL_FATHER") {
         db.users.clear();
-        db.organizations.set("org-root", { id: "org-root", is_active: 1 });
+        db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
         db.users.set("__allfather__", {
           id: "__allfather__", username: "allfather", email: "owner@example.test",
-          organization_id: "org-root", is_admin: 1, is_active: 1, class: "ALL_FATHER",
-          role: "ALL_FATHER", supabase_user_id: "subject-1",
+          organization_id: "__allfather__", is_admin: 1, is_active: 1, class: "ALL_FATHER",
+          role: "ALL_FATHER",
         });
         token = await signToken(sessionClaims({
-          sub: "__allfather__", username: "allfather", organization_id: "org-root",
-          is_admin: true, role: "ALL_FATHER", identity_sub: "subject-1",
+          sub: "__allfather__", username: "allfather", organization_id: "__allfather__",
+          is_admin: true, role: "ALL_FATHER",
         }));
       } else {
         token = await signToken(sessionClaims({
@@ -624,7 +729,7 @@ describe("Worker authorization and session security", () => {
     db.users.set("__allfather__", {
       id: "__allfather__", username: "allfather", email: "owner@example.test",
       organization_id: "__allfather__", is_admin: 0, is_active: 1, class: "STAFF",
-      role: "STAFF", supabase_user_id: null,
+      role: "STAFF", 
     });
     const token = await signToken(sessionClaims({
       sub: "__allfather__", username: "allfather", organization_id: "__allfather__",
@@ -632,6 +737,28 @@ describe("Worker authorization and session security", () => {
     }));
     const response = await worker.fetch(new Request("https://worker.test/api/query?envelope=" +
       encodeURIComponent(b64u(JSON.stringify({ query_id: "q-1", query_type: "dashboard.summary", organization_id: "__allfather__" }))), {
+      headers: { authorization: `Bearer ${token}` },
+    }), makeEnv(db));
+
+    expect(response.status).toBe(401);
+    expect(db.writes).toHaveLength(0);
+  });
+
+
+  it("rejects a previously issued All-Father token with a mismatched username claim", async () => {
+    const db = new SecurityDb();
+    db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
+    db.users.set("__allfather__", {
+      id: "__allfather__", username: "allfather", email: "owner@example.test",
+      organization_id: "__allfather__", is_admin: 1, is_active: 1, class: "ALL_FATHER",
+      role: "ALL_FATHER",
+    });
+    const token = await signToken(sessionClaims({
+      sub: "__allfather__", username: "forged-username", organization_id: "__allfather__",
+      is_admin: true, role: "ALL_FATHER",
+    }));
+    const response = await worker.fetch(new Request("https://worker.test/api/query?envelope=" +
+      encodeURIComponent(b64u(JSON.stringify({ query_id: "q-username-mismatch", query_type: "dashboard.summary", organization_id: "__allfather__" }))), {
       headers: { authorization: `Bearer ${token}` },
     }), makeEnv(db));
 
@@ -695,7 +822,7 @@ describe("Worker authorization and session security", () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     db.users.set("staff-2", {
       id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
-      is_admin: 0, is_active: 1, class: "staff", role: "STAFF", supabase_user_id: null,
+      is_admin: 0, is_active: 1, class: "staff", role: "STAFF",
     });
     db.failUserSessionRevocationWrite = true;
     const adminToken = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
@@ -715,7 +842,7 @@ describe("Worker authorization and session security", () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     db.users.set("staff-2", {
       id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
-      is_admin: 0, is_active: 1, class: "staff", role: "STAFF", supabase_user_id: null,
+      is_admin: 0, is_active: 1, class: "staff", role: "STAFF",
     });
     const adminToken = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
     const oldClaims = {
@@ -759,7 +886,7 @@ describe("Worker authorization and session security", () => {
 
     db.users.set("staff-2", {
       id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
-      is_admin: 0, is_active: 1, class: "STAFF", role: "STAFF", supabase_user_id: null,
+      is_admin: 0, is_active: 1, class: "STAFF", role: "STAFF",
     });
     const otherToken = await signToken(sessionClaims({ sub: "staff-2", username: "staff2", jti: crypto.randomUUID() }));
     const overwrite = await worker.fetch(new Request("https://worker.test/api/push/subscriptions", {
@@ -973,11 +1100,11 @@ describe("Worker authorization and session security", () => {
     db.users.set("__allfather__", {
       id: "__allfather__", username: "allfather", email: "allfather@example.test",
       organization_id: "__allfather__", is_admin: 1, is_active: 1, class: "ALL_FATHER",
-      role: "ALL_FATHER", supabase_user_id: "subject-current",
+      role: "ALL_FATHER",
     });
     const token = await signToken(sessionClaims({
       sub: "__allfather__", username: "allfather", organization_id: "__allfather__",
-      is_admin: true, role: "ALL_FATHER", identity_sub: "subject-current",
+      is_admin: true, role: "ALL_FATHER",
     }));
     const response = await worker.fetch(new Request("https://worker.test/api/users/hierarchy", {
       headers: { authorization: "Bearer " + token },

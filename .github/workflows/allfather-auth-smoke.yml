@@ -2,10 +2,17 @@ name: All-Father ONYX credential smoke test
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'deploy/cloudflare/edge-gateway/**'
+      - 'crates/bins/admin-shell/ui/src/pages/Login.tsx'
+      - 'crates/bins/api-server/src/routes/auth.rs'
+      - 'crates/bins/api-server/src/routes/mod.rs'
+      - '.github/workflows/allfather-auth-smoke.yml'
   push:
     branches: [main]
     paths:
-      - 'deploy/cloudflare/edge-gateway/src/**'
+      - 'deploy/cloudflare/edge-gateway/**'
       - '.github/workflows/allfather-auth-smoke.yml'
 
 permissions:
@@ -13,10 +20,26 @@ permissions:
 
 jobs:
   allfather-auth:
-    name: Verify All-Father ONYX credential login against deployed Worker
+    name: Verify ONYX All-Father credential flow against isolated local Worker/D1
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: deploy/cloudflare/edge-gateway
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: deploy/cloudflare/edge-gateway/package-lock.json
+
+      - name: Validate authentication script syntax
+        run: node --check scripts/provision-allfather-password.mjs && node --check scripts/allfather-auth-smoke.mjs
+
       - name: Validate required Actions secrets
         shell: bash
         env:
@@ -26,41 +49,61 @@ jobs:
           set -euo pipefail
           test -n "$ONYX_ALLFATHER_USERNAME" || { echo "::error::Add ONYX_ALLFATHER_USERNAME in GitHub Actions secrets."; exit 1; }
           test -n "$ONYX_ALLFATHER_PASSWORD" || { echo "::error::Add ONYX_ALLFATHER_PASSWORD in GitHub Actions secrets."; exit 1; }
+          if [[ "${ONYX_ALLFATHER_USERNAME,,}" != "allfather" ]]; then
+            echo "::error::Set ONYX_ALLFATHER_USERNAME to the reserved canonical username allfather. Secret values are not printed."
+            exit 1
+          fi
 
-      - name: Authenticate directly with ONYX credentials
+      - name: Install Worker dependencies
+        run: npm ci
+
+      - name: Apply migrations to isolated local D1
+        run: npm run d1:local
+
+      - name: Provision canonical account in isolated local D1
+        env:
+          ONYX_ALLFATHER_USERNAME: ${{ secrets.ONYX_ALLFATHER_USERNAME }}
+          ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
+        run: npm run provision:allfather-password -- --environment test
+
+      - name: Run end-to-end authentication smoke against local Worker
         shell: bash
         env:
           ONYX_ALLFATHER_USERNAME: ${{ secrets.ONYX_ALLFATHER_USERNAME }}
           ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
-          ONYX_WORKER_URL: https://onyx-framework.soheil-mozaffari.workers.dev
+          ONYX_AUTH_SMOKE_BASE_URL: http://127.0.0.1:8787
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fail = (message) => { console.error(`::error::${message}`); process.exit(1); };
-          const username = process.env.ONYX_ALLFATHER_USERNAME;
-          const password = process.env.ONYX_ALLFATHER_PASSWORD;
-          const workerUrl = process.env.ONYX_WORKER_URL;
-          async function jsonRequest(url, options, label) {
-            let response;
-            try { response = await fetch(url, options); } catch { fail(`${label}: network request failed.`); }
-            const body = await response.json().catch(() => ({}));
-            if (!response.ok) fail(`${label}: HTTP ${response.status}; credentials and response body suppressed.`);
-            return body;
+          umask 077
+          JWT_SECRET="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          printf 'ONYX_JWT_SECRET="%s"\n' "$JWT_SECRET" > .dev.vars
+          unset JWT_SECRET
+          log_file="$RUNNER_TEMP/onyx-worker-smoke.log"
+          env -u ONYX_ALLFATHER_USERNAME -u ONYX_ALLFATHER_PASSWORD npx wrangler dev --local --config wrangler.dev.toml --ip 127.0.0.1 --port 8787 >"$log_file" 2>&1 &
+          worker_pid=$!
+          cleanup() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+            rm -f .dev.vars
           }
-          (async () => {
-            const session = await jsonRequest(`${workerUrl}/api/auth/login`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ username, password, client_type: 'admin' }),
-            }, 'ONYX credential authentication');
-            if (typeof session.access_token !== 'string' || typeof session.refresh_token !== 'string' ||
-                session.user?.role !== 'ALL_FATHER' || session.user?.username !== 'allfather') {
-              fail('ONYX did not issue the expected canonical All-Father session.');
-            }
-            const protectedResponse = await fetch(`${workerUrl}/api/users/hierarchy`, {
-              headers: { authorization: `Bearer ${session.access_token}` },
-            });
-            if (!protectedResponse.ok) fail(`Authenticated protected API request failed with HTTP ${protectedResponse.status}.`);
-            console.log('PASS: ONYX credentials authenticated; canonical All-Father session issued; protected API accepted it.');
-          })().catch(() => fail('Authentication smoke test failed unexpectedly; credentials and tokens suppressed.'));
-          NODE
+          trap cleanup EXIT
+          ready=false
+          for attempt in {1..40}; do
+            if curl -fsS --max-time 2 "$ONYX_AUTH_SMOKE_BASE_URL/ready" >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            echo "::error::Local Worker did not become ready. Credentials and token material suppressed."
+            tail -n 80 "$log_file" || true
+            exit 1
+          fi
+          node scripts/allfather-auth-smoke.mjs
+
+      - name: Clean up local D1 smoke data
+        if: always()
+        shell: bash
+        run: rm -f .dev.vars

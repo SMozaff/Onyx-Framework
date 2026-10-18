@@ -365,14 +365,14 @@ async fn create_user_record(
     organization_id: &str,
 ) -> Result<UserDto, ApiError> {
     let username = payload.username.trim().to_string();
-    if username.eq_ignore_ascii_case(super::supabase::ALLFATHER_USERNAME) {
+    if username.eq_ignore_ascii_case(super::auth::ALLFATHER_USERNAME) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "RESERVED_USERNAME",
             "AUTHORITY",
             "NON_RETRYABLE",
             correlation(),
-            json!({"message":"The designated All-Father identity is reserved for Supabase authentication"}),
+            json!({"message":"The canonical All-Father username is reserved"}),
         ));
     }
     if username.is_empty() {
@@ -761,7 +761,7 @@ pub async fn set_user_password(
         })?;
     if target
         .username
-        .eq_ignore_ascii_case(super::supabase::ALLFATHER_USERNAME)
+        .eq_ignore_ascii_case(super::auth::ALLFATHER_USERNAME)
     {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -769,7 +769,7 @@ pub async fn set_user_password(
             "AUTHORITY",
             "NON_RETRYABLE",
             correlation(),
-            json!({"message":"The designated All-Father identity is managed exclusively by Supabase Auth"}),
+            json!({"message":"The canonical All-Father account is managed by ONYX authentication"}),
         ));
     }
     let hash = state

@@ -10,7 +10,8 @@
     "d1:local": "wrangler d1 migrations apply onyx-free-db --local --config wrangler.dev.toml",
     "d1:remote": "wrangler d1 migrations apply onyx-free-db --remote --config wrangler.deploy.toml",
     "test": "vitest run",
-    "provision:allfather": "node scripts/provision-allfather.mjs"
+    "provision:allfather-password": "node scripts/provision-allfather-password.mjs",
+    "smoke:allfather": "node scripts/allfather-auth-smoke.mjs"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0"

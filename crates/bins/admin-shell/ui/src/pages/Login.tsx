@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
+import { loginWithOnyxCredentials } from "@/auth/credentials";
 import { describeError } from "@/utils/errorHandler";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useI18n } from "@/i18n/I18nContext";
@@ -20,12 +21,12 @@ export default function Login() {
     setError(null);
     setLoading(true);
     try {
-      const response = await apiClient.post("/api/auth/login", {
+      const session = await loginWithOnyxCredentials(
+        (url, body) => apiClient.post(url, body),
         username,
         password,
-        client_type: "admin",
-      });
-      useAuthStore.getState().login(response.data);
+      );
+      useAuthStore.getState().login(session);
       navigate("/", { replace: true });
     } catch (err) {
       if (isNetworkError(err)) setError(describeError(err));
