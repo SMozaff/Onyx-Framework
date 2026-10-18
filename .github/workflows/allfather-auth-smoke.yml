@@ -43,16 +43,11 @@ jobs:
       - name: Validate required Actions secrets
         shell: bash
         env:
-          ONYX_ALLFATHER_USERNAME: ${{ secrets.ONYX_ALLFATHER_USERNAME }}
+          ONYX_ALLFATHER_USERNAME: allfather
           ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
         run: |
           set -euo pipefail
-          test -n "$ONYX_ALLFATHER_USERNAME" || { echo "::error::Add ONYX_ALLFATHER_USERNAME in GitHub Actions secrets."; exit 1; }
           test -n "$ONYX_ALLFATHER_PASSWORD" || { echo "::error::Add ONYX_ALLFATHER_PASSWORD in GitHub Actions secrets."; exit 1; }
-          if [[ "${ONYX_ALLFATHER_USERNAME,,}" != "allfather" ]]; then
-            echo "::error::Set ONYX_ALLFATHER_USERNAME to the reserved canonical username allfather. Secret values are not printed."
-            exit 1
-          fi
 
       - name: Install Worker dependencies
         run: npm ci
