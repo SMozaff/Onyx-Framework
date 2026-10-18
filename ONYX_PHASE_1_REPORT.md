@@ -11,8 +11,13 @@
 - **Remediation commits so far:**
   - 348714c968bbbb5009ea55ad19fee9a707e4021c — add Phase 1 authentication trust-boundary regression tests.
   - 3b807bec5228767b5021e5f3b9f9c93f5df97cb5 — correct the schema-index mock used by those tests.
-- **Final SHA:** pending further implementation and CI.
-- The GitHub connector exposed recent commit history and file contents for this main candidate, but did not expose an independent direct refs/heads/main SHA read. Reconfirm the main ref before final acceptance.
+  - 3a82ae2bf58f2ffadf48aba2ba1be25865e02e57 — align route-completeness assertions with the current ONYX-managed All-Father login contract.
+  - 5dd06e8508dfe0edf60d70af1e18b01cf8ce8e0d — replace obsolete Supabase-subject security test with a canonical D1 role revalidation test.
+  - 0b3031082f2d53f186dac7a76a6faf9ac01febea — add schema readiness support to the relay route test double.
+  - 326c280504412be852d3768c1d7b0dea116e59f4 — include response body in relay test assertion diagnostics.
+- **Last observed code/test commit before this report update:** 326c280504412be852d3768c1d7b0dea116e59f4.
+- **Final report-update commit:** recorded by the resulting GitHub commit/PR head; the report cannot self-reference its own commit SHA.
+- PR #268 metadata confirms its base SHA was 54221e10f1dff46730aef33826db0c631c3d293d, independently confirming the main base used for this remediation branch.
 
 ## 2. Phase 0 inputs and source review
 
@@ -33,7 +38,10 @@ The baseline contract states that D1 is authoritative for ONYX principal identit
 | File | Change | Purpose |
 |---|---|---|
 | deploy/cloudflare/edge-gateway/test/auth-phase1-regressions.test.ts | Added | Exercises malformed/missing password-hash failure, client metadata privilege-spoofing resistance, and rejection of an ALL_FATHER role on a non-canonical principal. |
-| ONYX_PHASE_1_REPORT.md | Added | Records evidence, test status, gaps, and Phase 2 recommendations. |
+| deploy/cloudflare/edge-gateway/test/route-completeness.test.ts | Updated | Removes a stale test requirement for the superseded Supabase exchange route and asserts the current ONYX credential contract. |
+| deploy/cloudflare/edge-gateway/test/security.test.ts | Updated | Tests that All-Father access is denied when the canonical D1 principal no longer has the required role/admin authority. |
+| deploy/cloudflare/edge-gateway/test/relay-route.test.ts | Updated | Adds the schema metadata interface to the test double and preserves failure diagnostics. |
+| ONYX_PHASE_1_REPORT.md | Added/updated | Records evidence, test status, gaps, and Phase 2 recommendations. |
 
 **No runtime authentication or authorization implementation has been changed yet.** The added tests are not a substitute for fixing any newly confirmed runtime defect.
 
@@ -58,20 +66,21 @@ These are source observations, not claims that the requirements are fully implem
 
 - Repository/source inspection was performed through GitHub connector file and commit operations.
 - No local build, test, or dependency download was performed.
-- **Tests executed:** 0 in this phase so far.
-- **Test count/results:** not yet available; no test has been reported as passing.
-- **CI checks:** pending a draft PR and GitHub Actions execution against the exact branch head.
+- **Observed Worker CI run #289** on initial PR head eaa87ad8701b90d289ea39bb94e9b8483eda95a2: bundle dry-run passed; tests reported 149 passed / 3 failed (152 total). New Phase 1 regression tests passed 5/5. Failures were the stale Supabase route expectation, stale Supabase identity-mapping test, and relay test returning 503 instead of 200.
+- **Observed Worker CI run #291** on later PR head 5dd06e8508dfe0edf60d70af1e18b01cf8ce8e0d: bundle dry-run passed; tests reported 151 passed / 1 failed (152 total). The route-contract and security-test failures were resolved; relay-ticket test still returned 503. Its test double was then updated, and the assertion now includes the response body for diagnosis.
+- **Latest head verification:** a new completed test result for 326c280504412be852d3768c1d7b0dea116e59f4 was not yet available when this report update was prepared. Do not count that run as passing.
+- **Skipped in failed Worker runs:** disposable D1 migrations, mobile-access migration verification, and relay WebSocket integration steps, because the test step failed.
 - **Skipped/unverified:** live Cloudflare Worker behavior, production D1 state, live credentials, session lifecycle end-to-end, Axum alternate entry points, and full cross-tenant/resource matrix.
 
 ## 6. Known gaps and residual risks
 
-1. Runtime implementation has not yet been changed; the branch currently adds regression tests and this report only.
+1. Runtime implementation has not yet been changed; the branch currently adds regression tests and this report only. No source-code vulnerability fix is claimed.
 2. The new tests must run in GitHub Actions and their test double must be reconciled with the actual D1 schema contract.
 3. Full route-by-route authorization review is still required for every admin endpoint, command handler, resource lookup, and alternate API entry point.
 4. Session lifecycle needs explicit tests for malformed/expired/revoked tokens, inactive accounts and organizations, refresh rotation races/replay, logout, and session revocation.
 5. Cross-tenant and cross-resource negative tests are not yet implemented or executed.
 6. The accepted Phase 0 report should be confirmed by its canonical artifact/acceptance status; this report used the current auth-repair baseline and contract documents as available evidence.
-7. The exact current main ref SHA needs independent confirmation before final acceptance.
+7. The PR base SHA is confirmed as 54221e10f1dff46730aef33826db0c631c3d293d by PR #268 metadata.
 8. No production configuration, credentials, data, or deployment has been changed.
 
 ## 7. Compatibility changes
