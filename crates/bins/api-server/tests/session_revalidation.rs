@@ -7,13 +7,13 @@ use std::net::SocketAddr;
 
 use api_server::routes::{ApiState, TokenClaims, ONYX_API_TOKEN_AUDIENCE, ONYX_API_TOKEN_ISSUER};
 use reqwest::{Client, StatusCode};
+use security_adapter::Ed25519JwtCodec;
+use security_application::NewUser;
+use sqlx::SqlitePool;
 use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest,
     http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderValue},
 };
-use security_adapter::Ed25519JwtCodec;
-use security_application::NewUser;
-use sqlx::SqlitePool;
 
 const ORG_A: &str = "11111111-1111-1111-1111-111111111111";
 const ORG_B: &str = "33333333-3333-3333-3333-333333333333";

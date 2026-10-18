@@ -48,8 +48,8 @@ use sync_transport::SyncMessage;
 use tokio::sync::{mpsc, RwLock};
 
 use super::{
-    authenticate_headers, revalidate_token_principal, unix_seconds, validate_token, ApiError, ApiState, ProjectionPool,
-    TokenClaims, TokenScope,
+    authenticate_headers, revalidate_token_principal, unix_seconds, validate_token, ApiError,
+    ApiState, ProjectionPool, TokenClaims, TokenScope,
 };
 
 /// One connected replica's inbound mailbox, plus the tenant it authenticated
