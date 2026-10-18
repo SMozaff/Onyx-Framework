@@ -14,7 +14,7 @@ class AuthDb {
   userRow: Record<string, unknown> | null = null;
   prepare(sql: string) {
     const tablePrefix = "PRAGMA table_info(";
-    const indexPrefix = "pragma index_list(";
+    const indexPrefix = "pragmaindex_list(";
     const rows = (): Array<Record<string, unknown>> => {
       if (sql.toLowerCase().startsWith(tablePrefix.toLowerCase()) && sql.endsWith(")")) {
         const table = sql.slice(tablePrefix.length, -1);
