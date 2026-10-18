@@ -752,8 +752,15 @@ pub struct TokenScope {
     pub self_replica: Option<String>,
 }
 
+/// JWT issuer and audience are deliberately specific to the Axum API.
+/// Tokens minted by another ONYX service are not interchangeable sessions.
+pub const ONYX_API_TOKEN_ISSUER: &str = "onyx-api-server";
+pub const ONYX_API_TOKEN_AUDIENCE: &str = "onyx-api";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenClaims {
+    pub iss: String,
+    pub aud: String,
     pub sub: String,
     pub username: String,
     pub organization_id: String,
@@ -820,6 +827,8 @@ pub async fn issue_token(
 ) -> anyhow::Result<String> {
     let now = unix_seconds();
     let claims = TokenClaims {
+        iss: ONYX_API_TOKEN_ISSUER.to_string(),
+        aud: ONYX_API_TOKEN_AUDIENCE.to_string(),
         sub: user.user_id.clone(),
         username: user.username.clone(),
         organization_id: user.organization_id.clone(),
@@ -899,7 +908,9 @@ pub async fn validate_token(
     let claims: TokenClaims = codec
         .decode(token)
         .map_err(|_| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
-    if claims.exp <= unix_seconds()
+    if claims.iss != ONYX_API_TOKEN_ISSUER
+        || claims.aud != ONYX_API_TOKEN_AUDIENCE
+        || claims.exp <= unix_seconds()
         || claims.iat > unix_seconds()
         || claims.token_type != expected_type
     {
