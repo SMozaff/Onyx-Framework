@@ -57,14 +57,14 @@ jobs:
 
       - name: Provision canonical account in isolated local D1
         env:
-          ONYX_ALLFATHER_USERNAME: ${{ secrets.ONYX_ALLFATHER_USERNAME }}
+          ONYX_ALLFATHER_USERNAME: allfather
           ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
         run: npm run provision:allfather-password -- --environment test
 
       - name: Run end-to-end authentication smoke against local Worker
         shell: bash
         env:
-          ONYX_ALLFATHER_USERNAME: ${{ secrets.ONYX_ALLFATHER_USERNAME }}
+          ONYX_ALLFATHER_USERNAME: allfather
           ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
           ONYX_AUTH_SMOKE_BASE_URL: http://127.0.0.1:8787
         run: |
