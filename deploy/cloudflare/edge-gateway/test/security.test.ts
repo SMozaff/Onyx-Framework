@@ -599,17 +599,17 @@ describe("Worker authorization and session security", () => {
     expect(inactiveOrgDb.writes).toHaveLength(0);
   });
 
-  it("rejects All-Father access tokens whose subject no longer matches the D1 mapping", async () => {
+  it("rejects All-Father access tokens when the canonical D1 principal no longer has All-Father authority", async () => {
     const db = new SecurityDb();
     db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
     db.users.set("__allfather__", {
       id: "__allfather__", username: "allfather", email: "owner@example.test",
-      organization_id: "__allfather__", is_admin: 1, is_active: 1, class: "ALL_FATHER",
-      role: "ALL_FATHER", supabase_user_id: "subject-current",
+      organization_id: "__allfather__", is_admin: 0, is_active: 1, class: "STAFF",
+      role: "STAFF", supabase_user_id: null,
     });
     const token = await signToken(sessionClaims({
       sub: "__allfather__", username: "allfather", organization_id: "__allfather__",
-      is_admin: true, role: "ALL_FATHER", identity_sub: "subject-old",
+      is_admin: true, role: "ALL_FATHER",
     }));
     const response = await worker.fetch(new Request("https://worker.test/api/query?envelope=" +
       encodeURIComponent(b64u(JSON.stringify({ query_id: "q-1", query_type: "dashboard.summary", organization_id: "__allfather__" }))), {
