@@ -8,6 +8,13 @@ use serde_json::json;
 
 use security_application::UserRecord;
 
+/// Reserved principal name: All-Father authenticates only through the Worker.
+pub const ALLFATHER_USERNAME: &str = "allfather";
+
+fn is_reserved_allfather_username(username: &str) -> bool {
+    username.eq_ignore_ascii_case(ALLFATHER_USERNAME)
+}
+
 use super::{
     authenticate_headers, client_type::ClientType, issue_token, token_hash, unix_seconds,
     validate_token, ApiError, ApiState,
@@ -177,8 +184,7 @@ pub async fn login(
                 "TRANSIENT",
                 uuid::Uuid::new_v4().to_string(),
                 json!({}),
-            )
-        })?;
+            )        })?;
 
     let user: UserRecord = match candidate {
         Some(user) if user.is_active => {
@@ -358,7 +364,6 @@ pub async fn refresh(
                 json!({}),
             )
         })?;
-
     Ok(Json(RefreshResponse {
         access_token,
         refresh_token,
