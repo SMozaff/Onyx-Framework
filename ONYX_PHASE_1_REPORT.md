@@ -168,3 +168,106 @@ At the time of this evidence refresh, full CI run #1695 and Security run #1237 f
 ## 10. Completion decision
 
 **PHASE INCOMPLETE.** The Worker relay-ticket runtime defect is fixed, Worker CI and local integration checks passed on the recorded code head, and the Cloudflare preview configuration issue was fixed for successful subsequent builds. Phase 1 is not complete because the independent Axum backend contract/revalidation gap and the full alternate-path audit remain unresolved; final-head checks and the isolated relay-only run are also release gates.
+
+
+---
+
+# Phase 1 Continuation Addendum — Axum Boundary and Cross-Client Audit
+
+**Continuation starting head:** `fdb86532e88c4e1b5a6de0eb6986d7e399d4f57c`  
+**Starting base/main SHA verified:** `54221e10f1dff46730aef33826db0c631c3d293d`  
+**Branch head at addendum authoring:** `bda03cc1d9aa394dd456815872932d95d49d347b` (report update itself will create a later head).  
+**PR state at start:** #268 open, draft, unmerged; base `main`; 18 commits ahead and 0 behind at initial comparison. The report update adds another commit.
+
+## A. Axum production-role decision — evidence and limits
+
+**Finding: treat Axum as a supported, production-configured backend unless the owner explicitly retires it.** This is based on deployment configuration, not merely Rust source existence:
+
+- `render.yaml` declares `onyx-api-docker`, `runtime: docker`, `ONYX_ENV=production`, `autoDeploy: true`, health check `/ready`, and a managed PostgreSQL database. Its comments configure Supabase variables for All-Father.
+- `deploy/helm/onyx-api/values-production.yaml` declares five replicas, production ingress host `api.onyx.example.com`, TLS, and autoscaling.
+- `deploy/helm/onyx-api/templates/deployment.yaml` defines an API-server rollout, container port, probes, and environment from a secret.
+- `.github/workflows/release.yml` builds the `api-server` binary and container images. Its comments also say the real production server is a Windows 10 office machine and that Linux/macOS native server binaries are not currently deployed.
+- `docs/DECISIONS.md` describes Cloud-Only Client Connectivity and says browser/desktop/mobile clients use a deployed ONYX Cloud API. The Admin Shell source says it is a thin HTTP client that talks directly to `api-server`.
+- `crates/bins/admin-shell/ui/src/auth/allfatherOAuth.ts`, `crates/bins/admin-shell/src/lib.rs`, and the Admin Shell API client contain an actual Google/Supabase sign-in and exchange flow; this is a real code caller, not a dead route proven unused.
+
+These artifacts conflict about the *currently live* hosting path (Render/Helm versus the Windows-office deployment note). I do not have authorized live Render/Kubernetes deployment metadata in this task, so **actual live deployment is unverified**. However, the production manifests and supported client wiring are sufficient to classify Axum as production-configured and to require its auth boundary to be secured. Do not disable or remove it on an assumption.
+
+## B. Authentication-contract conflict — decision required for client migration
+
+The current `docs/SECURITY_AUTHENTICATION_MODEL.md` states that All-Father uses canonical ONYX-managed credentials and that Google/Supabase are not part of All-Father authentication. The current Axum route table still registers `POST /api/auth/supabase`; `render.yaml` injects its provider configuration; and Admin Shell code actively starts Google/Supabase OAuth and exchanges the provider bearer token for an ONYX session.
+
+Therefore the inconsistency spans the API and a supported client. The correct destination contract is documented as ONYX-managed credentials, but retiring the existing provider exchange without first migrating the Admin Shell login UI would break the current caller. I have **not** silently removed the route, removed provider configuration, or changed the supported client’s login UX. Required owner/product decision: approve the coordinated Admin Shell login migration to ONYX username/password (and confirm whether any separately authorized provider use remains). After that migration, remove the All-Father Supabase exchange route and its exclusive configuration only through a tested, reviewable change. The Worker route was not restored.
+
+## C. Confirmed Axum runtime fix
+
+Changed `crates/bins/api-server/src/routes/mod.rs`:
+
+- After cryptographic validation, expiry/type checks and token/session revocation checks, `authenticate_headers` now re-reads the subject from the authoritative `UserStore` on every access-token protected request.
+- It rejects missing/inactive principals and rejects a token whose signed username or organization ID no longer matches the current stored user.
+- It uses the current database identity in the returned `AuthenticatedUser`, not stale token identity fields.
+- If the user store is unavailable, the request fails closed with generic `503 AUTHORIZATION_STATE_UNAVAILABLE`; no database error details are returned to the client.
+- This function is called by the route-layer auth middleware and by handlers that explicitly authenticate headers, so it covers both common paths without adding route-specific duplicate checks.
+
+Added `crates/bins/api-server/tests/session_revalidation.rs`, a real local HTTP + SQLite integration fixture with regressions for:
+1. An already-issued signed access token after user deactivation.
+2. An already-issued signed access token after the user's authoritative organization binding changes.
+3. Admin authorization after the stored admin flag is revoked.
+
+These are code/test changes; their CI results must be taken from the current exact head’s completed workflow, not inferred from the test source.
+
+## D. Organization active-state limitation — unresolved P0
+
+The Axum `UserRecord` / `UserStore` contract currently has an active-user flag and organization ID, but no organization record or organization-active lookup. The API's checked-in SQLite/Postgres migration sets do not provide the same canonical `organizations.is_active` trust model used by the Worker’s D1 schema. Consequently, the new Axum check enforces current user active state and current tenant binding, but **cannot truthfully claim organization-active-state validation**.
+
+Do not fix this by returning `true` on missing organization data or by inventing a schema assumption. The remaining implementation needs a deliberate Axum organization/membership model: schema migration(s), store port methods implemented for each database adapter, provisioning/backfill policy, and tests proving inactive/missing organization and membership fail closed. This is an unresolved P0 for a potentially active production backend.
+
+## E. Cross-client / protected-route audit status
+
+### Axum route groups inspected
+
+The router in `crates/bins/api-server/src/routes/mod.rs` separates public auth/health/readiness routes from a protected router wrapped by `middleware::authenticate_request`. The protected route inventory includes:
+
+- `/api/users`, `/api/users/hierarchy`
+- `/api/admin/users`, `/api/admin/users/:id`, activate/deactivate/password/manager/class/parent
+- `/api/admin/mobile-access`
+- `/api/profiles`, `/api/profiles/:owner_id`, `/api/admin/profiles`, import/export
+- `/api/admin/policies`, `/api/admin/legal-holds`
+- `/api/todo/lists`, `/api/todo/targets`, `/api/todo/staff-loans`
+- `/api/auth/logout`, `/api/command`, `/api/query`, `/api/relay-ticket`
+- `/api/files/:content_hash`, push-subscription routes
+- `/api/events` and `/api/relay/:target_id`, which use their own WebSocket/token or one-time ticket authentication path and must remain separately reviewed.
+
+The shared protected-router middleware calls `authenticate_headers`; the fix therefore applies to the protected route group. The explicitly listed special WebSocket paths are not covered by that ordinary bearer middleware and require their own auth semantics. `/api/auth/refresh` uses refresh-token validation and a fresh user lookup; `/api/auth/supabase` remains a separate public identity-exchange route pending the coordinated contract migration.
+
+### Findings / evidence limits by boundary
+
+| Boundary | Verified from source | Remaining gap |
+|---|---|---|
+| Axum standard protected routes | Signature/type/expiry/revocation checks; now fresh user lookup, active check, username/org claim binding; common router middleware plus explicit handler calls. | No organization-active record in current store contract; not every individual handler has a completed negative authorization matrix. |
+| Axum admin routes | `require_admin` re-fetches current `UserRecord` and checks active/admin flags; tenant-scoped lookup/update methods exist and are used by user-management paths. | Need exhaustive per-handler role, ownership and organization-state matrix and integration evidence. |
+| Axum query/command | Query compares envelope organization to authenticated organization; command and query handlers perform additional checks. | Need complete command-by-command spoofing/target/ownership review, including every dispatched aggregate and payload actor field. |
+| Axum events/relay | Dedicated WebSocket and relay-ticket auth paths exist separately from ordinary access middleware. | Their token binding, target binding, one-time use, expiry and tenant/resource rules need individual negative tests on Axum. |
+| Admin Shell | Actual OAuth callback helper, Supabase flow, and HTTP client to API server identified. | Client migration to the documented ONYX credential contract is not implemented; Tauri loopback callback/PKCE lifecycle needs its own review. |
+| Web UI / PWA | API client interceptors preserve explicit provider credentials; UI strings describe Google/Supabase All-Father sign-in. | Client-to-deployment mapping and coordinated contract migration are unresolved. |
+| Desktop Shell | Repository documentation describes a separate local-first command path via `client-composition`, not the Admin Shell HTTP route. | Full Tauri command audit and whether any local command path can mutate protected data without server authorization remain incomplete. |
+| Android/mobile | Uses API/Worker clients and client capability metadata. | Full endpoint-by-endpoint server authorization mapping remains incomplete; client metadata is not itself trusted authority. |
+| Cloudflare Worker | Existing Phase 1 report documents the relay TTL fix and 153-test suite on earlier tested SHA; current-head Worker workflow must be refreshed. | Worker tests do not prove Axum security or live production state. |
+
+## F. Verification status for this continuation
+
+- Starting branch `fdb86532e88c4e1b5a6de0eb6986d7e399d4f57c`; current code/test commit before this report update: `bda03cc1d9aa394dd456815872932d95d49d347b`.
+- Current branch commits include the runtime principal revalidation and a three-case HTTP/SQLite integration test.
+- The previous Worker CI #303 passed on `fdb8653…`; the previous Cloudflare preview build succeeded on that same earlier head. New Worker CI and Cloudflare preview runs are triggered for this continuation and must be checked by exact SHA.
+- The previous Security run #1238 passed on `fdb8653…`, but is not evidence for the new Rust changes.
+- At this point, the current-head full CI / Security / Worker / preview outcomes are pending or running. No current-head Rust test, formatting, lint, or full-suite pass is claimed until the completed logs are read. This assistant did not execute a local checkout/working-tree test run.
+- No production deployment, production database mutation, credential rotation, or production secret change was performed.
+
+## G. Required next steps and recommendation
+
+1. Run `cargo fmt --check`, the targeted `api-server` integration test `session_revalidation`, relevant existing auth/tenant tests, and the repository-required Clippy/build commands through CI; inspect logs and fix any compile/test regressions.
+2. Verify full CI, Security, Worker CI and Cloudflare preview on the final exact head after the report commit.
+3. Obtain owner approval for coordinated Admin Shell migration away from the legacy All-Father Supabase exchange, then implement client + Axum contract changes together; do not leave the API route in place solely for compatibility.
+4. Design and implement the Axum organization/membership active-state store contract with migrations and fail-closed tests.
+5. Complete route-by-route authorization matrices for Axum special WebSockets/relay, commands, Admin Shell/Tauri, web/PWA, Desktop Shell and Android before release.
+
+**Continuation decision: PHASE INCOMPLETE.** The API is production-configured and must be treated as an in-scope protected entry point. The stale-principal defect has a targeted fix and integration regressions, but its new CI evidence is pending, the organization-active-state model is absent, and the All-Father client/API contract migration plus the full cross-client audit remain outstanding.
