@@ -16,7 +16,6 @@ apiClient.interceptors.request.use((config) => {
   const address = getServerAddress();
   config.baseURL = address;
   const token = useAuthStore.getState().accessToken;
-  // Preserve explicit provider credentials for the Supabase -> ONYX exchange.
   if (token && !config.headers.get('Authorization')) {
     config.headers.set('Authorization', `Bearer ${token}`);
   }

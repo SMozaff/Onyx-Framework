@@ -12,8 +12,6 @@ pub mod profiles;
 pub mod push;
 pub mod query;
 pub mod relay;
-#[path = "../supabase.rs"]
-pub mod supabase;
 pub mod todo_admin;
 
 use std::{
@@ -89,10 +87,6 @@ pub struct ApiState {
     /// Identity store backing `/api/auth/login` (audit finding H-01).
     /// Replaces the former `DEFAULT_USERNAME`/`DEFAULT_PASSWORD` constants.
     pub user_store: Arc<dyn UserStore>,
-    /// Optional Supabase Auth identity boundary for the designated All-Father account.
-    /// Supabase verifies the external identity; ONYX remains authoritative for
-    /// principal provisioning, role, tenant, and authorization.
-    pub supabase_auth: Option<Arc<supabase::SupabaseAuth>>,
     /// Repository for `profile_domain::StaffProfile`. Backs the staff
     /// profile view/edit routes and the batch import/export feature —
     /// see `routes::profiles`.
@@ -339,47 +333,6 @@ impl ApiState {
 
         let password_hasher = Arc::new(PasswordHasher::new());
 
-        // Supabase Auth verifies the designated All-Father identity. ONYX
-        // retains the principal and authorization model; the principal has no
-        // usable password and is reachable only through the Supabase exchange.
-        let supabase_auth = supabase::SupabaseAuth::from_env()?.map(Arc::new);
-        if let Some(supabase_auth) = &supabase_auth {
-            match user_store
-                .find_by_id(supabase_auth.allfather_principal_id())
-                .await?
-            {
-                Some(existing) if !supabase_auth.is_canonical_principal(&existing) => {
-                    anyhow::bail!(
-                        "configured All-Father principal is not an active reserved ONYX administrator"
-                    );
-                }
-                Some(_) => {}
-                None => {
-                    let password_hash = password_hasher
-                        .hash(&format!("onyx-supabase-{}", uuid::Uuid::new_v4()))
-                        .map_err(|e| {
-                            anyhow::anyhow!("failed to create unusable All-Father credential: {e}")
-                        })?;
-                    user_store
-                        .create(security_application::NewUser {
-                            user_id: supabase_auth.allfather_principal_id().to_owned(),
-                            username: supabase::ALLFATHER_USERNAME.to_owned(),
-                            organization_id: ORGANIZATION_ID.to_owned(),
-                            password_hash,
-                            is_admin: true,
-                            is_manager: false,
-                            class: None,
-                            parent_user_id: None,
-                        })
-                        .await?;
-                    tracing::info!(
-                        principal_id = %supabase_auth.allfather_principal_id(),
-                        "provisioned the designated Supabase identity as the ONYX master administrator"
-                    );
-                }
-            }
-        }
-
         // Test-only ordinary account fixture. This is intentionally separate
         // from the All-Father principal: CI and local integration environments
         // can exercise the real username/password session path without ever
@@ -436,7 +389,6 @@ impl ApiState {
             audit_writer,
             metrics: Metrics::new("onyx_api_server")?,
             user_store,
-            supabase_auth,
             password_hasher,
             relay_registry: relay::RelayRegistry::new(),
             blob_store,
@@ -574,8 +526,6 @@ pub fn router(state: ApiState) -> Router {
         .route("/ready", get(readiness))
         // Ordinary Admin/Staff accounts authenticate directly against ONYX credentials.
         .route("/api/auth/login", post(auth::login))
-        // Supabase Auth is reserved for the designated All-Father identity.
-        .route("/api/auth/supabase", post(supabase::login))
         // Refresh consumes a refresh token rather than an access token, so it
         // intentionally remains outside the standard access-auth layer.
         .route("/api/auth/refresh", post(auth::refresh))
