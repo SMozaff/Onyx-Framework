@@ -41,6 +41,7 @@ async function signAccessToken(): Promise<string> {
 
 /** Minimal D1 test double for the actual Worker ticket + relay route handlers. */
 class RelayDb {
+  operations: string[] = [];
   owners = new Map<string, { user_id: string; organization_id: string }>();
   redeemed = new Set<string>();
 
@@ -49,6 +50,7 @@ class RelayDb {
     const db = this;
     const statement: any = {
       all: async () => {
+        db.operations.push(`all: ${sql}`);
         const tablePrefix = "PRAGMA table_info(";
         if (sql.toLowerCase().startsWith(tablePrefix.toLowerCase()) && sql.endsWith(")")) {
           const table = sql.slice(tablePrefix.length, -1);
@@ -65,6 +67,7 @@ class RelayDb {
       },
       bind(...values: unknown[]) { params = values; return statement; },
       first: async () => {
+        db.operations.push(`first: ${sql}`);
         if (sql.includes("FROM mobile_access_settings")) {
           return { allowed_classes: JSON.stringify(["staff"]), version: 1, updated_at: Date.now() };
         }
@@ -85,6 +88,7 @@ class RelayDb {
         return null;
       },
       run: async () => {
+        db.operations.push(`run: ${sql}`);
         if (sql.includes("INSERT INTO replica_ownership")) {
           const replica = String(params[0]).toLowerCase();
           if (!db.owners.has(replica)) {
@@ -136,7 +140,7 @@ describe("Worker Cloud Relay route integration", () => {
       headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
       body: JSON.stringify({ target_id: TARGET, self_replica: SELF }),
     }), env);
-    expect(ticketResponse.status, await ticketResponse.clone().text()).toBe(200);
+    expect(ticketResponse.status, `${await ticketResponse.clone().text()}\nD1 operations:\n${db.operations.join("\n")}`).toBe(200);
     const ticketBody = await ticketResponse.json() as { ticket?: string };
     expect(typeof ticketBody.ticket).toBe("string");
     expect(ticketBody.ticket!.length).toBeGreaterThan(20);
