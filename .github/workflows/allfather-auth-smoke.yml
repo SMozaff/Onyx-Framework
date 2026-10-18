@@ -36,7 +36,7 @@ jobs:
           ONYX_ALLFATHER_PASSWORD: ${{ secrets.ONYX_ALLFATHER_PASSWORD }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
           SUPABASE_URL: https://uhpqjhbciimklheohvfr.supabase.co
-          ONYX_WORKER_URL: https://onyx-framework.soheil-mozaff.workers.dev
+          ONYX_WORKER_URL: https://onyx-framework.soheil-mozaffari.workers.dev
         run: |
           set -euo pipefail
           node <<'NODE'
