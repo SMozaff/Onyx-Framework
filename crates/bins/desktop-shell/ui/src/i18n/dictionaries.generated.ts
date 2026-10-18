@@ -588,7 +588,7 @@ export const fa: Record<string, string> = {
   "auth.adminAccessRequired": "دسترسی مدیر لازم است",
   "auth.adminAccountForOrganization": "برای این سازمان از یک حساب مدیر استفاده کنید.",
   "auth.adminConnectionSecurity": "امنیت اتصال",
-  "auth.adminCredentialsDescription": "مدیران با اعتبارنامه‌های ONYX خود وارد می‌شوند. All-Father تعیین‌شده با Google از طریق Supabase Auth وارد می‌شود.",
+  "auth.adminCredentialsDescription": "مدیران و All-Father با نام کاربری و گذرواژه ONYX خود وارد می‌شوند.",
   "auth.adminHeroDescription": "سیاست سازمان، دسترسی و پروفایل کارکنان را از یک فضای کاری مدیریتی اختصاصی مدیریت کنید.",
   "auth.adminHeroHeadline": "عملیات را با کنترل آرام و شفاف هدایت کنید.",
   "auth.adminInvalidCredentials": "نام کاربری یا گذرواژه نامعتبر است.",
