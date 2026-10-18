@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-09"
 workers_dev = true
 
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+
 # Required by Cloudflare Builds when creating a Worker Preview.
 [previews]
 
