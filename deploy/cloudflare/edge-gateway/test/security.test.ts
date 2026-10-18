@@ -648,6 +648,30 @@ describe("Worker authorization and session security", () => {
     expect(second.status).toBe(401);
   });
 
+  it("allows exactly one winner when the same refresh token is rotated concurrently", async () => {
+    const db = makeDb();
+    const token = await signToken(sessionClaims({ typ: "refresh" }));
+    const request = () => new Request("https://worker.test/api/auth/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refresh_token: token }),
+    });
+
+    const responses = await Promise.all([
+      worker.fetch(request(), makeEnv(db)),
+      worker.fetch(request(), makeEnv(db)),
+    ]);
+    const statuses = responses.map((response) => response.status).sort((a, b) => a - b);
+
+    expect(statuses).toEqual([200, 401]);
+    expect(db.revokedTokens.size).toBe(1);
+    const winner = responses.find((response) => response.status === 200)!;
+    const body = await winner.json() as { access_token?: string; refresh_token?: string };
+    expect(body.access_token).toEqual(expect.any(String));
+    expect(body.refresh_token).toEqual(expect.any(String));
+    expect(body.refresh_token).not.toBe(token);
+  });
+
   it("rolls back Staff deactivation when its revocation watermark write fails", async () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     db.users.set("staff-2", {
