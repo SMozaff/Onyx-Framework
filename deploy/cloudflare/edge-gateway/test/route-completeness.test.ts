@@ -143,6 +143,12 @@ describe("Admin API route completeness", () => {
       .toContain("Fetches the org's reporting-line tree");
   });
 
+  it("matches the current ONYX-managed All-Father credential contract", () => {
+    const implemented = extractImplementedRoutes(worker);
+    expect(implemented).toContainEqual({ method: "POST", pattern: "/api/auth/login" });
+    expect(implemented.some((route) => route.method === "POST" && route.pattern === "/api/auth/supabase")).toBe(false);
+  });
+
   it("extracts representative routes from dispatch()", () => {
     const implemented = extractImplementedRoutes(worker);
     expect(implemented).toContainEqual({ method: "POST", pattern: "/api/auth/login" });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
+import { AUTH_SCHEMA_CONTRACT } from "../src/schema-contract";
 
 const SECRET = "relay-route-test-secret";
 const ORG = "11111111-2222-4333-8444-555555555555";
@@ -47,6 +48,21 @@ class RelayDb {
     let params: unknown[] = [];
     const db = this;
     const statement: any = {
+      all: async () => {
+        const tablePrefix = "PRAGMA table_info(";
+        if (sql.toLowerCase().startsWith(tablePrefix.toLowerCase()) && sql.endsWith(")")) {
+          const table = sql.slice(tablePrefix.length, -1);
+          return { results: (AUTH_SCHEMA_CONTRACT.tables[table] ?? []).map((name) => ({ name })) };
+        }
+        const compact = sql.toLowerCase().replaceAll(" ", "");
+        const indexPrefix = "pragmaindex_list(";
+        if (compact.startsWith(indexPrefix) && compact.endsWith(")")) {
+          const table = compact.slice(indexPrefix.length, -1);
+          const indexes = table === "users" ? AUTH_SCHEMA_CONTRACT.indexes : AUTH_SCHEMA_CONTRACT.tableIndexes[table] ?? [];
+          return { results: indexes.map((name) => ({ name })) };
+        }
+        return { results: [] };
+      },
       bind(...values: unknown[]) { params = values; return statement; },
       first: async () => {
         if (sql.includes("FROM mobile_access_settings")) {
@@ -58,7 +74,7 @@ class RelayDb {
           return {
             id: USER, username: "staff", email: "staff@example.test",
             organization_id: ORG, is_active: 1, is_admin: 0,
-            class: "staff", role: "STAFF",
+            class: "staff", role: "STAFF", supabase_user_id: null,
           };
         }
         if (sql.includes("FROM user_session_revocations")) return null;
@@ -120,8 +136,9 @@ describe("Worker Cloud Relay route integration", () => {
       headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
       body: JSON.stringify({ target_id: TARGET, self_replica: SELF }),
     }), env);
-    expect(ticketResponse.status).toBe(200);
-    const ticketBody = await ticketResponse.json() as { ticket?: string };
+    expect(ticketResponse.status, await ticketResponse.clone().text()).toBe(200);
+    const ticketBody = await ticketResponse.json() as { ticket?: string; expires_in?: number };
+    expect(ticketBody.expires_in).toBe(30);
     expect(typeof ticketBody.ticket).toBe("string");
     expect(ticketBody.ticket!.length).toBeGreaterThan(20);
 

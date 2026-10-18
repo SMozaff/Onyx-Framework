@@ -704,6 +704,47 @@ describe("Worker authorization and session security", () => {
     expect(inactiveOrgDb.writes).toHaveLength(0);
   });
 
+  it("rejects a previously issued access token after the user is reassigned to another organization", async () => {
+    const db = makeDb();
+    const token = await signToken(sessionClaims());
+    db.users.get("staff-1")!.organization_id = "org-2";
+
+    const envelope = b64u(JSON.stringify({
+      query_id: "q-reassigned",
+      query_type: "dashboard.summary",
+      organization_id: ORG,
+    }));
+    const response = await worker.fetch(new Request(
+      "https://worker.test/api/query?envelope=" + encodeURIComponent(envelope),
+      { headers: { authorization: `Bearer ${token}` } },
+    ), makeEnv(db));
+
+    expect(response.status).toBe(401);
+    expect(db.writes).toHaveLength(0);
+  });
+
+  it("rejects All-Father access tokens when the canonical D1 principal no longer has All-Father authority", async () => {
+    const db = new SecurityDb();
+    db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
+    db.users.set("__allfather__", {
+      id: "__allfather__", username: "allfather", email: "owner@example.test",
+      organization_id: "__allfather__", is_admin: 0, is_active: 1, class: "STAFF",
+      role: "STAFF", 
+    });
+    const token = await signToken(sessionClaims({
+      sub: "__allfather__", username: "allfather", organization_id: "__allfather__",
+      is_admin: true, role: "ALL_FATHER",
+    }));
+    const response = await worker.fetch(new Request("https://worker.test/api/query?envelope=" +
+      encodeURIComponent(b64u(JSON.stringify({ query_id: "q-1", query_type: "dashboard.summary", organization_id: "__allfather__" }))), {
+      headers: { authorization: `Bearer ${token}` },
+    }), makeEnv(db));
+
+    expect(response.status).toBe(401);
+    expect(db.writes).toHaveLength(0);
+  });
+
+
   it("rejects a previously issued All-Father token with a mismatched username claim", async () => {
     const db = new SecurityDb();
     db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
@@ -717,7 +758,7 @@ describe("Worker authorization and session security", () => {
       is_admin: true, role: "ALL_FATHER",
     }));
     const response = await worker.fetch(new Request("https://worker.test/api/query?envelope=" +
-      encodeURIComponent(b64u(JSON.stringify({ query_id: "q-1", query_type: "dashboard.summary", organization_id: "__allfather__" }))), {
+      encodeURIComponent(b64u(JSON.stringify({ query_id: "q-username-mismatch", query_type: "dashboard.summary", organization_id: "__allfather__" }))), {
       headers: { authorization: `Bearer ${token}` },
     }), makeEnv(db));
 
@@ -751,6 +792,30 @@ describe("Worker authorization and session security", () => {
     expect(first.status).toBe(200);
     const second = await worker.fetch(request(), makeEnv(db));
     expect(second.status).toBe(401);
+  });
+
+  it("allows exactly one winner when the same refresh token is rotated concurrently", async () => {
+    const db = makeDb();
+    const token = await signToken(sessionClaims({ typ: "refresh" }));
+    const request = () => new Request("https://worker.test/api/auth/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refresh_token: token }),
+    });
+
+    const responses = await Promise.all([
+      worker.fetch(request(), makeEnv(db)),
+      worker.fetch(request(), makeEnv(db)),
+    ]);
+    const statuses = responses.map((response) => response.status).sort((a, b) => a - b);
+
+    expect(statuses).toEqual([200, 401]);
+    expect(db.revokedTokens.size).toBe(1);
+    const winner = responses.find((response) => response.status === 200)!;
+    const body = await winner.json() as { access_token?: string; refresh_token?: string };
+    expect(body.access_token).toEqual(expect.any(String));
+    expect(body.refresh_token).toEqual(expect.any(String));
+    expect(body.refresh_token).not.toBe(token);
   });
 
   it("rolls back Staff deactivation when its revocation watermark write fails", async () => {

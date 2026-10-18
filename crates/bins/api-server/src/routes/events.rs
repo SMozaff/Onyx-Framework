@@ -9,7 +9,7 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 
-use super::{validate_token, ApiError, ApiState};
+use super::{revalidate_token_principal, validate_token, ApiError, ApiState};
 
 /// Fixed WebSocket subprotocol negotiated for the authenticated event stream.
 ///
@@ -69,10 +69,11 @@ pub async fn websocket_route(
             )
         })?;
     let claims = validate_token(&state, token, "access").await?;
+    let current_user = revalidate_token_principal(&state, &claims).await?;
 
     Ok(ws
         .protocols([WS_AUTH_PROTOCOL])
-        .on_upgrade(move |socket| serve_socket(socket, state, claims.organization_id)))
+        .on_upgrade(move |socket| serve_socket(socket, state, current_user.organization_id)))
 }
 
 #[derive(Debug, Default)]

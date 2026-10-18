@@ -13,12 +13,6 @@ use super::{
     validate_token, ApiError, ApiState,
 };
 
-pub const ALLFATHER_USERNAME: &str = "allfather";
-
-fn is_reserved_allfather_username(username: &str) -> bool {
-    username.eq_ignore_ascii_case(ALLFATHER_USERNAME)
-}
-
 /// Single failure response for every authentication failure mode.
 ///
 /// Audit finding H-01: unknown username, wrong password and disabled account
@@ -317,7 +311,11 @@ pub async fn refresh(
                 json!({}),
             )
         })?
-        .filter(|u| u.is_active)
+        .filter(|user| {
+            user.is_active
+                && user.username == claims.username
+                && user.organization_id == claims.organization_id
+        })
         .ok_or_else(|| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
 
     let access_token = issue_token(&state, &user, "access", 3600, claims.client_type)

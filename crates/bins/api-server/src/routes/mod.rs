@@ -12,6 +12,8 @@ pub mod profiles;
 pub mod push;
 pub mod query;
 pub mod relay;
+#[path = "../supabase.rs"]
+pub mod supabase;
 pub mod todo_admin;
 
 use std::{
@@ -702,8 +704,15 @@ pub struct TokenScope {
     pub self_replica: Option<String>,
 }
 
+/// JWT issuer and audience are deliberately specific to the Axum API.
+/// Tokens minted by another ONYX service are not interchangeable sessions.
+pub const ONYX_API_TOKEN_ISSUER: &str = "onyx-api-server";
+pub const ONYX_API_TOKEN_AUDIENCE: &str = "onyx-api";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenClaims {
+    pub iss: String,
+    pub aud: String,
     pub sub: String,
     pub username: String,
     pub organization_id: String,
@@ -770,6 +779,8 @@ pub async fn issue_token(
 ) -> anyhow::Result<String> {
     let now = unix_seconds();
     let claims = TokenClaims {
+        iss: ONYX_API_TOKEN_ISSUER.to_string(),
+        aud: ONYX_API_TOKEN_AUDIENCE.to_string(),
         sub: user.user_id.clone(),
         username: user.username.clone(),
         organization_id: user.organization_id.clone(),
@@ -849,7 +860,9 @@ pub async fn validate_token(
     let claims: TokenClaims = codec
         .decode(token)
         .map_err(|_| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
-    if claims.exp <= unix_seconds()
+    if claims.iss != ONYX_API_TOKEN_ISSUER
+        || claims.aud != ONYX_API_TOKEN_AUDIENCE
+        || claims.exp <= unix_seconds()
         || claims.iat > unix_seconds()
         || claims.token_type != expected_type
     {
@@ -925,6 +938,36 @@ pub fn test_mode_error(_headers: &HeaderMap, _correlation_id: &str) -> Option<Ap
     None
 }
 
+/// Re-resolves the principal for token-authenticated entry points that do
+/// not use the ordinary Authorization-header middleware (for example the
+/// WebSocket handshake and relay-ticket redemption). Signature validity alone
+/// does not establish current account status or tenant binding.
+pub async fn revalidate_token_principal(
+    state: &ApiState,
+    claims: &TokenClaims,
+) -> Result<security_application::UserRecord, ApiError> {
+    state
+        .user_store
+        .find_by_id(&claims.sub)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "AUTHORIZATION_STATE_UNAVAILABLE",
+                "INFRASTRUCTURE",
+                "TRANSIENT",
+                uuid::Uuid::new_v4().to_string(),
+                json!({}),
+            )
+        })?
+        .filter(|user| {
+            user.is_active
+                && user.username == claims.username
+                && user.organization_id == claims.organization_id
+        })
+        .ok_or_else(|| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))
+}
+
 pub async fn authenticate_headers(
     state: &ApiState,
     headers: &HeaderMap,
@@ -935,10 +978,14 @@ pub async fn authenticate_headers(
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(|| ApiError::unauthorized(uuid::Uuid::new_v4().to_string()))?;
     let claims = validate_token(state, token, "access").await?;
+
+    // Revalidate the current account and tenant for every protected request.
+    let current_user = revalidate_token_principal(state, &claims).await?;
+
     Ok(AuthenticatedUser {
-        user_id: claims.sub,
-        username: claims.username,
-        organization_id: claims.organization_id,
+        user_id: current_user.user_id,
+        username: current_user.username,
+        organization_id: current_user.organization_id,
         token: token.to_string(),
         scope: claims.scope,
         client_type: claims.client_type,

@@ -127,6 +127,8 @@ jobs:
         run: cargo install sqlx-cli --version 0.9.0 --no-default-features --features postgres,rustls --locked
       - name: Verify sqlx offline metadata is current
         run: cargo sqlx prepare --check --workspace -- --all-targets
+      - name: Targeted session revalidation integration test
+        run: cargo test --package api-server --release --test session_revalidation --features test-endpoints -- --test-threads=1
       # desktop-shell's secure_storage tests exercise the real `keyring`
       # crate against a live Secret Service, deliberately not mocked (see
       # keyring_adapter.rs's own test doc comments). A bare ubuntu-latest

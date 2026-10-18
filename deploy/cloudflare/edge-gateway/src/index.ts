@@ -38,8 +38,6 @@ interface Session {
 }
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
-// Match the Axum relay-ticket contract: a ticket is single-use and valid for 30 seconds.
-const RELAY_TICKET_TTL_SECONDS = 30;
 const ALLFATHER_EMAIL = "so.muzaff@gmail.com";
 const OBSERVER_QUERIES: Record<string, string> = {
   "mission.list":"mission", "mission.detail":"mission", "task.list":"task", "task.detail":"task",
@@ -79,6 +77,8 @@ async function sha256(value:string):Promise<string>{
 }
 const ONYX_JWT_ISSUER = "onyx-cloudflare-worker";
 const ONYX_JWT_AUDIENCE = "onyx-api";
+// Relay tickets are short-lived, single-use credentials for the WebSocket upgrade.
+const RELAY_TICKET_TTL_SECONDS = 30;
 
 async function jwtSign(env:Env,session:Omit<Session,"jti">):Promise<string>{
   if(!env.ONYX_JWT_SECRET) throw new Error("ONYX_JWT_SECRET is not configured");
@@ -297,7 +297,7 @@ async function issueRelayTicket(request:Request,env:Env,session:Session){
     if(!owner||owner.user_id!==session.sub||owner.organization_id!==session.organization_id)return json({error:"REPLICA_OWNERSHIP_REJECTED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
     const claims:RelayTicketClaims={sub:session.sub,organization_id:session.organization_id,typ:"relay_ticket",target_id:target,self_replica:self,iat:now(),exp:now()+RELAY_TICKET_TTL_SECONDS,jti:uuid()};
     return json({ticket:await signRelayTicket(env,claims),expires_in:RELAY_TICKET_TTL_SECONDS});
-  }catch{
+  }catch(error){
     return json({error:"RELAY_TICKET_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},503);
   }
 }
