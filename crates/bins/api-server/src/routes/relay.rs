@@ -342,6 +342,8 @@ pub async fn issue_ticket(
 
     let now = unix_seconds();
     let claims = TokenClaims {
+        iss: super::ONYX_API_TOKEN_ISSUER.to_string(),
+        aud: super::ONYX_API_TOKEN_AUDIENCE.to_string(),
         sub: actor.user_id,
         username: actor.username,
         organization_id: actor.organization_id,
