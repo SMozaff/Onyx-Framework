@@ -102,7 +102,12 @@ jobs:
             tail -n 80 "$log_file" || true
             exit 1
           fi
-          node scripts/allfather-auth-smoke.mjs
+          if ! node scripts/allfather-auth-smoke.mjs; then
+            echo "::group::Safe local auth diagnostics"
+            grep -E 'All-Father login diagnostics|Argon2id verifier runtime error' "$log_file" || true
+            echo "::endgroup::"
+            exit 1
+          fi
 
       - name: Clean up local D1 smoke data
         if: always()
