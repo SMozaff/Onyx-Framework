@@ -132,3 +132,24 @@ async fn signed_access_token_is_rejected_after_tenant_binding_changes() {
         .expect("protected request");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn admin_role_revocation_takes_effect_for_existing_access_token() {
+    let fixture = start("role-revoked").await;
+    let token = login(&fixture).await;
+
+    sqlx::query("UPDATE users SET is_admin = 0 WHERE id = ?1")
+        .bind(&fixture.user_id)
+        .execute(&fixture.pool)
+        .await
+        .expect("revoke current admin role");
+
+    let response = fixture
+        .http
+        .get(format!("{}/api/admin/users", fixture.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("admin-only request");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
