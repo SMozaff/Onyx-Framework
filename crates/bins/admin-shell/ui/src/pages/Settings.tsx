@@ -314,7 +314,7 @@ function CreatePolicyForm({ onCreated }: { onCreated: (id: string) => void }) {
           disabled={loading}
           className="mt-2 rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
-          Retry creation safely
+          {t("settings.retryCreationSafely")}
         </button>
       )}
     </div>
@@ -367,7 +367,7 @@ function PolicyPanel({
         </>
       ) : (
         <p className="mt-3 text-xs text-onyx-status-blocked">
-          This projection is missing concurrency epochs. Refresh before changing this policy.
+          {t("settings.policyMissingConcurrencyEpochs")}
         </p>
       )}
     </div>
@@ -713,7 +713,7 @@ function LegalHoldPanel() {
           disabled={applying}
           className="ml-2 mt-2 rounded-md bg-onyx-surface px-2 py-1 text-xs text-onyx-text hover:bg-onyx-surface-hover disabled:opacity-50"
         >
-          Retry application safely
+          {t("settings.retryApplicationSafely")}
         </button>
       )}
 
@@ -732,7 +732,7 @@ function LegalHoldPanel() {
           {holdDetailState === "loading" && <p className="text-sm text-onyx-text-dim">{t("common.loading")}</p>}
           {holdDetailState === "error" && <p className="text-sm text-onyx-status-blocked">{error?.message}</p>}
           {holdDetailState === "empty" && (
-            <p className="text-sm text-onyx-text-dim">No legal hold found for this ID.</p>
+            <p className="text-sm text-onyx-text-dim">{t("settings.noLegalHoldFound")}</p>
           )}
           {holdDetailState === "ready" && hold && (
             <>
@@ -757,7 +757,7 @@ function LegalHoldPanel() {
               )}
               {status === "Applied" && !projectionConcurrency(hold) && (
                 <p className="mt-1 text-xs text-onyx-status-blocked">
-                  This projection is missing concurrency epochs. Refresh before releasing the hold.
+                  {t("settings.legalHoldMissingConcurrencyEpochs")}
                 </p>
               )}
               {releaseCmd.error && (
