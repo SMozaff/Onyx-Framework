@@ -369,3 +369,8 @@ Do not silently remove the route, assume external callers do not exist, or provi
 The Cloudflare Worker already re-resolves its D1 user and organization state on protected requests. Added a focused regression to `deploy/cloudflare/edge-gateway/test/security.test.ts`: it signs an access token for a user in organization `org-1`, changes the authoritative user row to `org-2`, and verifies that a query using the old token receives HTTP 401 with no writes. This test does not create or modify production data; it runs against the disposable in-memory security test double.
 
 The Worker test addition and this report update are committed together so the exact report-containing candidate also triggers Worker CI. At commit time, Full CI, Security, and Worker CI results for that candidate must be checked from the exact PR-head workflow runs; no result from a parent SHA is treated as proof for the final candidate.
+
+
+### H.8 Explicit isolated integration-test gate
+
+Added a dedicated CI step to run `cargo test --package api-server --release --test session_revalidation --features test-endpoints -- --test-threads=1` before the workspace-wide test invocation. This provides a separately identifiable result for the session-revalidation HTTP/WebSocket regressions rather than relying only on the aggregate workspace test. The step must pass on the exact report-containing PR head; no pass is claimed until the run log confirms it.
