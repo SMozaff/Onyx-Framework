@@ -534,5 +534,10 @@
   "settings.signingOut": "در حال خروج…",
   "settings.title": "تنظیمات",
   "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
-  "language.title": "زبان"
+  "language.title": "زبان",
+  "settings.noLegalHoldFound": "برای این شناسه هیچ نگهداشت قانونی پیدا نشد.",
+  "settings.retryCreationSafely": "ایجاد را با اطمینان دوباره تلاش کنید",
+  "settings.retryApplicationSafely": "اعمال را با اطمینان دوباره تلاش کنید",
+  "settings.policyMissingConcurrencyEpochs": "دوره‌های هم‌زمانی در این نمای داده وجود ندارند. پیش از تغییر این سیاست، تازه‌سازی کنید.",
+  "settings.legalHoldMissingConcurrencyEpochs": "دوره‌های هم‌زمانی در این نمای داده وجود ندارند. پیش از آزادسازی نگهداشت، تازه‌سازی کنید."
 }
