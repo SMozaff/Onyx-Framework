@@ -144,13 +144,13 @@ async function requireSession(request:Request,env:Env){
   // Account and organization status, role and tenant are re-read on EVERY
   // protected request. Long-lived JWT claims are not authority.
   const current=await env.DB.prepare(
-    "SELECT u.id,u.username,u.organization_id,u.is_active,u.role,u.is_admin,u.class,u.supabase_user_id FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
+    "SELECT u.id,u.username,u.organization_id,u.is_active,u.role,u.is_admin,u.class FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
   ).bind(session.sub).first<Record<string,unknown>>();
   const currentRole=current?roleForUser(current):"";
   if(!current||!ONYX_ROLES.includes(currentRole as typeof ONYX_ROLES[number])||(String(current.id)==="__allfather__"&&currentRole!=="ALL_FATHER"))throw new Error("AUTH_REQUIRED");
   const revocation=await env.DB.prepare("SELECT revoked_before_ms FROM user_session_revocations WHERE user_id=? LIMIT 1").bind(String(current.id)).first<{revoked_before_ms:number}>();
   if(revocation && (!Number.isSafeInteger(session.iat_ms) || Number(session.iat_ms)<=Number(revocation.revoked_before_ms)))throw new Error("revoked session");
-  if(String(current.organization_id)!==session.organization_id||currentRole!==session.role||
+  if(String(current.username)!==session.username||String(current.organization_id)!==session.organization_id||currentRole!==session.role||
      Boolean(current.is_admin)!==Boolean(session.is_admin))throw new Error("AUTH_REQUIRED");
   if(currentRole==="ALL_FATHER"&&(String(current.id)!=="__allfather__"||!current.is_admin))throw new Error("AUTH_REQUIRED");
   return session;
@@ -183,7 +183,7 @@ async function authLogin(request:Request,env:Env){
   const identifier=typeof body?.username==="string"?body.username.trim():typeof body?.email==="string"?body.email.trim():"";
   const password=typeof body?.password==="string"?body.password:"";
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role,u.supabase_user_id FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
+  const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
   const role=user?roleForUser(user):"";
   if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||((role==="ALL_FATHER"||String(user.id)==="__allfather__")&&(String(user.id)!=="__allfather__"||role!=="ALL_FATHER"||!user.is_admin))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   const requestedClientType = clientType(body);
@@ -200,14 +200,14 @@ async function authRefresh(request:Request,env:Env){
     const claims=await jwtVerify(env,token);
     if(claims.typ!=="refresh")throw new Error("wrong token type");
     const user=await env.DB.prepare(
-      "SELECT u.id,u.username,u.email,u.organization_id,u.is_admin,u.is_active,u.class,u.role,u.supabase_user_id FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
+      "SELECT u.id,u.username,u.email,u.organization_id,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
     ).bind(claims.sub).first<Record<string,unknown>>();
     if(!user)throw new Error("inactive user or organization");
     const revocation=await env.DB.prepare("SELECT revoked_before_ms FROM user_session_revocations WHERE user_id=? LIMIT 1").bind(String(user.id)).first<{revoked_before_ms:number}>();
     if(revocation && (!Number.isSafeInteger(claims.iat_ms) || Number(claims.iat_ms)<=Number(revocation.revoked_before_ms)))throw new Error("revoked session");
     const role=roleForUser(user);
     if(!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||role!==claims.role||
-       String(user.organization_id)!==claims.organization_id||
+       String(user.username)!==claims.username||String(user.organization_id)!==claims.organization_id||
        Boolean(user.is_admin)!==Boolean(claims.is_admin))throw new Error("session authority changed");
     if(role==="ALL_FATHER"&&(String(user.id)!=="__allfather__"||!user.is_admin))throw new Error("All-Father principal changed");
     // Consume the refresh token exactly once. Fail closed if D1 cannot prove
@@ -475,7 +475,7 @@ async function reactivateOrganizationAdmin(env:Env,session:Session,userId:string
 }
 async function deactivateUser(request:Request,env:Env,session:Session,userId:string){
   requireRole(session,"ALL_FATHER","ORGANIZATION_ADMIN");
-  const target=await env.DB.prepare("SELECT id,username,email,supabase_user_id,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
+  const target=await env.DB.prepare("SELECT id,username,email,organization_id,is_admin,is_active,role FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
   if(!target)return json({error:"USER_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
   const role=roleForUser(target);
   if(session.role==="ALL_FATHER"&&role!=="ORGANIZATION_ADMIN")return json({error:"FORBIDDEN_ROLE",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);

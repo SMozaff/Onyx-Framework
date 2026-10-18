@@ -58,7 +58,7 @@ class RelayDb {
           return {
             id: USER, username: "staff", email: "staff@example.test",
             organization_id: ORG, is_active: 1, is_admin: 0,
-            class: "staff", role: "STAFF", supabase_user_id: null,
+            class: "staff", role: "STAFF",
           };
         }
         if (sql.includes("FROM user_session_revocations")) return null;

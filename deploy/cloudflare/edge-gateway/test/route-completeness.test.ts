@@ -38,7 +38,6 @@ const REQUIRED_ROUTES: RequiredRoute[] = [
   { method: "POST", path: "/api/auth/login", source: "Admin/Staff login" },
   { method: "POST", path: "/api/auth/refresh", source: "HTTP client interceptor" },
   { method: "POST", path: "/api/auth/logout", source: "All shells logout" },
-  { method: "POST", path: "/api/auth/supabase", source: "All-Father OAuth" },
   { method: "GET", path: "/api/query", source: "useQuery hook" },
   { method: "POST", path: "/api/todo/lists", source: "Staff todo creation" },
   { method: "GET", path: "/api/events", source: "Realtime client" },
@@ -101,6 +100,11 @@ function routeMatches(requiredPath: string, implementedPattern: string): boolean
 }
 
 describe("Admin API route completeness", () => {
+  it("does not register the retired All-Father Supabase exchange", () => {
+    expect(worker).not.toContain("/api/auth/supabase");
+    expect(REQUIRED_ROUTES.some((route) => route.path === "/api/auth/supabase")).toBe(false);
+  });
+
   it("keeps every required Admin Settings endpoint registered with its expected method", () => {
     for (const [method, path] of [
       ["GET", "/api/admin/mobile-access"],

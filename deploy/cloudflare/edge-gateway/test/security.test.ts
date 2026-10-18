@@ -18,7 +18,6 @@ interface UserRow {
   class: string | null;
   parent_user_id?: string | null;
   role: string;
-  supabase_user_id?: string | null;
 }
 interface OrgRow { id: string; is_active: number }
 interface AggregateRow {
@@ -356,7 +355,7 @@ function makeDb(role = "STAFF") {
   db.users.set("staff-1", {
     id: "staff-1", username: "staff", email: "staff@example.test", organization_id: ORG,
     is_admin: role === "ORGANIZATION_ADMIN" ? 1 : 0, is_active: 1,
-    class: role, role, supabase_user_id: null,
+    class: role, role,
   });
   db.aggregates.set("task-1", {
     id: "task-1", aggregate_type: "task", version: 1, lifecycle_epoch: 0,
@@ -495,7 +494,7 @@ describe("Worker authorization and session security", () => {
         db.users.set("__allfather__", {
           id: "__allfather__", username: "allfather", email: "owner@example.test",
           organization_id: "org-root", is_admin: 1, is_active: 1, class: "ALL_FATHER",
-          role: "ALL_FATHER", supabase_user_id: "subject-1",
+          role: "ALL_FATHER",
         });
         token = await signToken(sessionClaims({
           sub: "__allfather__", username: "allfather", organization_id: "org-root",
@@ -599,17 +598,17 @@ describe("Worker authorization and session security", () => {
     expect(inactiveOrgDb.writes).toHaveLength(0);
   });
 
-  it("rejects All-Father access tokens whose subject no longer matches the D1 mapping", async () => {
+  it("rejects a previously issued All-Father token with a mismatched username claim", async () => {
     const db = new SecurityDb();
     db.organizations.set("__allfather__", { id: "__allfather__", is_active: 1 });
     db.users.set("__allfather__", {
       id: "__allfather__", username: "allfather", email: "owner@example.test",
       organization_id: "__allfather__", is_admin: 1, is_active: 1, class: "ALL_FATHER",
-      role: "ALL_FATHER", supabase_user_id: "subject-current",
+      role: "ALL_FATHER",
     });
     const token = await signToken(sessionClaims({
-      sub: "__allfather__", username: "allfather", organization_id: "__allfather__",
-      is_admin: true, role: "ALL_FATHER", identity_sub: "subject-old",
+      sub: "__allfather__", username: "forged-username", organization_id: "__allfather__",
+      is_admin: true, role: "ALL_FATHER",
     }));
     const response = await worker.fetch(new Request("https://worker.test/api/query?envelope=" +
       encodeURIComponent(b64u(JSON.stringify({ query_id: "q-1", query_type: "dashboard.summary", organization_id: "__allfather__" }))), {
@@ -652,7 +651,7 @@ describe("Worker authorization and session security", () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     db.users.set("staff-2", {
       id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
-      is_admin: 0, is_active: 1, class: "staff", role: "STAFF", supabase_user_id: null,
+      is_admin: 0, is_active: 1, class: "staff", role: "STAFF",
     });
     db.failUserSessionRevocationWrite = true;
     const adminToken = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
@@ -672,7 +671,7 @@ describe("Worker authorization and session security", () => {
     const db = makeDb("ORGANIZATION_ADMIN");
     db.users.set("staff-2", {
       id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
-      is_admin: 0, is_active: 1, class: "staff", role: "STAFF", supabase_user_id: null,
+      is_admin: 0, is_active: 1, class: "staff", role: "STAFF",
     });
     const adminToken = await signToken(sessionClaims({ role: "ORGANIZATION_ADMIN", is_admin: true }));
     const oldClaims = {
@@ -716,7 +715,7 @@ describe("Worker authorization and session security", () => {
 
     db.users.set("staff-2", {
       id: "staff-2", username: "staff2", email: "staff2@example.test", organization_id: ORG,
-      is_admin: 0, is_active: 1, class: "STAFF", role: "STAFF", supabase_user_id: null,
+      is_admin: 0, is_active: 1, class: "STAFF", role: "STAFF",
     });
     const otherToken = await signToken(sessionClaims({ sub: "staff-2", username: "staff2", jti: crypto.randomUUID() }));
     const overwrite = await worker.fetch(new Request("https://worker.test/api/push/subscriptions", {
@@ -930,7 +929,7 @@ describe("Worker authorization and session security", () => {
     db.users.set("__allfather__", {
       id: "__allfather__", username: "allfather", email: "allfather@example.test",
       organization_id: "__allfather__", is_admin: 1, is_active: 1, class: "ALL_FATHER",
-      role: "ALL_FATHER", supabase_user_id: "subject-current",
+      role: "ALL_FATHER",
     });
     const token = await signToken(sessionClaims({
       sub: "__allfather__", username: "allfather", organization_id: "__allfather__",

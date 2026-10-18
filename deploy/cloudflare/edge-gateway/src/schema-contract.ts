@@ -40,7 +40,6 @@ export const AUTH_SCHEMA_CONTRACT: {
       "class",
       "role",
       "parent_user_id",
-      "supabase_user_id",
       "created_at",
       "updated_at",
     ],
@@ -55,7 +54,6 @@ export const AUTH_SCHEMA_CONTRACT: {
   indexes: [
     "idx_users_username_lower",
     "idx_users_email_lower",
-    "idx_users_supabase_user",
   ],
   tableIndexes: {
     mobile_access_settings: ["idx_mobile_access_settings_updated_at"],
