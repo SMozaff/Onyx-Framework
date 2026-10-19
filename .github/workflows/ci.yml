@@ -104,9 +104,9 @@ jobs:
         # verification surface, while the release build below remains default-feature
         # only and therefore excludes client-driven fault injection.
         run: cargo clippy --workspace --all-targets --features api-server/test-endpoints -- -D warnings
-      - name: Generate transparent native ONYX icons
+      - name: Generate PNG-based ONYX platform icons
         run: |
-          python3 -m pip install --disable-pip-version-check cairosvg pillow
+          python3 -m pip install --disable-pip-version-check pillow
           python3 scripts/branding/generate-native-icons.py
       - name: Build
         run: cargo build --workspace --release
