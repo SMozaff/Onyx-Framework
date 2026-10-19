@@ -1,16 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#58f5ff"/><stop offset=".48" stop-color="#20c8ed"/><stop offset="1" stop-color="#1268df"/></linearGradient>
-    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2464d8"/><stop offset=".55" stop-color="#1742a5"/><stop offset="1" stop-color="#082b7d"/></linearGradient>
-    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ed2d91"/><stop offset=".5" stop-color="#d51d80"/><stop offset="1" stop-color="#95135e"/></linearGradient>
-    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%"><feGaussianBlur stdDeviation="2"/></filter>
-  </defs>
-  <g stroke="#142b68" stroke-width="5" stroke-linejoin="round">
-    <path fill="url(#cyan)" d="M256 28C373 28 466 117 475 231c7 87-36 160-101 208 27-42 40-91 35-140-9-99-87-178-188-188-58-6-111 12-152 47C108 80 177 28 256 28Z"/>
-    <path fill="url(#blue)" d="M475 231c7 87-36 160-101 208-55 41-123 53-188 31 71 7 141-22 184-77 58-74 53-181-13-249-31-32-71-51-113-57 124 4 222 64 231 144Z"/>
-    <path fill="url(#cyan)" d="M374 439c-55 41-123 53-188 31-75-25-126-93-129-174-3-65 27-124 78-160-33 39-46 91-34 141 20 83 97 140 181 135 34-2 66-13 92-32Z"/>
-    <path fill="url(#pink)" d="M186 470C96 440 38 358 41 266 44 186 90 121 164 91c-48 34-79 89-80 151-1 71 43 134 108 162 61 26 130 17 181-20-42 54-111 93-187 86Z"/>
-    <path fill="url(#blue)" d="M84 242c5-75 61-140 137-158 77-18 159 17 198 82-42-42-104-59-161-41-66 20-111 81-111 150 0 63 37 119 94 145-93-19-164-92-157-178Z"/>
-    <path fill="url(#pink)" d="M41 266C44 186 90 121 164 91c59-24 124-21 181 9-73-22-153 0-201 57-46 54-54 130-20 193-52-16-86-48-83-84Z"/>
-  </g>
+ <defs>
+  <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5af5ff"/><stop offset=".55" stop-color="#27c8e7"/><stop offset="1" stop-color="#168bd4"/></linearGradient>
+  <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#3264c9"/><stop offset="1" stop-color="#173a9a"/></linearGradient>
+  <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e22b8d"/><stop offset="1" stop-color="#a81769"/></linearGradient>
+ </defs>
+ <g stroke="#172e6a" stroke-width="5" stroke-linejoin="round">
+  <path fill="url(#cyan)" d="M257 31C376 31 468 126 474 244c4 74-26 140-82 188 24-44 33-93 22-141-20-89-99-153-189-153-48 0-91 18-124 49C137 93 192 31 257 31Z"/>
+  <path fill="url(#blue)" d="M474 244c4 74-26 140-82 188-60 51-145 65-218 36 74 8 144-22 184-79 48-68 42-162-15-223-29-31-68-50-109-56 126 7 232 63 240 134Z"/>
+  <path fill="url(#cyan)" d="M392 432c-60 51-145 65-218 36-74-30-124-100-125-180-1-59 25-113 69-150-28 41-37 91-22 138 23 75 92 126 170 126 47 0 91-18 126-49Z"/>
+  <path fill="url(#pink)" d="M174 467C92 436 39 355 42 267c2-75 46-140 116-173-43 35-69 86-69 143 0 72 44 135 108 161 62 26 130 16 181-22-49 65-124 106-204 91Z"/>
+  <path fill="url(#blue)" d="M89 247c8-78 68-140 144-155 72-14 146 17 185 76-41-34-96-45-147-29-68 21-114 83-114 153 0 58 32 110 82 139-93-25-160-98-150-184Z"/>
+  <path fill="url(#pink)" d="M42 267c2-75 46-140 116-173 57-27 124-26 181 2-70-18-145 5-190 60-43 52-52 126-20 187-55-15-88-41-87-76Z"/>
+ </g>
 </svg>
