@@ -46,7 +46,15 @@ async function main() {
     throw new Error(`vite manifest not found at dist/.vite/manifest.json — run vite build first (${error.message})`);
   }
 
-  const urls = new Set(['/', '/manifest.webmanifest', '/icons/icon.svg']);
+  const urls = new Set([
+    '/',
+    '/manifest.webmanifest',
+    '/icons/icon-192.png',
+    '/icons/icon-512.png',
+    '/icons/icon-192-maskable.png',
+    '/icons/icon-512-maskable.png',
+    '/icons/apple-touch-icon.png',
+  ]);
   collectUrls(manifest, 'index.html', new Set(), urls);
   const precache = [...urls].sort();
   if (precache.length < 3) {

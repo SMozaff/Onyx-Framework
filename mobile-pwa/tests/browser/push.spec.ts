@@ -119,8 +119,8 @@ test('service worker displays a simulated push and routes the click', async ({ p
       const scope = self as unknown as ServiceWorkerGlobalScope;
       await scope.registration.showNotification(payload.title, {
         body: payload.message,
-        icon: '/icons/icon.svg',
-        badge: '/icons/icon.svg',
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
         data: payload.url,
       });
     },
