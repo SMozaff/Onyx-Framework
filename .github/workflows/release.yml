@@ -195,6 +195,11 @@ jobs:
         # `target/${{ matrix.target }}/release/...` from the repo root.
         # The "Locate bundle output" step below relies on that same
         # workspace-root path.
+        - name: Generate transparent native ONYX icons
+          shell: bash
+          run: |
+            python3 -m pip install --disable-pip-version-check cairosvg pillow
+            python3 scripts/branding/generate-native-icons.py
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
