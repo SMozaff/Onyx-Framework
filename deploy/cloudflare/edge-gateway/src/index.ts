@@ -1,5 +1,11 @@
 export { EventHub, RelayHub } from "./event-hub";
-import { argon2id, argon2Verify } from "hash-wasm";
+import { argon2id, argon2Verify, setWASMModules } from "argon2-wasm-edge";
+// @ts-expect-error Wrangler loads this as a precompiled WebAssembly module.
+import argon2WASM from "argon2-wasm-edge/wasm/argon2.wasm";
+// @ts-expect-error Wrangler loads this as a precompiled WebAssembly module.
+import blake2bWASM from "argon2-wasm-edge/wasm/blake2b.wasm";
+
+setWASMModules({ argon2WASM, blake2bWASM });
 import { missingAuthSchema } from "./schema-contract";
 import { authorizeCommand, authorizeQuery, ONYX_ROLES, payloadOwnerIds, resourceOwnedBy } from "./authorization";
 import { mobileCapabilityGranted } from "./mobile-capability";

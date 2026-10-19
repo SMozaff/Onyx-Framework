@@ -97,6 +97,10 @@ jobs:
           compatibility_date = "2026-10-09"
           workers_dev = true
 
+          [[rules]]
+          type = "CompiledWasm"
+          globs = ["**/*.wasm"]
+
           [observability]
           enabled = true
 
