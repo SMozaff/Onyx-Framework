@@ -1,5 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
-  <rect width="192" height="192" rx="36" fill="#0a1e3d"/>
-  <text x="96" y="126" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="96" font-weight="900" fill="#ffffff">O</text>
-  <circle cx="150" cy="44" r="10" fill="#3a7ab8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#58f5ff"/><stop offset=".48" stop-color="#20c8ed"/><stop offset="1" stop-color="#1268df"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2464d8"/><stop offset=".55" stop-color="#1742a5"/><stop offset="1" stop-color="#082b7d"/></linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ed2d91"/><stop offset=".5" stop-color="#d51d80"/><stop offset="1" stop-color="#95135e"/></linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%"><feGaussianBlur stdDeviation="2"/></filter>
+  </defs>
+  <g stroke="#142b68" stroke-width="5" stroke-linejoin="round">
+    <path fill="url(#cyan)" d="M256 28C373 28 466 117 475 231c7 87-36 160-101 208 27-42 40-91 35-140-9-99-87-178-188-188-58-6-111 12-152 47C108 80 177 28 256 28Z"/>
+    <path fill="url(#blue)" d="M475 231c7 87-36 160-101 208-55 41-123 53-188 31 71 7 141-22 184-77 58-74 53-181-13-249-31-32-71-51-113-57 124 4 222 64 231 144Z"/>
+    <path fill="url(#cyan)" d="M374 439c-55 41-123 53-188 31-75-25-126-93-129-174-3-65 27-124 78-160-33 39-46 91-34 141 20 83 97 140 181 135 34-2 66-13 92-32Z"/>
+    <path fill="url(#pink)" d="M186 470C96 440 38 358 41 266 44 186 90 121 164 91c-48 34-79 89-80 151-1 71 43 134 108 162 61 26 130 17 181-20-42 54-111 93-187 86Z"/>
+    <path fill="url(#blue)" d="M84 242c5-75 61-140 137-158 77-18 159 17 198 82-42-42-104-59-161-41-66 20-111 81-111 150 0 63 37 119 94 145-93-19-164-92-157-178Z"/>
+    <path fill="url(#pink)" d="M41 266C44 186 90 121 164 91c59-24 124-21 181 9-73-22-153 0-201 57-46 54-54 130-20 193-52-16-86-48-83-84Z"/>
+  </g>
 </svg>
