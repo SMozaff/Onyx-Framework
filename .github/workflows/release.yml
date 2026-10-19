@@ -179,6 +179,11 @@ jobs:
           else
             echo "No real Apple notarization credentials configured; leaving APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID unset so Tauri skips notarization."
           fi
+      - name: Generate transparent native ONYX icons
+        shell: bash
+        run: |
+          python3 -m pip install --disable-pip-version-check cairosvg pillow
+          python3 scripts/branding/generate-native-icons.py
       - name: Build and bundle the desktop app
         # Deliberately omits tagName/releaseName/releaseId: per
         # tauri-action's own documented behavior, providing none of
@@ -322,6 +327,11 @@ jobs:
           else
             echo "No real Apple notarization credentials configured; leaving APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID unset so Tauri skips notarization."
           fi
+      - name: Generate transparent native ONYX icons
+        shell: bash
+        run: |
+          python3 -m pip install --disable-pip-version-check cairosvg pillow
+          python3 scripts/branding/generate-native-icons.py
       - name: Build and bundle the Admin desktop app
         # Omitting tagName/releaseName/releaseId makes tauri-action build only.
         # `publish` below remains the one release-assembly owner. Cargo output
