@@ -108,7 +108,9 @@ describe("Worker internal diagnostics contract", () => {
     })).toBeUndefined();
   });
 
-  it("maps response classes to conservative severity and retryability without inferring root cause", () => {
+  it("maps client errors to warnings and server errors to errors", () => {
+    expect(makeApiFailureEvent({ requestId: "request-0", pathname: "/api/query", method: "GET", status: 400, elapsedMs: 10, originAllowed: true }))
+      .toMatchObject({ severity: "warning", error_code: "API_REQUEST_INVALID" });
     expect(makeApiFailureEvent({ requestId: "request-1", pathname: "/api/query", method: "GET", status: 503, elapsedMs: 20, originAllowed: true }))
       .toMatchObject({ severity: "error", retryability: "yes", cause_confidence: "unknown", evidence_source: "http_status" });
     expect(makeApiFailureEvent({ requestId: "request-2", pathname: "/api/query", method: "GET", status: 500, elapsedMs: 20, originAllowed: true }))

@@ -96,7 +96,7 @@ export interface ApiFailureEvent {
 
 function severityForStatus(status: number): DiagnosticSeverity {
   if (status >= 500) return "error";
-  if (status === 401 || status === 403 || status === 429) return "warning";
+  if (status >= 400) return "warning";
   return "info";
 }
 
