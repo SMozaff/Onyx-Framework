@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image, ImageChops
 
 STANDARD_RING_PNGS = {
-    "assets/branding/onyx-ring.png",
+    "assets/branding/onyx-ring-transparent.png",
     "crates/bins/desktop-shell/icons/icon.png",
     "crates/bins/desktop-shell/ui/public/favicon.png",
     "crates/bins/desktop-shell/ui/public/onyx-ring.png",
@@ -36,8 +36,8 @@ padded_maskable = _generator.padded_maskable
 ERRORS: list[str] = []
 CHECKED: dict[str, tuple[int, int, float]] = {}
 EXPECTED_PNGS: dict[str, tuple[int | None, int | None]] = {
-    "assets/branding/onyx-ring.png": (1024, 1024),
-    "assets/branding/admin-shell.png": (1024, 1024),
+    "assets/branding/onyx-ring-transparent.png": (1024, 1024),
+    "assets/branding/admin-shell-transparent.png": (1024, 1024),
     "crates/bins/admin-shell/icons/icon.png": (1024, 1024),
     "crates/bins/admin-shell/ui/public/favicon.png": (96, 96),
     "crates/bins/desktop-shell/icons/icon.png": (1024, 1024),
@@ -285,8 +285,8 @@ def validate_references() -> None:
 
 
 def validate_generated_mappings() -> None:
-    ring = load_square(ROOT / "assets/branding/onyx-ring.png")
-    admin = load_square(ROOT / "assets/branding/admin-shell.png")
+    ring = load_square(ROOT / "assets/branding/onyx-ring-transparent.png")
+    admin = load_square(ROOT / "assets/branding/admin-shell-transparent.png")
     expected: dict[str, Image.Image] = {}
     expected["crates/bins/admin-shell/icons/icon.png"] = resized(admin, 1024)
     expected["crates/bins/admin-shell/ui/public/favicon.png"] = resized(admin, 96)
@@ -312,14 +312,36 @@ def validate_generated_mappings() -> None:
 def main() -> int:
     for relative, dims in EXPECTED_PNGS.items():
         validate_png(relative, dims)
-    if (ROOT / "assets/branding/admin-shell.png").is_file() and (ROOT / "assets/branding/onyx-ring.png").is_file():
+    # The repository's source masters are retained as inputs, but their
+    # generated *transparent exports* are the only files accepted as sources
+    # for the native/browser launchers. Confirm the legacy source files remain
+    # valid PNGs with the black-matte signature the generator knows how to remove.
+    for relative in ("assets/branding/admin-shell.png", "assets/branding/onyx-ring.png"):
+        path = ROOT / relative
         try:
-            admin = Image.open(ROOT / "assets/branding/admin-shell.png").convert("RGBA")
-            ring = Image.open(ROOT / "assets/branding/onyx-ring.png").convert("RGBA")
-            if admin.size == ring.size and ImageChops.difference(admin, ring).getbbox() is None:
-                fail("Admin Shell source is identical to the standard ONYX ring; the approved custom exception appears lost")
+            with Image.open(path) as source:
+                if source.format != "PNG" or source.size != (1024, 1024):
+                    fail(f"{relative}: expected a readable 1024x1024 PNG master")
+                rgb = source.convert("RGB")
+                corners = (
+                    rgb.getpixel((0, 0)),
+                    rgb.getpixel((rgb.width - 1, 0)),
+                    rgb.getpixel((0, rgb.height - 1)),
+                    rgb.getpixel((rgb.width - 1, rgb.height - 1)),
+                )
+                if any(max(pixel) > 12 for pixel in corners):
+                    fail(f"{relative}: source matte no longer matches the documented black-corner conversion contract")
         except Exception as error:
-            fail(f"cannot compare Admin Shell exception with standard ring ({error})")
+            fail(f"{relative}: cannot validate source master ({error})")
+
+    if (ROOT / "assets/branding/admin-shell-transparent.png").is_file() and (ROOT / "assets/branding/onyx-ring-transparent.png").is_file():
+        try:
+            admin = Image.open(ROOT / "assets/branding/admin-shell-transparent.png").convert("RGBA")
+            ring = Image.open(ROOT / "assets/branding/onyx-ring-transparent.png").convert("RGBA")
+            if admin.size == ring.size and ImageChops.difference(admin, ring).getbbox() is None:
+                fail("Admin Shell transparent export is identical to the standard ONYX ring; the approved custom exception appears lost")
+        except Exception as error:
+            fail(f"cannot compare transparent Admin Shell export with standard ring ({error})")
     validate_generated_mappings()
     validate_tauri_containers()
     validate_references()
