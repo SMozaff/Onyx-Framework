@@ -52,7 +52,7 @@ export default function Login({
     <div className="onyx-auth-shell flex flex-col lg:flex-row">
       <section className="onyx-auth-aside" aria-labelledby="staff-signin-context">
         <div className="relative z-10 flex items-center gap-3">
-          <img src="/onyx-ring.png" alt={t("app.name")} className="h-11 w-11 shrink-0 object-contain" />
+          <img src="/favicon.png" alt={t("app.name")} className="h-11 w-11 shrink-0 object-contain" />
           <div>
             <p className="text-[0.72rem] font-extrabold tracking-[0.24em] text-white">{t("app.name")}</p>
             <p className="mt-0.5 text-[0.62rem] text-sky-100/70">{t("auth.staffOperations")}</p>
