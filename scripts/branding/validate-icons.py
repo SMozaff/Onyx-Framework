@@ -322,15 +322,30 @@ def main() -> int:
             with Image.open(path) as source:
                 if source.format != "PNG" or source.size != (1024, 1024):
                     fail(f"{relative}: expected a readable 1024x1024 PNG master")
-                rgb = source.convert("RGB")
-                corners = (
-                    rgb.getpixel((0, 0)),
-                    rgb.getpixel((rgb.width - 1, 0)),
-                    rgb.getpixel((0, rgb.height - 1)),
-                    rgb.getpixel((rgb.width - 1, rgb.height - 1)),
+                rgba = source.convert("RGBA")
+                alpha = rgba.getchannel("A")
+                alpha_corners = (
+                    alpha.getpixel((0, 0)),
+                    alpha.getpixel((rgba.width - 1, 0)),
+                    alpha.getpixel((0, rgba.height - 1)),
+                    alpha.getpixel((rgba.width - 1, rgba.height - 1)),
                 )
-                if any(max(pixel) > 12 for pixel in corners):
-                    fail(f"{relative}: source matte no longer matches the documented black-corner conversion contract")
+                alpha_histogram = alpha.histogram()
+                already_transparent = (
+                    alpha.getextrema()[0] == 0
+                    and alpha_histogram[0] / (rgba.width * rgba.height) >= 0.05
+                    and all(value == 0 for value in alpha_corners)
+                )
+                if not already_transparent:
+                    rgb = source.convert("RGB")
+                    corners = (
+                        rgb.getpixel((0, 0)),
+                        rgb.getpixel((rgb.width - 1, 0)),
+                        rgb.getpixel((0, rgb.height - 1)),
+                        rgb.getpixel((rgb.width - 1, rgb.height - 1)),
+                    )
+                    if any(max(pixel) > 12 for pixel in corners):
+                        fail(f"{relative}: non-transparent master does not match the documented black-corner conversion contract")
         except Exception as error:
             fail(f"{relative}: cannot validate source master ({error})")
 
