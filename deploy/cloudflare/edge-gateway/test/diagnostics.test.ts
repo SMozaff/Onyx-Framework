@@ -74,6 +74,7 @@ describe("Worker internal diagnostics contract", () => {
       stage: "worker",
       correlation_id: "request-123",
       outcome: "failure",
+      error_code: "API_AUTHORIZATION_DENIED",
       cause_confidence: "unknown",
       evidence_source: "http_status",
       retryability: "no",
@@ -94,7 +95,7 @@ describe("Worker internal diagnostics contract", () => {
       elapsed_ms: 10,
       origin_allowed: false,
     });
-    expect(event?.timestamp).toMatch(/^\\d{4}-\\d{2}-\\d{2}T/);
+    expect(event?.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(JSON.stringify(event)).not.toContain("private-id");
     expect(JSON.stringify(event)).not.toContain("private payload");
     expect(makeApiFailureEvent({

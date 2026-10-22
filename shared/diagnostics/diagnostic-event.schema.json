@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:onyx:diagnostic-event:1.0",
+  "$id": "https://onyx-framework.invalid/schemas/diagnostic-event-1.0.json",
   "title": "ONYX Unified Diagnostic Event",
   "description": "Version 1.0 event contract for Stage 1 Admin Shell login and Stage 2 Cloudflare Worker HTTP failure events. Legacy aliases are permitted for compatibility; never place secrets or raw payloads in context.",
   "type": "object",
@@ -12,9 +12,7 @@
     "component",
     "operation",
     "stage",
-    "correlation_id",
     "outcome",
-    "error_code",
     "cause_confidence",
     "evidence_source",
     "retryability",
