@@ -176,6 +176,23 @@ export function formatLoginFailureMessage(
 }
 
 export interface LoginDiagnosticEvent {
+  schema_version: "1.0";
+  timestamp: string;
+  component: "admin-shell";
+  operation: "auth.login";
+  correlation_id: string;
+  error_code: string;
+  cause_confidence: "unknown";
+  evidence_source: "http_status" | "server_code" | "transport_code" | "client_stage" | "unknown";
+  retryability: "yes" | "no";
+  remediation_ref: string;
+  context: {
+    http_status?: number;
+    transport_code?: string;
+    server_code?: string;
+    duration_ms?: number;
+  };
+  // Compatibility aliases retained for the Stage 1 login event contract.
   event: "onyx.login.diagnostic";
   outcome: "success" | "failure";
   request_id?: string;
@@ -209,17 +226,43 @@ export function recordLoginDiagnostic(input: {
   const code = input.code === "LOGIN_SUCCESS" && input.outcome === "success"
     ? input.code
     : Object.prototype.hasOwnProperty.call(LOGIN_ERROR_REGISTRY, input.code) ? input.code : "LOGIN_UNKNOWN";
+  const correlationId = safeRequestId(input.requestId) ?? createLoginRequestId();
+  const httpStatus = Number.isInteger(input.httpStatus) && Number(input.httpStatus) >= 100 && Number(input.httpStatus) <= 599 ? input.httpStatus : undefined;
+  const transportCode = typeof input.transportCode === "string" && KNOWN_TRANSPORT_CODES.has(input.transportCode) ? input.transportCode : undefined;
+  const serverCode = typeof input.serverCode === "string" && KNOWN_SERVER_CODES.has(input.serverCode) ? input.serverCode : undefined;
+  const durationMs = Number.isFinite(input.durationMs) ? Math.max(0, Math.min(Number(input.durationMs), 3_600_000)) : undefined;
+  const stage = validStages.has(input.stage) ? input.stage : "unknown";
+  const outcome = input.outcome === "success" ? "success" : "failure";
   const event: LoginDiagnosticEvent = {
+    schema_version: "1.0",
+    timestamp: new Date().toISOString(),
+    component: "admin-shell",
+    operation: "auth.login",
+    correlation_id: correlationId,
+    error_code: code,
+    // A mapped symptom is not a root-cause diagnosis. Root cause remains unknown
+    // until correlated evidence from the Worker or native transport is available.
+    cause_confidence: "unknown",
+    evidence_source: transportCode ? "transport_code" : serverCode ? "server_code" : httpStatus ? "http_status" : stage === "unknown" ? "unknown" : "client_stage",
+    retryability: input.retryable === true ? "yes" : "no",
+    remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#login-error-mapping",
+    context: {
+      ...(httpStatus !== undefined ? { http_status: httpStatus } : {}),
+      ...(transportCode ? { transport_code: transportCode } : {}),
+      ...(serverCode ? { server_code: serverCode } : {}),
+      ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+    },
+    // Compatibility aliases retained for the Stage 1 login event contract.
     event: "onyx.login.diagnostic",
-    outcome: input.outcome === "success" ? "success" : "failure",
-    request_id: safeRequestId(input.requestId),
+    outcome,
+    request_id: correlationId,
     code,
-    stage: validStages.has(input.stage) ? input.stage : "unknown",
+    stage,
     severity: validSeverities.has(input.severity) ? input.severity : "error",
-    http_status: Number.isInteger(input.httpStatus) && Number(input.httpStatus) >= 100 && Number(input.httpStatus) <= 599 ? input.httpStatus : undefined,
-    transport_code: typeof input.transportCode === "string" && KNOWN_TRANSPORT_CODES.has(input.transportCode) ? input.transportCode : undefined,
-    server_code: typeof input.serverCode === "string" && KNOWN_SERVER_CODES.has(input.serverCode) ? input.serverCode : undefined,
-    duration_ms: Number.isFinite(input.durationMs) ? Math.max(0, Math.min(Number(input.durationMs), 3_600_000)) : undefined,
+    http_status: httpStatus,
+    transport_code: transportCode,
+    server_code: serverCode,
+    duration_ms: durationMs,
     retryable: input.retryable === true
   };
   try {

@@ -39,14 +39,33 @@ describe("Worker internal diagnostics contract", () => {
   });
 
   it("bounds event fields and omits any event for a successful response", () => {
-    expect(makeApiFailureEvent({
+    const event = makeApiFailureEvent({
       requestId: "request-123",
       pathname: "/api/admin/users/private-id",
       method: "DELETE",
       status: 403,
       elapsedMs: 10,
       originAllowed: false,
-    })).toEqual({
+    });
+    expect(event).toMatchObject({
+      schema_version: "1.0",
+      severity: "warning",
+      component: "cloudflare-worker",
+      operation: "DELETE /api/admin",
+      stage: "worker",
+      correlation_id: "request-123",
+      outcome: "failure",
+      cause_confidence: "unknown",
+      evidence_source: "http_status",
+      retryability: "no",
+      remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#worker-http-error-mapping",
+      context: {
+        route_group: "/api/admin",
+        method: "DELETE",
+        http_status: 403,
+        duration_ms: 10,
+        origin_allowed: false,
+      },
       event: "onyx.api.failure",
       request_id: "request-123",
       route_group: "/api/admin",
@@ -56,6 +75,9 @@ describe("Worker internal diagnostics contract", () => {
       elapsed_ms: 10,
       origin_allowed: false,
     });
+    expect(event?.timestamp).toMatch(/^\\d{4}-\\d{2}-\\d{2}T/);
+    expect(JSON.stringify(event)).not.toContain("private-id");
+    expect(JSON.stringify(event)).not.toContain("private payload");
     expect(makeApiFailureEvent({
       requestId: "request-123",
       pathname: "/api/query",
@@ -64,6 +86,13 @@ describe("Worker internal diagnostics contract", () => {
       elapsedMs: 1,
       originAllowed: true,
     })).toBeUndefined();
+  });
+
+  it("maps response classes to conservative severity and retryability without inferring root cause", () => {
+    expect(makeApiFailureEvent({ requestId: "request-1", pathname: "/api/query", method: "GET", status: 503, elapsedMs: 20, originAllowed: true }))
+      .toMatchObject({ severity: "error", retryability: "yes", cause_confidence: "unknown", evidence_source: "http_status" });
+    expect(makeApiFailureEvent({ requestId: "request-2", pathname: "/api/query", method: "GET", status: 500, elapsedMs: 20, originAllowed: true }))
+      .toMatchObject({ severity: "error", retryability: "unknown", cause_confidence: "unknown" });
   });
 
   it("propagates request IDs to non-login HTTP errors without logging credentials or raw paths", async () => {

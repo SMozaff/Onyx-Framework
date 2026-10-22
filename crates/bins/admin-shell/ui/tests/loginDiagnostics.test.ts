@@ -134,6 +134,21 @@ describe("Admin login diagnostics registry", () => {
       serverCode: "access_token=untrusted",
       retryable: false,
     });
+    const emitted = spy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(emitted).toMatchObject({
+      schema_version: "1.0",
+      component: "admin-shell",
+      operation: "auth.login",
+      correlation_id: "safe-correlation-id",
+      error_code: "LOGIN_RESPONSE_UNAVAILABLE",
+      outcome: "failure",
+      cause_confidence: "unknown",
+      evidence_source: "transport_code",
+      retryability: "yes",
+      remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#login-error-mapping",
+    });
+    expect(emitted.context).toMatchObject({ transport_code: "ERR_NETWORK" });
+    expect(JSON.stringify(emitted)).not.toContain("private-exception-message");
     const serialized = JSON.stringify(spy.mock.calls);
     for (const sensitive of ["password", "access_token", "refresh_token", "secret-environment-value", "private-exception-message"]) {
       expect(serialized.toLowerCase()).not.toContain(sensitive);

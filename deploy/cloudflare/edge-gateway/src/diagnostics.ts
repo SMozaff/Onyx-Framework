@@ -58,7 +58,31 @@ export function classifyApiFailure(status: number): ApiFailureCode | undefined {
 
 export type SafeCauseType = "TypeError" | "RangeError" | "SyntaxError" | "Error" | "UnknownError";
 
+export type DiagnosticSeverity = "info" | "warning" | "error" | "critical";
+export type DiagnosticRetryability = "yes" | "no" | "unknown";
+
 export interface ApiFailureEvent {
+  schema_version: "1.0";
+  timestamp: string;
+  severity: DiagnosticSeverity;
+  component: "cloudflare-worker";
+  operation: string;
+  stage: "worker";
+  correlation_id: string;
+  outcome: "failure";
+  cause_confidence: "unknown";
+  evidence_source: "http_status";
+  retryability: DiagnosticRetryability;
+  remediation_ref: string;
+  context: {
+    route_group: string;
+    method: string;
+    http_status: number;
+    duration_ms: number;
+    origin_allowed: boolean | null;
+    cause_type?: SafeCauseType;
+  };
+  // Compatibility aliases retained for existing Stage 2 log queries.
   event: "onyx.api.failure";
   request_id: string;
   route_group: string;
@@ -68,6 +92,18 @@ export interface ApiFailureEvent {
   elapsed_ms: number;
   origin_allowed: boolean | null;
   cause_type?: SafeCauseType;
+}
+
+function severityForStatus(status: number): DiagnosticSeverity {
+  if (status >= 500) return "error";
+  if (status === 401 || status === 403 || status === 429) return "warning";
+  return "info";
+}
+
+function retryabilityForStatus(status: number): DiagnosticRetryability {
+  if (status === 429 || status === 502 || status === 503 || status === 504) return "yes";
+  if ([400, 401, 403, 404, 405, 409, 422, 501].includes(status)) return "no";
+  return "unknown";
 }
 
 export function makeApiFailureEvent(input: {
@@ -82,14 +118,41 @@ export function makeApiFailureEvent(input: {
   const diagnosticCode = classifyApiFailure(input.status);
   if (!diagnosticCode) return undefined;
   const method = /^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)$/.test(input.method) ? input.method : "OTHER";
+  const requestId = trustedRequestId(input.requestId);
+  const routeGroup = safeRouteGroup(input.pathname);
+  const elapsedMs = Math.max(0, Math.min(Math.trunc(input.elapsedMs), 86_400_000));
+  const context = {
+    route_group: routeGroup,
+    method,
+    http_status: input.status,
+    duration_ms: elapsedMs,
+    origin_allowed: input.originAllowed,
+    ...(input.causeType ? { cause_type: input.causeType } : {}),
+  };
   return {
+    schema_version: "1.0",
+    timestamp: new Date().toISOString(),
+    severity: severityForStatus(input.status),
+    component: "cloudflare-worker",
+    operation: `${method} ${routeGroup}`,
+    // Stage 2 reports at the Worker response boundary; a status does not prove
+    // which internal handler or dependency caused the failure.
+    stage: "worker",
+    correlation_id: requestId,
+    outcome: "failure",
+    cause_confidence: "unknown",
+    evidence_source: "http_status",
+    retryability: retryabilityForStatus(input.status),
+    remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#worker-http-error-mapping",
+    context,
+    // Compatibility aliases retained for existing Stage 2 log queries.
     event: "onyx.api.failure",
-    request_id: trustedRequestId(input.requestId, () => "invalid-request-id"),
-    route_group: safeRouteGroup(input.pathname),
+    request_id: requestId,
+    route_group: routeGroup,
     method,
     status: input.status,
     diagnostic_code: diagnosticCode,
-    elapsed_ms: Math.max(0, Math.min(Math.trunc(input.elapsedMs), 86_400_000)),
+    elapsed_ms: elapsedMs,
     origin_allowed: input.originAllowed,
     ...(input.causeType ? { cause_type: input.causeType } : {}),
   };
