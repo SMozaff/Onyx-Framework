@@ -144,7 +144,9 @@ def assert_matches(relative: str, actual: Image.Image | None, expected: Image.Im
 
 def validate_tauri_containers() -> None:
     required_ico_sizes = {16, 24, 32, 48, 64, 128, 256}
-    required_icns_sizes = {128, 256, 512, 1024}
+    # ICNS stores Retina variants as (logical size, scale=2), e.g. 512@2x
+    # represents a 1024x1024 source without an additional 1024 logical-size entry.
+    required_icns_sizes = {128, 256, 512}
     for _name, crate in BRANDS.items():
         ico_path = crate / "icons/icon.ico"
         icns_path = crate / "icons/icon.icns"
