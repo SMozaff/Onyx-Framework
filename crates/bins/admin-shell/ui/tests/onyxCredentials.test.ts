@@ -13,10 +13,10 @@ const session = {
 describe("Admin Shell ONYX credential login contract", () => {
   it("posts username/password to the ONYX login endpoint and consumes the token pair", async () => {
     const post = vi.fn(async () => ({ data: session }));
-    const result = await loginWithOnyxCredentials(post, "allfather", "operator-secret");
+    const result = await loginWithOnyxCredentials(post, "allfather", "operator-secret", "test-request-id");
     expect(post).toHaveBeenCalledExactlyOnceWith("/api/auth/login", {
       username: "allfather", password: "operator-secret", client_type: "admin",
-    });
+    }, { headers: { "X-ONYX-Request-ID": "test-request-id" } });
     expect(result).toEqual(session);
     expect(isOnyxLoginSession(result)).toBe(true);
   });

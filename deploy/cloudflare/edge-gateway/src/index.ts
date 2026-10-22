@@ -197,20 +197,47 @@ async function issuePair(env:Env,user:Record<string,unknown>,type:string,session
   const access=await jwtSign(env,{...base,exp:now()+3600,typ:"access"}); const refresh=await jwtSign(env,{...base,exp:now()+7*86400,typ:"refresh"});
   return {access_token:access,refresh_token:refresh,expires_in:3600,user:{id:user.id,username:user.username,email:user.email??null,organization_id:user.organization_id,is_admin:Boolean(user.is_admin),class:user.class??null,role}};
 }
-async function authLogin(request:Request,env:Env){
-  const body=await request.json().catch(()=>null) as Json|null;
-  const identifier=typeof body?.username==="string"?body.username.trim():typeof body?.email==="string"?body.email.trim():"";
-  const password=typeof body?.password==="string"?body.password:"";
+async function authLogin(request:Request,env:Env):Promise<Response>{
+  let parsed:unknown;
+  try { parsed=await request.json(); }
+  catch { return json({error:"INVALID_LOGIN_REQUEST",category:"VALIDATION",retryability:"NON_RETRYABLE"},400); }
+  if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))return json({error:"INVALID_LOGIN_REQUEST",category:"VALIDATION",retryability:"NON_RETRYABLE"},400);
+  const body=parsed as Json;
+  // Distinguish malformed field types from absent/empty credentials, while
+  // keeping credential/account-state denial indistinguishable to the client.
+  if((body.username!==undefined&&typeof body.username!=="string")||
+    (body.email!==undefined&&typeof body.email!=="string")||
+    (body.password!==undefined&&typeof body.password!=="string")){
+    return json({error:"INVALID_LOGIN_REQUEST",category:"VALIDATION",retryability:"NON_RETRYABLE"},400);
+  }
+  const identifier=typeof body.username==="string"?body.username.trim():typeof body.email==="string"?body.email.trim():"";
+  const password=typeof body.password==="string"?body.password:"";
+  // Preserve the deliberately indistinguishable credential/account-state denial.
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
-  const role=user?roleForUser(user):"";
-  if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
-  const requestedClientType = clientType(body);
-  if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
-  // client_type is caller-controlled metadata and is never an authorization
-  // input. Capability endpoints enforce the persisted class policy from D1;
-  // this policy is server-side authorization, not device attestation.
-  return json(await issuePair(env,user,requestedClientType));
+  let stage="credential_lookup";
+  try{
+    const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
+    stage="credential_verification";
+    const role=user?roleForUser(user):"";
+    if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+    const requestedClientType = clientType(body);
+    if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    // client_type is caller-controlled metadata and is never an authorization
+    // input. Capability endpoints enforce the persisted class policy from D1;
+    // this policy is server-side authorization, not device attestation.
+    stage="session_creation";
+    return json(await issuePair(env,user,requestedClientType));
+  }catch(error){
+    const sessionFailure=stage==="session_creation";
+    const code=sessionFailure?"LOGIN_SESSION_CREATION_FAILED":"LOGIN_BACKEND_FAILURE";
+    // Only allowlisted diagnostic metadata is logged; never log request bodies,
+    // usernames, password material, tokens, D1 row data, or exception messages.
+    console.error(JSON.stringify({
+      event:"onyx.login.failure", request_id:request.headers.get("X-ONYX-Request-ID"), stage, diagnostic_code:code,
+      cause_type:error instanceof TypeError?"TypeError":error instanceof RangeError?"RangeError":error instanceof SyntaxError?"SyntaxError":error instanceof Error?"Error":"UnknownError"
+    }));
+    return json({error:code,code,category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500);
+  }
 }
 async function authRefresh(request:Request,env:Env){
   const body=await request.json().catch(()=>null) as Json|null;
@@ -1723,7 +1750,9 @@ async function websocketEvents(request: Request, env: Env): Promise<Response> {
 
 async function dispatch(request:Request,env:Env):Promise<Response>{
   const url=new URL(request.url);const origin=corsOrigin(request,env);
-  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,PATCH,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
+  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,PATCH,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key,X-ONYX-Request-ID","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
+  if(url.pathname==="/api/auth/login"&&request.method!=="POST")return json({error:"METHOD_NOT_ALLOWED",category:"VALIDATION",retryability:"NON_RETRYABLE"},405,origin);
+  if(url.pathname.startsWith("/api/auth/")&&!["/api/auth/login","/api/auth/refresh","/api/auth/logout"].includes(url.pathname))return json({error:"AUTH_ROUTE_NOT_FOUND",category:"ROUTING",retryability:"NON_RETRYABLE"},404,origin);
   if(url.pathname==="/health")return json({status:"ok",service:"onyx-cloudflare-worker",runtime:"cloudflare-workers-free"},200,origin);
   if(url.pathname==="/ready"){
     try{
@@ -1809,10 +1838,74 @@ function applyCors(request:Request,env:Env,response:Response):Response{
   if(origin&&allowed.includes(origin)&&!allowed.includes("*")){
     headers.set("access-control-allow-origin",origin);
     headers.set("access-control-allow-credentials","true");
+      if(headers.has("x-onyx-request-id"))headers.set("access-control-expose-headers","X-ONYX-Request-ID");
     const vary=headers.get("vary");
     if(!vary)headers.set("vary","Origin");
     else if(!vary.split(",").some(value=>value.trim().toLowerCase()==="origin"))headers.set("vary",`${vary}, Origin`);
   }
   return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 }
-export default {fetch:async(request:Request,env:Env)=>applyCors(request,env,await dispatch(request,env))};
+function trustedLoginRequestId(value:string|null):string{
+  return value&&/^[A-Za-z0-9._:-]{1,80}$/.test(value)?value:uuid();
+}
+async function correlateLoginResponse(response:Response,requestId:string):Promise<Response>{
+  const headers=new Headers(response.headers);
+  headers.set("X-ONYX-Request-ID",requestId);
+  if(response.status>=400&&(headers.get("content-type")??"").toLowerCase().includes("application/json")){
+    const body=await response.clone().json().catch(()=>null) as unknown;
+    if(body&&typeof body==="object"&&!Array.isArray(body)){
+      const record=body as Record<string,unknown>;
+      const code=typeof record.code==="string"?record.code:typeof record.error==="string"?record.error:"LOGIN_HTTP_ERROR";
+      headers.delete("content-length");
+      return new Response(JSON.stringify({...record,code,correlation_id:requestId}),{status:response.status,statusText:response.statusText,headers});
+    }
+  }
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+async function instrumentLoginRequest(request:Request,env:Env):Promise<Response>{
+  const requestId=trustedLoginRequestId(request.headers.get("X-ONYX-Request-ID"));
+  const headers=new Headers(request.headers);
+  headers.set("X-ONYX-Request-ID",requestId);
+  const correlatedRequest=new Request(request,{headers});
+  const started=Date.now();
+  let response:Response;
+  try{
+    response=await dispatch(correlatedRequest,env);
+  }catch(error){
+    console.error(JSON.stringify({event:"onyx.login.failure",request_id:requestId,stage:"worker_dispatch",diagnostic_code:"LOGIN_BACKEND_FAILURE",cause_type:error instanceof TypeError?"TypeError":error instanceof RangeError?"RangeError":error instanceof SyntaxError?"SyntaxError":error instanceof Error?"Error":"UnknownError"}));
+    response=json({error:"LOGIN_BACKEND_FAILURE",code:"LOGIN_BACKEND_FAILURE",category:"INFRASTRUCTURE",retryability:"TRANSIENT",correlation_id:requestId},500);
+  }
+  response=await correlateLoginResponse(response,requestId);
+  response=applyCors(correlatedRequest,env,response);
+  const origin=request.headers.get("origin");
+  const code=await response.clone().json().then(body=>{
+    if(!body||typeof body!=="object")return undefined;
+    const value=(body as Record<string,unknown>).code??(body as Record<string,unknown>).error;
+    return typeof value==="string"&&/^[A-Z][A-Z0-9_]{1,63}$/.test(value)?value:undefined;
+  }).catch(()=>undefined);
+  const stage=request.method==="OPTIONS"?"cors_preflight"
+    :code==="INVALID_LOGIN_REQUEST"||code==="INVALID_CLIENT_TYPE"?"request_validation"
+    :code==="INVALID_CREDENTIALS"?"credential_verification"
+    :code==="LOGIN_SESSION_CREATION_FAILED"?"session_creation"
+    :code==="LOGIN_BACKEND_FAILURE"||response.status>=500?"backend"
+    :response.status===404||response.status===405?"routing"
+    :response.ok?"session_issued":"authentication_response";
+  const originAllowed=origin?Boolean(corsOrigin(request,env)):null;
+  const corsRejected=request.method==="OPTIONS"&&Boolean(origin)&&originAllowed===false;
+  console.log(JSON.stringify({
+    event:"onyx.login.http", request_id:requestId,
+    stage,
+    method:request.method, status:response.status,
+    outcome:corsRejected?"cors_rejected":response.ok?"success":"http_error",
+    error_code:corsRejected?"LOGIN_CORS_ORIGIN_REJECTED":response.ok?undefined:code,
+    elapsed_ms:Date.now()-started,
+    origin:origin?origin.slice(0,200).replace(/[\u0000-\u001f\u007f]/g,"?"):null,
+    origin_allowed:originAllowed
+  }));
+  return response;
+}
+export default {fetch:async(request:Request,env:Env)=>{
+  return new URL(request.url).pathname==="/api/auth/login"
+    ?instrumentLoginRequest(request,env)
+    :applyCors(request,env,await dispatch(request,env));
+}};
