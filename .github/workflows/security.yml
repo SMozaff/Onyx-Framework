@@ -1,8 +1,9 @@
 name: Security
 
 on:
+  # Feature/fix branches are verified by pull_request, avoiding duplicate full runs.
   push:
-    branches: [ main, 'feature/**', 'fix/**', 'hardening/**' ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
   schedule:
