@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:onyx:diagnostic-event:1.0",
+  "title": "ONYX Unified Diagnostic Event",
+  "description": "Version 1.0 contract for Stage 1 Admin Shell and Cloudflare Worker login events plus Stage 2 Worker HTTP failures. Legacy fields remain available; raw payloads and secrets must never be included.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timestamp",
+    "severity",
+    "component",
+    "operation",
+    "stage",
+    "correlation_id",
+    "outcome",
+    "error_code",
+    "cause_confidence",
+    "evidence_source",
+    "retryability",
+    "remediation_ref"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "severity": {
+      "enum": [
+        "debug",
+        "info",
+        "warning",
+        "error",
+        "critical"
+      ]
+    },
+    "component": {
+      "enum": [
+        "admin-shell",
+        "desktop-shell",
+        "web-ui",
+        "mobile-pwa",
+        "mobile-android",
+        "mobile",
+        "cloudflare-worker",
+        "api-server",
+        "internal-service",
+        "unknown"
+      ]
+    },
+    "operation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9._:/ -]+$"
+    },
+    "stage": {
+      "enum": [
+        "configuration",
+        "transport",
+        "cors",
+        "routing",
+        "request_validation",
+        "authentication",
+        "authorization",
+        "backend",
+        "dependency",
+        "session",
+        "client",
+        "navigation",
+        "worker",
+        "unknown"
+      ]
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,80}$"
+    },
+    "outcome": {
+      "enum": [
+        "success",
+        "failure",
+        "degraded",
+        "unknown"
+      ]
+    },
+    "error_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "cause_confidence": {
+      "enum": [
+        "confirmed",
+        "suspected",
+        "unknown"
+      ]
+    },
+    "evidence_source": {
+      "enum": [
+        "http_status",
+        "server_code",
+        "transport_code",
+        "client_stage",
+        "dependency_probe",
+        "unknown",
+        "cors_policy"
+      ]
+    },
+    "retryability": {
+      "enum": [
+        "yes",
+        "no",
+        "unknown"
+      ]
+    },
+    "remediation_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^docs/diagnostics/"
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "route_group": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "^(/[A-Za-z0-9_-]+)*$"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+            "HEAD",
+            "OTHER"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "origin_allowed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "transport_code": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "^[A-Z0-9_]+$"
+        },
+        "server_code": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[A-Z][A-Z0-9_]+$"
+        },
+        "cause_type": {
+          "enum": [
+            "TypeError",
+            "RangeError",
+            "SyntaxError",
+            "Error",
+            "UnknownError"
+          ]
+        },
+        "trace_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-fA-F0-9]+$"
+        },
+        "operation_id": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "command_type": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        }
+      }
+    },
+    "event": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^onyx\\.[a-z0-9.]+$"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,80}$"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "http_status": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "transport_code": {
+      "type": "string",
+      "maxLength": 40,
+      "pattern": "^[A-Z0-9_]+$"
+    },
+    "server_code": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]+$"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3600000
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "route_group": {
+      "type": "string",
+      "maxLength": 40,
+      "pattern": "^(/[A-Za-z0-9_-]+)*$"
+    },
+    "method": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+        "HEAD",
+        "OTHER"
+      ]
+    },
+    "status": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "diagnostic_code": {
+      "type": "string",
+      "pattern": "^(API|LOGIN)_[A-Z_]+$"
+    },
+    "elapsed_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400000
+    },
+    "origin_allowed": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "cause_type": {
+      "enum": [
+        "TypeError",
+        "RangeError",
+        "SyntaxError",
+        "Error",
+        "UnknownError"
+      ]
+    },
+    "origin": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "legacy_stage": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z_]{1,64}$"
+    },
+    "legacy_outcome": {
+      "enum": [
+        "success",
+        "http_error",
+        "cors_rejected"
+      ]
+    },
+    "legacy_error_code": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    }
+  }
+}

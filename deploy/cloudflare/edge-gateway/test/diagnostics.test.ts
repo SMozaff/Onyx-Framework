@@ -1,14 +1,105 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyApiFailure,
   makeApiFailureEvent,
+  makeWorkerLoginDiagnosticEvent,
   safeRouteGroup,
   trustedRequestId,
 } from "../src/diagnostics";
 import worker from "../src/index";
 
+const diagnosticSchema = JSON.parse(readFileSync(
+  new URL("../../../../shared/diagnostics/diagnostic-event.schema.json", import.meta.url),
+  "utf8",
+)) as {
+  properties: Record<string, { const?: string; additionalProperties?: boolean }>;
+  required: string[];
+};
+
 describe("Worker internal diagnostics contract", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("keeps the shared schema versioned and requires canonical correlation and error code", () => {
+    expect(diagnosticSchema.properties.schema_version.const).toBe("1.0");
+    expect(diagnosticSchema.required).toEqual(expect.arrayContaining([
+      "schema_version", "timestamp", "severity", "component", "operation", "stage",
+      "correlation_id", "outcome", "error_code", "cause_confidence", "evidence_source",
+      "retryability", "remediation_ref",
+    ]));
+    expect(diagnosticSchema.properties.context.additionalProperties).toBe(false);
+  });
+
+  it("maps Stage 1 Worker login evidence into the shared schema and redacts malformed origins", () => {
+    const event = makeWorkerLoginDiagnosticEvent({
+      event: "onyx.login.http",
+      requestId: "login-correlation-17",
+      legacyStage: "credential_verification",
+      method: "POST",
+      status: 401,
+      outcome: "failure",
+      serverCode: "INVALID_CREDENTIALS",
+      legacyErrorCode: "INVALID_CREDENTIALS",
+      legacyOutcome: "http_error",
+      elapsedMs: 22,
+      origin: "https://app.example/path?token=must-not-log",
+      originAllowed: true,
+    });
+    expect(event).toMatchObject({
+      schema_version: "1.0",
+      component: "cloudflare-worker",
+      operation: "POST /api/auth/login",
+      stage: "authentication",
+      correlation_id: "login-correlation-17",
+      outcome: "failure",
+      error_code: "LOGIN_AUTH_REJECTED",
+      cause_confidence: "unknown",
+      evidence_source: "server_code",
+      retryability: "no",
+      remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#login-error-mapping",
+      legacy_stage: "credential_verification",
+      legacy_outcome: "http_error",
+      legacy_error_code: "INVALID_CREDENTIALS",
+      origin: "[invalid-origin]",
+    });
+    expect(JSON.stringify(event)).not.toContain("must-not-log");
+    expect(JSON.stringify(event)).not.toContain("access_token");
+
+    expect(makeWorkerLoginDiagnosticEvent({
+      requestId: "login-forbidden-19",
+      legacyStage: "authorization",
+      method: "POST",
+      status: 403,
+      outcome: "failure",
+      originAllowed: true,
+    })).toMatchObject({
+      error_code: "LOGIN_AUTHORIZATION_DENIED",
+      stage: "authorization",
+      cause_confidence: "unknown",
+    });
+
+    const unknown = makeWorkerLoginDiagnosticEvent({
+      requestId: "login-unknown-18",
+      legacyStage: "authentication_response",
+      method: "POST",
+      status: 302,
+      outcome: "failure",
+      serverCode: "UNMAPPED_PRIVATE_CODE",
+      legacyErrorCode: "UNMAPPED_PRIVATE_CODE",
+      legacyOutcome: "http_error",
+      origin: "malformed origin data",
+      originAllowed: null,
+    });
+    expect(unknown).toMatchObject({
+      outcome: "failure",
+      error_code: "LOGIN_HTTP_ERROR",
+      cause_confidence: "unknown",
+      severity: "warning",
+      stage: "authentication",
+      origin: "[invalid-origin]",
+    });
+    expect(JSON.stringify(unknown)).not.toContain("UNMAPPED_PRIVATE_CODE");
+  });
 
   it("uses stable status-based classifications and leaves successful responses unclassified", () => {
     expect(classifyApiFailure(200)).toBeUndefined();
@@ -39,14 +130,34 @@ describe("Worker internal diagnostics contract", () => {
   });
 
   it("bounds event fields and omits any event for a successful response", () => {
-    expect(makeApiFailureEvent({
+    const event = makeApiFailureEvent({
       requestId: "request-123",
       pathname: "/api/admin/users/private-id",
       method: "DELETE",
       status: 403,
       elapsedMs: 10,
       originAllowed: false,
-    })).toEqual({
+    });
+    expect(event).toMatchObject({
+      schema_version: "1.0",
+      severity: "warning",
+      component: "cloudflare-worker",
+      operation: "DELETE /api/admin",
+      stage: "worker",
+      correlation_id: "request-123",
+      outcome: "failure",
+      error_code: "API_AUTHORIZATION_DENIED",
+      cause_confidence: "unknown",
+      evidence_source: "http_status",
+      retryability: "no",
+      remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#worker-http-error-mapping",
+      context: {
+        route_group: "/api/admin",
+        method: "DELETE",
+        http_status: 403,
+        duration_ms: 10,
+        origin_allowed: false,
+      },
       event: "onyx.api.failure",
       request_id: "request-123",
       route_group: "/api/admin",
@@ -56,6 +167,9 @@ describe("Worker internal diagnostics contract", () => {
       elapsed_ms: 10,
       origin_allowed: false,
     });
+    expect(event?.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(JSON.stringify(event)).not.toContain("private-id");
+    expect(JSON.stringify(event)).not.toContain("private payload");
     expect(makeApiFailureEvent({
       requestId: "request-123",
       pathname: "/api/query",
@@ -64,6 +178,15 @@ describe("Worker internal diagnostics contract", () => {
       elapsedMs: 1,
       originAllowed: true,
     })).toBeUndefined();
+  });
+
+  it("maps client errors to warnings and server errors to errors", () => {
+    expect(makeApiFailureEvent({ requestId: "request-0", pathname: "/api/query", method: "GET", status: 400, elapsedMs: 10, originAllowed: true }))
+      .toMatchObject({ severity: "warning", error_code: "API_REQUEST_INVALID" });
+    expect(makeApiFailureEvent({ requestId: "request-1", pathname: "/api/query", method: "GET", status: 503, elapsedMs: 20, originAllowed: true }))
+      .toMatchObject({ severity: "error", retryability: "yes", cause_confidence: "unknown", evidence_source: "http_status" });
+    expect(makeApiFailureEvent({ requestId: "request-2", pathname: "/api/query", method: "GET", status: 500, elapsedMs: 20, originAllowed: true }))
+      .toMatchObject({ severity: "error", retryability: "unknown", cause_confidence: "unknown" });
   });
 
   it("propagates request IDs to non-login HTTP errors without logging credentials or raw paths", async () => {

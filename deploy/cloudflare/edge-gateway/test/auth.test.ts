@@ -403,12 +403,30 @@ describe("POST /api/auth/login — diagnostic correlation and safe failures", ()
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     const event = JSON.parse(String(info.mock.calls[0]?.[0])) as Record<string, unknown>;
     expect(event).toMatchObject({
-      event: "onyx.login.http",
-      stage: "cors_preflight",
-      outcome: "cors_rejected",
+      schema_version: "1.0",
+      component: "cloudflare-worker",
+      operation: "OPTIONS /api/auth/login",
+      stage: "cors",
+      correlation_id: expect.stringMatching(/^[A-Za-z0-9._:-]{1,80}$/),
+      outcome: "failure",
       error_code: "LOGIN_CORS_ORIGIN_REJECTED",
+      cause_confidence: "unknown",
+      evidence_source: "cors_policy",
+      retryability: "no",
+      remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#login-error-mapping",
+      event: "onyx.login.http",
+      request_id: expect.stringMatching(/^[A-Za-z0-9._:-]{1,80}$/),
+      legacy_stage: "cors_preflight",
+      legacy_outcome: "cors_rejected",
+      legacy_error_code: "LOGIN_CORS_ORIGIN_REJECTED",
       origin: "https://origin-not-allowed.example",
       origin_allowed: false,
+      context: {
+        route_group: "/api/auth",
+        method: "OPTIONS",
+        http_status: 204,
+        origin_allowed: false,
+      },
     });
   });
 
@@ -457,6 +475,26 @@ describe("POST /api/auth/login — diagnostic correlation and safe failures", ()
     expect(body.access_token).toBeUndefined();
     expect(body.refresh_token).toBeUndefined();
 
+    const logEvent = JSON.parse(String(errorLog.mock.calls[0]?.[0])) as Record<string, unknown>;
+    expect(logEvent).toMatchObject({
+      schema_version: "1.0",
+      component: "cloudflare-worker",
+      operation: "POST /api/auth/login",
+      stage: "session",
+      correlation_id: requestId,
+      outcome: "failure",
+      error_code: "LOGIN_SESSION_CREATION_FAILED",
+      cause_confidence: "unknown",
+      evidence_source: "server_code",
+      retryability: "yes",
+      legacy_stage: "session_creation",
+      diagnostic_code: "LOGIN_SESSION_CREATION_FAILED",
+      context: {
+        route_group: "/api/auth",
+        method: "POST",
+        http_status: 500,
+      },
+    });
     const logs = JSON.stringify(errorLog.mock.calls);
     expect(logs).toContain(requestId);
     expect(logs).toContain("LOGIN_SESSION_CREATION_FAILED");
