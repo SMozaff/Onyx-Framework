@@ -38,7 +38,7 @@ def black_matte_to_alpha(image: Image.Image, path: Path) -> Image.Image:
         for x in range(rgba.width):
             red, green, blue, _old_alpha = source[x, y]
             alpha = max(red, green, blue)
-            if alpha <= 2:
+            if alpha <= 12:
                 source[x, y] = (0, 0, 0, 0)
             else:
                 source[x, y] = (
