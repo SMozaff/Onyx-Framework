@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyApiFailure,
@@ -7,8 +8,26 @@ import {
 } from "../src/diagnostics";
 import worker from "../src/index";
 
+const diagnosticSchema = JSON.parse(readFileSync(
+  new URL("../../../../shared/diagnostics/diagnostic-event.schema.json", import.meta.url),
+  "utf8",
+)) as {
+  properties: Record<string, { const?: string; additionalProperties?: boolean }>;
+  required: string[];
+};
+
 describe("Worker internal diagnostics contract", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("keeps the shared schema versioned and requires canonical correlation and classification fields", () => {
+    expect(diagnosticSchema.properties.schema_version.const).toBe("1.0");
+    expect(diagnosticSchema.required).toEqual(expect.arrayContaining([
+      "schema_version", "timestamp", "severity", "component", "operation", "stage",
+      "correlation_id", "outcome", "error_code", "cause_confidence", "evidence_source",
+      "retryability", "remediation_ref",
+    ]));
+    expect(diagnosticSchema.properties.context.additionalProperties).toBe(false);
+  });
 
   it("uses stable status-based classifications and leaves successful responses unclassified", () => {
     expect(classifyApiFailure(200)).toBeUndefined();
