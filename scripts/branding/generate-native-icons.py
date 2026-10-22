@@ -77,8 +77,9 @@ def generate_tauri_icons(name: str, crate: Path, image: Image.Image) -> None:
     print(f"Generated transparent PNG/ICO/ICNS Tauri launcher assets for {name}.")
 
 
-def generate_mobile_and_web_icons(image: Image.Image) -> None:
+def generate_mobile_and_web_icons(image: Image.Image, desktop_crate: Path) -> None:
     save_png(resized(image, 96), ROOT / "web-ui/public/favicon.png")
+    save_png(resized(image, 1024), desktop_crate / "ui/public/onyx-ring.png")
     pwa = ROOT / "mobile-pwa/public/icons"
     for size in (192, 512):
         save_png(resized(image, size), pwa / f"icon-{size}.png")
@@ -102,7 +103,7 @@ def main() -> None:
         images[name] = load_square(ROOT / "assets/branding" / source_name)
     for name, crate in BRANDS.items():
         generate_tauri_icons(name, crate, images[name])
-    generate_mobile_and_web_icons(images["desktop-shell"])
+    generate_mobile_and_web_icons(images["desktop-shell"], BRANDS["desktop-shell"])
 
 
 if __name__ == "__main__":
