@@ -156,10 +156,15 @@ def generate_mobile_and_web_icons(image: Image.Image, desktop_crate: Path) -> No
 
 
 def main() -> None:
-    images: dict[str, Image.Image] = {}
-    for name in ("admin-shell", "desktop-shell"):
-        source_name = "admin-shell.png" if name == "admin-shell" else "onyx-ring.png"
-        images[name] = load_square(ROOT / "assets/branding" / source_name)
+    branding = ROOT / "assets/branding"
+    images = {
+        "admin-shell": prepare_transparent_source(
+            branding / "admin-shell.png", branding / "admin-shell-transparent.png"
+        ),
+        "desktop-shell": prepare_transparent_source(
+            branding / "onyx-ring.png", branding / "onyx-ring-transparent.png"
+        ),
+    }
     for name, crate in BRANDS.items():
         generate_tauri_icons(name, crate, images[name])
     generate_mobile_and_web_icons(images["desktop-shell"], BRANDS["desktop-shell"])
