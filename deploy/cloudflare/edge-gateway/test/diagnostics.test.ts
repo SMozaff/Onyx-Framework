@@ -80,6 +80,10 @@ describe("Worker internal diagnostics contract", () => {
       },
     }), {
       DB: {} as unknown as D1Database,
+      // The request deliberately carries a malformed bearer credential. Configure
+      // the test Worker so jwtVerify reaches token validation instead of failing
+      // early with "ONYX_JWT_SECRET is not configured" (HTTP 500).
+      ONYX_JWT_SECRET: "diagnostics-test-jwt-secret",
       ONYX_CORS_ORIGINS: "https://app.example",
     } as never);
 
