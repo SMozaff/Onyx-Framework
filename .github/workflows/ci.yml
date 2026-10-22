@@ -104,10 +104,11 @@ jobs:
         # verification surface, while the release build below remains default-feature
         # only and therefore excludes client-driven fault injection.
         run: cargo clippy --workspace --all-targets --features api-server/test-endpoints -- -D warnings
-      - name: Generate PNG-based ONYX platform icons
+      - name: Generate and validate PNG-based ONYX platform icons
         run: |
           python3 -m pip install --disable-pip-version-check pillow
           python3 scripts/branding/generate-native-icons.py
+          python3 scripts/branding/validate-icons.py
       - name: Build
         run: cargo build --workspace --release
       # Integration tests connect directly to PostgreSQL and expect the
@@ -275,6 +276,12 @@ jobs:
         working-directory: web-ui
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Generate and validate ONYX brand assets
+        working-directory: .
+        run: |
+          python3 -m pip install --disable-pip-version-check pillow
+          python3 scripts/branding/generate-native-icons.py
+          python3 scripts/branding/validate-icons.py
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -321,6 +328,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Generate and validate ONYX brand assets
+        working-directory: .
+        run: |
+          python3 -m pip install --disable-pip-version-check pillow
+          python3 scripts/branding/generate-native-icons.py
+          python3 scripts/branding/validate-icons.py
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -349,6 +362,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Generate and validate ONYX brand assets
+        working-directory: .
+        run: |
+          python3 -m pip install --disable-pip-version-check pillow
+          python3 scripts/branding/generate-native-icons.py
+          python3 scripts/branding/validate-icons.py
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
