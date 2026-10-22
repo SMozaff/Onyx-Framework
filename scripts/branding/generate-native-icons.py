@@ -126,7 +126,17 @@ def generate_tauri_icons(name: str, crate: Path, image: Image.Image) -> None:
     out.mkdir(parents=True, exist_ok=True)
     source = resized(image, 1024)
     save_png(source, out / "icon.png")
-    source.save(
+    # Tiny ICO representations lose sub-pixel alpha when the logo almost
+    # fills the frame. Keep the canonical PNG unchanged, but place a 86%-scale
+    # transparent-safe version in the ICO container so its smallest entries
+    # retain a clear exterior margin and do not cut off the outer glow.
+    ico_size = round(source.width * 0.86)
+    ico_canvas = Image.new("RGBA", source.size, (0, 0, 0, 0))
+    ico_canvas.alpha_composite(
+        resized(source, ico_size),
+        ((source.width - ico_size) // 2, (source.height - ico_size) // 2),
+    )
+    ico_canvas.save(
         out / "icon.ico",
         format="ICO",
         sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
