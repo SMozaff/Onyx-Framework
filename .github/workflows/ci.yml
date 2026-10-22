@@ -8,11 +8,12 @@ on:
     branches: [ main ]
   workflow_dispatch: {}
 
-# Keep only the newest verification run for a given branch/PR. This prevents
-# every corrective commit in a hardening pass from occupying the runner queue
-# after a newer commit has already superseded it.
+# Scope concurrency to an exact revision as well as its branch/PR ref.
+# A cancelled earlier run can leave the aggregate merge-gate job queued while
+# the next revision waits behind the same ref-only concurrency group. Including
+# the SHA lets the exact new revision execute its full gate independently.
 concurrency:
-  group: onyx-ci-${{ github.ref }}
+  group: onyx-ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:
