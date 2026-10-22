@@ -70,6 +70,7 @@ export interface ApiFailureEvent {
   stage: "worker";
   correlation_id: string;
   outcome: "failure";
+  error_code: ApiFailureCode;
   cause_confidence: "unknown";
   evidence_source: "http_status";
   retryability: DiagnosticRetryability;
