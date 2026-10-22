@@ -1,0 +1,105 @@
+# Stage 3 — Unified diagnostics, reporting and verification
+
+## Scope and baseline evidence
+
+Repository: SMozaff/Onyx-Framework. This audit inspected main at e59993389ff68bdc851a827d36b9392d3d40c649.
+
+- Stage 1 PR #280: branch head ac1a2fe5317161cef1e18956164c54d2be1e25dc; merge commit 28770927087783e930ecaeafbbebc4fa4e9c1d4d. It added the Admin Shell login registry/classifier, request ID on its login request, safe user-facing code/reference text, and Worker login-boundary events.
+- Stage 2 PR #281: branch head e8bcde615b319392ffbf3262376cd0a07b2df19e; merge commit ff1565b65d4a639f7116233fc0c1070018ffd7c9. It added non-login Worker request-boundary diagnostics, bounded route groups and HTTP status classifications.
+- Later Stage 2 test-fixture corrections: merge commit f411f1df1626bb36995aad7697612cb4dc5bb1a4 fixed the relay-upgrade fixture; current base commit e59993389ff68bdc851a827d36b9392d3d40c649 fixed the diagnostics auth test's missing test-only ONYX_JWT_SECRET. Neither change changes production credentials or the login response contract.
+- At baseline e599933, main's Cloudflare Worker CI and Security workflow were successful; the All-Father credential smoke was successful; full CI was still running when checked. The deployment workflow for that same main commit completed successfully (https://github.com/SMozaff/Onyx-Framework/actions/runs/39766343266). This document does not claim Stage 3 has been deployed.
+
+Stage 1 and Stage 2 are present in current source. The missing prerequisite was a versioned shared event contract and explicit mappings across those two event shapes. The smallest correction is additive: preserve the existing event fields and response contracts, add canonical schema-versioned fields to the two existing emitters, and document all other runtimes as partial or separate until they are instrumented and tested.
+
+## Architecture choice
+
+Use the existing structured console-log paths and a JSON Schema contract. No dashboard, diagnostic API, new database, or telemetry service is added. Stage 1 emits browser/WebView console records plus the onyx:login-diagnostic custom event. The Worker login-boundary logs (onyx.login.http and onyx.login.failure) and Stage 2 non-login HTTP failure logs now emit the schema-versioned fields to the Worker console while preserving prior values under legacy aliases where canonical field meanings differ. Rust has an existing CanonicalJsonLayer and optional OTLP export controlled by OTEL_EXPORTER_OTLP_ENDPOINT, but its current R3 shape is not yet emitted in schema 1.0. No central sink, log-retention policy, or access-control policy was established by this audit; those are deployment/platform decisions, not invented here.
+
+## Unified event and evidence interpretation
+
+See shared/diagnostics/diagnostic-event.schema.json. Keep these distinctions:
+- Observed failure classification is not the same as a confirmed root cause.
+- Stage 2's generic HTTP event identifies the Worker boundary, not necessarily the handler/dependency that failed.
+- LOGIN_UNKNOWN, LOGIN_RESPONSE_UNAVAILABLE and generic HTTP errors must remain unknown until corroborated by an HTTP/server/native-transport observation.
+- Correlation IDs allow events to be grouped; they do not authorize access and do not prove causation.
+- Timestamp joins must allow clock skew. Correlation IDs are stronger than time-only joins when the request reached the Worker.
+- Incoming IDs failing the bounded pattern are replaced. Do not quote or log rejected incoming values.
+
+## Correlation path and limits
+
+For Admin Shell login the source path is Login.tsx -> credentials.ts/Axios -> POST /api/auth/login with X-ONYX-Request-ID -> Cloudflare Worker instrumentLoginRequest -> authLogin. Worker login boundary stages are normalized for the canonical stage field (for example credential_verification to authentication); legacy_stage records the earlier fine-grained value. The Worker validates or replaces the incoming ID, uses it for the request event and JSON error correlation, and adds X-ONYX-Request-ID to the response where the existing CORS rules permit. Admin Shell reads the response header first and falls back to its outbound request ID. The request ID is never used in authorization.
+
+For non-login Worker routes the Worker entry instruments the HTTP response, generates/replaces the request ID, returns it in X-ONYX-Request-ID, and adds correlation_id (or request_id when a domain correlation_id already exists) to JSON error responses. It logs only a bounded route family, HTTP method/status, duration, origin-allowed flag and optional allowlisted cause type. Stage 2 does not capture raw route IDs, query strings, headers or request/response bodies.
+
+A browser's OPTIONS preflight generally does not include the header value from the subsequent request. A rejected preflight may therefore lack the client-generated ID; use time range, HTTP method and the exact observed origin to find the Worker preflight record. This does not prove the POST was sent.
+
+The Rust Axum API is a distinct API backend from the Worker login path. ApiError includes its own correlation_id, and the canonical R3 logger can emit correlation_id/trace_id/operation_id. This Stage 3 change does not establish a single HTTP middleware that validates X-ONYX-Request-ID across Axum routes, nor does it join Worker IDs to Rust trace IDs. Never infer those paths are joined. Web UI, non-admin Desktop Shell, PWA and Android paths have different client/auth implementations and are not automatically covered by the Admin Shell logger.
+
+## Reporting workflow (no new endpoint)
+
+1. Start with the stable error code shown to the user or present in structured log JSON.
+2. Search the runtime's existing log interface for error_code/diagnostic_code, then narrow by correlation_id/request_id when available.
+3. Compare client event, Worker request event and response status/code. Do not assume events with similar timestamps are the same operation absent a matching ID or domain operation ID.
+4. For an opaque client network error, report LOGIN_RESPONSE_UNAVAILABLE rather than asserting CORS, DNS, TLS or backend failure. If the Worker has no matching record, that absence alone does not prove the request never arrived.
+5. For API_INTERNAL_FAILURE or API_SERVICE_UNAVAILABLE, the Worker event proves the response classification, not the underlying dependency cause. Check the health/readiness event and actual dependency evidence before a remediation is chosen.
+6. If only client evidence is available, say cause unknown and request the sanitized code/reference ID plus approximate UTC time. Do not ask users to send passwords, tokens, cookies, screenshots containing secrets, or raw payloads.
+7. For a likely preflight rejection use the sanitized origin decision and approximate time, because the client's ID may not have crossed preflight.
+
+## Login error mapping
+
+Admin Shell classification is in crates/bins/admin-shell/ui/src/auth/loginDiagnostics.ts. It deliberately preserves generic authentication failure so the UI cannot enumerate accounts. Use its evidenceRequired/remediation fields before stating any root cause. A user-facing code is a report reference, not a promise that logs will exist.
+
+- LOGIN_AUTH_REJECTED requires INVALID_CREDENTIALS response, not a visual message alone.
+- LOGIN_CORS_ORIGIN_REJECTED requires explicit ORIGIN_NOT_ALLOWED or matched Worker origin_allowed=false evidence.
+- LOGIN_RESPONSE_UNAVAILABLE is not proof of CORS, DNS, TLS, network, or server failure.
+- LOGIN_UNKNOWN remains a valid class when no stronger evidence exists.
+
+## Worker HTTP error mapping
+
+Stage 2 codes are stable status classifications: API_REQUEST_INVALID, API_AUTHENTICATION_REQUIRED, API_AUTHORIZATION_DENIED, API_NOT_FOUND, API_METHOD_NOT_ALLOWED, API_CONFLICT, API_RATE_LIMITED, API_FEATURE_UNAVAILABLE, API_SERVICE_UNAVAILABLE, API_INTERNAL_FAILURE and API_REQUEST_REJECTED. They identify the observed HTTP status class only. Retryability is yes for 429/502/503/504, no for common client/auth/route/feature errors, otherwise unknown. Root cause confidence remains unknown for generic response-boundary records.
+
+## Coverage matrix (measured from source/test inventory, not a claim of full product coverage)
+
+| Component | Entry point / diagnostic codes | Evidence sources | Correlation support | Test coverage at Stage 3 branch scope | Known blind spots | Recommended next action |
+| --- | --- | --- | --- | --- | --- | --- |
+| Admin Shell (Tauri/WebView React UI) | Login form; LOGIN_* registry codes | Client classification, safe HTTP status/server code, allowlisted native transport code, storage/navigation stage | Generated client ID on login header; response header preferred; Stage 3 event correlation_id | loginDiagnostics.test.ts (mocked Axios/classifier and event writer); onyxCredentials.test.ts | Client event not persisted centrally; pre-request/local-only IDs cannot join server logs; actual packaged Tauri Origin requires live evidence | Capture one sanitized demo attempt's code + ID and compare with Worker logs; never log credentials |
+| Cloudflare Worker login | POST /api/auth/login; LOGIN_BACKEND_FAILURE, LOGIN_SESSION_CREATION_FAILED and login HTTP outcome codes | Worker route/status, D1 operation try/catch stage, sanitized cause type and origin policy decision | Validates/replaces X-ONYX-Request-ID; returns request/correlation response metadata subject to CORS | auth.test.ts, diagnostics.test.ts and All-Father smoke workflow; tests use fake D1/test credentials | Preflight ID limit; logs cannot prove source commit is deployed unless deployment metadata is compared; no request payloads | Search Worker logs by ID/code; separately verify deployed revision before attributing to source |
+| Cloudflare Worker non-login HTTP boundary | Worker router; API_* status classes | HTTP status, safe route group, method, elapsed time, origin decision, limited cause type | Validates/replaces ID; response header and JSON error correlation | test/diagnostics.test.ts (Worker fetch with mocked D1); CI is mocked, not live traffic | Event identifies response boundary only; WebSocket 101 response is not reconstructed; Durable Object internal events are not joined | Trace handler-specific evidence only after an API_* event identifies the relevant route family |
+| Axum API server (Rust) | Axum router/routes; ApiError code/category/retryability | Existing API error envelope and CanonicalJsonLayer R3 logs | Command/query envelopes and log trace/operation IDs exist, but no common inbound request-ID middleware was proven | Rust/unit/integration tests in CI; this change adds no Rust test for schema 1.0 | R3 shape is not schema-validated; details map redaction is key-based; inbound request IDs not uniformly joined to response headers | Add an allowlist-based adapter and tested request middleware in a separately scoped follow-up |
+| Desktop Shell UI (not Admin Shell) | Login and API paths in crates/bins/desktop-shell/ui | Existing UI and API errors; no Stage 1 registry imported in this review | No Stage 1 header propagation proven for this UI | Existing client tests/CI only; no new diagnostics-specific test | Generic/opaque errors can collapse into UI messages; no canonical event integration verified | Reuse schema mapper after confirming its request client and session flow |
+| Web UI | web-ui hooks, store, utils and API client | Existing HTTP client/server error mapping | No consistent correlation ID integration proven in this review | Existing UI tests/CI only; no new diagnostics-specific test | No canonical event integration verified | Instrument the existing HTTP client with bounded IDs and localization-aware safe mapping |
+| Mobile PWA | mobile-pwa hooks/store/utils | Existing API error handling | No Stage 1 request ID propagation proven in this review | Existing component tests/CI only; no new diagnostics-specific test | Browser preflight and no-response errors remain opaque | Add a PWA-specific adapter and test it with the actual API client |
+| Android client | mobile-android AuthApi/LoginScreen | HTTP status, response code parsing; IOException for transport errors | No X-ONYX-Request-ID header in AuthApi at inspected baseline | Existing Android tests/CI only; no Stage 3 change-specific test | AuthApiException retains raw response body in its message; cross-platform code mapping is not unified | Follow up: generate/send request ID and make exception carry safe code/status/correlation only; verify callers don't display raw body |
+| Rust internal services/observability | observability-adapter CanonicalJsonLayer, tracing, metrics and audit | Structured stdout, optional OTLP trace exporter, metrics/audit adapters | trace_id, operation_id and correlation_id can appear in the R3 shape | Existing tests are not a proof that production collector/log retention is configured | No evidence of a central sink or retention/access settings; key-based redaction alone is not certification for arbitrary details | Validate against schema through an explicit adapter; redact/allowlist fields before enabling raw details |
+
+## Automated verification and claim boundaries
+
+Stage 3 adds focused tests for stable schema fields, request ID/correlation mapping, conservative retryability, unknown-root-cause handling, and redaction of known sensitive values in Stage 1/2 event paths. Cloudflare Worker tests use the Worker module with mocked environment bindings; they are not live Cloudflare observations. Admin Shell tests mock the HTTP/classification layer; they are not a real login or packaged Tauri diagnostic test. Existing API contract and success-path tests must remain green in CI. No secret was read or displayed by this implementation.
+
+## Safe reproduction and evidence requirements
+
+- Use a dedicated demo/test account; do not repeatedly submit production/admin credentials.
+- Record the stable code, correlation ID if present, UTC time, client name/version and whether the request reached HTTP response handling.
+- For 401, retain only HTTP status and the safe stable code; do not try to distinguish unknown account/wrong password/inactive org via public login responses.
+- For no response, capture only sanitized request ID, app origin (if already available in approved logs), UTC time and client runtime. Do not infer CORS from an opaque WebView/network error.
+- For 5xx, obtain the corresponding Worker failure JSON plus readiness/dependency data. cause_type=Error is a broad runtime type, not an underlying root-cause diagnosis.
+
+## Additive code evolution
+
+1. Add a stable uppercase error code and a safe remediation section before emitting it.
+2. Add evidence requirements, severity and conservative retryability to the relevant platform registry.
+3. Add a schema 1.0 mapping, with allowlisted context only, and test both expected and unknown paths.
+4. Keep legacy event keys until all consumers have migrated. Do not recycle a code for a new semantic.
+5. If a required field or enum meaning changes incompatibly, add schema version 2.0 and dual-read/migration tests before removing v1 aliases.
+
+## Retention, privacy and access
+
+This audit found code that writes events to console/stdout and optional OTLP. It did not verify the effective retention period, access permissions, redaction applied by the provider, or whether a collector is configured in each deployed environment. Do not quote a retention duration unless platform/project settings provide it. Restrict log access to maintainers who need it, use provider filters/exports instead of copying logs into tickets, and redact IDs/timestamps if sharing outside the authorized debugging team. The schema does not grant access to diagnostics or permit an endpoint to bypass existing authorization.
+
+## Explicit remaining work
+
+- Integrate non-admin Desktop Shell, Web UI, PWA and Android request/reporting paths using tested per-client adapters.
+- Add a tested Axum inbound correlation middleware and a canonical schema 1.0 adapter for the existing R3 Rust logger.
+- Audit or replace arbitrary Rust details serialization with a strict metadata allowlist.
+- Establish, and document from actual settings, log retention and access control; do not treat schema documentation as proof of operational configuration.
+- Perform a live, authorized end-to-end diagnostic trace from a client through the deployed Worker. Mocked tests do not establish live deployment parity or actual Tauri WebView origin behavior.
