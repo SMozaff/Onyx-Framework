@@ -129,7 +129,7 @@ jobs:
           [vars]
           # The Admin Shell dev server uses this exact origin while running under Tauri.
           # Keep it explicit in the deployed allowlist because local dev builds call the shared Worker.
-          ONYX_CORS_ORIGINS = "${ONYX_CORS_ORIGINS},http://localhost:5174"
+          ONYX_CORS_ORIGINS = "${ONYX_CORS_ORIGINS},http://localhost:5174,tauri://localhost,http://tauri.localhost"
           HF_S3_ENDPOINT = "https://s3.hf.co/Arronthemalkavian"
           HF_S3_BUCKET = "onyx"
           EOF
