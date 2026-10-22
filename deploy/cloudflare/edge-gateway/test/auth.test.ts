@@ -2,7 +2,7 @@
  * Authentication contract tests for ONYX username/password login.
  * Google/Supabase is not an All-Father authentication path.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { argon2id } from "hash-wasm";
 import worker from "../src/index";
 import { AUTH_SCHEMA_CONTRACT } from "../src/schema-contract";
@@ -188,7 +188,21 @@ describe("POST /api/auth/login (ONYX password path)", () => {
 
     expect(unknownUser.status).toBe(401);
     expect(wrongPassword.status).toBe(401);
-    expect(wrongBody).toEqual(body);
+
+    // The public authentication contract must be identical except for the
+    // per-request correlation ID, which must remain unique for diagnostics.
+    const { correlation_id: unknownCorrelationId, ...unknownPublicBody } = body;
+    const { correlation_id: wrongCorrelationId, ...wrongPublicBody } = wrongBody;
+    expect(unknownPublicBody).toEqual(wrongPublicBody);
+    expect(unknownPublicBody).toEqual({
+      error: "INVALID_CREDENTIALS",
+      code: "INVALID_CREDENTIALS",
+      category: "AUTHORITY",
+      retryability: "NON_RETRYABLE",
+    });
+    expect(unknownCorrelationId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+    expect(wrongCorrelationId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+    expect(unknownCorrelationId).not.toBe(wrongCorrelationId);
   });
 });
 
@@ -266,5 +280,188 @@ describe("CORS response policy", () => {
     }), makeEnv(new MockDb()));
     expect(denied.headers.get("access-control-allow-origin")).toBeNull();
     expect(denied.headers.get("access-control-allow-credentials")).toBeNull();
+  });
+});
+
+
+describe("POST /api/auth/login — diagnostic correlation and safe failures", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("echoes a safe request ID on HTTP credential failures without logging credential material", async () => {
+    const db = new MockDb();
+    const info = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const username = "diagnostic-user-must-not-be-logged";
+    const password = "diagnostic-password-must-not-be-logged";
+    const requestId = "login-test-001";
+    const response = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://app.example",
+        "x-onyx-request-id": requestId,
+      },
+      body: JSON.stringify({ username, password, client_type: "admin" }),
+    }), makeEnv(db));
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(401);
+    expect(body).toMatchObject({
+      error: "INVALID_CREDENTIALS",
+      code: "INVALID_CREDENTIALS",
+      correlation_id: requestId,
+    });
+    expect(response.headers.get("x-onyx-request-id")).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example");
+    expect(response.headers.get("access-control-expose-headers")).toContain("X-ONYX-Request-ID");
+
+    const logs = JSON.stringify([...info.mock.calls, ...errorLog.mock.calls]);
+    expect(logs).toContain(requestId);
+    expect(logs).not.toContain(username);
+    expect(logs).not.toContain(password);
+    expect(logs).not.toContain("access_token");
+    expect(logs).not.toContain("refresh_token");
+    expect(logs).not.toContain("password_hash");
+  });
+
+  it("rejects malformed JSON with an explicit request-validation code", async () => {
+    const requestId = "malformed-json-002";
+    const response = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-onyx-request-id": requestId },
+      body: "{not-json",
+    }), makeEnv(new MockDb()));
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({
+      error: "INVALID_LOGIN_REQUEST",
+      code: "INVALID_LOGIN_REQUEST",
+      correlation_id: requestId,
+    });
+    expect(response.headers.get("x-onyx-request-id")).toBe(requestId);
+  });
+
+  it("rejects non-string credential fields as invalid request schema", async () => {
+    const response = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: ["not", "a", "string"], password: 42 }),
+    }), makeEnv(new MockDb()));
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({ error: "INVALID_LOGIN_REQUEST", code: "INVALID_LOGIN_REQUEST" });
+    expect(body.access_token).toBeUndefined();
+    expect(body.refresh_token).toBeUndefined();
+  });
+
+  it("adds request ID support to CORS preflight for the login endpoint", async () => {
+    const response = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://app.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-onyx-request-id",
+      },
+    }), makeEnv(new MockDb()));
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example");
+    expect(response.headers.get("access-control-allow-headers")).toContain("X-ONYX-Request-ID");
+    const preflightRequestId = response.headers.get("x-onyx-request-id");
+    expect(preflightRequestId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+
+    // A browser preflight carries requested header names, not the future POST's
+    // request-ID value. The Worker should generate a valid ID per preflight.
+    const secondResponse = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://app.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-onyx-request-id",
+      },
+    }), makeEnv(new MockDb()));
+    const secondPreflightRequestId = secondResponse.headers.get("x-onyx-request-id");
+    expect(secondResponse.status).toBe(204);
+    expect(secondPreflightRequestId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+    expect(secondPreflightRequestId).not.toBe(preflightRequestId);
+  });
+
+  it("records a rejected CORS preflight as server-observed CORS evidence", async () => {
+    const info = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const response = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://origin-not-allowed.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-onyx-request-id",
+      },
+    }), makeEnv(new MockDb()));
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    const event = JSON.parse(String(info.mock.calls[0]?.[0])) as Record<string, unknown>;
+    expect(event).toMatchObject({
+      event: "onyx.login.http",
+      stage: "cors_preflight",
+      outcome: "cors_rejected",
+      error_code: "LOGIN_CORS_ORIGIN_REJECTED",
+      origin: "https://origin-not-allowed.example",
+      origin_allowed: false,
+    });
+  });
+
+  it("returns machine-readable method and route errors in the auth namespace", async () => {
+    const method = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "GET",
+    }), makeEnv(new MockDb()));
+    expect(method.status).toBe(405);
+    expect(await method.json()).toMatchObject({ error: "METHOD_NOT_ALLOWED" });
+
+    const route = await fetchHandler(new Request("https://onyx-worker.test/api/auth/unknown", {
+      method: "POST",
+    }), makeEnv(new MockDb()));
+    expect(route.status).toBe(404);
+    expect(await route.json()).toMatchObject({ error: "AUTH_ROUTE_NOT_FOUND" });
+  });
+
+  it("returns a safe session-creation error and logs only allowlisted metadata", async () => {
+    const password = "correct horse battery staple";
+    const hash = await argon2id({
+      password,
+      salt: new Uint8Array(16).fill(21),
+      parallelism: 1,
+      iterations: 1,
+      memorySize: 8192,
+      hashLength: 32,
+      outputType: "encoded",
+    });
+    const db = new MockDb();
+    db.userRow = allfatherRow({ password_hash: hash });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const requestId = "session-failure-004";
+    const response = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-onyx-request-id": requestId },
+      body: JSON.stringify({ username: ALLFATHER_USERNAME, password, client_type: "admin" }),
+    }), { ...makeEnv(db), ONYX_JWT_SECRET: undefined } as unknown as WorkerEnv);
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(500);
+    expect(body).toMatchObject({
+      error: "LOGIN_SESSION_CREATION_FAILED",
+      code: "LOGIN_SESSION_CREATION_FAILED",
+      correlation_id: requestId,
+    });
+    expect(body.access_token).toBeUndefined();
+    expect(body.refresh_token).toBeUndefined();
+
+    const logs = JSON.stringify(errorLog.mock.calls);
+    expect(logs).toContain(requestId);
+    expect(logs).toContain("LOGIN_SESSION_CREATION_FAILED");
+    expect(logs).not.toContain(password);
+    expect(logs).not.toContain("password_hash");
+    expect(logs).not.toContain("ONYX_JWT_SECRET is not configured");
   });
 });

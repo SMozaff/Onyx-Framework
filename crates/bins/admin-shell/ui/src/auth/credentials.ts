@@ -1,4 +1,5 @@
 import type { AuthUser } from "../utils/auth";
+import { createLoginRequestId } from "./loginDiagnostics";
 
 export interface OnyxLoginSession {
   access_token: string;
@@ -6,9 +7,14 @@ export interface OnyxLoginSession {
   user: AuthUser;
 }
 
+export interface OnyxLoginPostOptions {
+  headers: { "X-ONYX-Request-ID": string };
+}
+
 export type OnyxLoginPost = (
   url: string,
   body: { username: string; password: string; client_type: "admin" },
+  options: OnyxLoginPostOptions,
 ) => Promise<{ data: unknown }>;
 
 function isAuthUser(value: unknown): value is AuthUser {
@@ -35,8 +41,13 @@ export async function loginWithOnyxCredentials(
   post: OnyxLoginPost,
   username: string,
   password: string,
+  requestId: string = createLoginRequestId(),
 ): Promise<OnyxLoginSession> {
-  const response = await post("/api/auth/login", { username, password, client_type: "admin" });
+  const response = await post(
+    "/api/auth/login",
+    { username, password, client_type: "admin" },
+    { headers: { "X-ONYX-Request-ID": requestId } },
+  );
   if (!isOnyxLoginSession(response.data)) throw new Error("INVALID_AUTH_RESPONSE");
   return response.data;
 }

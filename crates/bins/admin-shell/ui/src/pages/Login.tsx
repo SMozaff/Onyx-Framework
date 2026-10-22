@@ -3,7 +3,16 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { loginWithOnyxCredentials } from "@/auth/credentials";
-import { describeError } from "@/utils/errorHandler";
+import {
+  classifyLoginFailure,
+  createLoginRequestId,
+  formatLoginFailureMessage,
+  getLoginConfigurationFailure,
+  loginFailureForCode,
+  recordLoginDiagnostic,
+} from "@/auth/loginDiagnostics";
+import { getServerAddress } from "@/utils/serverAddress";
+import { notifyNetworkError } from "@/utils/errorHandler";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { useI18n } from "@/i18n/I18nContext";
 import { useAuthStore } from "@/stores/authStore";
@@ -20,17 +29,80 @@ export default function Login() {
     event.preventDefault();
     setError(null);
     setLoading(true);
+    const startedAt = Date.now();
+    const requestId = createLoginRequestId();
+
     try {
-      const session = await loginWithOnyxCredentials(
-        (url, body) => apiClient.post(url, body),
-        username,
-        password,
-      );
-      useAuthStore.getState().login(session);
-      navigate("/", { replace: true });
-    } catch (err) {
-      if (isNetworkError(err)) setError(describeError(err));
-      else setError(t("auth.adminInvalidCredentials"));
+      const configurationFailure = getLoginConfigurationFailure(getServerAddress());
+      if (configurationFailure) {
+        const failure = loginFailureForCode(configurationFailure, requestId);
+        recordLoginDiagnostic({
+          outcome: "failure", code: failure.code, stage: failure.stage, severity: failure.severity,
+          requestId, durationMs: Date.now() - startedAt, retryable: failure.retryable,
+        });
+        setError(formatLoginFailureMessage(failure, requestId));
+        return;
+      }
+
+      let session: Awaited<ReturnType<typeof loginWithOnyxCredentials>>;
+      try {
+        session = await loginWithOnyxCredentials(
+          (url, body, options) => apiClient.post(url, body, options),
+          username,
+          password,
+          requestId,
+        );
+      } catch (err) {
+        const failure = classifyLoginFailure(err, requestId);
+        if (failure.stage === "transport") notifyNetworkError();
+        recordLoginDiagnostic({
+          outcome: "failure", code: failure.code, stage: failure.stage, severity: failure.severity,
+          requestId: failure.requestId, httpStatus: failure.httpStatus, transportCode: failure.transportCode,
+          serverCode: failure.serverCode, durationMs: Date.now() - startedAt, retryable: failure.retryable,
+        });
+        setError(formatLoginFailureMessage(
+          failure,
+          requestId,
+          failure.code === "LOGIN_AUTH_REJECTED" ? t("auth.adminInvalidCredentials") : undefined,
+        ));
+        return;
+      }
+
+      try {
+        useAuthStore.getState().login(session);
+      } catch {
+        // Best-effort cleanup if storage accepted some session fields before
+        // another field failed; never let cleanup hide the original failure.
+        try {
+          useAuthStore.getState().logout();
+        } catch {
+          // Session storage itself may be unavailable.
+        }
+        const failure = loginFailureForCode("LOGIN_SESSION_PERSISTENCE_FAILED", requestId);
+        recordLoginDiagnostic({
+          outcome: "failure", code: failure.code, stage: failure.stage, severity: failure.severity,
+          requestId, durationMs: Date.now() - startedAt, retryable: failure.retryable,
+        });
+        setError(formatLoginFailureMessage(failure, requestId));
+        return;
+      }
+
+      try {
+        await navigate("/", { replace: true });
+      } catch {
+        const failure = loginFailureForCode("LOGIN_NAVIGATION_FAILED", requestId);
+        recordLoginDiagnostic({
+          outcome: "failure", code: failure.code, stage: failure.stage, severity: failure.severity,
+          requestId, durationMs: Date.now() - startedAt, retryable: failure.retryable,
+        });
+        setError(formatLoginFailureMessage(failure, requestId));
+        return;
+      }
+
+      recordLoginDiagnostic({
+        outcome: "success", code: "LOGIN_SUCCESS", stage: "navigation", severity: "info",
+        requestId, durationMs: Date.now() - startedAt, retryable: false,
+      });
     } finally {
       setLoading(false);
     }
@@ -85,6 +157,3 @@ export default function Login() {
   );
 }
 
-function isNetworkError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && !("response" in error);
-}
