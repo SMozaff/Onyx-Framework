@@ -22,9 +22,13 @@ describe("Admin Shell ONYX credential login contract", () => {
   });
 
   it("generates a correlation ID when a caller does not supply one", async () => {
-    const post = vi.fn(async () => ({ data: session }));
+    const post = vi.fn(async (
+      _url: string,
+      _body: unknown,
+      _options: { headers: { "X-ONYX-Request-ID": string } },
+    ) => ({ data: session }));
     await loginWithOnyxCredentials(post, "allfather", "operator-secret");
-    const options = post.mock.calls[0]?.[2] as { headers?: { "X-ONYX-Request-ID"?: string } } | undefined;
+    const options = post.mock.calls[0]?.[2];
     expect(options?.headers?.["X-ONYX-Request-ID"]).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
   });
 
