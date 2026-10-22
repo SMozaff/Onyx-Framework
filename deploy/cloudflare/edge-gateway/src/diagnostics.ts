@@ -140,7 +140,6 @@ export function makeApiFailureEvent(input: {
     stage: "worker",
     correlation_id: requestId,
     outcome: "failure",
-    error_code: diagnosticCode,
     cause_confidence: "unknown",
     evidence_source: "http_status",
     retryability: retryabilityForStatus(input.status),
