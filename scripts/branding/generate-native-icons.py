@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate all ONYX launcher assets from the committed transparent PNG brand sources."""
+"""Export transparent ONYX logo PNGs and generate every platform launcher asset."""
 from pathlib import Path
 from PIL import Image
 
