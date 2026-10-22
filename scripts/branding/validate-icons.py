@@ -12,7 +12,6 @@ STANDARD_RING_PNGS = {
     "assets/branding/onyx-ring.png",
     "crates/bins/desktop-shell/icons/icon.png",
     "crates/bins/desktop-shell/ui/public/favicon.png",
-    "crates/bins/desktop-shell/ui/public/onyx-ring.png",
     "web-ui/public/favicon.png",
     "mobile-pwa/public/icons/icon-192.png",
     "mobile-pwa/public/icons/icon-512.png",
@@ -42,7 +41,6 @@ EXPECTED_PNGS: dict[str, tuple[int | None, int | None]] = {
     "crates/bins/admin-shell/ui/public/favicon.png": (96, 96),
     "crates/bins/desktop-shell/icons/icon.png": (1024, 1024),
     "crates/bins/desktop-shell/ui/public/favicon.png": (96, 96),
-    "crates/bins/desktop-shell/ui/public/onyx-ring.png": (1024, 1024),
     "crates/bins/desktop-shell/ui/src/assets/onyx-logo-horizontal.png": (None, None),
     "web-ui/public/favicon.png": (96, 96),
     "mobile-pwa/public/icons/icon-192.png": (192, 192),
@@ -275,12 +273,12 @@ def validate_references() -> None:
         fail(f"{login_relative}: missing")
     else:
         source = login.read_text(encoding="utf-8")
-        if 'src="/onyx-ring.png"' not in source:
-            fail(f"{login_relative}: must reference the generated standard /onyx-ring.png")
+        if 'src="/favicon.png"' not in source:
+            fail(f"{login_relative}: must reference the generated standard /favicon.png")
         if "onyx-logo.png" in source:
             fail(f"{login_relative}: stale import of the wordmark asset remains")
-        if not (ROOT / "crates/bins/desktop-shell/ui/public/onyx-ring.png").is_file():
-            fail("Staff login ring is missing from desktop-shell UI public assets")
+        if not (ROOT / "crates/bins/desktop-shell/ui/public/favicon.png").is_file():
+            fail("Staff login ring favicon is missing from desktop-shell UI public assets")
 
 
 def validate_generated_mappings() -> None:
@@ -291,8 +289,7 @@ def validate_generated_mappings() -> None:
     expected["crates/bins/admin-shell/ui/public/favicon.png"] = resized(admin, 96)
     expected["crates/bins/desktop-shell/icons/icon.png"] = resized(ring, 1024)
     expected["crates/bins/desktop-shell/ui/public/favicon.png"] = resized(ring, 96)
-    expected["crates/bins/desktop-shell/ui/public/onyx-ring.png"] = resized(ring, 1024)
-    expected["web-ui/public/favicon.png"] = resized(ring, 96)
+        expected["web-ui/public/favicon.png"] = resized(ring, 96)
     expected["mobile-pwa/public/icons/icon-192.png"] = resized(ring, 192)
     expected["mobile-pwa/public/icons/icon-512.png"] = resized(ring, 512)
     expected["mobile-pwa/public/icons/icon-192-maskable.png"] = padded_maskable(ring, 192)
