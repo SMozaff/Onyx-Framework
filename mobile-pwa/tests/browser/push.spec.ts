@@ -20,6 +20,10 @@ async function stubPushManager(page: Page): Promise<void> {
     if (!('PushManager' in window)) {
       Object.defineProperty(window, 'PushManager', { configurable: true, value: class PushManager {} });
     }
+    Object.defineProperty(Notification, 'requestPermission', {
+      configurable: true,
+      value: async () => 'granted',
+    });
     const subscription = {
       endpoint,
       getKey: (kind: string) => decode(kind === 'p256dh' ? 'cGFyZW50a2V5' : 'YXV0aHNlY3JldA'),
