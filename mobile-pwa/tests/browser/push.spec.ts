@@ -14,15 +14,30 @@ async function stubPushManager(page: Page): Promise<void> {
       for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
       return bytes;
     };
-    const ctor = window.PushManager as unknown as {
-      prototype: { subscribe: unknown; getSubscription: unknown };
-    };
-    if (!ctor) return;
-    ctor.prototype.getSubscription = async () => null;
-    ctor.prototype.subscribe = async () => ({
+    // Some headless Chromium builds expose service workers but not the
+    // PushManager constructor. Keep this browser test deterministic rather
+    // than depending on the runner's native push implementation.
+    if (!('PushManager' in window)) {
+      Object.defineProperty(window, 'PushManager', { configurable: true, value: class PushManager {} });
+    }
+    Object.defineProperty(Notification, 'requestPermission', {
+      configurable: true,
+      value: async () => 'granted',
+    });
+    const subscription = {
       endpoint,
       getKey: (kind: string) => decode(kind === 'p256dh' ? 'cGFyZW50a2V5' : 'YXV0aHNlY3JldA'),
       unsubscribe: async () => true,
+    };
+    const registration = {
+      pushManager: {
+        getSubscription: async () => null,
+        subscribe: async () => subscription,
+      },
+    };
+    Object.defineProperty(navigator.serviceWorker, 'register', {
+      configurable: true,
+      value: async () => registration,
     });
   }, { endpoint: ENDPOINT });
 }
@@ -130,8 +145,8 @@ test('service worker displays a simulated push and routes the click', async ({ p
   await expect
     .poll(
       () =>
-        page.evaluate(async () =>
-          (await navigator.serviceWorker.ready).getNotifications().then((ns) =>
+        worker.evaluate(async () =>
+          (self as unknown as ServiceWorkerGlobalScope).registration.getNotifications().then((ns) =>
             ns.map((n) => ({ title: n.title, body: n.body })),
           ),
         ),
