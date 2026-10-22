@@ -289,7 +289,7 @@ def validate_generated_mappings() -> None:
     expected["crates/bins/admin-shell/ui/public/favicon.png"] = resized(admin, 96)
     expected["crates/bins/desktop-shell/icons/icon.png"] = resized(ring, 1024)
     expected["crates/bins/desktop-shell/ui/public/favicon.png"] = resized(ring, 96)
-        expected["web-ui/public/favicon.png"] = resized(ring, 96)
+    expected["web-ui/public/favicon.png"] = resized(ring, 96)
     expected["mobile-pwa/public/icons/icon-192.png"] = resized(ring, 192)
     expected["mobile-pwa/public/icons/icon-512.png"] = resized(ring, 512)
     expected["mobile-pwa/public/icons/icon-192-maskable.png"] = padded_maskable(ring, 192)
