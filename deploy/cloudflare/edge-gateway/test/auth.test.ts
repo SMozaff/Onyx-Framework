@@ -188,7 +188,21 @@ describe("POST /api/auth/login (ONYX password path)", () => {
 
     expect(unknownUser.status).toBe(401);
     expect(wrongPassword.status).toBe(401);
-    expect(wrongBody).toEqual(body);
+
+    // The public authentication contract must be identical except for the
+    // per-request correlation ID, which must remain unique for diagnostics.
+    const { correlation_id: unknownCorrelationId, ...unknownPublicBody } = body;
+    const { correlation_id: wrongCorrelationId, ...wrongPublicBody } = wrongBody;
+    expect(unknownPublicBody).toEqual(wrongPublicBody);
+    expect(unknownPublicBody).toEqual({
+      error: "INVALID_CREDENTIALS",
+      code: "INVALID_CREDENTIALS",
+      category: "AUTHORITY",
+      retryability: "NON_RETRYABLE",
+    });
+    expect(unknownCorrelationId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+    expect(wrongCorrelationId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+    expect(unknownCorrelationId).not.toBe(wrongCorrelationId);
   });
 });
 
@@ -355,7 +369,23 @@ describe("POST /api/auth/login — diagnostic correlation and safe failures", ()
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example");
     expect(response.headers.get("access-control-allow-headers")).toContain("X-ONYX-Request-ID");
-    expect(response.headers.get("x-onyx-request-id")).toBe(requestId);
+    const preflightRequestId = response.headers.get("x-onyx-request-id");
+    expect(preflightRequestId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+
+    // A browser preflight carries requested header names, not the future POST's
+    // request-ID value. The Worker should generate a valid ID per preflight.
+    const secondResponse = await fetchHandler(new Request("https://onyx-worker.test/api/auth/login", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://app.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-onyx-request-id",
+      },
+    }), makeEnv(new MockDb()));
+    const secondPreflightRequestId = secondResponse.headers.get("x-onyx-request-id");
+    expect(secondResponse.status).toBe(204);
+    expect(secondPreflightRequestId).toMatch(/^[A-Za-z0-9._:-]{1,80}$/);
+    expect(secondPreflightRequestId).not.toBe(preflightRequestId);
   });
 
   it("records a rejected CORS preflight as server-observed CORS evidence", async () => {
