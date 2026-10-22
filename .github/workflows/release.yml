@@ -179,11 +179,12 @@ jobs:
           else
             echo "No real Apple notarization credentials configured; leaving APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID unset so Tauri skips notarization."
           fi
-      - name: Generate PNG-based ONYX platform icons
+      - name: Generate and validate PNG-based ONYX platform icons
         shell: bash
         run: |
           python3 -m pip install --disable-pip-version-check pillow
           python3 scripts/branding/generate-native-icons.py
+          python3 scripts/branding/validate-icons.py
       - name: Build and bundle the desktop app
         # Deliberately omits tagName/releaseName/releaseId: per
         # tauri-action's own documented behavior, providing none of
@@ -327,11 +328,12 @@ jobs:
           else
             echo "No real Apple notarization credentials configured; leaving APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID unset so Tauri skips notarization."
           fi
-      - name: Generate PNG-based ONYX platform icons
+      - name: Generate and validate PNG-based ONYX platform icons
         shell: bash
         run: |
           python3 -m pip install --disable-pip-version-check pillow
           python3 scripts/branding/generate-native-icons.py
+          python3 scripts/branding/validate-icons.py
       - name: Build and bundle the Admin desktop app
         # Omitting tagName/releaseName/releaseId makes tauri-action build only.
         # `publish` below remains the one release-assembly owner. Cargo output
@@ -397,6 +399,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Generate and validate PNG-based ONYX platform icons
+        run: |
+          python3 -m pip install --disable-pip-version-check pillow
+          python3 scripts/branding/generate-native-icons.py
+          python3 scripts/branding/validate-icons.py
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           toolchain: "1.97.1"
