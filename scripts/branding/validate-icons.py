@@ -66,7 +66,18 @@ def fail(message: str) -> None:
     ERRORS.append(message)
 
 
-def require_transparent_alpha(image: Image.Image, label: str) -> float:
+def require_transparent_alpha(
+    image: Image.Image,
+    label: str,
+    *,
+    faint_edge_threshold: int = 0,
+) -> float:
+    """Validate real alpha transparency and reject meaningful artwork clipped at edges.
+
+    ICO's 16–32px entries can acquire alpha values of only 1–4/255 on the
+    outermost pixels from Lanczos filtering. Those near-invisible antialias
+    fringes are not meaningful clipping; actual visible edge pixels still fail.
+    """
     rgba = image.convert("RGBA")
     alpha = rgba.getchannel("A")
     histogram = alpha.histogram()
@@ -90,8 +101,30 @@ def require_transparent_alpha(image: Image.Image, label: str) -> float:
         fail(f"{label}: image is blank/fully transparent")
     else:
         left, top, right, bottom = bounds
-        if left == 0 or top == 0 or right >= rgba.width or bottom >= rgba.height:
-            fail(f"{label}: visible logo touches an image edge and may be clipped (alpha bounds {bounds})")
+        edges = {
+            "left": [alpha.getpixel((0, y)) for y in range(rgba.height)],
+            "top": [alpha.getpixel((x, 0)) for x in range(rgba.width)],
+            "right": [alpha.getpixel((rgba.width - 1, y)) for y in range(rgba.height)],
+            "bottom": [alpha.getpixel((x, rgba.height - 1)) for x in range(rgba.width)],
+        }
+        touched_edges = []
+        if left == 0:
+            touched_edges.append("left")
+        if top == 0:
+            touched_edges.append("top")
+        if right >= rgba.width:
+            touched_edges.append("right")
+        if bottom >= rgba.height:
+            touched_edges.append("bottom")
+        meaningful_edge_contact = [
+            name for name in touched_edges
+            if max(edges[name], default=0) > faint_edge_threshold
+        ]
+        if meaningful_edge_contact:
+            fail(
+                f"{label}: visible logo touches/crops at {', '.join(meaningful_edge_contact)} "
+                f"image edge(s) (alpha bounds {bounds}; permitted edge alpha <= {faint_edge_threshold})"
+            )
         visible_fraction = (right - left) * (bottom - top) / total
         if visible_fraction < 0.01:
             fail(f"{label}: visible artwork is unexpectedly small ({visible_fraction:.2%} of canvas)")
@@ -161,7 +194,11 @@ def validate_tauri_containers() -> None:
                         fail(f"{ico_path.relative_to(ROOT)}: ICO sizes {sorted(sizes)}; missing {sorted(required_ico_sizes - sizes)}")
                     for size in required_ico_sizes & sizes:
                         layer = ico.ico.getimage((size, size)).convert("RGBA")
-                        require_transparent_alpha(layer, f"{ico_path.relative_to(ROOT)} [{size}x{size}]")
+                        require_transparent_alpha(
+                            layer,
+                            f"{ico_path.relative_to(ROOT)} [{size}x{size}]",
+                            faint_edge_threshold=8,
+                        )
             except Exception as error:
                 fail(f"{ico_path.relative_to(ROOT)}: cannot validate ICO ({error})")
         if not icns_path.is_file():
