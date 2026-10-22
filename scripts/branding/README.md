@@ -22,7 +22,7 @@ The validator checks PNG encoding, dimensions, visible artwork, real alpha trans
 | Target | Configured icon reference | Brand source |
 | --- | --- | --- |
 | Admin Shell (Tauri desktop) | crates/bins/admin-shell/tauri.conf.json; ui/public/favicon.png | assets/branding/admin-shell.png custom exception |
-| Staff desktop shell (Tauri) | crates/bins/desktop-shell/tauri.conf.json; ui/public/favicon.png; ui/public/onyx-ring.png | assets/branding/onyx-ring.png |
+| Staff desktop shell (Tauri) | crates/bins/desktop-shell/tauri.conf.json; ui/public/favicon.png | assets/branding/onyx-ring.png |
 | Web operator application | web-ui/index.html; web-ui/public/favicon.png | assets/branding/onyx-ring.png |
 | Mobile Observer PWA | mobile-pwa/index.html; mobile-pwa/public/manifest.webmanifest; mobile-pwa/public/icons/ | assets/branding/onyx-ring.png |
 | Android native app | mobile-android/app/src/main/AndroidManifest.xml; res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ | assets/branding/onyx-ring.png |
