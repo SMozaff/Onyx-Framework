@@ -43,7 +43,6 @@ EXPECTED_PNGS: dict[str, tuple[int | None, int | None]] = {
     "crates/bins/desktop-shell/icons/icon.png": (1024, 1024),
     "crates/bins/desktop-shell/ui/public/favicon.png": (96, 96),
     "crates/bins/desktop-shell/ui/public/onyx-ring.png": (1024, 1024),
-    "crates/bins/desktop-shell/ui/src/assets/onyx-logo-horizontal.png": (None, None),
     "web-ui/public/favicon.png": (96, 96),
     "mobile-pwa/public/icons/icon-192.png": (192, 192),
     "mobile-pwa/public/icons/icon-512.png": (512, 512),
