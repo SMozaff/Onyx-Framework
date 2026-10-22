@@ -65,6 +65,19 @@ describe("Worker internal diagnostics contract", () => {
     expect(JSON.stringify(event)).not.toContain("must-not-log");
     expect(JSON.stringify(event)).not.toContain("access_token");
 
+    expect(makeWorkerLoginDiagnosticEvent({
+      requestId: "login-forbidden-19",
+      legacyStage: "authorization",
+      method: "POST",
+      status: 403,
+      outcome: "failure",
+      originAllowed: true,
+    })).toMatchObject({
+      error_code: "LOGIN_AUTHORIZATION_DENIED",
+      stage: "authorization",
+      cause_confidence: "unknown",
+    });
+
     const unknown = makeWorkerLoginDiagnosticEvent({
       requestId: "login-unknown-18",
       legacyStage: "authentication_response",

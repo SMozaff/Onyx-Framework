@@ -166,7 +166,9 @@ export function makeWorkerLoginDiagnosticEvent(input: WorkerLoginDiagnosticInput
             ? "LOGIN_METHOD_NOT_ALLOWED"
             : status === 429
               ? "LOGIN_RATE_LIMITED"
-              : status >= 500
+              : status === 403
+                ? "LOGIN_AUTHORIZATION_DENIED"
+                : status >= 500
                 ? "LOGIN_BACKEND_FAILURE"
                 : "LOGIN_HTTP_ERROR";
   const stage = ({
