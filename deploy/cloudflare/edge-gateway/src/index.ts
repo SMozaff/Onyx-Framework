@@ -11,6 +11,7 @@ import { authorizeCommand, authorizeQuery, ONYX_ROLES, payloadOwnerIds, resource
 import { mobileCapabilityGranted } from "./mobile-capability";
 import { validateCommandSemantics } from "./command-semantics";
 import { staffOwnedPredicateSql, staffOwnedBindings, resourceIdFromReference } from "./resource-scope";
+import { makeApiFailureEvent, trustedRequestId, type SafeCauseType } from "./diagnostics";
 
 type Json = Record<string, unknown>;
 
@@ -1818,7 +1819,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/admin/staff"&&request.method==="POST")return await createUser(request,env,session,"STAFF");
     if(url.pathname.startsWith("/api/admin/users/")&&request.method==="DELETE")return await deactivateUser(request,env,session,url.pathname.split("/").pop()!);
     return json({error:"ROUTE_NOT_MIGRATED",route:url.pathname,method:request.method,message:"This feature is not available on the Cloudflare Worker yet. The equivalent Axum route exists but has not been ported with equivalent authorization and persistence semantics.",category:"FEATURE_UNAVAILABLE",retryability:"NON_RETRYABLE",correlation_id:uuid()},501,origin);
-  }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);if(message==="FORBIDDEN_ROLE")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403,origin);if(message.startsWith("INVALID_")||message==="PASSWORD_TOO_SHORT"||message==="ORGANIZATION_NOT_FOUND")return json({error:message,category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);console.error(error);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
+  }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);if(message==="FORBIDDEN_ROLE")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403,origin);if(message.startsWith("INVALID_")||message==="PASSWORD_TOO_SHORT"||message==="ORGANIZATION_NOT_FOUND")return json({error:message,category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
 }
 /**
  * Apply one exact-origin CORS policy to every route, including helper
@@ -1904,8 +1905,65 @@ async function instrumentLoginRequest(request:Request,env:Env):Promise<Response>
   }));
   return response;
 }
+async function correlateApiResponse(response:Response,requestId:string):Promise<Response>{
+  // Cloudflare's 101 WebSocket upgrade response cannot be reconstructed safely.
+  if(response.status===101)return response;
+  const headers=new Headers(response.headers);
+  headers.set("X-ONYX-Request-ID",requestId);
+  if(response.status>=400&&(headers.get("content-type")??"").toLowerCase().includes("application/json")){
+    const body=await response.clone().json().catch(()=>null) as unknown;
+    if(body&&typeof body==="object"&&!Array.isArray(body)){
+      const record=body as Record<string,unknown>;
+      // Preserve domain/command correlation IDs. Add request correlation only
+      // when no domain correlation exists; the response header is authoritative
+      // for this HTTP attempt in either case.
+      const correlated=record.correlation_id===undefined
+        ?{...record,correlation_id:requestId}
+        :{...record,request_id:requestId};
+      headers.delete("content-length");
+      return new Response(JSON.stringify(correlated),{status:response.status,statusText:response.statusText,headers});
+    }
+  }
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
+async function instrumentApiRequest(request:Request,env:Env):Promise<Response>{
+  const requestId=trustedRequestId(request.headers.get("X-ONYX-Request-ID"));
+  const headers=new Headers(request.headers);
+  headers.set("X-ONYX-Request-ID",requestId);
+  const correlatedRequest=new Request(request,{headers});
+  const started=Date.now();
+  let response:Response;
+  let causeType:SafeCauseType|undefined;
+  try{
+    response=await dispatch(correlatedRequest,env);
+  }catch(error){
+    // Never serialize exception messages, stacks, request bodies or headers.
+    // Only a bounded cause type is retained for internal troubleshooting.
+    causeType=error instanceof TypeError?"TypeError"
+      :error instanceof RangeError?"RangeError"
+      :error instanceof SyntaxError?"SyntaxError"
+      :error instanceof Error?"Error":"UnknownError";
+    response=json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500);
+  }
+  response=await correlateApiResponse(response,requestId);
+  response=applyCors(correlatedRequest,env,response);
+  const origin=request.headers.get("origin");
+  const event=makeApiFailureEvent({
+    requestId,
+    pathname:new URL(request.url).pathname,
+    method:request.method,
+    status:response.status,
+    elapsedMs:Date.now()-started,
+    originAllowed:origin?Boolean(corsOrigin(request,env)):null,
+    causeType
+  });
+  if(event)console.error(JSON.stringify(event));
+  return response;
+}
+
 export default {fetch:async(request:Request,env:Env)=>{
   return new URL(request.url).pathname==="/api/auth/login"
     ?instrumentLoginRequest(request,env)
-    :applyCors(request,env,await dispatch(request,env));
+    :instrumentApiRequest(request,env);
 }};
