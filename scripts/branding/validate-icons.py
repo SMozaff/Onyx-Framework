@@ -8,6 +8,19 @@ import re
 from pathlib import Path
 from PIL import Image, ImageChops
 
+STANDARD_RING_PNGS = {
+    "assets/branding/onyx-ring.png",
+    "crates/bins/desktop-shell/icons/icon.png",
+    "crates/bins/desktop-shell/ui/public/favicon.png",
+    "crates/bins/desktop-shell/ui/public/onyx-ring.png",
+    "web-ui/public/favicon.png",
+    "mobile-pwa/public/icons/icon-192.png",
+    "mobile-pwa/public/icons/icon-512.png",
+    "mobile-pwa/public/icons/icon-192-maskable.png",
+    "mobile-pwa/public/icons/icon-512-maskable.png",
+    "mobile-pwa/public/icons/apple-touch-icon.png",
+}
+
 ROOT = Path(__file__).resolve().parents[2]
 _generator_path = ROOT / "scripts/branding/generate-native-icons.py"
 _spec = importlib.util.spec_from_file_location("onyx_icon_generator", _generator_path)
@@ -107,6 +120,10 @@ def validate_png(relative: str, expected: tuple[int | None, int | None]) -> Imag
             if image.getbbox() is None:
                 fail(f"{relative}: decoded pixels are blank")
             ratio = require_transparent_alpha(image, relative)
+            if relative in STANDARD_RING_PNGS or relative.startswith("mobile-android/app/src/main/res/mipmap-"):
+                center_alpha = image.getchannel("A").getpixel((image.width // 2, image.height // 2))
+                if center_alpha != 0:
+                    fail(f"{relative}: standard ONYX ring center is not transparent (alpha={center_alpha}); a black background may be baked into the logo hole")
             CHECKED[relative] = (image.width, image.height, ratio)
             return image.copy()
     except Exception as error:
