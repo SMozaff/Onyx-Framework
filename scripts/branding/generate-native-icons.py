@@ -12,32 +12,91 @@ RESAMPLING = Image.Resampling.LANCZOS
 TRANSPARENT_PIXEL_THRESHOLD = 0.05
 
 
-def load_square(path: Path) -> Image.Image:
+def black_matte_to_alpha(image: Image.Image, path: Path) -> Image.Image:
+    """Remove a black matte from an existing logo without redrawing its artwork.
+
+    The input files in this repository are flattened against pure black. For such
+    an image, each RGB pixel is the foreground color premultiplied by coverage.
+    Recover coverage from the strongest channel and unpremultiply the foreground.
+    A small near-black cutoff removes compression/noise from the old matte.
+    """
+    rgba = image.convert("RGBA")
+    corners = (
+        rgba.getpixel((0, 0))[:3],
+        rgba.getpixel((rgba.width - 1, 0))[:3],
+        rgba.getpixel((0, rgba.height - 1))[:3],
+        rgba.getpixel((rgba.width - 1, rgba.height - 1))[:3],
+    )
+    if any(max(pixel) > 12 for pixel in corners):
+        raise ValueError(
+            f"Cannot safely remove a black matte from {path}: all four corners must be near black; "
+            f"corner RGB values were {corners}"
+        )
+
+    source = rgba.load()
+    for y in range(rgba.height):
+        for x in range(rgba.width):
+            red, green, blue, _old_alpha = source[x, y]
+            alpha = max(red, green, blue)
+            if alpha <= 2:
+                source[x, y] = (0, 0, 0, 0)
+            else:
+                source[x, y] = (
+                    min(255, round(red * 255 / alpha)),
+                    min(255, round(green * 255 / alpha)),
+                    min(255, round(blue * 255 / alpha)),
+                    alpha,
+                )
+    return rgba
+
+
+def load_square(path: Path, *, allow_black_matte: bool = False) -> Image.Image:
     with Image.open(path) as original:
         if original.format != "PNG":
             raise ValueError(f"Brand source must be an actual PNG: {path} ({original.format})")
-        if original.mode not in ("RGBA", "LA") and "transparency" not in original.info:
-            raise ValueError(f"Brand source has no alpha/transparency channel: {path}")
         image = original.convert("RGBA")
     if image.width != image.height:
         raise ValueError(f"Brand source must be square: {path} ({image.size})")
-    alpha = image.getchannel("A")
-    transparent_fraction = sum(alpha.histogram()[:1]) / (image.width * image.height)
-    if alpha.getextrema()[0] != 0 or transparent_fraction < TRANSPARENT_PIXEL_THRESHOLD:
-        raise ValueError(
-            f"Brand source has an opaque/baked background or insufficient transparency: "
-            f"{path} ({transparent_fraction:.2%} fully transparent pixels)"
+
+    def is_transparent_logo(candidate: Image.Image) -> bool:
+        alpha = candidate.getchannel("A")
+        transparent_fraction = alpha.histogram()[0] / (candidate.width * candidate.height)
+        corners = (
+            alpha.getpixel((0, 0)),
+            alpha.getpixel((candidate.width - 1, 0)),
+            alpha.getpixel((0, candidate.height - 1)),
+            alpha.getpixel((candidate.width - 1, candidate.height - 1)),
         )
-    corners = (
-        alpha.getpixel((0, 0)),
-        alpha.getpixel((image.width - 1, 0)),
-        alpha.getpixel((0, image.height - 1)),
-        alpha.getpixel((image.width - 1, image.height - 1)),
-    )
-    if any(value != 0 for value in corners):
-        raise ValueError(f"Brand source corners must be fully transparent: {path} ({corners})")
-    if alpha.getbbox() is None:
-        raise ValueError(f"Brand source is blank: {path}")
+        return (
+            alpha.getextrema()[0] == 0
+            and transparent_fraction >= TRANSPARENT_PIXEL_THRESHOLD
+            and all(value == 0 for value in corners)
+            and alpha.getbbox() is not None
+        )
+
+    if not is_transparent_logo(image):
+        if not allow_black_matte:
+            alpha = image.getchannel("A")
+            ratio = alpha.histogram()[0] / (image.width * image.height)
+            raise ValueError(
+                f"Brand export is not genuinely transparent: {path} "
+                f"({ratio:.2%} fully transparent pixels)"
+            )
+        image = black_matte_to_alpha(image, path)
+        if not is_transparent_logo(image):
+            raise ValueError(f"Black-matte removal did not produce a valid transparent logo: {path}")
+    return image
+
+
+def prepare_transparent_source(input_path: Path, output_path: Path) -> Image.Image:
+    """Export the designated brand artwork as a transparent canonical PNG.
+
+    Already-transparent sources are preserved. Legacy files flattened on black
+    are de-matted only when all four outer corners are near black; other
+    backgrounds fail closed rather than being guessed.
+    """
+    image = load_square(input_path, allow_black_matte=True)
+    save_png(image, output_path)
     return image
 
 
