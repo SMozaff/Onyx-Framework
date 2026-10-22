@@ -143,12 +143,11 @@ describe("Worker Cloud Relay route integration", () => {
     expect(ticketBody.ticket!.length).toBeGreaterThan(20);
 
     const socketRequest = new Request(`https://worker.test/api/relay/${TARGET}?ticket=${encodeURIComponent(ticketBody.ticket!)}&self=${SELF}`);
-    // Node's fetch Request implementation does not permit constructing a
-    // browser-style Upgrade request. Override only the request-header read
-    // observed by the Worker route; the production Worker runtime supplies it.
-    const originalGet = socketRequest.headers.get.bind(socketRequest.headers);
-    socketRequest.headers.get = ((name: string) =>
-      name.toLowerCase() === "upgrade" ? "websocket" : originalGet(name)) as typeof socketRequest.headers.get;
+    // Represent the platform-provided upgrade as a real header entry. The
+    // Worker diagnostics layer clones Request headers before dispatch, so a
+    // test-only override of Headers.get() would be lost during that clone.
+    socketRequest.headers.set("upgrade", "websocket");
+    expect(new Headers(socketRequest.headers).get("upgrade")).toBe("websocket");
 
     const relayResponse = await worker.fetch(socketRequest, env);
     expect(relayResponse.status).toBe(200);
@@ -161,9 +160,7 @@ describe("Worker Cloud Relay route integration", () => {
     expect(forwarded?.headers.get("x-onyx-relay-target")).toBe(TARGET);
 
     const replay = new Request(`https://worker.test/api/relay/${TARGET}?ticket=${encodeURIComponent(ticketBody.ticket!)}&self=${SELF}`);
-    const replayGet = replay.headers.get.bind(replay.headers);
-    replay.headers.get = ((name: string) =>
-      name.toLowerCase() === "upgrade" ? "websocket" : replayGet(name)) as typeof replay.headers.get;
+    replay.headers.set("upgrade", "websocket");
     const replayResponse = await worker.fetch(replay, env);
     expect(replayResponse.status).toBe(401);
     expect(await replayResponse.json()).toMatchObject({ error: "RELAY_TICKET_REPLAYED" });
