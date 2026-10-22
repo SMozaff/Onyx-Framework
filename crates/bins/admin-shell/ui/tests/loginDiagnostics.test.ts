@@ -53,11 +53,16 @@ describe("Admin login diagnostics registry", () => {
     expect(getLoginConfigurationFailure("https://onyx-framework.soheil-mozaffari.workers.dev")).toBeNull();
   });
 
-  it("classifies only explicit timeout, DNS, TLS, and connection transport codes", () => {
+  it("creates valid request IDs for correlation", () => {
+    expect(classifyLoginFailure(axiosError({ code: "ERR_NETWORK" }), "client-id").requestId).toBe("client-id");
+  });
+
+  it("classifies only explicit timeout, DNS, TLS, cancellation, and connection transport codes", () => {
     expect(classifyLoginFailure(axiosError({ code: "ETIMEDOUT" })).code).toBe("LOGIN_TIMEOUT");
     expect(classifyLoginFailure(axiosError({ code: "ENOTFOUND" })).code).toBe("LOGIN_DNS_FAILURE");
     expect(classifyLoginFailure(axiosError({ code: "ERR_TLS_CERT_ALTNAME_INVALID" })).code).toBe("LOGIN_TLS_FAILURE");
     expect(classifyLoginFailure(axiosError({ code: "ECONNREFUSED" })).code).toBe("LOGIN_CONNECTION_FAILURE");
+    expect(classifyLoginFailure(axiosError({ code: "ERR_CANCELED" })).code).toBe("LOGIN_REQUEST_CANCELLED");
   });
 
   it("keeps opaque no-response errors unclassified as CORS", () => {
@@ -79,14 +84,16 @@ describe("Admin login diagnostics registry", () => {
     expect(failure.userMessage).toBe("The username or password is incorrect.");
   });
 
-  it("maps malformed request, client type, CORS, routing, rate limit, and backend evidence", () => {
+  it("maps malformed request, client type, CORS, routing, rate limit, authorization, and backend evidence", () => {
     expect(classifyLoginFailure(axiosError({ status: 400, serverCode: "INVALID_LOGIN_REQUEST" })).code).toBe("LOGIN_REQUEST_INVALID");
     expect(classifyLoginFailure(axiosError({ status: 400, serverCode: "INVALID_CLIENT_TYPE" })).code).toBe("LOGIN_CLIENT_TYPE_INVALID");
     expect(classifyLoginFailure(axiosError({ status: 403, serverCode: "ORIGIN_NOT_ALLOWED" })).code).toBe("LOGIN_CORS_ORIGIN_REJECTED");
+    expect(classifyLoginFailure(axiosError({ status: 403, serverCode: "FORBIDDEN" })).code).toBe("LOGIN_AUTHORIZATION_DENIED");
     expect(classifyLoginFailure(axiosError({ status: 405, serverCode: "METHOD_NOT_ALLOWED" })).code).toBe("LOGIN_METHOD_NOT_ALLOWED");
     expect(classifyLoginFailure(axiosError({ status: 404, serverCode: "AUTH_ROUTE_NOT_FOUND" })).code).toBe("LOGIN_ROUTE_NOT_FOUND");
     expect(classifyLoginFailure(axiosError({ status: 429 })).code).toBe("LOGIN_RATE_LIMITED");
     expect(classifyLoginFailure(axiosError({ status: 503 })).code).toBe("LOGIN_BACKEND_FAILURE");
+    expect(classifyLoginFailure(axiosError({ status: 400 })).code).toBe("LOGIN_HTTP_ERROR");
   });
 
   it("distinguishes session creation, malformed success responses, and explicit parsing exceptions", () => {
