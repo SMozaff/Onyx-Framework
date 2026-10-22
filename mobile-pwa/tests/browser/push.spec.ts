@@ -43,13 +43,19 @@ async function stubPushManager(page: Page): Promise<void> {
 }
 
 async function stubEmptyQueries(page: Page): Promise<void> {
-  await page.route('**/api/query', async (route: Route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(queryResponse([])),
-    });
-  });
+  // The query endpoint has an encoded `?envelope=...` parameter. Match by
+  // pathname instead of a glob so the browser test never falls through to the
+  // live API (which would 401 the fixture token and redirect the page to login).
+  await page.route(
+    (url) => new URL(url).pathname === '/api/query',
+    async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(queryResponse([])),
+      });
+    },
+  );
 }
 
 test('observer enables push delivery with VAPID keys and disables it again', async ({ page, context }) => {
