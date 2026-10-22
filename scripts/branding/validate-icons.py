@@ -2,12 +2,23 @@
 """Verify ONYX brand icon transparency, dimensions, source mapping, and references."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
 from PIL import Image, ImageChops
 
-from generate_native_icons import ROOT, BRANDS, load_square, resized, padded_maskable
+ROOT = Path(__file__).resolve().parents[2]
+_generator_path = ROOT / "scripts/branding/generate-native-icons.py"
+_spec = importlib.util.spec_from_file_location("onyx_icon_generator", _generator_path)
+if _spec is None or _spec.loader is None:
+    raise RuntimeError(f"cannot load icon generator at {_generator_path}")
+_generator = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_generator)
+BRANDS = _generator.BRANDS
+load_square = _generator.load_square
+resized = _generator.resized
+padded_maskable = _generator.padded_maskable
 
 ERRORS: list[str] = []
 CHECKED: dict[str, tuple[int, int, float]] = {}
