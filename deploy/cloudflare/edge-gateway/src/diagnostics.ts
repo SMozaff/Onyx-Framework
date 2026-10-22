@@ -107,6 +107,161 @@ function retryabilityForStatus(status: number): DiagnosticRetryability {
   return "unknown";
 }
 
+const LOGIN_SERVER_CODE_MAP: Record<string, string> = {
+  INVALID_LOGIN_REQUEST: "LOGIN_REQUEST_INVALID",
+  INVALID_CLIENT_TYPE: "LOGIN_CLIENT_TYPE_INVALID",
+  INVALID_CREDENTIALS: "LOGIN_AUTH_REJECTED",
+  LOGIN_SESSION_CREATION_FAILED: "LOGIN_SESSION_CREATION_FAILED",
+  LOGIN_BACKEND_FAILURE: "LOGIN_BACKEND_FAILURE",
+  INTERNAL_SERVER_ERROR: "LOGIN_BACKEND_FAILURE",
+  METHOD_NOT_ALLOWED: "LOGIN_METHOD_NOT_ALLOWED",
+  AUTH_ROUTE_NOT_FOUND: "LOGIN_ROUTE_NOT_FOUND",
+  ORIGIN_NOT_ALLOWED: "LOGIN_CORS_ORIGIN_REJECTED",
+  FORBIDDEN: "LOGIN_AUTHORIZATION_DENIED",
+  RATE_LIMITED: "LOGIN_RATE_LIMITED",
+};
+const SAFE_LOGIN_CODES = new Set([
+  ...Object.keys(LOGIN_SERVER_CODE_MAP),
+  "LOGIN_SUCCESS", "LOGIN_HTTP_ERROR", "LOGIN_UNKNOWN", "LOGIN_REQUEST_INVALID",
+  "LOGIN_CLIENT_TYPE_INVALID", "LOGIN_AUTH_REJECTED", "LOGIN_METHOD_NOT_ALLOWED",
+  "LOGIN_ROUTE_NOT_FOUND", "LOGIN_AUTHORIZATION_DENIED", "LOGIN_RATE_LIMITED",
+  "LOGIN_CORS_ORIGIN_REJECTED", "LOGIN_BACKEND_FAILURE", "LOGIN_SESSION_CREATION_FAILED",
+]);
+
+export interface WorkerLoginDiagnosticInput {
+  event?: "onyx.login.http" | "onyx.login.failure";
+  requestId: string | null;
+  legacyStage: string;
+  method: string;
+  status: number;
+  outcome: "success" | "failure";
+  serverCode?: string;
+  legacyErrorCode?: string;
+  legacyOutcome?: "success" | "http_error" | "cors_rejected";
+  diagnosticCode?: string;
+  elapsedMs?: number;
+  origin?: string | null;
+  originAllowed: boolean | null;
+  causeType?: SafeCauseType;
+  corsRejected?: boolean;
+}
+
+/** Canonicalizes Stage 1 Worker login logs while retaining their prior values under legacy_* keys. */
+export function makeWorkerLoginDiagnosticEvent(input: WorkerLoginDiagnosticInput): Record<string, unknown> {
+  const method = /^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)$/.test(input.method) ? input.method : "OTHER";
+  const status = Number.isInteger(input.status) && input.status >= 100 && input.status <= 599 ? input.status : 500;
+  const legacyStage = /^[a-z_]{1,64}$/.test(input.legacyStage) ? input.legacyStage : "unknown";
+  const serverCode = typeof input.serverCode === "string" && Object.prototype.hasOwnProperty.call(LOGIN_SERVER_CODE_MAP, input.serverCode)
+    ? input.serverCode
+    : undefined;
+  const diagnosticCode = input.corsRejected
+    ? "LOGIN_CORS_ORIGIN_REJECTED"
+    : input.outcome === "success" && status < 400
+      ? "LOGIN_SUCCESS"
+      : serverCode
+        ? LOGIN_SERVER_CODE_MAP[serverCode]
+        : status === 404
+          ? "LOGIN_ROUTE_NOT_FOUND"
+          : status === 405
+            ? "LOGIN_METHOD_NOT_ALLOWED"
+            : status === 429
+              ? "LOGIN_RATE_LIMITED"
+              : status >= 500
+                ? "LOGIN_BACKEND_FAILURE"
+                : "LOGIN_HTTP_ERROR";
+  const stage = ({
+    configuration: "configuration",
+    transport: "transport",
+    cors: "cors",
+    cors_preflight: "cors",
+    routing: "routing",
+    request_validation: "request_validation",
+    credential_lookup: "authentication",
+    credential_verification: "authentication",
+    authentication: "authentication",
+    authentication_response: "authentication",
+    authorization: "authorization",
+    backend: "backend",
+    worker_dispatch: "backend",
+    dependency: "dependency",
+    session: "session",
+    session_creation: "session",
+    session_issued: "session",
+    client: "client",
+    navigation: "navigation",
+    unknown: "unknown",
+  } as Record<string, string>)[legacyStage] ?? "unknown";
+  const originText = typeof input.origin === "string"
+    ? input.origin.slice(0, 200).replace(/[\x00-\x1f\x7f]/g, "?")
+    : null;
+  const originSeparator = originText?.indexOf("://") ?? -1;
+  const originScheme = originSeparator > 0 ? originText?.slice(0, originSeparator) ?? "" : "";
+  const originHost = originSeparator > 0 ? originText?.slice(originSeparator + 3) ?? "" : "";
+  const validOrigin = originText === "null" ||
+    (/^[A-Za-z][A-Za-z0-9+.-]*$/.test(originScheme) &&
+     /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$/.test(originHost));
+  const origin = originText === null ? null : validOrigin ? originText : "[invalid-origin]";
+  const elapsedMs = Number.isFinite(input.elapsedMs)
+    ? Math.max(0, Math.min(Math.trunc(Number(input.elapsedMs)), 86_400_000))
+    : undefined;
+  const severity = input.outcome === "success" ? "info" : status >= 500 ? "error" : "warning";
+  const retryability = input.outcome === "success" ||
+      diagnosticCode === "LOGIN_CORS_ORIGIN_REJECTED"
+    ? "no"
+    : status === 429 || [502, 503, 504].includes(status) ||
+        diagnosticCode === "LOGIN_BACKEND_FAILURE" ||
+        diagnosticCode === "LOGIN_SESSION_CREATION_FAILED" ||
+        diagnosticCode === "LOGIN_RATE_LIMITED"
+      ? "yes"
+      : status >= 400 && status < 500
+        ? "no"
+        : "unknown";
+  const safeCauseType = input.causeType && ["TypeError", "RangeError", "SyntaxError", "Error", "UnknownError"].includes(input.causeType)
+    ? input.causeType
+    : undefined;
+  const legacyErrorCode = input.legacyErrorCode && SAFE_LOGIN_CODES.has(input.legacyErrorCode)
+    ? input.legacyErrorCode
+    : undefined;
+  const requestId = trustedRequestId(input.requestId);
+  const context = {
+    route_group: "/api/auth",
+    method,
+    http_status: status,
+    ...(elapsedMs !== undefined ? { duration_ms: elapsedMs } : {}),
+    origin_allowed: input.originAllowed,
+    ...(serverCode ? { server_code: serverCode } : {}),
+    ...(safeCauseType ? { cause_type: safeCauseType } : {}),
+  };
+  return {
+    schema_version: "1.0",
+    timestamp: new Date().toISOString(),
+    severity,
+    component: "cloudflare-worker",
+    operation: method + " /api/auth/login",
+    stage,
+    correlation_id: requestId,
+    outcome: input.outcome,
+    error_code: diagnosticCode,
+    cause_confidence: "unknown",
+    evidence_source: input.corsRejected ? "cors_policy" : serverCode ? "server_code" : "http_status",
+    retryability,
+    remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#login-error-mapping",
+    context,
+    event: input.event ?? "onyx.login.http",
+    request_id: requestId,
+    legacy_stage: legacyStage,
+    method,
+    status,
+    ...(input.legacyOutcome ? { legacy_outcome: input.legacyOutcome } : {}),
+    ...(legacyErrorCode ? { legacy_error_code: legacyErrorCode } : {}),
+    ...(input.diagnosticCode && /^(API|LOGIN)_[A-Z_]+$/.test(input.diagnosticCode) ? { diagnostic_code: input.diagnosticCode } : {}),
+    ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+    origin,
+    origin_allowed: input.originAllowed,
+    ...(safeCauseType ? { cause_type: safeCauseType } : {}),
+  };
+}
+
 export function makeApiFailureEvent(input: {
   requestId: string;
   pathname: string;

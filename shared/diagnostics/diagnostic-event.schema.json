@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://onyx-framework.invalid/schemas/diagnostic-event-1.0.json",
+  "$id": "urn:onyx:diagnostic-event:1.0",
   "title": "ONYX Unified Diagnostic Event",
-  "description": "Version 1.0 event contract for Stage 1 Admin Shell login and Stage 2 Cloudflare Worker HTTP failure events. Legacy aliases are permitted for compatibility; never place secrets or raw payloads in context.",
+  "description": "Version 1.0 contract for Stage 1 Admin Shell and Cloudflare Worker login events plus Stage 2 Worker HTTP failures. Legacy fields remain available; raw payloads and secrets must never be included.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -105,7 +105,8 @@
         "transport_code",
         "client_stage",
         "dependency_probe",
-        "unknown"
+        "unknown",
+        "cors_policy"
       ]
     },
     "retryability": {
@@ -254,7 +255,7 @@
     },
     "diagnostic_code": {
       "type": "string",
-      "pattern": "^API_[A-Z_]+$"
+      "pattern": "^(API|LOGIN)_[A-Z_]+$"
     },
     "elapsed_ms": {
       "type": "integer",
@@ -275,6 +276,30 @@
         "Error",
         "UnknownError"
       ]
+    },
+    "origin": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "legacy_stage": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z_]{1,64}$"
+    },
+    "legacy_outcome": {
+      "enum": [
+        "success",
+        "http_error",
+        "cors_rejected"
+      ]
+    },
+    "legacy_error_code": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
     }
   }
 }

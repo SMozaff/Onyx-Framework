@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyApiFailure,
   makeApiFailureEvent,
+  makeWorkerLoginDiagnosticEvent,
   safeRouteGroup,
   trustedRequestId,
 } from "../src/diagnostics";
@@ -27,6 +28,64 @@ describe("Worker internal diagnostics contract", () => {
       "retryability", "remediation_ref",
     ]));
     expect(diagnosticSchema.properties.context.additionalProperties).toBe(false);
+  });
+
+  it("maps Stage 1 Worker login evidence into the shared schema and redacts malformed origins", () => {
+    const event = makeWorkerLoginDiagnosticEvent({
+      event: "onyx.login.http",
+      requestId: "login-correlation-17",
+      legacyStage: "credential_verification",
+      method: "POST",
+      status: 401,
+      outcome: "failure",
+      serverCode: "INVALID_CREDENTIALS",
+      legacyErrorCode: "INVALID_CREDENTIALS",
+      legacyOutcome: "http_error",
+      elapsedMs: 22,
+      origin: "https://app.example/path?token=must-not-log",
+      originAllowed: true,
+    });
+    expect(event).toMatchObject({
+      schema_version: "1.0",
+      component: "cloudflare-worker",
+      operation: "POST /api/auth/login",
+      stage: "authentication",
+      correlation_id: "login-correlation-17",
+      outcome: "failure",
+      error_code: "LOGIN_AUTH_REJECTED",
+      cause_confidence: "unknown",
+      evidence_source: "server_code",
+      retryability: "no",
+      remediation_ref: "docs/diagnostics/stage-3-unified-diagnostics.md#login-error-mapping",
+      legacy_stage: "credential_verification",
+      legacy_outcome: "http_error",
+      legacy_error_code: "INVALID_CREDENTIALS",
+      origin: "[invalid-origin]",
+    });
+    expect(JSON.stringify(event)).not.toContain("must-not-log");
+    expect(JSON.stringify(event)).not.toContain("access_token");
+
+    const unknown = makeWorkerLoginDiagnosticEvent({
+      requestId: "login-unknown-18",
+      legacyStage: "authentication_response",
+      method: "POST",
+      status: 302,
+      outcome: "failure",
+      serverCode: "UNMAPPED_PRIVATE_CODE",
+      legacyErrorCode: "UNMAPPED_PRIVATE_CODE",
+      legacyOutcome: "http_error",
+      origin: "malformed origin data",
+      originAllowed: null,
+    });
+    expect(unknown).toMatchObject({
+      outcome: "failure",
+      error_code: "LOGIN_HTTP_ERROR",
+      cause_confidence: "unknown",
+      severity: "warning",
+      stage: "authentication",
+      origin: "[invalid-origin]",
+    });
+    expect(JSON.stringify(unknown)).not.toContain("UNMAPPED_PRIVATE_CODE");
   });
 
   it("uses stable status-based classifications and leaves successful responses unclassified", () => {

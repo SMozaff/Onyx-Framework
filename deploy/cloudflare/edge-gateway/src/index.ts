@@ -11,7 +11,7 @@ import { authorizeCommand, authorizeQuery, ONYX_ROLES, payloadOwnerIds, resource
 import { mobileCapabilityGranted } from "./mobile-capability";
 import { validateCommandSemantics } from "./command-semantics";
 import { staffOwnedPredicateSql, staffOwnedBindings, resourceIdFromReference } from "./resource-scope";
-import { makeApiFailureEvent, trustedRequestId, type SafeCauseType } from "./diagnostics";
+import { makeApiFailureEvent, makeWorkerLoginDiagnosticEvent, trustedRequestId, type SafeCauseType } from "./diagnostics";
 
 type Json = Record<string, unknown>;
 
@@ -233,10 +233,22 @@ async function authLogin(request:Request,env:Env):Promise<Response>{
     const code=sessionFailure?"LOGIN_SESSION_CREATION_FAILED":"LOGIN_BACKEND_FAILURE";
     // Only allowlisted diagnostic metadata is logged; never log request bodies,
     // usernames, password material, tokens, D1 row data, or exception messages.
-    console.error(JSON.stringify({
-      event:"onyx.login.failure", request_id:request.headers.get("X-ONYX-Request-ID"), stage, diagnostic_code:code,
-      cause_type:error instanceof TypeError?"TypeError":error instanceof RangeError?"RangeError":error instanceof SyntaxError?"SyntaxError":error instanceof Error?"Error":"UnknownError"
-    }));
+    const causeType: SafeCauseType = error instanceof TypeError ? "TypeError" : error instanceof RangeError ? "RangeError" : error instanceof SyntaxError ? "SyntaxError" : error instanceof Error ? "Error" : "UnknownError";
+    const requestOrigin = request.headers.get("origin");
+    console.error(JSON.stringify(makeWorkerLoginDiagnosticEvent({
+      event: "onyx.login.failure",
+      requestId: request.headers.get("X-ONYX-Request-ID"),
+      legacyStage: stage,
+      method: request.method,
+      status: 500,
+      outcome: "failure",
+      serverCode: code,
+      legacyErrorCode: code,
+      diagnosticCode: code,
+      origin: requestOrigin,
+      originAllowed: requestOrigin ? Boolean(corsOrigin(request, env)) : null,
+      causeType,
+    })));
     return json({error:code,code,category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500);
   }
 }
@@ -1873,7 +1885,22 @@ async function instrumentLoginRequest(request:Request,env:Env):Promise<Response>
   try{
     response=await dispatch(correlatedRequest,env);
   }catch(error){
-    console.error(JSON.stringify({event:"onyx.login.failure",request_id:requestId,stage:"worker_dispatch",diagnostic_code:"LOGIN_BACKEND_FAILURE",cause_type:error instanceof TypeError?"TypeError":error instanceof RangeError?"RangeError":error instanceof SyntaxError?"SyntaxError":error instanceof Error?"Error":"UnknownError"}));
+    const causeType: SafeCauseType = error instanceof TypeError ? "TypeError" : error instanceof RangeError ? "RangeError" : error instanceof SyntaxError ? "SyntaxError" : error instanceof Error ? "Error" : "UnknownError";
+    const requestOrigin = request.headers.get("origin");
+    console.error(JSON.stringify(makeWorkerLoginDiagnosticEvent({
+      event: "onyx.login.failure",
+      requestId,
+      legacyStage: "worker_dispatch",
+      method: request.method,
+      status: 500,
+      outcome: "failure",
+      serverCode: "LOGIN_BACKEND_FAILURE",
+      legacyErrorCode: "LOGIN_BACKEND_FAILURE",
+      diagnosticCode: "LOGIN_BACKEND_FAILURE",
+      origin: requestOrigin,
+      originAllowed: requestOrigin ? Boolean(corsOrigin(request, env)) : null,
+      causeType,
+    })));
     response=json({error:"LOGIN_BACKEND_FAILURE",code:"LOGIN_BACKEND_FAILURE",category:"INFRASTRUCTURE",retryability:"TRANSIENT",correlation_id:requestId},500);
   }
   response=await correlateLoginResponse(response,requestId);
@@ -1893,17 +1920,23 @@ async function instrumentLoginRequest(request:Request,env:Env):Promise<Response>
     :response.ok?"session_issued":"authentication_response";
   const originAllowed=origin?Boolean(corsOrigin(request,env)):null;
   const corsRejected=request.method==="OPTIONS"&&Boolean(origin)&&originAllowed===false;
-  console.log(JSON.stringify({
-    event:"onyx.login.http", request_id:requestId,
-    stage,
-    method:request.method, status:response.status,
-    outcome:corsRejected?"cors_rejected":response.ok?"success":"http_error",
-    error_code:corsRejected?"LOGIN_CORS_ORIGIN_REJECTED":response.ok?undefined:code,
-    elapsed_ms:Date.now()-started,
-    origin:origin?origin.slice(0,200).replace(/[\u0000-\u001f\u007f]/g,"?"):null,
-    origin_allowed:originAllowed
-  }));
-  return response;
+  const legacyOutcome = corsRejected ? "cors_rejected" : response.ok ? "success" : "http_error";
+  const legacyErrorCode = corsRejected ? "LOGIN_CORS_ORIGIN_REJECTED" : response.ok ? undefined : code;
+  console.log(JSON.stringify(makeWorkerLoginDiagnosticEvent({
+    event: "onyx.login.http",
+    requestId,
+    legacyStage: stage,
+    method: request.method,
+    status: response.status,
+    outcome: corsRejected ? "failure" : response.ok ? "success" : "failure",
+    legacyOutcome,
+    legacyErrorCode,
+    serverCode: code,
+    elapsedMs: Date.now() - started,
+    origin,
+    originAllowed,
+    corsRejected,
+  })));  return response;
 }
 async function correlateApiResponse(response:Response,requestId:string):Promise<Response>{
   // Cloudflare's 101 WebSocket upgrade response cannot be reconstructed safely.

@@ -1,6 +1,6 @@
 # ONYX diagnostic event contract
 
-Schema version: 1.0. This is an additive, compatibility-preserving contract for events emitted by the Stage 1 Admin Shell login diagnostics and Stage 2 Cloudflare Worker HTTP failure instrumentation.
+Schema version: 1.0. This contract covers Stage 1 Admin Shell login diagnostics, Stage 1 Cloudflare Worker login-boundary events, and Stage 2 Cloudflare Worker non-login HTTP failures.
 
 ## Required semantics
 
@@ -13,14 +13,14 @@ Schema version: 1.0. This is an additive, compatibility-preserving contract for 
 - outcome: success, failure, degraded, or unknown.
 - error_code: stable machine classification.
 - cause_confidence: confirmed, suspected, or unknown. Use unknown until independent evidence proves a cause.
-- evidence_source: what directly supported the classification, not an inference.
+- evidence_source: what directly supported the classification, not an inference. Worker CORS decisions use cors_policy; a code mapped from the response uses server_code; generic HTTP classifications use http_status.
 - retryability: yes, no, or unknown. Unknown is preferred over inventing a retry policy.
 - remediation_ref: stable documentation reference. This is advice, not proof that the suggested cause occurred.
 - context: explicitly allowlisted scalar metadata only. The JSON Schema rejects additional context keys.
 
 ## Compatibility
 
-The Stage 1 login event keeps legacy event, request_id, code, http_status, transport_code, server_code, duration_ms and retryable aliases. The Stage 2 Worker event keeps event, request_id, route_group, method, status, diagnostic_code, elapsed_ms, origin_allowed and cause_type. For both, correlation_id mirrors the validated request ID. New consumers must use schema_version + error_code + correlation_id and treat legacy aliases as deprecated but present for Stage 1/2 query compatibility. Removing aliases requires a separately reviewed versioned change.
+The Admin Shell login event keeps legacy event, request_id, code, http_status, transport_code, server_code, duration_ms and retryable aliases. The Stage 1 Worker login event keeps event, request_id, method, status, origin, origin_allowed, elapsed_ms, cause_type and diagnostic_code where those fields existed. Its old fine-grained stage, outcome and server code are retained under legacy_stage, legacy_outcome and legacy_error_code, while stage/outcome/error_code use canonical meanings. The Stage 2 Worker event keeps event, request_id, route_group, method, status, diagnostic_code, elapsed_ms, origin_allowed and cause_type. For both, correlation_id mirrors the validated request ID. New consumers must use schema_version + error_code + correlation_id and treat legacy aliases as deprecated but present for Stage 1/2 query compatibility. Removing aliases requires a separately reviewed versioned change.
 
 The Worker reports stage=worker for generic non-login HTTP failures. A returned status and status-based code do not confirm the internal root cause; cause_confidence remains unknown. Severity/retryability are conservative status mappings and are not a prediction of service recovery.
 

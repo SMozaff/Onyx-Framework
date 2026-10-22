@@ -13,7 +13,7 @@ Stage 1 and Stage 2 are present in current source. The missing prerequisite was 
 
 ## Architecture choice
 
-Use the existing structured console-log paths and a JSON Schema contract. No dashboard, diagnostic API, new database, or telemetry service is added. Stage 1 emits browser/WebView console records plus the onyx:login-diagnostic custom event; Stage 1/2 Worker emit structured JSON to the Worker console. Rust has an existing CanonicalJsonLayer and optional OTLP export controlled by OTEL_EXPORTER_OTLP_ENDPOINT, but its current R3 shape is not yet emitted in schema 1.0. No central sink, log-retention policy, or access-control policy was established by this audit; those are deployment/platform decisions, not invented here.
+Use the existing structured console-log paths and a JSON Schema contract. No dashboard, diagnostic API, new database, or telemetry service is added. Stage 1 emits browser/WebView console records plus the onyx:login-diagnostic custom event. The Worker login-boundary events (onyx.login.http and onyx.login.failure) and Stage 2 non-login HTTP failure events emit schema-versioned JSON to the Worker console. The prior Worker login stage/outcome/server-code values remain under legacy_* aliases where canonical meanings are normalized. Rust has an existing CanonicalJsonLayer and optional OTLP export controlled by OTEL_EXPORTER_OTLP_ENDPOINT, but its current R3 shape is not yet emitted in schema 1.0. No central sink, log-retention policy, or access-control policy was established by this audit; those are deployment/platform decisions, not invented here.
 
 ## Unified event and evidence interpretation
 
@@ -27,7 +27,7 @@ See shared/diagnostics/diagnostic-event.schema.json. Keep these distinctions:
 
 ## Correlation path and limits
 
-For Admin Shell login the source path is Login.tsx -> credentials.ts/Axios -> POST /api/auth/login with X-ONYX-Request-ID -> Cloudflare Worker instrumentLoginRequest -> authLogin. The Worker validates or replaces the incoming ID, uses it for the request event and JSON error correlation, and adds X-ONYX-Request-ID to the response where the existing CORS rules permit. Admin Shell reads the response header first and falls back to its outbound request ID. The request ID is never used in authorization.
+For Admin Shell login the source path is Login.tsx -> credentials.ts/Axios -> POST /api/auth/login with X-ONYX-Request-ID -> Cloudflare Worker instrumentLoginRequest -> authLogin. Worker stages are normalized (for example credential_verification to authentication); legacy_stage records the original fine-grained stage. The Worker validates or replaces the incoming ID, uses it for the request event and JSON error correlation, and adds X-ONYX-Request-ID to the response where the existing CORS rules permit. Admin Shell reads the response header first and falls back to its outbound request ID. The request ID is never used in authorization.
 
 For non-login Worker routes the Worker entry instruments the HTTP response, generates/replaces the request ID, returns it in X-ONYX-Request-ID, and adds correlation_id (or request_id when a domain correlation_id already exists) to JSON error responses. It logs only a bounded route family, HTTP method/status, duration, origin-allowed flag and optional allowlisted cause type. Stage 2 does not capture raw route IDs, query strings, headers or request/response bodies.
 
