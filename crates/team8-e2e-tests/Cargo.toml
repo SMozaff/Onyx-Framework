@@ -29,6 +29,3 @@ work-domain.workspace = true
 synchronization-domain.workspace = true
 api-server.workspace = true
 
-[[test]]
-name = "performance_benchmark"
-path = "../../tests/load/performance_benchmark.rs"

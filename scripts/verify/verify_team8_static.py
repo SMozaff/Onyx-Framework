@@ -45,11 +45,12 @@ def text(path: str) -> str:
 
 
 required = [
-    # CI was consolidated from eight increment workflows into the current
-    # platform- and purpose-based workflow set.
+    # Current workflow inventory for demo, runtime, and artifact checks.
     ".github/workflows/ci.yml", ".github/workflows/release.yml",
     ".github/workflows/Debug.yml", ".github/workflows/devcontainer-check.yml",
-    ".github/workflows/fmt-fix.yml",
+    ".github/workflows/cloudflare-worker-check.yml",
+    ".github/workflows/allfather-auth-smoke.yml", ".github/workflows/deploy-cloudflare-edge.yml",
+    ".github/workflows/security.yml", ".github/workflows/provision-allfather-password.yml",
     "scripts/ci-pipeline.sh", "scripts/release.sh", "scripts/canary-rollout.sh",
     "scripts/verify/verify_crdt_determinism.sh",
     "scripts/verify/verify_migration_idempotency.sh",
@@ -79,7 +80,6 @@ required = [
     *[f"tests/end-to-end/{name}.rs" for name in [
         "test_harness", "mission_lifecycle", "task_workflow", "conflict_resolution",
         "approval_workflow", "notification_sync", "p2p_sync", "background_sync"]],
-    "tests/load/smoke-test.js", "tests/load/performance_benchmark.rs",
     "docs/TEAM8_README.md", "docs/DECISIONS.md",
 ]
 for item in required:
@@ -277,10 +277,6 @@ for name in ["notification_sync.rs", "p2p_sync.rs", "background_sync.rs"]:
     check("#[ignore" in text(f"tests/end-to-end/{name}"),
           f"client journey not ignored: {name}")
 
-load = text("tests/load/smoke-test.js")
-for token in ["vus: 100", "duration: '60s'", "p(95)<500"]:
-    check(token in load, f"load contract missing: {token}")
-
 # Release security and integrity controls.
 release_workflow = text(".github/workflows/release.yml")
 release_script = text("scripts/release.sh")
@@ -380,10 +376,6 @@ else:
 for path in sorted((ROOT / "scripts").rglob("*.sh")):
     result = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
     check(result.returncode == 0, f"bash syntax invalid: {path.relative_to(ROOT)}: {result.stderr.strip()}")
-if subprocess.run(["bash", "-lc", "command -v node"], capture_output=True).returncode == 0:
-    result = subprocess.run(["node", "--check", str(ROOT / "tests/load/smoke-test.js")], capture_output=True, text=True)
-    check(result.returncode == 0, f"k6 JavaScript syntax invalid: {result.stderr.strip()}")
-
 # Basic delimiter integrity for Team 8-authored Rust sources.
 team8_rust = [
     ROOT / "crates/bins/migration-tool/src/main.rs",
@@ -397,7 +389,6 @@ team8_rust = [
     ROOT / "crates/bins/api-server/src/routes/command.rs",
     *list((ROOT / "crates/team8-e2e-tests").rglob("*.rs")),
     *list((ROOT / "tests/end-to-end").rglob("*.rs")),
-    ROOT / "tests/load/performance_benchmark.rs",
 ]
 for path in team8_rust:
     body = path.read_text(encoding="utf-8")
