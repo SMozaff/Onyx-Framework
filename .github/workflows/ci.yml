@@ -62,9 +62,8 @@ jobs:
             libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Ensure rustfmt is installed
         run: rustup component add rustfmt
-      # shared-key lets load-smoke (needs: check, so it always runs after
-      # this job's cache is saved) restore the exact same release
-      # target/ this job just built, instead of recompiling from scratch.
+      # Shared key lets other Rust build jobs in this workflow reuse the
+      # workspace release-build artifacts instead of recompiling from scratch.
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           shared-key: "release-build"
@@ -279,11 +278,9 @@ jobs:
       - name: Install Admin UI dependencies
         working-directory: crates/bins/admin-shell/ui
         run: npm ci
-      # The Admin shell owns the All-Father Supabase sign-in. Since that login
-      # replaced the OAuth implicit flow with Authorization Code + PKCE, its
-      # state/verifier/callback handling is a security boundary and must be
-      # regression-tested here rather than only built.
-      - name: Run Admin UI authentication (PKCE) tests
+      # The Admin shell owns ONYX credential sign-in. Its credential-form
+      # and session handling are demo-critical and must be regression-tested.
+      - name: Run Admin UI authentication tests
         working-directory: crates/bins/admin-shell/ui
         run: npm test
       - name: Build Admin UI frontend smoke target
