@@ -24,10 +24,10 @@
 The original audit opened 2026-08-06. Its detailed findings below have not been uniformly rerun against the current source tree. Findings that reference deleted paths, retired authentication, old workspace counts, or absent runbooks are superseded by the reconciliation above. Any security or runtime finding not explicitly reconciled here remains **unverified**, not automatically open or closed.
 
 
-## 2. Verified Findings
+## Historical findings (original numbering retained)
 
 Severity: **C**=Critical, **H**=High, **M**=Medium, **L**=Low.
-Status: OPEN unless stated.
+Historical status at the original audit date: OPEN unless stated.
 
 ### C-01 — Repository does not compile as delivered
 **Evidence:** `cargo check --workspace --all-targets`
