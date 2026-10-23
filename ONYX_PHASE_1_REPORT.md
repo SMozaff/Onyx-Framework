@@ -3,7 +3,9 @@
 **Repository:** `SMozaff/Onyx-Framework`  
 **PR:** [#268](https://github.com/SMozaff/Onyx-Framework/pull/268)  
 **Branch:** `security/phase-1-authz-sessions`  
-**Status:** PHASE INCOMPLETE — the Worker defect is fixed and its CI path is green, but the full backend audit is not complete and an active-backend contract conflict requires an explicit architecture decision.
+> **CURRENT-STATUS ADDENDUM (2026-10-23):** This is a historical report snapshot, not the current PR state. PR [#268](https://github.com/SMozaff/Onyx-Framework/pull/268) is **closed and merged** (2026-10-18). PR [#280](https://github.com/SMozaff/Onyx-Framework/pull/280) later merged the Stage 1 login diagnostics (2026-10-22). The old instructions below saying to keep #268 open/draft, do not merge, or continue from its former branch are superseded. Merge status does not prove live deployment, production D1 provisioning, or successful live authentication. Current All-Father authentication uses ONYX username/password on the Cloudflare Worker with D1-backed authority; Google/Supabase exchange is retired. See [the current authentication model](docs/SECURITY_AUTHENTICATION_MODEL.md) and [the Worker README](deploy/cloudflare/edge-gateway/README.md).
+
+**Historical status at time of original report:** Phase was considered incomplete because its audit and final-head verification were unfinished.
 
 ## 1. Baseline and exact revisions
 
@@ -11,7 +13,7 @@
 - **Starting branch head from the prior handoff:** `24cbb960c41fd7bf78aa2c811c8986681c35e40b`.
 - **Last tested source/workflow head before this report-only evidence refresh:** `faac00ea430ef946ab3d8fc245ea753b3caa1969` (the report-only commit that follows is the PR head; this report cannot self-reference its own commit SHA).
 - This report update creates a new report-only commit; the exact current PR head is recorded by PR #268 metadata and is stated again in the final handoff. The report commit cannot contain its own SHA.
-- PR #268 remains open, draft, and unmerged. No production deployment, production D1 mutation, credential rotation, or production secret change was performed.
+- At the time of this historical report, PR #268 had not yet merged. The report itself did not perform a production deployment, production D1 mutation, credential rotation, or production secret change.
 
 ## 2. Relay-ticket failure — root cause confirmed and fixed
 
@@ -163,7 +165,7 @@ At the time of this evidence refresh, full CI run #1695 and Security run #1237 f
 
 ## 9. Recommended next-phase prompt
 
-> Continue from the exact current PR #268 head; do not treat Phase 1 as complete. First resolve the documented architecture decision about whether the separately deployed Rust/Axum API is a supported production entry point and how its All-Father login contract aligns with the current ONYX-managed Worker contract. Then implement and test per-request principal/tenant revalidation in every active backend; audit every Axum route, Tauri command, Admin Shell, web/PWA and Android path for server-side role, active-state, tenant and resource ownership enforcement. Preserve the current Worker relay-ticket TTL fix and all passing regression tests. Do not restore the superseded Worker `/api/auth/supabase` route, weaken authorization, deploy production, mutate production data/secrets, or merge. Record exact SHAs, isolated relay test, full Worker suite, full CI/Security, preview logs and any remaining P0 blocker.
+> **Historical continuation instruction, superseded:** this instruction was written while PR #268 was open. It must not be used as current workflow guidance. Use current source, current pull-request metadata, and current workflow runs for any follow-up; do not infer production deployment or live-login success from merge status.
 
 ## 10. Completion decision
 
@@ -177,7 +179,7 @@ At the time of this evidence refresh, full CI run #1695 and Security run #1237 f
 **Continuation starting head:** `fdb86532e88c4e1b5a6de0eb6986d7e399d4f57c`  
 **Starting base/main SHA verified:** `54221e10f1dff46730aef33826db0c631c3d293d`  
 **Latest code/test head before this report refresh:** `7631040e2b3f66db45e85e7dbce50557420f0361` (this report refresh creates a new head).  
-**PR state at start:** #268 open, draft, unmerged; base `main`; 18 commits ahead and 0 behind at initial comparison. The report update adds another commit.
+**PR state at the historical start of this continuation:** #268 was open and draft. Current GitHub state: #268 is closed and merged on 2026-10-18.
 
 ## A. Axum production-role decision — evidence and limits
 
@@ -359,7 +361,7 @@ Do not silently remove the route, assume external callers do not exist, or provi
 - Security [run 39144256212](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256212) and Full CI [run 39144256232](https://github.com/SMozaff/Onyx-Framework/actions/runs/39144256232) were queued when this section was authored. The new WebSocket and relay integration tests therefore have no pass claim yet.
 - The earlier Cloudflare preview build `27bd0c31-9116-47ff-87ed-ecf8741510c0` is for the earlier `ee8c2bbf5ec8ba56811844adfdff15d791144398` candidate, not this continuation's final source. It is preview-build evidence, not production runtime evidence.
 - The report-containing commit necessarily has a new SHA; its own CI/Security/Worker status must be read from the checks associated with the actual PR head. Results on any earlier SHA are not proof for that final candidate.
-- No production deployment, production database migration/data mutation, production secret change, or credential rotation was performed. PR #268 must remain open and draft.
+- The original report did not perform a production deployment, production database migration/data mutation, production secret change, or credential rotation. The instruction to keep PR #268 open/draft is obsolete; GitHub records show it merged on 2026-10-18.
 
 **Decision: BLOCKED.** The Clippy defect was identified precisely and corrected; special WebSocket and relay-ticket handshake revalidation was added with regression tests. Phase 1 cannot be declared complete because the authoritative organization/membership schema and backfill/activation policy, the All-Father legacy-route compatibility decision, the complete cross-client authorization matrix, and exact-final-head verification remain unresolved.
 
