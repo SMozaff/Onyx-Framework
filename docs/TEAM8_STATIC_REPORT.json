@@ -2,7 +2,7 @@
   "document": "ONYX Team 8 current source inventory",
   "scope": "Repository inventory only. Does not claim builds, tests, release gates, or runtime behavior passed.",
   "source_commit": "e0708eb5ebc2502c601039ee61087678d38bfe8f",
-  "generation_method": "GitHub current-main recursive Git tree inspection; not an execution of the verifier",
+  "generation_method": "Current-main Git tree inventory snapshot at source_commit; dynamic regeneration is wired into scripts/verify/verify_team8.sh and the CI source-contracts job.",
   "checks_total": 19,
   "checks_passed": 19,
   "checks_failed": 0,
@@ -103,5 +103,6 @@
       "detail": "Present in current main Git tree"
     }
   ],
-  "historical_note": "The former 345/345 static result is invalidated. The legacy comprehensive verifier still contains stale path/contract expectations and must be reconciled in correction step 4 before it can be used as a pass/fail gate."
+  "historical_note": "The former 345/345 result is invalidated. The verifier no longer requires absent docs/runbooks and go-live/signoff files. This committed JSON is still an inventory snapshot, not the comprehensive verifier's executed result; the CI source-contracts job will produce the full report artifact.",
+  "generator": "scripts/verify/verify_team8_static.py via scripts/verify/verify_team8.sh (comprehensive source checks; writes this report before returning failure)"
 }
