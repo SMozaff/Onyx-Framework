@@ -1,48 +1,36 @@
-# ONYX Google Authentication Flow
+# Historical ONYX Google/Supabase Authentication Flow — Retired
 
-This diagram documents the intended Admin sign-in boundaries. It distinguishes the local Admin web-development origin from the packaged Linux desktop callback. It is an architecture guide, **not evidence that live Google sign-in has passed**.
+> **Historical reference only. This is not the current sign-in design, setup guide, or verification evidence.** The Google/Supabase All-Father exchange path has been retired from current runtime authentication. Do not restore it based on this document.
 
-## Flow overview
+This document preserves the previous design and its former verification limits for audit/history purposes. The diagram below describes the retired flow, not the current product.
+
+## Retired flow overview
 
 ```mermaid
 flowchart TD
-    U[User selects Google sign-in] --> A[ONYX Admin UI]
-    A -->|Builds PKCE verifier and S256 challenge; stores transaction locally| S[Supabase Auth authorize endpoint]
+    U[User selects Google sign-in] --> A[Legacy ONYX Admin UI]
+    A --> S[Supabase Auth authorize endpoint]
     S --> G[Google OAuth]
-    G -->|Provider response| S
-    S -->|Redirects to the exact allow-listed redirect_to with one-time code| C{Client callback}
-    C -->|Local Admin web development: localhost:5174| W[Admin web UI handles callback]
-    C -->|Packaged Linux app: configured native callback path| N[Native callback listener / Tauri event]
-    W --> P[Validate state; consume pending transaction once]
-    N --> P
-    P -->|POST token endpoint with code and matching PKCE verifier| X[Supabase Auth PKCE exchange]
-    X -->|Supabase session/access token| B[ONYX API / Worker]
-    B --> V[Verify Supabase bearer token server-side]
-    V --> I{Canonical ONYX identity and active account checks}
-    I -->|Designated All-Father identity, provisioned and active| AF[Grant authorized All-Father capabilities]
-    I -->|Ordinary identity or failed checks| DENY[Deny All-Father privileges]
+    G --> S
+    S --> C[Legacy client callback]
+    C --> X[Supabase Auth PKCE exchange]
+    X --> B[Legacy ONYX API exchange path]
+    B --> V[Legacy Supabase token verification]
+    V --> I{Legacy canonical identity check}
+    I -->|Former designated identity| AF[Former All-Father capability path]
+    I -->|Other identity or failed checks| DENY[Deny elevated privileges]
 ```
 
-## Redirect configuration
+## Current authentication source of truth
 
-| Configuration | Purpose |
-|---|---|
-| `http://localhost:5174/` | Local Admin development origin. The repository's Admin Tauri config uses port 5174, and the All-Father OAuth helper guards the local web flow to this origin. Keep it in Supabase's allowed redirect URLs only while this development flow is needed. |
-| `http://127.0.0.1:17645/auth/callback` | Loopback callback reported by the Linux native OAuth implementation. Keep it only if the packaged Linux build's actual `redirect_to` uses this exact URI. |
-| Google OAuth client's authorized redirect URI | Normally Supabase's own Auth callback URL for the project, not the application's final `redirect_to`. Confirm the exact callback shown for the configured Supabase project. |
+- The supported remote login is ONYX username/password at the Cloudflare Worker route `POST /api/auth/login`.
+- The Worker uses D1 as its authority for the canonical All-Father principal, account/organization state, role/admin state, and session revocation.
+- All-Father-only routes enforce authority server-side.
+- The native Axum login path reserves the `allfather` username and is not an alternate All-Father authentication path.
+- There is no supported Google/Supabase fallback for All-Father login. Historical migration records/columns may remain for ledger compatibility and are not current authorization inputs.
 
-The redirect passed as `redirect_to` must match an allowed URL in Supabase. Google redirects to Supabase Auth first; Supabase then redirects to the application's allow-listed destination.
+For current behavior, use [the authoritative authentication model](../SECURITY_AUTHENTICATION_MODEL.md) and [the Cloudflare Worker documentation](../../deploy/cloudflare/edge-gateway/README.md).
 
-## Security boundaries
+## Historical verification note
 
-- The browser/client creates a random PKCE verifier and S256 challenge. The verifier must remain available to the same client origin/transaction until the one-time code exchange.
-- Validate the returned state against the pending transaction; reject expired, mismatched, duplicate, or malformed callbacks.
-- Exchange the one-time authorization code with the matching verifier. Never log or publish authorization codes, verifiers, access tokens, refresh tokens, or full callback URLs.
-- A successful Google/Supabase login is **not** proof of All-Father authority. The ONYX server must verify the Supabase token and resolve the canonical subject against the provisioned, active All-Father identity; client-supplied role metadata must not grant privilege.
-- Ordinary authenticated accounts may sign in through the normal path, but must be denied All-Father-only capabilities.
-
-## Verification status
-
-PR #235's recorded runtime smoke test confirmed that the packaged Linux app launched, registered its callback listener, and opened Google's sign-in page. It did **not** complete an authenticated Google session. The full Google → Supabase → callback → PKCE exchange → ONYX session and All-Father-versus-ordinary-account authorization checks remain **NOT VERIFIED** until tested with authorized identities.
-
-Before relying on the packaged-app callback arrow above, verify the actual `redirect_to` generated by the packaged Linux build and the callback URI accepted by its native listener; do not infer this from the local web-development configuration.
+Older PR notes and smoke-test records concerning opening Google's sign-in page or registering a native callback do not verify a completed authenticated session, and they do not verify the current ONYX username/password path. Current login claims must be supported by the Worker tests and, for live behavior, a secret-safe test against the deployed Worker after the account is provisioned.
