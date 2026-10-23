@@ -505,7 +505,7 @@ jobs:
             "mobile-pwa=$MOBILE_PWA_RESULT" \
             "native-ui-evidence=$NATIVE_UI_RESULT" \
             "load-smoke=$LOAD_SMOKE_RESULT" \
-            "security-audit=$SECURITY_RESULT"
+            "security-audit=$SECURITY_RESULT" \
             "source-contracts=$SOURCE_CONTRACTS_RESULT"
           for result in \
             "$CHECK_RESULT" \
@@ -515,7 +515,7 @@ jobs:
             "$MOBILE_PWA_RESULT" \
             "$NATIVE_UI_RESULT" \
             "$LOAD_SMOKE_RESULT" \
-            "$SECURITY_RESULT"
+            "$SECURITY_RESULT" \
             "$SOURCE_CONTRACTS_RESULT"
           do
             if [[ "$result" != "success" ]]; then
