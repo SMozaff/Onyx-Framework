@@ -1,3 +1,9 @@
+# Historical Flutter Mobile v1.1 Changed-File List
+
+> **Historical only.** This manifest refers to the retired `mobile/` Flutter tree and is not a current file inventory. Current mobile surfaces are `mobile-android/`, `mobile-pwa/`, `crates/mobile-core/`, and `crates/mobile-android-jni/`. See [docs/Structure.md](Structure.md) and [docs/MOBILE_V11_STATIC_REPORT.json](MOBILE_V11_STATIC_REPORT.json).
+
+The original list is preserved below for history; confirm every path in the current checkout before using it.
+
 .github/workflows/ci.yml
 .github/workflows/increment5-clients.yml
 .gitignore
