@@ -1,24 +1,17 @@
 # ONYX Observer PWA (`mobile-pwa/`)
 
-Read-only ObserverClient for the `mobile_observer` client class, per
-`docs/mobile-migration/MIGRATION_PLAN.md` Phase 2 and the frozen
-`docs/mobile-migration/pwa-observer-contract.md`.
+Read-only ObserverClient for the `mobile_observer` client class. Its current
+source lives in this directory; the current backend boundaries and authentication
+model are documented in [Backend Architecture](../docs/BACKEND_ARCHITECTURE.md),
+[Authentication Model](../docs/SECURITY_AUTHENTICATION_MODEL.md), and the
+[Cloudflare Worker API contract](../docs/production/api-contract.md).
 
-> **Status: Phase 2 + 3.2 + 5.1/5.2/5.3 delivered.** Project structure, build
-> stack, `ObserverHttpGateway` (`src/api/onyx.ts`), the Phase 2.3 observer
-> views (Dashboard, Missions, Tasks, Notifications, Approvals, Reports,
-> FileDetail), the Phase 2.6 test suite, Phase 3.2 Web Push (opt-in/opt-out
-> card, `pushStore`, SW show-and-route, and the backend **delivery worker**
-> in `crates/bins/worker` that VAPID-signs and RFC 8291-encrypts
-> notifications to registered endpoints), and Phase 5 PWA acceptance
-> (build-time shell precache, offline-served app shell + stale snapshot,
-> `OfflineBanner`, launch screen/iOS meta, 0 npm audit findings) are in place
-> and green on every gate — 38 Vitest + 4 a11y + 7 Playwright dev-suite + 1
-> offline prod-suite test, plus `cargo test -p worker` (10 unit + 2
-> Postgres-gated delivery tests). A FileList index (needs a backend FileAsset
-> listing), a device-level push round trip through a real push service,
-> real-iphone Home Screen acceptance, and the Phase 5.4 hosting decision
-> remain future/pending.
+> **Verification status:** The old phase-based migration documents and test-count
+> claims referenced by earlier versions of this README are not present as current
+> evidence. The project still has source-level unit, component, accessibility,
+> and Playwright test suites under `tests/`; current results must be taken from
+> workflow runs for the exact commit. This README does not claim every gate is
+> green or that device-level push and offline behavior has passed on real devices.
 
 ## What this client is
 

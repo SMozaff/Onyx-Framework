@@ -11,6 +11,7 @@ type RequiredRoute = { method: string; path: string; source: string };
 const settings = read("crates/bins/admin-shell/ui/src/pages/Settings.tsx");
 const users = read("crates/bins/admin-shell/ui/src/pages/Users.tsx");
 const worker = read("deploy/cloudflare/edge-gateway/src/index.ts");
+const apiContract = read("docs/production/api-contract.md");
 
 const REQUIRED_ROUTES: RequiredRoute[] = [
   { method: "GET", path: "/api/admin/mobile-access", source: "Settings.tsx MobileAccessPanel" },
@@ -100,6 +101,13 @@ function routeMatches(requiredPath: string, implementedPattern: string): boolean
 }
 
 describe("Admin API route completeness", () => {
+
+  it("documents every required Worker route in the source-level API contract", () => {
+    for (const route of REQUIRED_ROUTES) {
+      const rowPrefix = `| ${route.method} | \`${route.path}\` |`;
+      expect(apiContract, "API contract missing " + rowPrefix).toContain(rowPrefix);
+    }
+  });
   it("does not register the retired All-Father Supabase exchange", () => {
     expect(worker).not.toContain("/api/auth/supabase");
     expect(REQUIRED_ROUTES.some((route) => route.path === "/api/auth/supabase")).toBe(false);

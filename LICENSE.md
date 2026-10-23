@@ -1,5 +1,7 @@
 # ONYX Proprietary License Notice
 
+This file is the license notice referenced by the Rust workspace metadata (`license-file = "LICENSE.md"`). ONYX is **not** distributed under the MIT License. This notice does not grant a general software license; any commercial use, redistribution, or other rights require separate written permission or an applicable written agreement.
+
 Copyright (c) 2026 Soheil Mozaffari. All rights reserved.
 
 ONYX and the source code, software, documentation, designs, product interfaces, branding, and other original materials contained in this repository are proprietary intellectual property of **Soheil Mozaffari**, except for third-party materials that are separately identified or governed by their own licenses.

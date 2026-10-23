@@ -447,6 +447,22 @@ jobs:
       - if: always()
         run: kill "$(cat api.pid)" || true
 
+  source-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Regenerate fail-closed mobile and Team 8 source reports
+        run: bash scripts/verify/verify_team8.sh
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: onyx-source-reports-${{ github.sha }}
+          path: |
+            docs/MOBILE_V11_STATIC_REPORT.json
+            docs/TEAM8_STATIC_REPORT.json
+          if-no-files-found: error
+          retention-days: 30
+
 # Phase 0 merge-control gate.
   #
   # This job is intentionally an aggregate gate rather than a build/test job.
@@ -466,6 +482,7 @@ jobs:
       - native-ui-evidence
       - load-smoke
       - security-audit
+      - source-contracts
     steps:
       - name: Report upstream gate results
         env:
@@ -477,6 +494,7 @@ jobs:
           NATIVE_UI_RESULT: ${{ needs['native-ui-evidence'].result }}
           LOAD_SMOKE_RESULT: ${{ needs['load-smoke'].result }}
           SECURITY_RESULT: ${{ needs['security-audit'].result }}
+          SOURCE_CONTRACTS_RESULT: ${{ needs['source-contracts'].result }}
         run: |
           set -euo pipefail
           printf '%s\n' \
@@ -487,7 +505,8 @@ jobs:
             "mobile-pwa=$MOBILE_PWA_RESULT" \
             "native-ui-evidence=$NATIVE_UI_RESULT" \
             "load-smoke=$LOAD_SMOKE_RESULT" \
-            "security-audit=$SECURITY_RESULT"
+            "security-audit=$SECURITY_RESULT" \
+            "source-contracts=$SOURCE_CONTRACTS_RESULT"
           for result in \
             "$CHECK_RESULT" \
             "$I18N_RESULT" \
@@ -496,7 +515,8 @@ jobs:
             "$MOBILE_PWA_RESULT" \
             "$NATIVE_UI_RESULT" \
             "$LOAD_SMOKE_RESULT" \
-            "$SECURITY_RESULT"
+            "$SECURITY_RESULT" \
+            "$SOURCE_CONTRACTS_RESULT"
           do
             if [[ "$result" != "success" ]]; then
               echo "::error::Merge gate blocked: required verification result was $result."

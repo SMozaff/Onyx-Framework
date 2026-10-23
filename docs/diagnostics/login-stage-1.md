@@ -1,6 +1,6 @@
 # ONYX Stage 1 — Login diagnostics and error intelligence
 
-**Status:** implemented on a review branch; not merged or deployed.  
+**Status:** merged into main via [PR #280](https://github.com/SMozaff/Onyx-Framework/pull/280) on 2026-10-22. Source presence is confirmed by the current repository; live deployment of every diagnostic change is not established by merge status alone.  
 **Repository baseline:** `main` at `0e83e8713cc8c84a169dbf6aef129f1255867cc6` when the branch was created.  
 **Scope:** Admin Shell login request, Cloudflare Worker login route, request correlation, sanitized diagnostic events, stable error registry, and focused tests.
 

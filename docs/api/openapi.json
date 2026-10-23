@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "ONYX Web Thin Client API",
+    "title": "ONYX Native Axum API — Partial OpenAPI Contract",
     "version": "1.0.0",
-    "description": "Frozen Team 6 HTTP and WebSocket contract. Authority is supplied by the bearer access_token JWT; actor and authority proof are enriched server-side."
+    "description": "Partial OpenAPI contract for the native Rust/Axum API registered in crates/bins/api-server/src/routes/mod.rs. This document does not describe the full Cloudflare Worker API. The Worker/D1 source-level route inventory is docs/production/api-contract.md. Neither document proves deployed behavior; verify current source, tests, and deployment records separately."
   },
   "servers": [
     {
@@ -1038,5 +1038,6 @@
         }
       }
     }
-  }
+  },
+  "x-onyx-contract-scope": "native-axum-partial"
 }

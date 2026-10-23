@@ -6,7 +6,7 @@
 
 - Canonical D1 principal: `id='__allfather__'`, username `allfather`, organization `__allfather__`.
 - The principal must be active, its organization must be active, `role='ALL_FATHER'`, and `is_admin=1`.
-- Only `POST /api/auth/login` on the Cloudflare Worker accepts All-Father username/password. The Worker verifies the stored PHC Argon2id hash using `hash-wasm` with `parallelism=1`, `iterations=3`, `memorySize=65536`, and `hashLength=32`.
+- Only `POST /api/auth/login` on the Cloudflare Worker accepts All-Father username/password. The Worker runtime verifies the stored PHC Argon2id hash using `argon2-wasm-edge` with `parallelism=1`, `iterations=3`, `memorySize=65536`, and `hashLength=32`. The owner-controlled provisioning script and local smoke/tests use `hash-wasm` to produce/verify compatible PHC Argon2id hashes with the same parameters; do not describe the runtime dependency as `hash-wasm`.
 - The Worker issues the existing ONYX access/refresh token pair. Access tokens are short-lived and protected requests re-read the current user, organization, role, active state, tenant, and revocation watermark from D1.
 - User-provided `role`, `is_admin`, principal IDs, organization IDs, and client type do not grant authority. The canonical ID, explicit role, admin flag, and active state come from D1.
 - All-Father-only organization and organization-admin routes enforce `ALL_FATHER` on the server. Ordinary users cannot claim or inherit this authority.

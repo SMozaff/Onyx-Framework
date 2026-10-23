@@ -2872,22 +2872,14 @@ pull); `p2p/P2pChannel.kt` (deferred handshake);
    dependent loss of sibling subtrees.
 
 
-## Cloud-Only Client Connectivity
+## Cloud-Only Client Connectivity — Current Ruling (2026-10-23)
 
-**Ruling:** All installed and browser-based ONYX clients (Admin desktop, Staff desktop,
-Android, and PWA) use the single deployed ONYX Cloud API with Supabase Cloud
-authentication. Clients must not expose local-backend selection, editable API
-base URLs, local-server settings, or local-backend guidance.
+**Current ruling:** installed and browser-based ONYX clients use the Cloudflare Worker as the supported remote API. All-Father and ordinary account sign-in use ONYX-managed username/password credentials; the Worker uses D1-backed principal, organization, role, and session state. Google/Supabase identity exchange is retired and must not be treated as the current sign-in flow.
 
-- Canonical API: `https://onyx-framework.soheil-mozaffari.workers.dev`
-- Localhost/loopback endpoints may be used only by developer tooling and isolated
-  CI tests; they must not be a runtime fallback or configurable endpoint in a
-  distributed client.
-- OAuth return handling must use the supported desktop callback/deep-link flow;
-  it must not require a development server at `localhost:3000`.
-- Offline PWA behavior must not silently redirect API calls to a loopback service.
-  Any offline capability must be explicit and compatible with the cloud-only API
-  contract.
-- This ruling applies across Admin, Staff, Android, and PWA. A UI-only removal is
-  insufficient: endpoint selection, persisted overrides, build-time defaults,
-  OAuth redirects, and tests must all enforce the same contract.
+- Canonical Worker API recorded by the current deployment configuration: `https://onyx-framework.soheil-mozaffari.workers.dev`.
+- Localhost/loopback endpoints may be used by developer tooling and isolated CI tests only; they are not a distributed-client fallback.
+- The retired Google/Supabase flow's OAuth callback, redirect, and PKCE instructions are historical. They must not be used to configure current All-Father sign-in.
+- Offline PWA behavior must remain explicit and compatible with the cloud API contract; it must not silently redirect API calls to a loopback service.
+- The native Rust/Axum API is a separate backend implementation, not a proxy behind the Worker. Route, storage, auth, and deployment parity must be proven separately; see [Backend Architecture](BACKEND_ARCHITECTURE.md) and [the Worker API contract](production/api-contract.md).
+
+This current ruling supersedes the older wording in this section that named Supabase Cloud authentication and OAuth return handling as current behavior. Historical OAuth records remain for audit purposes only.

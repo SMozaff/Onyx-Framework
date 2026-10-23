@@ -13,6 +13,8 @@ This notice records the current ownership position for the ONYX project. It is i
 
 ## Proprietary status
 
+The Rust workspace declares `LICENSE.md` as its license file. The workspace does not declare the MIT License for ONYX-owned code. This repository's public availability does not itself grant commercial, redistribution, or derivative-work rights; those rights must be defined in a separate written agreement or explicit written permission. Third-party components remain governed by their own licenses.
+
 Unless a file or component is expressly identified as third-party material and governed by a separate license, original ONYX materials are proprietary.
 
 This includes, without limitation:

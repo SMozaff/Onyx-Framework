@@ -1,8 +1,8 @@
-# ONYX Production API Contract
+# ONYX Cloudflare Worker API Contract
 
 **Source of truth:** `deploy/cloudflare/edge-gateway/src/index.ts`, especially `dispatch()`.
-**Baseline:** `f0fca48cabd74f109096258f84925282bb349dba`; this is a source-level contract, not proof of deployed behavior.
-**Unknown paths:** return `501 ROUTE_NOT_MIGRATED` with `FEATURE_UNAVAILABLE`; never treat that response as success.
+**Source baseline:** `4873e314c4f2f638763a830e79134b5840906250` (current main inspected on 2026-10-23); this is a source-level contract, not proof of deployed behavior.
+**Unknown paths:** the Worker currently returns `501 ROUTE_NOT_MIGRATED` with `FEATURE_UNAVAILABLE`. Its response text generically says an equivalent Axum route exists; that text is not evidence that a native route actually exists. Check the native router separately, and never treat a `501` as success.
 
 Status terms: `implemented-in-source` means a dispatch branch and handler exist in this revision. It does not imply production deployment or successful end-to-end verification.
 
@@ -13,7 +13,12 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 | GET | `/health` | None | Reachability only; `{status:"ok",service,runtime}`. |
 | GET | `/ready` | None | `200` when required D1 schema is present; otherwise `503` with missing schema items. |
 | POST | `/api/auth/login` | None | `{username|email,password,client_type?}` → access/refresh token pair; All-Father is allowed only for canonical `__allfather__` with explicit `ALL_FATHER` role and admin flag. |
-
+| GET | `/api/allfather/organizations` | ALL_FATHER | Lists organizations from the Worker/D1 store. |
+| PATCH | `/api/allfather/organizations/:id` | ALL_FATHER | Renames the selected organization. |
+| POST | `/api/allfather/organizations/:id/activate` | ALL_FATHER | Reactivates an eligible organization. |
+| POST | `/api/allfather/organizations/:id/deactivate` | ALL_FATHER | Deactivates an organization. |
+| GET | `/api/allfather/admins` | ALL_FATHER | Lists organization administrator accounts. |
+| POST | `/api/allfather/admins/:id/reactivate` | ALL_FATHER | Reactivates an eligible organization administrator. |
 | POST | `/api/auth/refresh` | Refresh token in body | Single-use refresh token → rotated pair; replay is rejected. |
 | POST | `/api/auth/logout` | Optional bearer and/or refresh token | Revokes supplied valid token/session family; returns `{success:true}`. |
 | GET | `/api/query` | ONYX access session; role and ownership policy | Base64url query envelope → query result page. |
@@ -53,13 +58,17 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 | POST | `/api/allfather/organizations` | ALL_FATHER | Creates an organization. |
 | POST | `/api/allfather/admins` | ALL_FATHER | Creates an organization administrator. |
 
+## Known Worker/native API differences
+
+The native Axum router is registered separately in `crates/bins/api-server/src/routes/mod.rs`; it is not an upstream proxy for this Worker. In particular, native Axum registers `GET /api/admin/users/:id`, while the Worker dispatch table does not. A GET to that path on the Worker falls through to its `501 ROUTE_NOT_MIGRATED` response. Do not assume route parity from matching route names or from the OpenAPI subset. The Worker additionally implements the All-Father organization/admin management routes listed above; native Axum does not provide those as the canonical All-Father login/administration path.
+
 ## Security and cross-client decisions
 
 - **Identity and authority:** ONYX access sessions are verified server-side. Current account, organization, role and session revocation state are re-read from D1 for protected operations.
 - **Mobile capability:** `users.class` intersected with `mobile_access_settings.allowed_classes` governs staff capability endpoints. Missing, malformed, inactive or unlisted staff records deny. The caller-supplied `client_type` claim is metadata only. This is a server-side class policy, **not device attestation** and not a login restriction.
 - **Tenant isolation:** authorization and persistence must use the verified session's organization scope; caller-supplied tenant metadata is not authoritative.
 - **Hierarchy wire shape:** JSON array of `{id,parent_user_id,is_admin}` records, matching the Rust/Android contract.
-- **Errors:** stable `{error,category,retryability}` response shape; invalid input uses 400, unauthenticated 401, unauthorized 403, conflict 409, and infrastructure failures 5xx where defined.
+- **Errors:** the Worker fallback is `501 ROUTE_NOT_MIGRATED` for unimplemented paths. Many handlers return `{error,category,retryability}`, but response envelopes remain route-specific; callers and docs must follow the actual handler/tests rather than assume every route has a fully uniform shape.
 - **CORS:** exact `ONYX_CORS_ORIGINS` allowlist. Wildcard origin must never be paired with credentialed responses.
 
 ## Verification boundary

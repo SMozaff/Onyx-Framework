@@ -1,21 +1,39 @@
-# Test Suite Audit (2026-10-10)
+# Test Suite Audit
 
 ## Authentication model applied
-The ONYX authentication system document supplied for this project is the basis for this audit: All-Father signs in through Google via Supabase Auth; Admin and Staff use ONYX-managed username/email + password; D1 is authoritative for ONYX users, roles, organization membership and authorization. There is no first-user/bootstrap login flow and no fixed test administrator account.
+
+The current remote-client authentication path is the Cloudflare Worker at `deploy/cloudflare/edge-gateway`. All-Father uses ONYX-managed username/password credentials, and the Worker uses D1 for the canonical principal, account and organization state, roles, and session revocation. Admin and Staff use ONYX username/email plus password. Google/Supabase All-Father identity exchange is retired and must not be described as the current model.
+
+The native Rust/Axum API is a separate backend implementation. Its login route reserves the `allfather` username; it is not an alternate All-Father login path. Worker and native API tests must be assessed against the backend they actually exercise.
+
+See [the authoritative authentication model](SECURITY_AUTHENTICATION_MODEL.md), [the Worker README](../deploy/cloudflare/edge-gateway/README.md), and [the historical Google/Supabase flow](authentication/GOOGLE_OAUTH_FLOW.md).
 
 ## Removed from the Rust journey runner
-- approval_workflow.rs: depended on bootstrap_and_login and a seeded hard-coded All-Father username/password. It tests the retired Rust/Axum authentication path rather than the current Cloudflare Worker/D1/Supabase model.
-- session_revocation.rs: depended on the seeded test administrator credentials and legacy Axum/PostgreSQL user routes. The security behavior is valuable, but this implementation is not a valid test of the current target architecture; reimplement it against Worker/D1 session revocation when that path exists.
-- production_bootstrap.rs: tests a first-admin bootstrap/seed behavior that is not part of the authoritative authentication model.
-- The harness's TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD and bootstrap_and_login helper were removed. No fixed test credentials remain in this E2E harness.
 
-## Keep
-- mission_lifecycle.rs, task_workflow.rs and conflict_resolution.rs remain in the runner as domain journey tests. They still start Postgres despite primarily exercising in-memory domain objects; removing that container setup is a separate performance cleanup, and should only happen after checking whether their harness fixtures are needed.
-- Workspace unit and integration tests remain enabled. This change does not remove them.
-- Migration idempotency and rollback checks remain because they test a separate database contract.
-- The fake chaos suite and empty client journey placeholders were already removed from mandatory execution because they did not exercise real failure/client behavior.
+- `approval_workflow.rs`, `session_revocation.rs`, and `production_bootstrap.rs` were removed from the legacy Rust journey runner because they depended on bootstrap/seeded administrator assumptions or legacy Axum/PostgreSQL user routes that did not test the current Worker/D1 All-Father authentication path.
+- The harness's fixed test administrator credentials and `bootstrap_and_login` helper were removed. Do not restore fixed credentials or bootstrap endpoints merely to make CI pass.
 
-## Follow-up required
-- Add focused Cloudflare Worker tests for the actual target auth flow: All-Father Supabase identity verification; Admin/Staff password verification; D1 role and tenant authorization; staff provisioning restrictions; and session revocation if implemented.
-- Do not restore bootstrap endpoints or fixed test credentials to make CI pass.
-- This pruning does not claim GitHub Actions is green. CI must confirm that the remaining suite compiles and runs.
+These removals do not imply that the underlying security behaviors are unnecessary. Where behavior is required in the current product, it needs tests against the actual authoritative implementation.
+
+## Existing native tests
+
+- Domain journey tests such as mission lifecycle, task workflow, and conflict resolution exercise native domain/application behavior and should be described as such.
+- Workspace unit and integration tests remain separate from Worker tests.
+- Migration idempotency and rollback checks validate their respective database contracts; they do not prove Worker/D1 behavior.
+- Native API tests do not, by themselves, establish Worker route parity or deployed behavior.
+
+## Required Worker verification
+
+Worker tests should cover the actual supported path:
+
+- Successful and failed ONYX credential login for the canonical All-Father principal.
+- Invalid/missing credentials and reserved-principal behavior.
+- D1-backed role, active-account, active-organization, and tenant authorization.
+- All-Father-only organization/admin capabilities and rejection of forged client role/admin metadata.
+- Access/refresh token rotation and revocation.
+- Retired exchange route rejection.
+- Local-only provisioning/smoke behavior without sending credential tests to production.
+
+## Evidence status
+
+This document describes test scope and architecture; it does **not** claim that all GitHub Actions checks pass, that the production account has been provisioned, or that live login has succeeded. Those claims require current workflow and deployment evidence tied to a specific commit.
