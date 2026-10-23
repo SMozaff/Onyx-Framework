@@ -1,108 +1,52 @@
 # ONYX Backend Architecture
 
-## Runtime decision
+## Current deployment model
 
-ONYX remains a native Rust/Axum/Tokio application. The existing API server and worker contain
-domain execution, authorization, PostgreSQL transactions, audit/security policy, and background
-processing semantics that are not moved into Cloudflare Workers.
+ONYX currently has **two distinct backend implementations** in the repository. They are not one tiered request path and the Cloudflare Worker does not proxy to the native Axum API.
 
-Cloudflare is the preferred Tier 1 edge boundary. The repository therefore provides a small
-Cloudflare Worker under `deploy/cloudflare/edge-gateway` that proxies the public API route to the
-native ONYX origin.
+1. **Cloudflare Worker API** — `deploy/cloudflare/edge-gateway`. This is the supported remote API for Admin, Staff, web, and mobile clients. It implements its own route handlers, authentication and authorization, command/query handling, and persistence against Cloudflare D1. It uses Durable Objects for event/relay hubs. Its current contract and deployment behavior are described in that directory's README and Wrangler configuration.
+2. **Native Rust API and worker** — `crates/bins/api-server` and `crates/bins/worker`. The Axum API and Rust background worker are a separate runtime using the Rust domain/application layers and configured persistence adapters, including SQLx-backed PostgreSQL/SQLite. The native API rejects the reserved `allfather` username; All-Father authentication is supported only through the Worker.
 
-## Trust boundaries
+Do not describe the Worker as a transparent proxy, or assume that routes, storage, authorization logic, or operational state are shared automatically between the two implementations.
 
-### Tier 1 — Cloudflare edge
+## Cloudflare Worker boundary
 
-Responsibilities:
-- public ingress and TLS/network boundary;
-- route matching and edge-level abuse controls when configured;
-- forwarding HTTP and WebSocket requests to the ONYX origin.
+The Worker is authoritative for the remote clients that target it:
 
-Non-responsibilities:
-- no ONYX authorization decisions;
-- no PostgreSQL access;
-- no object-store credentials;
-- no domain/workflow execution.
+- **Authentication:** `POST /api/auth/login` accepts ONYX username/password credentials and issues ONYX access/refresh tokens. Password verification uses the Worker's `argon2-wasm-edge` implementation.
+- **Authorization:** protected requests re-read the relevant active principal, organization, role/admin state, tenant binding, and revocation state from D1. Client-provided identity or role fields do not grant authority.
+- **Persistence:** D1 stores Worker-managed principals, password hashes, organizations, roles, sessions/revocations, and application records handled by its route layer.
+- **Realtime/relay:** Durable Objects back the Worker event and relay hubs.
+- **Object storage:** optional Hugging Face S3-compatible configuration is supplied through server-side Worker bindings/environment configuration where used.
 
-The edge Worker deliberately forwards the request's authentication material to the native
-API. Authorization remains server-side in ONYX.
+The Worker does not forward requests to the legacy Axum deployment. Its route coverage and persistence semantics must be validated against the actual Worker source and tests.
 
-### Tier 2 — ONYX application
+## Native Rust boundary
 
-The Rust/Axum/Tokio runtime owns:
-- authentication and token revocation;
-- capability and command authorization;
-- domain validation and workflow semantics;
-- PostgreSQL transactions and migrations;
-- idempotency, audit, and security policy;
-- API response/error semantics;
-- background jobs, outbox relay, scheduler, leases, retries, and dead-letter handling.
+The native runtime is a separate implementation:
 
-Cloudflare Workers are not a replacement runtime for this tier.
+- `crates/bins/api-server` exposes Axum routes.
+- `crates/bins/worker` runs native background processing.
+- Rust domain and application crates hold native business logic and ports.
+- Persistence adapters include SQLx-based PostgreSQL and SQLite implementations; other adapters are selected through their configured ports.
+- Native authentication/session behavior and route contracts are implemented in the Rust API. They are not automatically equivalent to Worker/D1 behavior.
 
-### Tier 3 — managed persistence/infrastructure
+The native API must not be described as the authoritative All-Father login path. The current Rust login code reserves the `allfather` username for the Worker path.
 
-PostgreSQL remains provider-neutral through the existing SQLx/persistence abstractions.
-The background worker retains the existing PostgreSQL-backed queue and outbox semantics.
+## Data and deployment boundaries
 
-Blob storage is selected through the existing `query_application::BlobStore` port:
-- local filesystem for development/test;
-- Hugging Face Storage Buckets through their S3-compatible gateway for production.
+The Worker/D1 runtime and native SQLx-backed runtime have separate persistence and deployment configurations. No shared database, transaction, replication, or cross-runtime authorization guarantee should be inferred unless a specific implementation and configuration establish it.
 
-Provider credentials are server-side environment configuration only.
+Likewise, a successful build or test of one backend does not establish route parity, data parity, deployment success, or end-to-end functionality in the other backend.
 
-## Hugging Face object storage
+## Verification expectations
 
-The Hugging Face adapter is isolated in
-`crates/infrastructure/huggingface-blob-storage`. It implements the existing
-`BlobStore` contract using AWS Signature Version 4 against the Hugging Face S3 gateway.
+When changing an API contract, compare all of the following separately:
 
-The configured ONYX production bucket is:
+- Worker route handler and Worker tests
+- Native Axum route handler and native tests
+- Client base URL and request/response expectations
+- Persistence and authorization semantics for the backend that the client actually calls
+- Current deployment configuration and live deployment evidence, when making deployment claims
 
-```text
-namespace: Arronthemalkavian
-bucket: onyx
-endpoint: https://s3.hf.co/Arronthemalkavian
-region: us-east-1
-addressing: path
-```
-
-Production configuration:
-
-```text
-ONYX_BLOB_STORE_BACKEND=huggingface
-ONYX_BLOB_STORE_S3_ENDPOINT=https://s3.hf.co/Arronthemalkavian
-ONYX_BLOB_STORE_S3_BUCKET=onyx
-ONYX_BLOB_STORE_S3_ACCESS_KEY_ID=HFAK...
-ONYX_BLOB_STORE_S3_SECRET_ACCESS_KEY=<secret>
-```
-
-The access key and secret are Kubernetes Secret values and are never committed to Git.
-Hugging Face documents the namespace-scoped endpoint, `us-east-1` region, and path-style
-addressing as the required S3 client configuration.
-
-The adapter does not expose S3/Hugging Face types to application or domain crates.
-
-## Background execution decision
-
-The existing ONYX worker remains authoritative for:
-- job claiming and leases;
-- retry/backoff and attempt accounting;
-- deduplication;
-- dead-lettering;
-- outbox relay;
-- five-second scheduler cadence;
-- snapshot scheduling.
-
-Cloudflare Queues/Cron are intentionally not substituted for these mechanisms because doing so
-would change established transactional and retry semantics without a demonstrated requirement.
-
-## Deployment boundary
-
-The native API/worker deployment remains deployable through the existing container/Helm path.
-The Cloudflare Worker is independently deployable through Wrangler and is configured with an
-origin URL at deployment time.
-
-This separation keeps Cloudflare-specific configuration out of ONYX domain/application code and
-allows the native runtime to remain portable across PostgreSQL providers and deployment targets.
+Report unverified parity or deployment state explicitly rather than inferring it from source structure.
