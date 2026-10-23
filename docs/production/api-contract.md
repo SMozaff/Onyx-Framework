@@ -22,7 +22,6 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 | POST | `/api/admin/staff` | ORGANIZATION_ADMIN; own tenant | Legacy alias for creating a STAFF account. |
 | POST | `/api/admin/files/:hash/acl` | ORGANIZATION_ADMIN | Grants tenant-scoped file ACL access. |
 | DELETE | `/api/admin/files/:hash/acl/:userId` | ORGANIZATION_ADMIN | Revokes tenant-scoped file ACL access. |
-
 | POST | `/api/auth/refresh` | Refresh token in body | Single-use refresh token → rotated pair; replay is rejected. |
 | POST | `/api/auth/logout` | Optional bearer and/or refresh token | Revokes supplied valid token/session family; returns `{success:true}`. |
 | GET | `/api/query` | ONYX access session; role and ownership policy | Base64url query envelope → query result page. |
