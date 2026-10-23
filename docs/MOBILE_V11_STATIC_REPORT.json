@@ -2,7 +2,7 @@
   "document": "ONYX current mobile source inventory",
   "scope": "Repository inventory only. Does not claim builds, tests, release gates, or runtime behavior passed.",
   "source_commit": "e0708eb5ebc2502c601039ee61087678d38bfe8f",
-  "generation_method": "GitHub current-main recursive Git tree inspection; not an execution of the verifier",
+  "generation_method": "Current-main Git tree inventory snapshot at source_commit; dynamic regeneration is wired into scripts/verify/verify_team8.sh and the CI source-contracts job.",
   "checks_total": 20,
   "checks_passed": 20,
   "checks_failed": 0,
@@ -108,5 +108,6 @@
       "detail": "Present in current main Git tree"
     }
   ],
-  "historical_note": "The prior Flutter v1.1 report referenced the absent mobile/ tree. Current source surfaces are mobile-android/ and mobile-pwa/."
+  "historical_note": "The prior Flutter v1.1 report referenced the absent mobile/ tree. Current source surfaces are mobile-android/ and mobile-pwa/. The CI source-contracts job regenerates this report and fails on missing required files.",
+  "generator": "scripts/verify/verify_mobile_static.py (checks required current mobile files and exits non-zero if any are missing)"
 }
