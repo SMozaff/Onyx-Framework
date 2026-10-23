@@ -1,10 +1,10 @@
 # ONYX Repository Structure
 
-**Inventory baseline:** `main` at `4873e314c4f2f638763a830e79134b5840906250` (2026-10-23). This is a path-level inventory, not a build or deployment report.
+**Inventory baseline:** `main` at `38c8975fd6616376d51e016b3e718b7736888514` (2026-10-23). This is a path-level inventory, not a build or deployment report.
 
 ## Root
 
-- `Cargo.toml`, `Cargo.lock` — Rust workspace and dependency lockfile. The workspace currently declares **42 members**.
+- `Cargo.toml`, `Cargo.lock` — Rust workspace and dependency lockfile. The workspace currently declares **43 members**.
 - `README.md` — commercial product overview.
 - `DECISIONS.md` — project-wide decision record.
 - `ONYX_PHASE_1_REPORT.md` — historical security/remediation report; consult its current-status addendum before using older instructions.
