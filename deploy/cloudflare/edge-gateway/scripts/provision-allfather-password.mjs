@@ -68,19 +68,40 @@ FROM users WHERE id='__allfather__' AND password_hash=${quote(passwordHash)};
 `;
 }
 
+function extractD1Rows(value) {
+  // Wrangler's --json response may wrap each SQL statement result in an outer
+  // results array. Walk those wrappers so callers receive actual row objects,
+  // not the statement metadata object (which has its own results property).
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractD1Rows(item);
+      if (nested !== null) return nested;
+    }
+    return value;
+  }
+  if (value && typeof value === "object") {
+    if (Array.isArray(value.result?.results)) {
+      const nested = extractD1Rows(value.result.results);
+      if (nested !== null) return nested;
+    }
+    if (Array.isArray(value.results)) {
+      const nested = extractD1Rows(value.results);
+      if (nested !== null) return nested;
+    }
+    if (value.result && typeof value.result === "object") {
+      return extractD1Rows(value.result);
+    }
+  }
+  return null;
+}
+
 function parseRows(output) {
   // Wrangler can print informational lines before the JSON result in some
   // environments (for example CI). Parse from the first line that starts with
   // a JSON array or object, so the preamble does not break the query result.
-  const start = output.search(/^\s*[\[{]/m);
+  const start = output.search(/^\\s*[\\[{]/m);
   const parsed = JSON.parse(start >= 0 ? output.slice(start) : output);
-  const candidates = Array.isArray(parsed) ? parsed : [parsed];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate?.results)) return candidate.results;
-    if (Array.isArray(candidate?.result?.results)) return candidate.result.results;
-  }
-  if (Array.isArray(parsed?.results)) return parsed.results;
-  return [];
+  return extractD1Rows(parsed) ?? [];
 }
 
 function classifyD1Failure(error) {
