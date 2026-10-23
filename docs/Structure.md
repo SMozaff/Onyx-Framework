@@ -1,6 +1,6 @@
 # ONYX Repository Structure
 
-**Inventory baseline:** `main` at `e0708eb5ebc2502c601039ee61087678d38bfe8f` (2026-10-23). This is a path-level inventory, not a build or deployment report.
+**Inventory baseline:** `main` at `4873e314c4f2f638763a830e79134b5840906250` (2026-10-23). This is a path-level inventory, not a build or deployment report.
 
 ## Root
 
