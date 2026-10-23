@@ -79,7 +79,29 @@ function parseRows(output) {
   return [];
 }
 
-function runD1(sql, { remote, config }) {
+function classifyD1Failure(error) {
+  // Wrangler stderr can contain the SQL file contents. Only expose a coarse,
+  // allowlisted category; never forward raw stdout/stderr or SQL to CI logs.
+  const diagnostic = String(error?.stderr ?? error?.message ?? "");
+  if (/unauthorized|invalid api token|authentication error|\\b401\\b/i.test(diagnostic)) {
+    return "Cloudflare authentication was rejected";
+  }
+  if (/forbidden|\\b403\\b|permission denied|not authorized/i.test(diagnostic)) {
+    return "Cloudflare credentials lack permission for this D1 operation";
+  }
+  if (/no such table|no such column|sqlite_error|syntax error/i.test(diagnostic)) {
+    return "D1 schema or SQL operation failed";
+  }
+  if (/database.*not found|not found.*database|unknown database/i.test(diagnostic)) {
+    return "configured production D1 database could not be resolved";
+  }
+  if (/timed out|timeout|econn|network|fetch failed/i.test(diagnostic)) {
+    return "Cloudflare D1 request failed due to a network or timeout error";
+  }
+  return "Wrangler D1 command failed; detailed output suppressed";
+}
+
+function runD1(sql, { remote, config, stage }) {
   const dir = mkdtempSync(path.join(tmpdir(), "onyx-allfather-provision-"));
   const file = path.join(dir, "operation.sql");
   try {
@@ -98,9 +120,9 @@ function runD1(sql, { remote, config }) {
       env: wranglerEnvironment(),
     });
     return parseRows(output);
-  } catch {
-    // Wrangler output may echo SQL; never forward it to logs.
-    throw new Error("D1 operation failed; SQL output suppressed");
+  } catch (error) {
+    // Wrangler output may echo SQL; only log a stage and an allowlisted category.
+    throw new Error(`D1 ${stage} failed: ${classifyD1Failure(error)}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -178,7 +200,7 @@ async function main(args = process.argv.slice(2)) {
       (SELECT COUNT(*) FROM users WHERE LOWER(username)='allfather') AS reserved_username_count
       FROM users u LEFT JOIN organizations o ON o.id=u.organization_id
       WHERE u.id='__allfather__';`;
-    const rows = runD1(principalSql, { remote, config });
+    const rows = runD1(principalSql, { remote, config, stage: "canonical-principal check" });
     if (rows.length !== 1 || !validateCanonicalPrincipal(rows[0])) {
       throw new Error("canonical All-Father principal is missing, ambiguous, inactive, or incorrectly authorized");
     }
@@ -192,11 +214,11 @@ async function main(args = process.argv.slice(2)) {
       hashLength: 32,
       outputType: "encoded",
     }));
-    runD1(buildProvisionSql(hash, environment), { remote, config });
+    runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event" });
 
     const verified = runD1(
       "SELECT password_hash FROM users WHERE id='__allfather__' AND username='allfather' AND role='ALL_FATHER' AND is_admin=1 AND is_active=1;",
-      { remote, config },
+      { remote, config, stage: "stored-hash verification" },
     );
     if (verified.length !== 1 || !(await argon2Verify({ password, hash: String(verified[0].password_hash ?? "") }))) {
       throw new Error("stored All-Father credential hash could not be verified");
