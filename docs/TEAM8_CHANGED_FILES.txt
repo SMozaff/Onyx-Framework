@@ -1,4 +1,6 @@
-# ONYX Team 8 Change Manifest
+# Historical ONYX Team 8 Change Manifest
+
+> **Historical only.** This file records the original Team 8 integration changes, not the current repository inventory. Some listed paths/workflow names are absent from current main. For current paths see [docs/Structure.md](Structure.md) and [docs/TEAM8_STATIC_REPORT.json](TEAM8_STATIC_REPORT.json).
 
 Compared against the delivered Team 7 integrated repository.
 A = added, M = modified, D = deleted.
