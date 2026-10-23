@@ -143,17 +143,4 @@ dependencies {
     androidTestImplementation("androidx.work:work-testing:2.9.1")
 }
 
-// Keep direct Gradle builds aligned with CI: generate and validate the canonical
-// PNG-derived Android assets before any Android variant consumes mipmap resources.
-val onyxRepoRoot = rootProject.projectDir.parentFile
-val generateAndValidateOnyxIcons = tasks.register<Exec>("generateAndValidateOnyxIcons") {
-    group = "build"
-    description = "Generate and validate canonical ONYX launcher icon assets"
-    workingDir = onyxRepoRoot
-    commandLine("node", "scripts/branding/run-icon-generator.mjs")
-}
-
-tasks.named("preBuild").configure {
-    dependsOn(generateAndValidateOnyxIcons)
-}
 

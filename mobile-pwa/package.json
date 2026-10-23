@@ -5,8 +5,6 @@
   "type": "module",
   "description": "ONYX ObserverClient PWA — read-only browser client for the mobile_observer client class (MIGRATION_PLAN Phase 2).",
   "scripts": {
-    "predev": "node ../scripts/branding/run-icon-generator.mjs",
-    "prebuild": "node ../scripts/branding/run-icon-generator.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/render-sw.mjs",
     "preview": "vite preview",

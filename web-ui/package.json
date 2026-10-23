@@ -4,8 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node ../scripts/branding/run-icon-generator.mjs",
-    "prebuild": "node ../scripts/branding/run-icon-generator.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build && npm run bundle-check",
     "preview": "vite preview",

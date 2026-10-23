@@ -27,6 +27,22 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/icons/hicolor/16x16/apps/desktop-shell.png": "icons/hicolor/16x16/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/22x22/apps/desktop-shell.png": "icons/hicolor/22x22/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/24x24/apps/desktop-shell.png": "icons/hicolor/24x24/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/32x32/apps/desktop-shell.png": "icons/hicolor/32x32/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/48x48/apps/desktop-shell.png": "icons/hicolor/48x48/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/64x64/apps/desktop-shell.png": "icons/hicolor/64x64/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/96x96/apps/desktop-shell.png": "icons/hicolor/96x96/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/128x128/apps/desktop-shell.png": "icons/hicolor/128x128/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/256x256/apps/desktop-shell.png": "icons/hicolor/256x256/apps/desktop-shell.png",
+          "/usr/share/icons/hicolor/512x512/apps/desktop-shell.png": "icons/hicolor/512x512/apps/desktop-shell.png"
+        }
+      }
+    }
   }
 }
