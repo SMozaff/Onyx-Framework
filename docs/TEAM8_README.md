@@ -1,12 +1,12 @@
 # ONYX Team 8 — Historical Release Engineering Handoff
 
-**Revalidated against main:** `4873e314c4f2f638763a830e79134b5840906250` (2026-10-23).
+**Revalidated against main:** `38c8975fd6616376d51e016b3e718b7736888514` (2026-10-23).
 
 > This is a technical handoff record, not evidence of a completed release or production readiness. Older release claims and instructions have been reconciled against the current repository. ONYX's current objective is a demo; the checklist below describes existing source/verification entry points only.
 
 ## Current source inventory
 
-The current repository contains Dockerfiles, Helm charts, Terraform files, a Rust migration tool, a native sync agent, Team 8 E2E/chaos test crates, and release/CI workflows. The workspace has 42 members. The current E2E sources are under `crates/team8-e2e-tests/`, `crates/team8-chaos-tests/`, and `tests/end-to-end/`.
+The current repository contains Dockerfiles, Helm charts, Terraform files, a Rust migration tool, a native sync agent, Team 8 E2E/chaos test crates, and release/CI workflows. The workspace has 43 members. The current E2E sources are under `crates/team8-e2e-tests/`, `crates/team8-chaos-tests/`, and `tests/end-to-end/`.
 
 The following files referenced by the older handoff are **not present** in this baseline:
 
