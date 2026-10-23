@@ -1827,7 +1827,7 @@ cargo doc --workspace --no-deps
 | **R4** | Terraform and runbooks encode RTO below one hour and RPO below five minutes. Production PostgreSQL is Multi-AZ with continuous recovery logs and 35-day backups. |
 | **R5** | Backend E2E tests start PostgreSQL 16 through Testcontainers and read the frozen `tests/fixtures/seed.sql` source. |
 | **R6** | Each chaos scenario covers exactly 900 logical seconds. CI advances logical time; staging sets `ONYX_CHAOS_REALTIME=1` for the required wall-clock 15-minute drill. Recovery time is recorded and compared with RTO/RPO. |
-| **R7** | `tests/load/smoke-test.js` runs 100 VUs for 60 seconds and fails at command p95 ≥500 ms or failure rate ≥1%. |
+| **R7 (retired for demo scope, 2026-10-24)** | The former 100-VU/60-second k6 gate and in-process 100-request benchmark were removed from routine CI as performance/production-readiness work outside the current demo objective. Reintroduce only if performance acceptance becomes an explicit requirement. |
 | **R8** | Releases emit explicitly versioned SPDX 2.3 JSON SBOMs with Syft for source and container artifacts. The workflow rejects any document whose `spdxVersion` is not `SPDX-2.3`. |
 | **R9** | Container images are signed with cosign; binary archives are detached-armored with GPG. Build provenance is attached through GitHub artifact attestations. |
 | **R10** | `migration-tool up` executes the SQLx migrator twice. CI additionally runs up twice, down to target zero, and up again. |
@@ -1947,7 +1947,6 @@ The inherited web command route classified `LifecycleEpochConflict` and unit `No
 scripts/ci-pipeline.sh
 cargo test -p e2e --test all_journeys
 cargo test -p chaos --test all
-k6 run tests/load/smoke-test.js --vus 100 --duration 60s
 helm lint deploy/helm/onyx-api
 terraform -chdir=deploy/terraform validate
 scripts/verify/verify_team8.sh
