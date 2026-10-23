@@ -83,11 +83,14 @@ function classifyD1Failure(error) {
   // Wrangler stderr can contain the SQL file contents. Only expose a coarse,
   // allowlisted category; never forward raw stdout/stderr or SQL to CI logs.
   const diagnostic = String(error?.stderr ?? error?.message ?? "");
-  if (/unauthorized|invalid api token|authentication error|\\b401\\b/i.test(diagnostic)) {
+  if (/unauthorized|invalid api token|authentication error|\b401\b/i.test(diagnostic)) {
     return "Cloudflare authentication was rejected";
   }
-  if (/forbidden|\\b403\\b|permission denied|not authorized/i.test(diagnostic)) {
+  if (/forbidden|\b403\b|permission denied|not authorized/i.test(diagnostic)) {
     return "Cloudflare credentials lack permission for this D1 operation";
+  }
+  if (/unknown argument|unknown option|unrecognized option|invalid config|configuration.*(error|invalid)|no d1 database binding/i.test(diagnostic)) {
+    return "Wrangler rejected the D1 command or generated configuration";
   }
   if (/no such table|no such column|sqlite_error|syntax error/i.test(diagnostic)) {
     return "D1 schema or SQL operation failed";
