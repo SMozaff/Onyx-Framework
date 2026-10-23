@@ -2,7 +2,7 @@
 
 **Source baseline:** `71f316804d483dfe79139ceec6b72fb5899b8bec`  
 **Implementation branch:** `fix/p1-admin-api-contracts-20261012`  
-**Status:** Source and CI changes only. Not merged or deployed.
+**Status update (2026-10-23):** The documented mobile-access, policy, and legal-hold route families are present in the current Worker source on main. The original branch-only status below is historical and must not be read as evidence that these changes remain unmerged. This document does not establish live deployment; verify current workflow/deployment records separately.
 
 ## Canonical contracts
 
