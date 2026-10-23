@@ -1,30 +1,28 @@
-# ONYX — Production Readiness Audit Register
+# ONYX Historical Audit Register — Current Revalidation
 
-**Status:** Phase 0 (Reconnaissance) complete — findings below are *evidence-backed*, not inferred.
-**Auditor:** Claude
-**Date opened:** 2026-08-06
-**Toolchain used:** rustc/cargo 1.97.1 (matches `rust-toolchain.toml`), Node 22.22.2
-**Document hierarchy honoured:** `team_prompts/PROMPT_X.md` + `onyx_handover_v1.0.yaml` = authoritative; Blueprint = reference; `ONYX_Increment_X_*.md` = historical only.
+**Current revalidation baseline:** `main` at `e0708eb5ebc2502c601039ee61087678d38bfe8f` (2026-10-23).  
+**Scope:** documentation/source inventory reconciliation, not a production-readiness assessment. ONYX's current project goal is a demo; this register does not redefine that goal.
 
----
+> **Important:** Sections below the current revalidation table are the original 2026-08-06 audit record. Their findings, counts, line references, and “open” statuses are historical until individually rechecked. Do not treat old findings as current merely because they remain in the archive.
 
-## 1. Scope Inventory (measured, not estimated)
+## Current source and status reconciliation
 
-| Area | Measure |
-|---|---|
-| Rust crates in workspace | 33 |
-| Rust source files / LOC | 243 files / ~30,509 lines |
-| TypeScript (web-ui) files / LOC | 65 files / ~3,016 lines |
-| Flutter mobile | `mobile/` (Dart + Kotlin/Swift FFI shims) |
-| SQL migration files | 13 (Postgres + SQLite) |
-| Rust tests (`#[test]`/`#[tokio::test]`) | 344 |
-| Property tests (`proptest!`) | 3 |
-| `unsafe` occurrences | 91 (concentrated in mobile FFI) |
-| `.unwrap()`/`.expect()` in non-test code | ~120 |
-| Deployment assets | Docker (5), Helm (3 charts), Terraform |
-| Runbooks | 7 |
+| Item | Current evidence | Reconciled status |
+|---|---|---|
+| Rust workspace size | Root `Cargo.toml` lists 42 workspace members | Replaces historical counts of 33 crates |
+| Mobile source | `mobile-android/`, `mobile-pwa/`, `crates/mobile-core/`, and `crates/mobile-android-jni/` exist; old `mobile/` tree is absent | Flutter-era path findings and checks are stale |
+| Handler module collision | `crates/applications/client-composition/src/handlers/mod.rs` exists; sibling `handlers.rs` and root `_DELETE_FILES.txt` are absent | Historical duplicate-module finding is not present in this tree |
+| Runbooks | `docs/runbooks/` is absent from this baseline | Historical “7 runbooks” claim is not current |
+| Web UI lockfile | `web-ui/package-lock.json` exists | Historical warning that it is absent is stale |
+| Authentication authority | Worker README/source describe D1-backed ONYX credential authentication; native Axum reserves `allfather` and is a separate backend | Old Google/Supabase All-Father findings are superseded; see `docs/SECURITY_AUTHENTICATION_MODEL.md` |
+| PR #268 — AuthZ/session hardening | [Closed and merged 2026-10-18](https://github.com/SMozaff/Onyx-Framework/pull/268) | No longer open/draft; merge does not by itself prove production deployment |
+| PR #280 — Stage 1 login diagnostics | [Closed and merged 2026-10-22](https://github.com/SMozaff/Onyx-Framework/pull/280) | No longer an unmerged review branch; live deployment remains a separate claim |
+| PR #290 — commercial README | [Closed and merged 2026-10-23](https://github.com/SMozaff/Onyx-Framework/pull/290) | Product-facing README rewrite is merged |
 
----
+## Historical audit snapshot
+
+The original audit opened 2026-08-06. Its detailed findings below have not been uniformly rerun against the current source tree. Findings that reference deleted paths, retired authentication, old workspace counts, or absent runbooks are superseded by the reconciliation above. Any security or runtime finding not explicitly reconciled here remains **unverified**, not automatically open or closed.
+
 
 ## 2. Verified Findings
 
@@ -534,3 +532,4 @@ Required repository setting: protect `main`, prohibit direct pushes, require the
 ### Verification boundary
 
 This reconciliation deliberately does **not** mark the remediation program fully verified. Full CI, security, integration, E2E, deployment, native/Android, browser, and load verification remain the next phase, as specified by the plan. The purpose of this pass is to complete the root-cause control architecture before exercising every test surface.
+
