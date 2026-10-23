@@ -50,7 +50,7 @@ members = [
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.75"
-license = "MIT"
+license-file = "LICENSE.md"
 publish = false
 
 [workspace.dependencies]
