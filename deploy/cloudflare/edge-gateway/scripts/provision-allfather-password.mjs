@@ -69,7 +69,11 @@ FROM users WHERE id='__allfather__' AND password_hash=${quote(passwordHash)};
 }
 
 function parseRows(output) {
-  const parsed = JSON.parse(output);
+  // Wrangler can print informational lines before the JSON result in some
+  // environments (for example CI). Parse from the first line that starts with
+  // a JSON array or object, so the preamble does not break the query result.
+  const start = output.search(/^\s*[\[{]/m);
+  const parsed = JSON.parse(start >= 0 ? output.slice(start) : output);
   const candidates = Array.isArray(parsed) ? parsed : [parsed];
   for (const candidate of candidates) {
     if (Array.isArray(candidate?.results)) return candidate.results;
