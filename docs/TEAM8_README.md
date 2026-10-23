@@ -1,6 +1,6 @@
 # ONYX Team 8 — Historical Release Engineering Handoff
 
-**Revalidated against main:** `e0708eb5ebc2502c601039ee61087678d38bfe8f` (2026-10-23).
+**Revalidated against main:** `4873e314c4f2f638763a830e79134b5840906250` (2026-10-23).
 
 > This is a technical handoff record, not evidence of a completed release or production readiness. Older release claims and instructions have been reconciled against the current repository. ONYX's current objective is a demo; the checklist below describes existing source/verification entry points only.
 
