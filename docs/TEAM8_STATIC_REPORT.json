@@ -1,7 +1,7 @@
 {
   "document": "ONYX Team 8 current source inventory",
   "scope": "Repository inventory only. Does not claim builds, tests, release gates, or runtime behavior passed.",
-  "source_commit": "4873e314c4f2f638763a830e79134b5840906250",
+  "source_commit": "38c8975fd6616376d51e016b3e718b7736888514",
   "generation_method": "Current-main Git tree inventory snapshot at source_commit; dynamic regeneration is wired into scripts/verify/verify_team8.sh and the CI source-contracts job.",
   "checks_total": 19,
   "checks_passed": 19,
