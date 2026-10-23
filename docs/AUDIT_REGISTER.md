@@ -1,6 +1,6 @@
 # ONYX Historical Audit Register — Current Revalidation
 
-**Current revalidation baseline:** `main` at `4873e314c4f2f638763a830e79134b5840906250` (2026-10-23).  
+**Current revalidation baseline:** `main` at `38c8975fd6616376d51e016b3e718b7736888514` (2026-10-23).  
 **Scope:** documentation/source inventory reconciliation, not a production-readiness assessment. ONYX's current project goal is a demo; this register does not redefine that goal.
 
 > **Important:** Sections below the current revalidation table are the original 2026-08-06 audit record. Their findings, counts, line references, and “open” statuses are historical until individually rechecked. Do not treat old findings as current merely because they remain in the archive.
@@ -9,7 +9,7 @@
 
 | Item | Current evidence | Reconciled status |
 |---|---|---|
-| Rust workspace size | Root `Cargo.toml` lists 42 workspace members | Replaces historical counts of 33 crates |
+| Rust workspace size | Root `Cargo.toml` lists 43 workspace members | Replaces historical counts of 33 crates |
 | Mobile source | `mobile-android/`, `mobile-pwa/`, `crates/mobile-core/`, and `crates/mobile-android-jni/` exist; old `mobile/` tree is absent | Flutter-era path findings and checks are stale |
 | Handler module collision | `crates/applications/client-composition/src/handlers/mod.rs` exists; sibling `handlers.rs` and root `_DELETE_FILES.txt` are absent | Historical duplicate-module finding is not present in this tree |
 | Runbooks | `docs/runbooks/` is absent from this baseline | Historical “7 runbooks” claim is not current |
