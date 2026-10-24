@@ -3,26 +3,20 @@ name: All-Father ONYX credential smoke test
 on:
   workflow_dispatch:
   pull_request:
+    branches: [main]
     paths:
       - 'deploy/cloudflare/edge-gateway/**'
       - 'crates/bins/admin-shell/ui/src/pages/Login.tsx'
       - 'crates/bins/api-server/src/routes/auth.rs'
       - 'crates/bins/api-server/src/routes/mod.rs'
       - '.github/workflows/allfather-auth-smoke.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'deploy/cloudflare/edge-gateway/src/**'
-      - 'deploy/cloudflare/edge-gateway/migrations/**'
-      - 'deploy/cloudflare/edge-gateway/scripts/**'
-      - 'deploy/cloudflare/edge-gateway/test/**'
-      - 'deploy/cloudflare/edge-gateway/wrangler.dev.toml'
-      - 'crates/bins/api-server/src/routes/auth.rs'
-      - 'crates/bins/api-server/src/routes/mod.rs'
-      - '.github/workflows/allfather-auth-smoke.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  group: onyx-allfather-auth-smoke-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   allfather-auth:
