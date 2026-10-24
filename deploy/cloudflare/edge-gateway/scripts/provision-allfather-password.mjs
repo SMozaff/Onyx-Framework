@@ -68,40 +68,51 @@ FROM users WHERE id='__allfather__' AND password_hash=${quote(passwordHash)};
 `;
 }
 
-function extractD1Rows(value) {
-  // Wrangler's --json response may wrap each SQL statement result in an outer
-  // results array. Walk those wrappers so callers receive actual row objects,
-  // not the statement metadata object (which has its own results property).
+function findD1Rows(value, expectedColumns) {
   if (Array.isArray(value)) {
-    for (const item of value) {
-      const nested = extractD1Rows(item);
-      if (nested !== null) return nested;
+    if (value.length > 0 && value.every((row) =>
+      row !== null && typeof row === "object" && !Array.isArray(row) &&
+      expectedColumns.every((column) => Object.hasOwn(row, column))
+    )) {
+      return value;
     }
-    return value;
+    for (const item of value) {
+      const rows = findD1Rows(item, expectedColumns);
+      if (rows !== null) return rows;
+    }
+    return null;
   }
   if (value && typeof value === "object") {
-    if (Array.isArray(value.result?.results)) {
-      const nested = extractD1Rows(value.result.results);
-      if (nested !== null) return nested;
+    // Wrangler versions have returned both result/results wrappers. Traverse
+    // all fields, but only accept an array whose row objects contain the
+    // columns required by the SQL statement. This avoids mistaking statement
+    // metadata for a successful query row.
+    for (const key of ["results", "result"]) {
+      if (Object.hasOwn(value, key)) {
+        const rows = findD1Rows(value[key], expectedColumns);
+        if (rows !== null) return rows;
+      }
     }
-    if (Array.isArray(value.results)) {
-      const nested = extractD1Rows(value.results);
-      if (nested !== null) return nested;
-    }
-    if (value.result && typeof value.result === "object") {
-      return extractD1Rows(value.result);
+    for (const [key, child] of Object.entries(value)) {
+      if (key !== "results" && key !== "result") {
+        const rows = findD1Rows(child, expectedColumns);
+        if (rows !== null) return rows;
+      }
     }
   }
   return null;
 }
 
-function parseRows(output) {
-  // Wrangler can print informational lines before the JSON result in some
-  // environments (for example CI). Parse from the first line that starts with
-  // a JSON array or object, so the preamble does not break the query result.
-  const start = output.search(/^\s*[\[{]/m);
-  const parsed = JSON.parse(start >= 0 ? output.slice(start) : output);
-  return extractD1Rows(parsed) ?? [];
+export function parseD1Rows(output, expectedColumns) {
+  if (!Array.isArray(expectedColumns) || expectedColumns.length === 0) {
+    throw new Error("expected D1 result columns must be specified");
+  }
+  const start = output.search(/^\\s*[\\[{]/m);
+  if (start < 0) throw new Error("Wrangler output did not contain JSON");
+  const parsed = JSON.parse(output.slice(start));
+  const rows = findD1Rows(parsed, expectedColumns);
+  if (rows === null) throw new Error("Wrangler JSON did not contain the expected D1 row shape");
+  return rows;
 }
 
 function classifyD1Failure(error) {
@@ -129,7 +140,7 @@ function classifyD1Failure(error) {
   return "Wrangler D1 command failed; detailed output suppressed";
 }
 
-function runD1(sql, { remote, config, stage }) {
+function runD1(sql, { remote, config, stage, expectedColumns }) {
   const dir = mkdtempSync(path.join(tmpdir(), "onyx-allfather-provision-"));
   const file = path.join(dir, "operation.sql");
   try {
@@ -147,7 +158,7 @@ function runD1(sql, { remote, config, stage }) {
       stdio: ["ignore", "pipe", "pipe"],
       env: wranglerEnvironment(),
     });
-    return parseRows(output);
+    return parseD1Rows(output, expectedColumns);
   } catch (error) {
     // Wrangler output may echo SQL; only log a stage and an allowlisted category.
     throw new Error(`D1 ${stage} failed: ${classifyD1Failure(error)}`);
@@ -228,7 +239,7 @@ async function main(args = process.argv.slice(2)) {
       (SELECT COUNT(*) FROM users WHERE LOWER(username)='allfather') AS reserved_username_count
       FROM users u LEFT JOIN organizations o ON o.id=u.organization_id
       WHERE u.id='__allfather__';`;
-    const rows = runD1(principalSql, { remote, config, stage: "canonical-principal check" });
+    const rows = runD1(principalSql, { remote, config, stage: "canonical-principal check", expectedColumns: ["id", "username", "organization_id", "is_active", "is_admin", "role", "organization_is_active", "reserved_username_count"] });
     if (rows.length !== 1 || !validateCanonicalPrincipal(rows[0])) {
       throw new Error("canonical All-Father principal is missing, ambiguous, inactive, or incorrectly authorized");
     }
@@ -242,11 +253,11 @@ async function main(args = process.argv.slice(2)) {
       hashLength: 32,
       outputType: "encoded",
     }));
-    runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event" });
+    runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event", expectedColumns: ["success"] });
 
     const verified = runD1(
       "SELECT password_hash FROM users WHERE id='__allfather__' AND username='allfather' AND role='ALL_FATHER' AND is_admin=1 AND is_active=1;",
-      { remote, config, stage: "stored-hash verification" },
+      { remote, config, stage: "stored-hash verification", expectedColumns: ["password_hash"] },
     );
     if (verified.length !== 1 || !(await argon2Verify({ password, hash: String(verified[0].password_hash ?? "") }))) {
       throw new Error("stored All-Father credential hash could not be verified");
