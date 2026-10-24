@@ -143,7 +143,56 @@ function classifyD1Failure(error) {
   return "Wrangler D1 command failed; detailed output suppressed";
 }
 
+// Production D1 access goes through the Cloudflare REST query endpoint. In CI,
+// `wrangler d1 execute --remote --json` returns an execution summary instead of
+// the statement's rows, so reads cannot be verified from its output. The REST
+// endpoint returns each statement's results as JSON directly.
+let resolvedProductionDatabaseId = null;
+
+function splitStatements(sql) {
+  return sql.split(/;\s*\n/).map((s) => s.trim()).filter(Boolean).map((s) => (s.endsWith(";") ? s : s + ";"));
+}
+
+async function runD1Rest(sql, { stage, expectedColumns }) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+  const token = process.env.CLOUDFLARE_API_TOKEN ?? "";
+  if (!/^[0-9a-f]{32}$/i.test(accountId) || !token || !resolvedProductionDatabaseId) {
+    throw new Error(`D1 ${stage} failed: Cloudflare account, token, or database is not configured`);
+  }
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${resolvedProductionDatabaseId}/query`;
+  let rows = [];
+  for (const statement of splitStatements(sql)) {
+    let response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: statement }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      throw new Error(`D1 ${stage} failed: Cloudflare D1 request failed due to a network or timeout error`);
+    }
+    if (response.status === 401) throw new Error(`D1 ${stage} failed: Cloudflare authentication was rejected`);
+    if (response.status === 403) throw new Error(`D1 ${stage} failed: Cloudflare credentials lack permission for this D1 operation`);
+    let body;
+    try { body = await response.json(); } catch { throw new Error(`D1 ${stage} failed: response was not JSON`); }
+    if (!response.ok || body?.success !== true || !Array.isArray(body?.result)) {
+      throw new Error(`D1 ${stage} failed: D1 reported an unsuccessful statement`);
+    }
+    const result = body.result[0] ?? {};
+    if (result.success !== true) throw new Error(`D1 ${stage} failed: D1 reported an unsuccessful statement`);
+    if (expectedColumns !== undefined && expectedColumns !== null) {
+      const statementRows = Array.isArray(result.results) ? result.results : [];
+      rows = statementRows.filter((row) => row && typeof row === "object" && expectedColumns.every((c) => Object.hasOwn(row, c)));
+      if (statementRows.length !== rows.length) throw new Error(`D1 ${stage} failed: result rows did not match the expected columns`);
+    }
+  }
+  return rows;
+}
+
 function runD1(sql, { remote, config, stage, expectedColumns }) {
+  if (remote) return runD1Rest(sql, { stage, expectedColumns });
   const dir = mkdtempSync(path.join(tmpdir(), "onyx-allfather-provision-"));
   const file = path.join(dir, "operation.sql");
   try {
@@ -186,6 +235,7 @@ function createProductionConfig() {
   const matches = parseWranglerDatabaseList(output).filter((database) => database?.name === DATABASE_NAME);
   if (matches.length !== 1) throw new Error("expected exactly one configured production D1 database named onyx-free-db");
   const databaseId = matches[0].uuid ?? matches[0].database_id;
+  resolvedProductionDatabaseId = typeof databaseId === "string" ? databaseId : null;
   if (typeof databaseId !== "string" || !/^[0-9a-f-]{36}$/i.test(databaseId)) {
     throw new Error("production D1 database ID is missing or malformed");
   }
@@ -242,7 +292,7 @@ async function main(args = process.argv.slice(2)) {
       (SELECT COUNT(*) FROM users WHERE LOWER(username)='allfather') AS reserved_username_count
       FROM users u LEFT JOIN organizations o ON o.id=u.organization_id
       WHERE u.id='__allfather__';`;
-    const rows = runD1(principalSql, { remote, config, stage: "canonical-principal check", expectedColumns: ["id", "username", "organization_id", "is_active", "is_admin", "role", "organization_is_active", "reserved_username_count"] });
+    const rows = await runD1(principalSql, { remote, config, stage: "canonical-principal check", expectedColumns: ["id", "username", "organization_id", "is_active", "is_admin", "role", "organization_is_active", "reserved_username_count"] });
     if (rows.length !== 1 || !validateCanonicalPrincipal(rows[0])) {
       throw new Error("canonical All-Father principal is missing, ambiguous, inactive, or incorrectly authorized");
     }
@@ -256,9 +306,9 @@ async function main(args = process.argv.slice(2)) {
       hashLength: 32,
       outputType: "encoded",
     }));
-    runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event" });
+    await runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event" });
 
-    const verified = runD1(
+    const verified = await runD1(
       "SELECT password_hash FROM users WHERE id='__allfather__' AND username='allfather' AND role='ALL_FATHER' AND is_admin=1 AND is_active=1;",
       { remote, config, stage: "stored-hash verification", expectedColumns: ["password_hash"] },
     );
