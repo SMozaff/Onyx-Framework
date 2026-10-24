@@ -99,7 +99,7 @@ function parseRows(output) {
   // Wrangler can print informational lines before the JSON result in some
   // environments (for example CI). Parse from the first line that starts with
   // a JSON array or object, so the preamble does not break the query result.
-  const start = output.search(/^\\s*[\\[{]/m);
+  const start = output.search(/^\s*[\[{]/m);
   const parsed = JSON.parse(start >= 0 ? output.slice(start) : output);
   return extractD1Rows(parsed) ?? [];
 }
