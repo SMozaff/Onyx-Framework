@@ -30,7 +30,7 @@ describe("ONYX All-Father password provisioning contract", () => {
     const wrapped = [
       { success: true, results: [{ success: true, meta: { duration: 1 }, results: [principal] }] },
     ];
-    expect(parseD1Rows("Wrangler informational preamble\\n" + JSON.stringify(wrapped), [
+    expect(parseD1Rows("Wrangler informational preamble\n" + JSON.stringify(wrapped), [
       "id", "username", "organization_id", "is_active", "is_admin", "role",
       "organization_is_active", "reserved_username_count",
     ])).toEqual([principal]);
