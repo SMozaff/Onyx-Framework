@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiClient } from "@/api/client";
+import { nativeAdminLogin } from "@/auth/nativeLogin";
 import { loginWithOnyxCredentials } from "@/auth/credentials";
 import {
   classifyLoginFailure,
@@ -47,7 +47,7 @@ export default function Login() {
       let session: Awaited<ReturnType<typeof loginWithOnyxCredentials>>;
       try {
         session = await loginWithOnyxCredentials(
-          (url, body, options) => apiClient.post(url, body, options),
+          (_url, body, options) => nativeAdminLogin(body, options.headers["X-ONYX-Request-ID"]),
           username,
           password,
           requestId,
