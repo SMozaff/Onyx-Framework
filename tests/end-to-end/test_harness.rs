@@ -15,6 +15,7 @@ pub struct PostgresHarness {
     _container: ContainerAsync<Postgres>,
     pub pool: PgPool,
     /// Connection string for integration tests that compose the API state directly.
+    #[allow(dead_code)]
     pub database_url: String,
 }
 
