@@ -75,7 +75,12 @@ pub async fn admin_login(input: AdminLoginInput) -> Result<serde_json::Value, Ad
             .json::<serde_json::Value>()
             .await
             .ok()
-            .and_then(|value| value.get("code").and_then(|c| c.as_str()).map(str::to_owned));
+            .and_then(|value| {
+                value
+                    .get("code")
+                    .and_then(|c| c.as_str())
+                    .map(str::to_owned)
+            });
         return Err(AdminLoginError::Http {
             status: status.as_u16(),
             code,
