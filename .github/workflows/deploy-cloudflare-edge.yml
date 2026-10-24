@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: onyx-cloudflare-worker-production
+  group: onyx-cloudflare-worker-production-${{ github.sha }}
   cancel-in-progress: false
 
 env:

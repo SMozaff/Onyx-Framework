@@ -1,11 +1,6 @@
 name: Cloudflare Worker CI
 
 on:
-  push:
-    branches: [main, 'fix/**', 'migration/**']
-    paths:
-      - 'deploy/cloudflare/edge-gateway/**'
-      - '.github/workflows/cloudflare-worker-check.yml'
   pull_request:
     branches: [main]
     paths:
@@ -15,6 +10,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: onyx-worker-check-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   worker-check:
