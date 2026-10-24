@@ -103,13 +103,16 @@ function findD1Rows(value, expectedColumns) {
   return null;
 }
 
-export function parseD1Rows(output, expectedColumns) {
+export function parseD1Rows(output, expectedColumns = null) {
+  const start = output.search(/^\s*[\[{]/m);
+  if (start < 0) throw new Error("Wrangler output did not contain JSON");
+  const parsed = JSON.parse(output.slice(start));
+  // Mutating statements have no result rows to validate; successful process
+  // exit plus valid JSON is sufficient. Read queries specify their projection.
+  if (expectedColumns === null) return [];
   if (!Array.isArray(expectedColumns) || expectedColumns.length === 0) {
     throw new Error("expected D1 result columns must be specified");
   }
-  const start = output.search(/^\\s*[\\[{]/m);
-  if (start < 0) throw new Error("Wrangler output did not contain JSON");
-  const parsed = JSON.parse(output.slice(start));
   const rows = findD1Rows(parsed, expectedColumns);
   if (rows === null) throw new Error("Wrangler JSON did not contain the expected D1 row shape");
   return rows;
@@ -253,7 +256,7 @@ async function main(args = process.argv.slice(2)) {
       hashLength: 32,
       outputType: "encoded",
     }));
-    runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event", expectedColumns: ["success"] });
+    runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event" });
 
     const verified = runD1(
       "SELECT password_hash FROM users WHERE id='__allfather__' AND username='allfather' AND role='ALL_FATHER' AND is_admin=1 AND is_active=1;",
