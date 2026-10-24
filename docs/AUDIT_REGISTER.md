@@ -517,7 +517,7 @@ state is tracked here as the current remediation index.
 
 The repository has now implemented the architectural controls defined by ONYX_CRITICAL_HIGH_TOTAL_FIX_PLAN.md:
 
-- **C-01:** independent verification jobs plus a fail-closed `merge-gate` are present in `.github/workflows/ci.yml`. The gate covers `check`, `i18n`, `deploy-check`, `web`, `mobile-pwa`, `native-ui-evidence`, `load-smoke`, `mobile-android-kotlin`, and `security-audit`, and explicitly rejects failure, cancellation, or skip.
+- **C-01:** independent verification jobs plus a fail-closed `merge-gate` are present in `.github/workflows/ci.yml`. The current demo gate covers `check`, reusable `security`, `i18n`, `web`, `mobile-pwa`, `native-ui-evidence`, and `source-contracts`, and rejects failure, cancellation, or skip. Production infrastructure validation and load/performance acceptance are intentionally outside the demo merge gate.
 - **H-01:** `AppConfig` provides a closed `Environment` type, rejects unknown `ONYX_ENV` values, centralizes production storage/signing/governance/CORS invariants, and exposes development/test seeding only through the non-production configuration boundary.
 - **H-02:** the workspace uses SQLx 0.9 with regenerated dependency state and committed SQLx offline metadata; network/TLS dependencies were modernized as part of the staged dependency work.
 - **H-03:** all four frontend surfaces have committed lockfiles, Node 22/`npm ci` CI installation, high-severity production dependency audits, explicit dependency lifecycle policy, and Dependabot automation.
