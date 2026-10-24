@@ -153,6 +153,10 @@ jobs:
         # production/default release builds above do not enable it.
         run: cargo test --workspace --release --features api-server/test-endpoints -- --test-threads=1
 
+  security:
+    name: Security audits
+    uses: ./.github/workflows/security.yml
+
   i18n:
     runs-on: ubuntu-latest
     steps:
@@ -322,6 +326,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - check
+      - security
       - i18n
       - web
       - mobile-pwa
@@ -331,6 +336,7 @@ jobs:
       - name: Report upstream gate results
         env:
           CHECK_RESULT: ${{ needs.check.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
           I18N_RESULT: ${{ needs.i18n.result }}
           WEB_RESULT: ${{ needs.web.result }}
           MOBILE_PWA_RESULT: ${{ needs['mobile-pwa'].result }}
@@ -340,6 +346,7 @@ jobs:
           set -euo pipefail
           printf '%s\n' \
             "check=$CHECK_RESULT" \
+            "security=$SECURITY_RESULT" \
             "i18n=$I18N_RESULT" \
             "web=$WEB_RESULT" \
             "mobile-pwa=$MOBILE_PWA_RESULT" \
@@ -347,6 +354,7 @@ jobs:
             "source-contracts=$SOURCE_CONTRACTS_RESULT"
           for result in \
             "$CHECK_RESULT" \
+            "$SECURITY_RESULT" \
             "$I18N_RESULT" \
             "$WEB_RESULT" \
             "$MOBILE_PWA_RESULT" \

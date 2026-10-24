@@ -1,11 +1,8 @@
 name: Security
 
 on:
-  # Feature/fix branches are verified by pull_request, avoiding duplicate full runs.
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  # Reused by the main CI gate to avoid duplicate push/PR security runs.
+  workflow_call:
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch: {}

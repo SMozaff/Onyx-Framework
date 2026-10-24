@@ -47,7 +47,7 @@ def text(path: str) -> str:
 required = [
     # Current workflow inventory for demo, runtime, and artifact checks.
     ".github/workflows/ci.yml", ".github/workflows/release.yml",
-    ".github/workflows/Debug.yml", ".github/workflows/devcontainer-check.yml",
+    ".github/workflows/Debug.yml",
     ".github/workflows/cloudflare-worker-check.yml",
     ".github/workflows/allfather-auth-smoke.yml", ".github/workflows/deploy-cloudflare-edge.yml",
     ".github/workflows/security.yml", ".github/workflows/provision-allfather-password.yml",
