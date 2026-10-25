@@ -17,7 +17,7 @@ path = "src/main.rs"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "=2.12.1", features = [] }
+tauri = { version = "=2.12.2", features = [] }
 tauri-plugin-dialog = "=2.8.1"
 reqwest.workspace = true
 serde.workspace = true
