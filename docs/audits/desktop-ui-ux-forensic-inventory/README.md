@@ -26,12 +26,17 @@ Counts intentionally distinguish route-table entries, component templates, UI st
 | React screen/page component templates | 14 | 9 desktop-shell pages and 5 admin-shell pages |
 | Additional top-level UI states | 4 | Desktop startup loading/error; Admin Suspense loading/admin-access-denied |
 | UI screen/state classes tallied | 18 | Templates and startup/access states, not runtime DOM snapshots |
-| Route-table entries | 21 | Desktop shell 13; Admin shell 8; includes wildcard fallback entries |
+| JSX route elements | 22 | Desktop shell 13; Admin shell 9, including an index route and a pathless layout wrapper |
 | Admin role-dependent navigation | 3 standard links, plus Organizations for All-Father | Defined in `adminNavigation.ts` |
 | Staff desktop navigation items | 8 | Defined in `MainLayout.tsx` |
 | Explicit shared CSS design-token declarations | 13 | Seven surface/text/accent tokens and six status tokens |
+| Interactive-element register records | 113 | Static control/template records; not a live DOM count |
+| Forms-and-fields register records | 51 | Field and workflow rows; not an assertion of 51 HTML forms |
+| Animation/motion evidence records | 8 | Explicit motion/state records identified in inspected source |
+| Asset/token register records | 46 | App assets, design tokens, font stack and unresolved asset reference |
+| Evidence register items | 33 | Claims with source location and scope caveat |
 | App-directory visual-asset files | 29 | 14 Admin-shell asset paths and 15 desktop-shell asset paths from the source tree |
-| Additional branding asset found | 1 | `assets/branding/admin-shell.png`; usage and image metadata not established here |
+| Root branding assets | 2 | `assets/branding/admin-shell.png` and `assets/branding/onyx-ring.png`; usage and image metadata are not fully established |
 | Explicit literal HTML `<form>` wrappers found in inspected source | At least 4 | Workflow groupings are broader than HTML form tags |
 | Exact rendered control instances | Not established | Repeated list/table elements and conditional UI require runtime state to enumerate |
 

@@ -17,7 +17,8 @@
 | React page component templates | 14 | Desktop shell 9; Admin shell 5 |
 | Additional app-level UI states | 4 | Desktop session loading/startup error; Admin Suspense fallback/admin-access-denied |
 | Screen/state register rows | 18 | 14 page templates + 4 states; modal overlays are separately described rather than added as pages |
-| JSX route-table entries | 21 | Desktop 13 entries including wildcard; Admin 8 including wildcard. A route entry is not necessarily a unique screen. |
+| JSX `<Route>` elements | 22 | Desktop 13; Admin 9. Admin count includes an index route and a pathless layout wrapper. A route element is not necessarily a unique screen. |
+| Explicit route `path` attributes | 20 | Desktop 13; Admin 7. The Admin index route and pathless wrapper have no `path` attribute. |
 | Explicit nav item definitions | 11 baseline | Desktop 8; Admin 3 standard. Admin Organizations is a fourth role-conditional item. |
 | UI source file entries | 63 | 28 under `desktop-shell/ui/src/`; 35 under `admin-shell/ui/src/`, according to returned Git tree path counts |
 | Hicolor icon files | 20 | 10 declared icon-size paths per app |
@@ -25,6 +26,11 @@
 | Root branding files | 2 | `assets/branding/admin-shell.png`, `assets/branding/onyx-ring.png`; their exact use differs/unresolved |
 | Theme CSS declarations | 13 | `@theme` tokens in shared CSS blob |
 | Explicit `<form>` tags observed | At least 4 | Admin login (1), Organizations create-org (1), Organizations create-admin (1), Desktop login (1). Other data workflows may use non-form buttons/handlers. |
+| Interactive-element register records | 113 | Statically listed component/control templates in `interactive-elements.csv`; repeated rows remain data-dependent |
+| Forms-and-fields register records | 51 | Field/workflow rows in `forms-and-fields.csv` |
+| Animation inventory records | 8 | Rows in `animation-inventory.csv` |
+| Asset/token inventory records | 46 | Rows in `assets-and-tokens.csv` |
+| Evidence register items | 33 | Rows in `evidence-register.csv` |
 | Exact rendered controls at runtime | Not measured | Dynamic collections, conditional panels, native webview DOM and viewport-dependent controls were not rendered |
 | Test suites executed | 0 | This is a static source audit; test files are listed as evidence but were not run |
 

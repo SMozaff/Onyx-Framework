@@ -33,7 +33,7 @@ Source revision: `d8f64889cfe4473d40d50c41b0992bd22955eb7b`.
 | lazy-loading fallback | centered loading text | Suspense while lazy page code resolves | Resolves to lazy-loaded page |
 | admin-access-denied state | inline denied panel | authenticated user has no `is_admin` | Log Out control clears stored session |
 
-Route entry counts are static JSX route declarations, not unique screens. Desktop shell has 13 entries including wildcard; Admin has 8. The desktop conditional login is rendered outside the route table.
+Route element counts are static JSX declarations, not unique screens. Desktop shell has 13 <Route> elements. Admin shell has 9 <Route> elements: 7 with an explicit path, one index route, and one pathless layout wrapper. Combined total: 22 <Route> elements. The desktop conditional login is rendered outside the route table.
 
 ## Verified transition inventory
 
