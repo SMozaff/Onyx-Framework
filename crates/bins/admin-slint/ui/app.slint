@@ -1,0 +1,70 @@
+import { Button } from "std-widgets.slint";
+
+export global Theme {
+    in-out property <bool> dark: false;
+    out property <color> background: dark ? #0f1720 : #f3f7fb;
+    out property <color> surface: dark ? #17212d : #ffffff;
+    out property <color> text: dark ? #e6edf5 : #102b4d;
+    out property <color> text-dim: dark ? #9fb0c3 : #5d7088;
+    out property <color> accent: #1f6098;
+}
+
+export global Strings {
+    in-out property <string> app-title: "ONYX Admin";
+    in-out property <string> light-mode: "Light mode";
+    in-out property <string> dark-mode: "Dark mode";
+    in-out property <string> phase0-notice: "";
+}
+
+export component AppWindow inherits Window {
+    title: Strings.app-title;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 960px;
+    min-height: 600px;
+    background: Theme.background;
+
+    callback select-language(string);
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Button {
+                text: "English";
+                clicked => { root.select-language("en"); }
+            }
+            Button {
+                text: "فارسی";
+                clicked => { root.select-language("fa"); }
+            }
+            Button {
+                text: Theme.dark ? Strings.light-mode : Strings.dark-mode;
+                clicked => { Theme.dark = !Theme.dark; }
+            }
+        }
+
+        Rectangle {
+            background: Theme.surface;
+            border-radius: 8px;
+            VerticalLayout {
+                padding: 24px;
+                spacing: 8px;
+                Text {
+                    text: Strings.app-title;
+                    color: Theme.text;
+                    font-size: 24px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: Strings.phase0-notice;
+                    color: Theme.text-dim;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

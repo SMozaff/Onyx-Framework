@@ -1,2 +1,5 @@
 # Dependencies (installed by npm; never committed)
 node_modules/
+
+# Cargo build output (local)
+/target/
