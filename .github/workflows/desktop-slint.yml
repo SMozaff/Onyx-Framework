@@ -49,7 +49,7 @@ jobs:
         with:
           shared-key: "desktop-slint-cross-platform"
       - name: Verify locked dependency graph
-        run: cargo metadata --locked
+        run: cargo metadata --locked --format-version 1 > cargo-metadata.json
       - name: Format
         run: cargo fmt -p desktop-slint -p relay-websocket-adapter -- --check
       - name: Clippy
