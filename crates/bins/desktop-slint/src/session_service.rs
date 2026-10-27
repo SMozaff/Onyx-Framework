@@ -473,7 +473,7 @@ mod tests {
             api.last_logout_bearer.lock().unwrap().as_deref(),
             Some("Bearer access-rotated")
         );
-        assert_eq!(service.state.read().await.tokens.is_none(), true);
+        assert!(service.state.read().await.tokens.is_none());
     }
 
     #[tokio::test]
