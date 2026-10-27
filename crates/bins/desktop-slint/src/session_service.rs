@@ -224,14 +224,17 @@ impl SessionService {
     /// important: if refresh rotation is already in flight, logout must revoke
     /// the newly rotated refresh token rather than the now-revoked old value.
     pub async fn logout(&self) {
-        let logout_generation = {
+        let (logout_generation, cancellation) = {
             let mut state = self.state.write().await;
             state.logging_out = true;
-            state.session_generation
+            // Snapshot while holding the state lock so a concurrent session
+            // replacement cannot make this logout cancel the new session.
+            let cancellation = self.connection_cancellation.read().await.clone();
+            (state.session_generation, cancellation)
         };
 
         // Cancel active ticket/handshake attempts before waiting on network I/O.
-        self.connection_cancellation.read().await.cancel();
+        cancellation.cancel();
 
         let _refresh_guard = self.refresh_gate.lock().await;
         let current_pair = {
@@ -359,20 +362,21 @@ async fn invalidate_if_current(
     connection_cancellation: &RwLock<CancellationToken>,
     session_generation: u64,
 ) {
-    let invalidated = {
+    let cancellation = {
         let mut state = state.write().await;
         // During logout, preserve the current pair until logout owns the refresh
         // gate; it may be needed to revoke a rotation that just completed.
         if state.session_generation == session_generation && !state.logging_out {
             state.session_generation = state.session_generation.wrapping_add(1);
             state.tokens = None;
-            true
+            // Snapshot under the state lock; never cancel a replacement session.
+            Some(connection_cancellation.read().await.clone())
         } else {
-            false
+            None
         }
     };
-    if invalidated {
-        connection_cancellation.read().await.cancel();
+    if let Some(cancellation) = cancellation {
+        cancellation.cancel();
     }
 }
 
