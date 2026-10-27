@@ -80,7 +80,9 @@ impl SessionService {
         let parsed = reqwest::Url::parse(&api_origin).map_err(|_| SessionSourceError)?;
         let is_loopback_host = parsed.host_str().is_some_and(|host| {
             host.eq_ignore_ascii_case("localhost")
-                || host.parse::<IpAddr>().is_ok_and(|address| address.is_loopback())
+                || host
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback())
         });
         if !matches!(parsed.scheme(), "https" | "http")
             || parsed.host_str().is_none()
@@ -207,8 +209,7 @@ impl SessionService {
         state.tokens = Some(TokenPair {
             access_token: body.access_token,
             refresh_token: body.refresh_token,
-            access_expires_at: tokio::time::Instant::now()
-                + Duration::from_secs(body.expires_in),
+            access_expires_at: tokio::time::Instant::now() + Duration::from_secs(body.expires_in),
         });
         if state.logging_out {
             return Err(SessionSourceError);
@@ -301,7 +302,8 @@ impl SessionService {
         let rotated = TokenPair {
             access_token: rotated.access_token,
             refresh_token: rotated.refresh_token,
-            access_expires_at: tokio::time::Instant::now() + Duration::from_secs(rotated.expires_in),
+            access_expires_at: tokio::time::Instant::now()
+                + Duration::from_secs(rotated.expires_in),
         };
         let mut state = self.state.write().await;
         if state.session_generation != session_generation || !state.logging_out {
@@ -460,11 +462,6 @@ impl SessionTokenSource for SessionService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Mutex as StdMutex,
-    };
-    use tokio::sync::Notify;
     use axum::{
         extract::State,
         http::{HeaderMap, StatusCode},
@@ -472,7 +469,12 @@ mod tests {
         Json, Router,
     };
     use serde_json::{json, Value};
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Mutex as StdMutex,
+    };
     use tokio::net::TcpListener;
+    use tokio::sync::Notify;
 
     #[derive(Default)]
     struct MockApi {
