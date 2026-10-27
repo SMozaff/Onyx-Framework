@@ -12,6 +12,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sync_transport::placeholder_types::{AuthorityError, AuthorityProvider};
 
+/// Opaque failure from the authoritative session service.
+///
+/// This intentionally carries no detail that might contain a credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionSourceError;
+
 /// The single session owner supplies a current access token.
 ///
 /// Implementations must serialize refresh-token rotation and atomically publish
@@ -21,7 +27,9 @@ use sync_transport::placeholder_types::{AuthorityError, AuthorityProvider};
 /// accidentally escape through AuthorityError.
 #[async_trait]
 pub trait SessionTokenSource: Send + Sync {
-    async fn current_access_token(&self) -> Result<Option<String>, ()>;
+    async fn current_access_token(
+        &self,
+    ) -> Result<Option<String>, SessionSourceError>;
 }
 
 /// Adapter from the session owner to the transport's relay authority contract.
@@ -44,7 +52,7 @@ impl AuthorityProvider for SessionAuthorityProvider {
         match self.source.current_access_token().await {
             Ok(Some(token)) if !token.trim().is_empty() => Ok(token),
             Ok(Some(_)) | Ok(None) => Err(AuthorityError::NoCredentials),
-            Err(()) => Err(AuthorityError::RefreshFailed(
+            Err(_) => Err(AuthorityError::RefreshFailed(
                 "session authority unavailable".to_owned(),
             )),
         }
@@ -64,9 +72,11 @@ mod tests {
 
     #[async_trait]
     impl SessionTokenSource for FakeSession {
-        async fn current_access_token(&self) -> Result<Option<String>, ()> {
+        async fn current_access_token(
+            &self,
+        ) -> Result<Option<String>, SessionSourceError> {
             if *self.unavailable.read().unwrap() {
-                return Err(());
+                return Err(SessionSourceError);
             }
             Ok(self.token.read().unwrap().clone())
         }
@@ -111,6 +121,9 @@ mod tests {
         let error = provider.bearer_token().await.unwrap_err();
 
         assert!(matches!(error, AuthorityError::RefreshFailed(_)));
-        assert_eq!(error.to_string(), "credential refresh failed: session authority unavailable");
+        assert_eq!(
+            error.to_string(),
+            "credential refresh failed: session authority unavailable"
+        );
     }
 }
