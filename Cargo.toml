@@ -32,6 +32,7 @@ members = [
     "crates/bins/migration-tool",
     "crates/bins/sync-agent",
     "crates/bins/desktop-shell",
+    "crates/bins/desktop-slint",
     "crates/bins/admin-shell",
     "crates/bins/admin-slint",
     "crates/mobile-core",
