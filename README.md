@@ -1,4 +1,7 @@
 # ONYX
+
+[![Made with Slint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png)](https://slint.dev/)
+
 ### One connected workspace for the way your organization works.
 
 **Bring people, work, and organizational activity together in one clear experience.**
