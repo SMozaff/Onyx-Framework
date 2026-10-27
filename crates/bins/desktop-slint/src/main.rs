@@ -6,6 +6,7 @@
 
 pub mod authority;
 pub mod session_service;
+pub mod relay_adapter;
 
 slint::include_modules!();
 
