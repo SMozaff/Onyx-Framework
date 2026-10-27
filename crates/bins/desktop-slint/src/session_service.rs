@@ -166,9 +166,9 @@ impl SessionService {
         let refresh_gate = Arc::clone(&self.refresh_gate);
         let client = self.client.clone();
         let api_origin = Arc::clone(&self.api_origin);
-        tokio::spawn(async move {
-            coordinated_refresh(state, refresh_gate, client, api_origin).await
-        })
+        tokio::spawn(
+            async move { coordinated_refresh(state, refresh_gate, client, api_origin).await },
+        )
         .await
         .map_err(|_| SessionSourceError)?
     }
@@ -250,8 +250,7 @@ async fn coordinated_refresh(
     state.tokens = Some(TokenPair {
         access_token: rotated.access_token.clone(),
         refresh_token: rotated.refresh_token,
-        access_expires_at: tokio::time::Instant::now()
-            + Duration::from_secs(rotated.expires_in),
+        access_expires_at: tokio::time::Instant::now() + Duration::from_secs(rotated.expires_in),
     });
     if state.logging_out {
         Ok(None)
@@ -394,18 +393,14 @@ mod tests {
     #[tokio::test]
     async fn rejects_blank_or_zero_lifetime_tokens() {
         let service = SessionService::new("https://example.invalid").unwrap();
-        assert!(
-            service
-                .install_tokens(" ".into(), "refresh".into(), 3600)
-                .await
-                .is_err()
-        );
-        assert!(
-            service
-                .install_tokens("access".into(), "refresh".into(), 0)
-                .await
-                .is_err()
-        );
+        assert!(service
+            .install_tokens(" ".into(), "refresh".into(), 3600)
+            .await
+            .is_err());
+        assert!(service
+            .install_tokens("access".into(), "refresh".into(), 0)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
