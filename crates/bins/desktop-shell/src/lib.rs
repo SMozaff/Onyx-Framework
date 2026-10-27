@@ -28,7 +28,7 @@
 //! process-restart approach.
 
 #[path = "../../desktop-slint/src/relay_adapter.rs"]
-mod relay_socket;
+use relay_websocket_adapter as relay_socket;
 mod secure_storage;
 mod session;
 
