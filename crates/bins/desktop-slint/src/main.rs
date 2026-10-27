@@ -4,7 +4,7 @@
 //! application. Authentication wiring is introduced as a shell-independent
 //! seam; this binary does not claim a live session or relay connection.
 
-mod authority;
+pub mod authority;
 
 slint::include_modules!();
 
