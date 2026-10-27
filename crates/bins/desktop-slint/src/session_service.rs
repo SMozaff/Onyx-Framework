@@ -18,6 +18,7 @@ use std::{
 use async_trait::async_trait;
 use serde::Deserialize;
 use tokio::sync::{Mutex, Notify, RwLock};
+use tokio_util::sync::CancellationToken;
 
 use crate::authority::{SessionSourceError, SessionTokenSource};
 
@@ -44,6 +45,7 @@ pub struct SessionService {
     client: reqwest::Client,
     state: Arc<RwLock<SessionState>>,
     refresh_gate: Arc<Mutex<()>>,
+    connection_cancellation: Arc<RwLock<CancellationToken>>,
 }
 
 #[derive(Deserialize)]
@@ -103,6 +105,7 @@ impl SessionService {
             client,
             state: Arc::new(RwLock::new(SessionState::default())),
             refresh_gate: Arc::new(Mutex::new(())),
+            connection_cancellation: Arc::new(RwLock::new(CancellationToken::new())),
         }))
     }
 
@@ -120,12 +123,22 @@ impl SessionService {
         let mut state = self.state.write().await;
         state.session_generation = state.session_generation.wrapping_add(1);
         state.logging_out = false;
+        let mut cancellation = self.connection_cancellation.write().await;
+        cancellation.cancel();
+        *cancellation = CancellationToken::new();
         state.tokens = Some(TokenPair {
             access_token,
             refresh_token,
             access_expires_at: tokio::time::Instant::now() + Duration::from_secs(expires_in),
         });
         Ok(())
+    }
+
+    /// Shared cancellation source used by the relay adapter. Each connection
+    /// snapshots the current token; logout or session replacement cancels
+    /// attempts tied to the previous session.
+    pub fn connection_cancellation_source(&self) -> Arc<RwLock<CancellationToken>> {
+        Arc::clone(&self.connection_cancellation)
     }
 
     /// Authenticates against the canonical API and atomically installs the
@@ -146,6 +159,9 @@ impl SessionService {
             state.session_generation = state.session_generation.wrapping_add(1);
             state.logging_out = false;
             state.tokens = None;
+            let mut cancellation = self.connection_cancellation.write().await;
+            cancellation.cancel();
+            *cancellation = CancellationToken::new();
             state.session_generation
         };
 
@@ -215,6 +231,8 @@ impl SessionService {
 
         // A refresh operation holds this gate across its HTTP request and
         // publication. Local authority has already been disabled above.
+        self.connection_cancellation.read().await.cancel();
+
         let _refresh_guard = self.refresh_gate.lock().await;
         let pair = {
             let mut state = self.state.write().await;
@@ -261,29 +279,50 @@ impl SessionService {
         // the old refresh token as part of successful rotation.
         let state = Arc::clone(&self.state);
         let refresh_gate = Arc::clone(&self.refresh_gate);
+        let connection_cancellation = Arc::clone(&self.connection_cancellation);
         let client = self.client.clone();
         let api_origin = Arc::clone(&self.api_origin);
-        tokio::spawn(
-            async move { coordinated_refresh(state, refresh_gate, client, api_origin).await },
-        )
+        tokio::spawn(async move {
+            coordinated_refresh(
+                state,
+                refresh_gate,
+                connection_cancellation,
+                client,
+                api_origin,
+            )
+            .await
+        })
         .await
         .map_err(|_| SessionSourceError)?
     }
 }
 
-async fn invalidate_if_current(state: &RwLock<SessionState>, session_generation: u64) {
-    let mut state = state.write().await;
-    // During logout, preserve the current pair until logout owns the refresh
-    // gate; it may be needed to revoke a rotation that just completed.
-    if state.session_generation == session_generation && !state.logging_out {
-        state.session_generation = state.session_generation.wrapping_add(1);
-        state.tokens = None;
+async fn invalidate_if_current(
+    state: &RwLock<SessionState>,
+    connection_cancellation: &RwLock<CancellationToken>,
+    session_generation: u64,
+) {
+    let invalidated = {
+        let mut state = state.write().await;
+        // During logout, preserve the current pair until logout owns the refresh
+        // gate; it may be needed to revoke a rotation that just completed.
+        if state.session_generation == session_generation && !state.logging_out {
+            state.session_generation = state.session_generation.wrapping_add(1);
+            state.tokens = None;
+            true
+        } else {
+            false
+        }
+    };
+    if invalidated {
+        connection_cancellation.read().await.cancel();
     }
 }
 
 async fn coordinated_refresh(
     state: Arc<RwLock<SessionState>>,
     refresh_gate: Arc<Mutex<()>>,
+    connection_cancellation: Arc<RwLock<CancellationToken>>,
     client: reqwest::Client,
     api_origin: Arc<str>,
 ) -> Result<Option<String>, SessionSourceError> {
@@ -310,7 +349,7 @@ async fn coordinated_refresh(
     {
         Ok(response) => response,
         Err(_) => {
-            invalidate_if_current(&state, session_generation).await;
+            invalidate_if_current(&state, &connection_cancellation, session_generation).await;
             return Err(SessionSourceError);
         }
     };
