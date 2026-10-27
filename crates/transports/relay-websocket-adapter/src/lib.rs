@@ -21,7 +21,8 @@ use sync_transport::{
     cloud_relay::{RelaySocket, RelaySocketFactory},
     PeerInfo, TransportError,
 };
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::RwLock};
+use tokio_util::sync::CancellationToken;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, Message},
@@ -129,17 +130,30 @@ async fn mint_relay_ticket(
 /// opens, not lazily from whatever it happens to send first.
 pub struct TungsteniteRelaySocketFactory {
     local_replica: platform_kernel::ReplicaId,
+    cancellation_source: Option<Arc<RwLock<CancellationToken>>>,
 }
 
 impl TungsteniteRelaySocketFactory {
     pub fn new(local_replica: platform_kernel::ReplicaId) -> Self {
-        Self { local_replica }
+        Self {
+            local_replica,
+            cancellation_source: None,
+        }
     }
-}
 
-#[async_trait]
-impl RelaySocketFactory for TungsteniteRelaySocketFactory {
-    async fn connect(
+    /// Constructs a factory whose active connection attempts are cancelled
+    /// when the owning session is logged out or replaced.
+    pub fn with_cancellation(
+        local_replica: platform_kernel::ReplicaId,
+        cancellation_source: Arc<RwLock<CancellationToken>>,
+    ) -> Self {
+        Self {
+            local_replica,
+            cancellation_source: Some(cancellation_source),
+        }
+    }
+
+    async fn connect_inner(
         &self,
         relay_url: &str,
         peer: &PeerInfo,
@@ -198,6 +212,32 @@ impl RelaySocketFactory for TungsteniteRelaySocketFactory {
             })?;
 
         Ok(Box::new(TungsteniteRelaySocket { stream }))
+    }
+}
+
+#[async_trait]
+impl RelaySocketFactory for TungsteniteRelaySocketFactory {
+    async fn connect(
+        &self,
+        relay_url: &str,
+        peer: &PeerInfo,
+        bearer_token: &str,
+        timeout: Duration,
+    ) -> Result<Box<dyn RelaySocket>, TransportError> {
+        let cancellation = match self.cancellation_source.as_ref() {
+            Some(source) => Some(source.read().await.clone()),
+            None => None,
+        };
+
+        if let Some(cancellation) = cancellation {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => Err(TransportError::ConnectionLost),
+                result = self.connect_inner(relay_url, peer, bearer_token, timeout) => result,
+            }
+        } else {
+            self.connect_inner(relay_url, peer, bearer_token, timeout).await
+        }
     }
 }
 
