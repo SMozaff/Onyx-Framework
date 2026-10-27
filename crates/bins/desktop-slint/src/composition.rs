@@ -32,8 +32,9 @@ impl SlintComposition {
         let token_source: Arc<dyn SessionTokenSource> = session.clone();
         let authority: Arc<dyn AuthorityProvider> =
             Arc::new(SessionAuthorityProvider::new(token_source));
-        let socket_factory = Arc::new(TungsteniteRelaySocketFactory::new(
+        let socket_factory = Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
             ReplicaId::new_random(),
+            session.connection_cancellation_source(),
         ));
         let relay = Arc::new(CloudRelayTransport::new(
             ONYX_API_ORIGIN,
