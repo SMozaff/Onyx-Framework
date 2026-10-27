@@ -22,12 +22,12 @@ use sync_transport::{
     PeerInfo, TransportError,
 };
 use tokio::{net::TcpStream, sync::RwLock};
-use tokio_util::sync::CancellationToken;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, Message},
     MaybeTlsStream, WebSocketStream,
 };
+use tokio_util::sync::CancellationToken;
 
 /// Percent-encodes a query-string value.
 ///
@@ -236,7 +236,8 @@ impl RelaySocketFactory for TungsteniteRelaySocketFactory {
                 result = self.connect_inner(relay_url, peer, bearer_token, timeout) => result,
             }
         } else {
-            self.connect_inner(relay_url, peer, bearer_token, timeout).await
+            self.connect_inner(relay_url, peer, bearer_token, timeout)
+                .await
         }
     }
 }
@@ -291,7 +292,10 @@ mod cancellation_tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
-    use tokio::{net::TcpListener, sync::{Notify, RwLock}};
+    use tokio::{
+        net::TcpListener,
+        sync::{Notify, RwLock},
+    };
     use tokio_util::sync::CancellationToken;
 
     #[derive(Default)]
@@ -316,7 +320,10 @@ mod cancellation_tests {
         *state.body.lock().unwrap() = Some(payload.to_string());
         state.entered.notify_one();
         state.release.notified().await;
-        (StatusCode::OK, Json(json!({ "ticket": "single-use-test-ticket" })))
+        (
+            StatusCode::OK,
+            Json(json!({ "ticket": "single-use-test-ticket" })),
+        )
     }
 
     #[tokio::test]
