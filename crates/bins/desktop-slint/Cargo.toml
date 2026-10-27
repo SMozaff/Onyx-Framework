@@ -18,6 +18,10 @@ slint = "1.18"
 sync-transport = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
+platform-kernel = { workspace = true }
+futures-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
