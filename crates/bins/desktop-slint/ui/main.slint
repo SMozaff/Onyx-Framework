@@ -45,7 +45,7 @@ export component DesktopWindow inherits Window {
 
             LineEdit {
                 placeholder-text: "Password";
-                input-type: password;
+                input-type: InputType.password;
                 text <=> root.password;
                 enabled: !root.busy;
             }
