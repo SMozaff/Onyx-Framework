@@ -1,6 +1,6 @@
 # B-01 — BOUND Blocker and Decision Register
 
-**Current phase: Wave 0 only. Gate 0b is NOT APPROVED.** No production client implementation is authorized.
+**Current phase: Wave 0 / Gate 0b closure. Gate 0b remains BLOCKED pending mandatory evidence, decisions, approvals, and signed Contract Freeze v1. The project owner has authorized the assistant to pursue closure and then implement the approved B-01 scope once the gate criteria are satisfied; this is not a substitute for the gate artifacts.
 
 | ID | Requirement / blocker | Evidence and impact | Responsible owner(s) | Exit evidence |
 |---|---|---|---|---|
@@ -17,13 +17,13 @@
 | G0B-11 | C-09 fixture schema/version | Synthetic candidate cases are not authoritative until B-13 approves schema/version and provenance. | B-13 with B-01 | Schema, validator, valid/invalid fixtures, route/error coverage and recorded approval |
 | G0B-12 | Organization-admin create DTO | Worker response and current UI row expectation reportedly disagree on timestamps vs `is_admin`/`role`; no approved resolution found. | B-01 + B-10 + Worker/API owner | Canonical DTO decision and regression test against verified response shape |
 | G0B-13 | Security/license CI failure | Run [40336191173](https://github.com/SMozaff/Onyx-Framework/actions/runs/40336191173), job “Security audits / rust-advisories”, step “Advisory and source-policy audit”: `cargo deny check advisories bans licenses sources`; summary `advisories ok, bans ok, licenses FAILED, sources ok`. Rejected license metadata includes BSL-1.0, GPL-3.0-only, Unlicense and Slint custom LicenseRef identifiers. Do not change allowlist or suppress the check without policy-owner approval. | Security/CI maintainer + repository owner | Reviewed license policy disposition and fresh green required-check run |
-| G0B-14 | B-01 docs PR CI | PR #329 run [40424647061](https://github.com/SMozaff/Onyx-Framework/actions/runs/40424647061) failed; documentation PR is not green or merge-ready. | CI maintainers / PR owner | Required checks green on current PR head |
+| G0B-14 | B-01 docs PR CI | Latest verified PR #329 head `32d7dae99971d7b7cc70331298f62d4d844cfa05`, run [40426925219](https://github.com/SMozaff/Onyx-Framework/actions/runs/40426925219) **FAILED**: `Security audits / rust-advisories` → `Advisory and source-policy audit` failed on license policy; `merge-gate` failed as a consequence. The other reported jobs in this run passed. | CI maintainers / PR owner | Required checks green on current PR head |
 | DEP-01 | Rust implementation verification environment | Local Rust/Cargo unavailable in earlier environment; no B-01 Rust tests executed. | B-13/CI owner | Approved Rust 1.97.1 CI results for the eventual implementation commit |
 | DEP-02 | Documentation handover | User approved `reports/slint-migration/B-01/`; PR #329 contains the draft report packet but is still open and failing CI. | B-01 / integration coordinator | Reviewed/merged docs PR after required checks pass |
 
 ## Parallel work that remains authorized
 
-- Inspect/refresh source-derived C-01 draft and identify exact DTO/source mismatches.
+- Inspect/refresh source-derived C-01 draft and identify exact DTO/source mismatches. The new `B-01_C01_Dispatch_Reconciliation.md` records dispatch predicates and specific path/query contract gaps.
 - Prepare deterministic contract-test cases and test-harness proposals without treating them as approved C-09 fixtures.
 - Support CI failure diagnosis with evidence; do not change shared license policy without owner approval.
 - Coordinate C-03/C-09 reviews and update the existing handover as actual decisions arrive.
@@ -37,4 +37,4 @@
 - Fabricating organization-admin timestamps, adding unverified routes, or using unchecked casts.
 - Modifying shared license policy or required CI conditions without the responsible owner's review.
 
-**No item is resolved by this register alone; closure requires the evidence/approval stated in the exit column.**
+**The project owner's authorization to proceed is recorded, but no technical decision, feasibility report, cross-workstream approval, license-policy disposition, or Contract Freeze v1 is inferred from that authorization. No item is resolved by this register alone; closure requires the evidence/approval stated in the exit column.**
