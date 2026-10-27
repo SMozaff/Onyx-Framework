@@ -16,6 +16,8 @@ slint-build = "1.18"
 async-trait = { workspace = true }
 slint = "1.18"
 sync-transport = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 platform-kernel = { workspace = true }
@@ -24,4 +26,5 @@ tokio-tungstenite = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+axum = { workspace = true }
 tokio = { workspace = true }
