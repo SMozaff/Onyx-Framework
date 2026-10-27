@@ -29,6 +29,7 @@ platform-contracts.workspace = true
 query-application.workspace = true
 persistence-sqlite.workspace = true
 sync-transport.workspace = true
+relay-websocket-adapter.workspace = true
 lan-discovery.workspace = true
 tauri = { version = "=2.12.2", features = [] }
 keyring = { version = "4", features = ["v1"] }
