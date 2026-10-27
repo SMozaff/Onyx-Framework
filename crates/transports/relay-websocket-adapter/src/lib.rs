@@ -297,6 +297,20 @@ mod cancellation_tests {
         sync::{Notify, RwLock},
     };
     use tokio_util::sync::CancellationToken;
+    use platform_kernel::{OrganizationId, Timestamp};
+
+    fn test_peer() -> PeerInfo {
+        PeerInfo {
+            id: platform_kernel::ReplicaId::new_random(),
+            organization_id: OrganizationId::new_random(),
+            endpoints: vec!["127.0.0.1:4433".parse().unwrap()],
+            service_name: None,
+            mac_address: None,
+            bluetooth_address: None,
+            last_seen: Timestamp::now(),
+            from_cloud: false,
+        }
+    }
 
     #[derive(Default)]
     struct MockApi {
@@ -344,7 +358,7 @@ mod cancellation_tests {
             Arc::clone(&cancellation),
         ));
         let relay_url = format!("ws://{address}");
-        let peer = PeerInfo::dummy();
+        let peer = test_peer();
         let connect_factory = Arc::clone(&factory);
         let connect = tokio::spawn(async move {
             connect_factory
