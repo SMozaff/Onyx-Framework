@@ -369,8 +369,12 @@ mod cancellation_tests {
             )
             .await;
 
-        assert!(matches!(result, Err(TransportError::Platform(_))));
-        assert!(!format!("{result:?}").contains("ACCESS_SECRET_DO_NOT_LEAK"));
+        match result {
+            Err(TransportError::Platform(message)) => {
+                assert!(!message.contains("ACCESS_SECRET_DO_NOT_LEAK"));
+            }
+            _ => panic!("plaintext remote relay must be rejected before network I/O"),
+        }
     }
 
     #[tokio::test]
