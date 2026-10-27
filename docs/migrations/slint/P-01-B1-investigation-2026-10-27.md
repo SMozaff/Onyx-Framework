@@ -23,7 +23,7 @@ A source-level correction matters: the workspace does have a concrete WebSocket 
 - `client-composition/src/app_state.rs` says `local_discovery: None` falls back to a no-op stub, while desktop-shell currently attempts to start `lan_discovery::LanDiscovery` and falls back to relay-only mode if it fails. Classify this as degraded-mode behavior and test it explicitly.
 - `crates/bins/desktop-shell/Cargo.toml` is a Tauri application crate with a library target; its library uses Tauri types and manages `AppState` through Tauri state.
 - `crates/bins/admin-slint/Cargo.toml` currently depends only on Slint and slint-build; its source is a Phase 0 shell with language/theme UI controls. It is not a desktop host or backend integration yet.
-- The current workspace tree contains `admin-slint` but no `desktop-slint` package.
+- At the inspected main baseline, the workspace contained `admin-slint` but no `desktop-slint` package. This branch now adds a minimal, separate `desktop-slint` feasibility target with only Slint dependencies; it has no backend/session wiring and is not a production implementation. CI for the workspace-registration commit is pending, so the compile and cross-platform dependency claims are not yet verified.
 - The Slint spike workflow does not establish full desktop authentication, session security, runtime lifecycle, accessibility, Persian IME, or production packaging readiness.
 
 ## Immediate solution path
