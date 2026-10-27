@@ -8,6 +8,7 @@
 //! Tokens are never persisted or formatted into diagnostics.
 
 use std::{
+    net::IpAddr,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex as StdMutex,
@@ -84,8 +85,13 @@ impl SessionService {
     pub fn new(api_origin: impl Into<String>) -> Result<Arc<Self>, SessionSourceError> {
         let api_origin = api_origin.into().trim_end_matches('/').to_owned();
         let parsed = reqwest::Url::parse(&api_origin).map_err(|_| SessionSourceError)?;
+        let is_loopback_host = parsed.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host.parse::<IpAddr>().is_ok_and(|address| address.is_loopback())
+        });
         if !matches!(parsed.scheme(), "https" | "http")
             || parsed.host_str().is_none()
+            || (parsed.scheme() == "http" && !is_loopback_host)
             || !parsed.username().is_empty()
             || parsed.password().is_some()
             || parsed.query().is_some()
@@ -527,6 +533,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logout_cancels_connection_attempts_immediately() {
+        let service = SessionService::new("https://example.invalid").unwrap();
+        let cancellation = service.connection_cancellation_source();
+        let active_attempt = cancellation.read().await.clone();
+
+        service.logout().await;
+
+        assert!(active_attempt.is_cancelled());
+        assert_eq!(service.current_access_token().await.unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn rejects_blank_or_zero_lifetime_tokens() {
         let service = SessionService::new("https://example.invalid").unwrap();
         assert!(service
@@ -543,6 +561,7 @@ mod tests {
     async fn rejects_non_http_api_origins_and_url_credentials() {
         assert!(SessionService::new("file:///tmp/onyx").is_err());
         assert!(SessionService::new("ftp://example.invalid").is_err());
+        assert!(SessionService::new("http://example.invalid").is_err());
         assert!(SessionService::new("https://user:password@example.invalid").is_err());
         assert!(SessionService::new("https://example.invalid/api").is_err());
     }
