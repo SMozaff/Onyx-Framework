@@ -27,9 +27,7 @@ pub struct SessionSourceError;
 /// accidentally escape through AuthorityError.
 #[async_trait]
 pub trait SessionTokenSource: Send + Sync {
-    async fn current_access_token(
-        &self,
-    ) -> Result<Option<String>, SessionSourceError>;
+    async fn current_access_token(&self) -> Result<Option<String>, SessionSourceError>;
 }
 
 /// Adapter from the session owner to the transport's relay authority contract.
@@ -72,9 +70,7 @@ mod tests {
 
     #[async_trait]
     impl SessionTokenSource for FakeSession {
-        async fn current_access_token(
-            &self,
-        ) -> Result<Option<String>, SessionSourceError> {
+        async fn current_access_token(&self) -> Result<Option<String>, SessionSourceError> {
             if *self.unavailable.read().unwrap() {
                 return Err(SessionSourceError);
             }

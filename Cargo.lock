@@ -2148,6 +2148,7 @@ dependencies = [
  "platform-contracts",
  "platform-kernel",
  "query-application",
+ "relay-websocket-adapter",
  "reqwest",
  "serde",
  "serde_json",
@@ -2160,6 +2161,27 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "desktop-slint"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "futures-util",
+ "platform-kernel",
+ "relay-websocket-adapter",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "sync-transport",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tokio-util",
  "uuid",
 ]
 
@@ -7100,6 +7122,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "relay-websocket-adapter"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "futures-util",
+ "platform-kernel",
+ "reqwest",
+ "serde_json",
+ "sync-transport",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9401,6 +9440,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

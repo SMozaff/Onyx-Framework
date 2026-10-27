@@ -1,9 +1,18 @@
-import { Button, VerticalBox } from "std-widgets.slint";
+import { Button, LineEdit, VerticalBox } from "std-widgets.slint";
 
 export component DesktopWindow inherits Window {
+    in-out property <string> username: "";
+    in-out property <string> password: "";
+    in-out property <string> status: "Sign in to ONYX";
+    in-out property <string> display-name: "";
+    in-out property <bool> busy: false;
+    in-out property <bool> authenticated: false;
+    callback login-requested(string, string);
+    callback logout-requested();
+
     title: "ONYX Desktop — Feasibility";
     width: 720px;
-    height: 440px;
+    height: 520px;
     background: #10141f;
 
     VerticalBox {
@@ -18,14 +27,72 @@ export component DesktopWindow inherits Window {
             horizontal-alignment: center;
         }
 
+        if !root.authenticated: VerticalBox {
+            alignment: center;
+            spacing: 12px;
+
+            Text {
+                text: "Sign in with your ONYX account";
+                color: #9eacc4;
+                horizontal-alignment: center;
+            }
+
+            LineEdit {
+                placeholder-text: "Username";
+                text <=> root.username;
+                enabled: !root.busy;
+            }
+
+            LineEdit {
+                placeholder-text: "Password";
+                input-type: InputType.password;
+                text <=> root.password;
+                enabled: !root.busy;
+            }
+
+            Button {
+                text: root.busy ? "Signing in…" : "Sign in";
+                enabled: !root.busy;
+                clicked => {
+                    root.login-requested(root.username, root.password);
+                }
+            }
+        }
+
+        if root.authenticated: VerticalBox {
+            alignment: center;
+            spacing: 12px;
+
+            Text {
+                text: "Signed in as " + root.display-name;
+                color: #e6edf7;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: "The native session is active. Full application and peer-sync composition remains a migration gate.";
+                color: #9eacc4;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+
+            Button {
+                text: root.busy ? "Signing out…" : "Sign out";
+                enabled: !root.busy;
+                clicked => { root.logout-requested(); }
+            }
+        }
+
         Text {
-            text: "Native Slint host feasibility spike";
+            text: root.status;
             color: #9eacc4;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
 
         Button {
             text: "Close";
+            enabled: !root.busy;
             clicked => { root.close(); }
         }
     }

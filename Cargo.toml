@@ -42,6 +42,7 @@ members = [
     "crates/synchronization/synchronization-domain",
     "crates/synchronization/sync-test-utils",
     "crates/transports/sync-transport",
+    "crates/transports/relay-websocket-adapter",
     "crates/transports/sync-transport-mobile",
     "crates/team7-integration-tests",
     "crates/team8-e2e-tests",
@@ -125,6 +126,7 @@ sync-test-utils = { path = "crates/synchronization/sync-test-utils" }
 lan-discovery = { path = "crates/infrastructure/lan-discovery" }
 socket2 = { version = "0.5", features = ["all"] }
 sync-transport = { path = "crates/transports/sync-transport" }
+relay-websocket-adapter = { path = "crates/transports/relay-websocket-adapter" }
 sync-transport-mobile = { path = "crates/transports/sync-transport-mobile" }
 proptest = "1"
 rand = "0.8"
@@ -142,6 +144,7 @@ url = "2"
 # and RFC 6090 key import — supplied by BoringSSL-derived `ring`.
 ring = "0.17"
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 libc = "0.2"
 objc = "0.2"
 jni = "0.21"
