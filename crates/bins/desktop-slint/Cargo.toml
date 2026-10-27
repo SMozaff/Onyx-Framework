@@ -1,0 +1,16 @@
+[package]
+name = "desktop-slint"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "ONYX Desktop Slint host feasibility spike; not a production replacement for desktop-shell."
+
+[[bin]]
+name = "desktop-slint"
+path = "src/main.rs"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[dependencies]
+slint = "1.18"

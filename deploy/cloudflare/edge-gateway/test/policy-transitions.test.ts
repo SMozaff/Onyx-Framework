@@ -148,14 +148,14 @@ describe("policy: state transitions (validateCommandSemantics)", () => {
     expect(result).toEqual({ allowed: false, reason: "INVALID_STATE_TRANSITION" });
   });
 
-  // OPEN in the source review: the Rust API allows these on a Retired policy in
-  // some paths; the Worker rejects them. Recorded as current Worker behaviour only.
-  it("Worker rejects EvaluatePolicy on a Retired policy (open question vs Rust)", () => {
+  // Rust's Policy aggregate and the Worker both reject these commands on a Retired policy.
+  // Keep these as parity assertions; the former mismatch comment was stale.
+  it("Worker rejects EvaluatePolicy on a Retired policy (Rust parity)", () => {
     const result = validateCommandSemantics("EvaluatePolicy", retired, { rule_key: "max_hours" }, ACTOR);
     expect(result).toEqual({ allowed: false, reason: "INVALID_STATE_TRANSITION" });
   });
 
-  it("Worker rejects RegisterViolation on a Retired policy (open question vs Rust)", () => {
+  it("Worker rejects RegisterViolation on a Retired policy (Rust parity)", () => {
     const result = validateCommandSemantics("RegisterViolation", retired, { rule_key: "x", reason: "y" }, ACTOR);
     expect(result).toEqual({ allowed: false, reason: "INVALID_STATE_TRANSITION" });
   });

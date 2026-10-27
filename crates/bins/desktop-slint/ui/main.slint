@@ -1,0 +1,32 @@
+import { Button, VerticalBox } from "std-widgets.slint";
+
+export component DesktopWindow inherits Window {
+    title: "ONYX Desktop — Feasibility";
+    width: 720px;
+    height: 440px;
+    background: #10141f;
+
+    VerticalBox {
+        alignment: center;
+        spacing: 16px;
+        padding: 32px;
+
+        Text {
+            text: "ONYX Desktop";
+            color: #e6edf7;
+            font-size: 30px;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: "Native Slint host feasibility spike";
+            color: #9eacc4;
+            horizontal-alignment: center;
+        }
+
+        Button {
+            text: "Close";
+            clicked => { root.close(); }
+        }
+    }
+}
