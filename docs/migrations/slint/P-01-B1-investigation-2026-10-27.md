@@ -32,7 +32,7 @@ B1 is **plausible but not yet implementation-ready**. The workspace has reusable
 
 1. **Shell coupling:** login/session and composition setup currently live in `desktop-shell` and reference Tauri state/path APIs. The new host must not import Tauri UI/runtime behavior merely to reuse backend code.
 2. **Session authority:** define a single owner for authenticated identity, token lifecycle, logout, expiry, and refresh. For the separate Admin client, the approved Q-01 in-memory-only token rule must be enforced end-to-end; do not reuse desktop keyring persistence for Admin tokens.
-3. **Composition completeness:** `AppStateConfig` needs concrete relay authentication/socket/discovery providers and local paths. Existing comments identify missing production relay implementations in the workspace; the B1 spike must inventory which are real, stubbed, or test-only before asserting production readiness.
+3. **Composition completeness:** `AppStateConfig` needs concrete relay authentication/socket/discovery providers and local paths. Existing comments identify missing production relay implementations in the workspace; the B1 spike must inventory which are real, stubbed, or test-only before asserting production readiness. The source explicitly states no production Cloud Relay bearer-token provider exists in the delivered workspace; `sync_transport::placeholder_types::StaticAuthorityProvider` is test-only. This is a concrete runtime blocker, not just an integration risk.
 4. **Storage and identity:** specify per-OS data directories, SQLite migration behavior, blob-store paths, replica identity, startup lock handling, and multi-process contention behavior.
 5. **Event lifecycle:** define subscription ownership, unsubscribe/cancellation, event filtering, login/logout transitions, and behavior when the host restarts. The existing Tauri event forwarding has a documented subscription lifecycle gap.
 6. **Packaging:** define executable identity, installer/shortcut registration, application data migration, crash reporting, upgrade/rollback, and coexistence with the current Tauri package.
@@ -65,3 +65,8 @@ The current Rust policy aggregate rejects `EvaluatePolicy` and `RegisterViolatio
 ## Decision
 
 **B1 remains the authorized investigation path. Final architecture approval is pending.** The current evidence does not support claiming the separate host is ready for production implementation, and it does not satisfy Gate 0b sign-off.
+
+
+## Follow-up evidence update (2026-10-27)
+
+The `client-composition/src/app_state.rs` source was inspected through the `AppStateConfig` definition. It explicitly states that no production implementation of Cloud Relay bearer-token sourcing exists in the delivered workspace; the named `StaticAuthorityProvider` is test-only. This is a separate production-readiness blocker for B1, not merely a UI integration concern. The runtime must identify and validate concrete authentication, socket, and discovery providers before the separate host can be considered operational. Do not use a fixed test token as a production fallback, and do not report successful online sync from a build-only smoke test.
