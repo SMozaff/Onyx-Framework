@@ -16,3 +16,6 @@ tokio.workspace = true
 tokio-util.workspace = true
 tokio-tungstenite.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
