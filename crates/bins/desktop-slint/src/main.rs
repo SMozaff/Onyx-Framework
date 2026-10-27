@@ -44,8 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_authenticated(true);
                             ui.set_display_name(identity.username.into());
                             ui.set_status(
-                                "Authenticated. The full application runtime remains gated."
-                                    .into(),
+                                "Authenticated. The full application runtime remains gated.".into(),
                             );
                         }
                         Err(_) => {
