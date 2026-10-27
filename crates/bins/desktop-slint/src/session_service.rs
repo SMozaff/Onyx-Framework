@@ -119,6 +119,7 @@ impl SessionService {
             return Err(SessionSourceError);
         }
 
+        let _refresh_guard = self.refresh_gate.lock().await;
         let mut state = self.state.write().await;
         state.session_generation = state.session_generation.wrapping_add(1);
         state.logging_out = false;
@@ -228,25 +229,37 @@ impl SessionService {
             state.session_generation
         };
 
-        // A refresh operation holds this gate across its HTTP request and
-        // publication. Local authority has already been disabled above.
+        // Cancel active ticket/handshake attempts before waiting on network I/O.
         self.connection_cancellation.read().await.cancel();
 
         let _refresh_guard = self.refresh_gate.lock().await;
-        let pair = {
+        let current_pair = {
+            let state = self.state.read().await;
+            if state.session_generation != logout_generation || !state.logging_out {
+                return;
+            }
+            state.tokens.clone()
+        };
+
+        let pair = if let Some(pair) = current_pair {
+            self.refresh_pair_for_logout(pair, logout_generation).await
+        } else {
+            None
+        };
+
+        {
             let mut state = self.state.write().await;
-            // A new login during logout owns a newer generation and must win.
             if state.session_generation != logout_generation || !state.logging_out {
                 return;
             }
             state.session_generation = state.session_generation.wrapping_add(1);
             state.logging_out = false;
-            state.tokens.take()
-        };
+            state.tokens = None;
+        }
 
         if let Some(pair) = pair {
-            // The server response is deliberately ignored: local logout has
-            // already completed. Do not log credentials or transport details.
+            // Local authority is already cleared; send the current pair so a
+            // successful refresh rotation cannot strand a valid refresh token.
             let _ = self
                 .client
                 .post(format!("{}/api/auth/logout", self.api_origin))
@@ -255,6 +268,49 @@ impl SessionService {
                 .send()
                 .await;
         }
+    }
+
+    async fn refresh_pair_for_logout(
+        &self,
+        pair: TokenPair,
+        session_generation: u64,
+    ) -> Option<TokenPair> {
+        if pair.access_expires_at > tokio::time::Instant::now() + REFRESH_SKEW {
+            return Some(pair);
+        }
+
+        let response = self
+            .client
+            .post(format!("{}/api/auth/refresh", self.api_origin))
+            .json(&serde_json::json!({ "refresh_token": pair.refresh_token }))
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return Some(pair);
+        }
+
+        let rotated: RefreshResponse = response.json().await.ok()?;
+        if rotated.access_token.trim().is_empty()
+            || rotated.refresh_token.trim().is_empty()
+            || rotated.expires_in == 0
+        {
+            return Some(pair);
+        }
+
+        let rotated = TokenPair {
+            access_token: rotated.access_token,
+            refresh_token: rotated.refresh_token,
+            access_expires_at: tokio::time::Instant::now() + Duration::from_secs(rotated.expires_in),
+        };
+        let mut state = self.state.write().await;
+        if state.session_generation != session_generation || !state.logging_out {
+            return None;
+        }
+        // Publish both rotated values under one lock while logging_out keeps
+        // them unavailable to callers; logout revokes exactly this pair.
+        state.tokens = Some(rotated.clone());
+        Some(rotated)
     }
 
     async fn access_token(&self) -> Result<Option<String>, SessionSourceError> {
