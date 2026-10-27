@@ -287,6 +287,7 @@ mod cancellation_tests {
         routing::post,
         Json, Router,
     };
+    use platform_kernel::{OrganizationId, Timestamp};
     use serde_json::{json, Value};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -297,7 +298,6 @@ mod cancellation_tests {
         sync::{Notify, RwLock},
     };
     use tokio_util::sync::CancellationToken;
-    use platform_kernel::{OrganizationId, Timestamp};
 
     fn test_peer() -> PeerInfo {
         PeerInfo {
