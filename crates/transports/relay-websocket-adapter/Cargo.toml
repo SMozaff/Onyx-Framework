@@ -1,0 +1,17 @@
+[package]
+name = "relay-websocket-adapter"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Shell-independent WebSocket relay socket adapter for ONYX desktop hosts."
+
+[dependencies]
+async-trait.workspace = true
+futures-util.workspace = true
+platform-kernel.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+sync-transport.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+uuid.workspace = true
