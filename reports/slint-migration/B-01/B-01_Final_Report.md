@@ -26,7 +26,7 @@
 - No current-main dedicated Worker CI pass was verified.
 
 ## Deliverables
-This directory contains the seven requested Wave 0 reports, README, and draft fixture candidates. All contract and fixture materials are drafts, not frozen specifications. Candidate fixtures are synthetic and must be validated against the approved C-09 schema before being treated as tests.
+This directory contains the eight report documents (the seven audit/draft/handover deliverables plus this final report) and a README index. The separate local artifact package contains candidate synthetic fixture examples; those fixture files are **not included in this repository PR**. Any fixtures must be validated against the approved C-09 schema before being treated as tests. All contract materials remain drafts, not frozen specifications.
 
 ## Blockers and required decisions
 - Gate 0b authorization and integration coordinator sign-off.
