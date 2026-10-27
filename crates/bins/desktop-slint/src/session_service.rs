@@ -53,6 +53,31 @@ struct RefreshResponse {
     expires_in: u64,
 }
 
+#[derive(Deserialize)]
+struct LoginResponse {
+    access_token: String,
+    refresh_token: String,
+    expires_in: u64,
+    user: LoginUser,
+}
+
+#[derive(Deserialize)]
+struct LoginUser {
+    id: String,
+    username: String,
+    organization_id: String,
+    is_admin: bool,
+}
+
+/// Non-secret identity data returned by the authenticated API response.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIdentity {
+    pub user_id: String,
+    pub organization_id: String,
+    pub username: String,
+    pub is_admin: bool,
+}
+
 impl SessionService {
     pub fn new(api_origin: impl Into<String>) -> Result<Arc<Self>, SessionSourceError> {
         let api_origin = api_origin.into().trim_end_matches('/').to_owned();
@@ -101,6 +126,78 @@ impl SessionService {
             access_expires_at: tokio::time::Instant::now() + Duration::from_secs(expires_in),
         });
         Ok(())
+    }
+
+    /// Authenticates against the canonical API and atomically installs the
+    /// returned access/refresh pair. Login is serialized with refresh/logout
+    /// so an older rotation cannot overwrite a newer authenticated session.
+    pub async fn login(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<SessionIdentity, SessionSourceError> {
+        if username.trim().is_empty() || password.is_empty() {
+            return Err(SessionSourceError);
+        }
+
+        let _refresh_guard = self.refresh_gate.lock().await;
+        let generation = {
+            let mut state = self.state.write().await;
+            state.session_generation = state.session_generation.wrapping_add(1);
+            state.logging_out = false;
+            state.tokens = None;
+            state.session_generation
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/api/auth/login", self.api_origin))
+            .json(&serde_json::json!({
+                "username": username,
+                "password": password,
+                "client_type": "desktop"
+            }))
+            .send()
+            .await
+            .map_err(|_| SessionSourceError)?;
+        if !response.status().is_success() {
+            return Err(SessionSourceError);
+        }
+
+        let body: LoginResponse = response.json().await.map_err(|_| SessionSourceError)?;
+        if body.access_token.trim().is_empty()
+            || body.refresh_token.trim().is_empty()
+            || body.expires_in == 0
+            || body.user.id.trim().is_empty()
+            || body.user.username.trim().is_empty()
+            || body.user.organization_id.trim().is_empty()
+        {
+            return Err(SessionSourceError);
+        }
+
+        let identity = SessionIdentity {
+            user_id: body.user.id,
+            organization_id: body.user.organization_id,
+            username: body.user.username,
+            is_admin: body.user.is_admin,
+        };
+        let mut state = self.state.write().await;
+        if state.session_generation != generation {
+            return Err(SessionSourceError);
+        }
+        // If logout was requested while the HTTP login was in flight, retain
+        // the pair just long enough for logout to revoke it. Never report a
+        // successful login to the caller in that case.
+        state.tokens = Some(TokenPair {
+            access_token: body.access_token,
+            refresh_token: body.refresh_token,
+            access_expires_at: tokio::time::Instant::now()
+                + Duration::from_secs(body.expires_in),
+        });
+        if state.logging_out {
+            return Err(SessionSourceError);
+        }
+        Ok(identity)
     }
 
     /// Revokes the latest pair after immediately denying further local use.
