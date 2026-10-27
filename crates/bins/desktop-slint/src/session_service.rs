@@ -431,6 +431,43 @@ mod tests {
         last_refresh_token: StdMutex<Option<String>>,
         last_logout_refresh: StdMutex<Option<String>>,
         last_logout_bearer: StdMutex<Option<String>>,
+        last_login_username: StdMutex<Option<String>>,
+        last_login_client_type: StdMutex<Option<String>>,
+    }
+
+    async fn login_handler(
+        State(state): State<Arc<MockApi>>,
+        Json(payload): Json<Value>,
+    ) -> (StatusCode, Json<Value>) {
+        *state.last_login_username.lock().unwrap() = payload
+            .get("username")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        *state.last_login_client_type.lock().unwrap() = payload
+            .get("client_type")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if payload.get("password").and_then(Value::as_str) != Some("valid-password") {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "message": "Invalid username or password" })),
+            );
+        }
+        (
+            StatusCode::OK,
+            Json(json!({
+                "access_token": "access-login",
+                "refresh_token": "refresh-login",
+                "expires_in": 3600,
+                "user": {
+                    "id": "user-123",
+                    "username": "alice",
+                    "organization_id": "org-456",
+                    "is_admin": true,
+                    "class": "staff"
+                }
+            })),
+        )
     }
 
     async fn refresh_handler(
@@ -489,6 +526,7 @@ mod tests {
             ..MockApi::default()
         });
         let app = Router::new()
+            .route("/api/auth/login", post(login_handler))
             .route("/api/auth/refresh", post(refresh_handler))
             .route("/api/auth/logout", post(logout_handler))
             .with_state(Arc::clone(&state));
@@ -507,6 +545,34 @@ mod tests {
             }
             tokio::task::yield_now().await;
         }
+    }
+
+    #[tokio::test]
+    async fn login_installs_tokens_and_returns_only_non_secret_identity() {
+        let (origin, api) = start_mock_api(false).await;
+        let service = SessionService::new(origin).unwrap();
+
+        let identity = service.login("alice", "valid-password").await.unwrap();
+
+        assert_eq!(identity.username, "alice");
+        assert_eq!(identity.user_id, "user-123");
+        assert_eq!(identity.organization_id, "org-456");
+        assert!(identity.is_admin);
+        assert_eq!(
+            service.current_access_token().await.unwrap().as_deref(),
+            Some("access-login")
+        );
+        assert_eq!(
+            api.last_login_username.lock().unwrap().as_deref(),
+            Some("alice")
+        );
+        assert_eq!(
+            api.last_login_client_type.lock().unwrap().as_deref(),
+            Some("desktop")
+        );
+        let diagnostic = format!("{identity:?}");
+        assert!(!diagnostic.contains("access-login"));
+        assert!(!diagnostic.contains("refresh-login"));
     }
 
     #[tokio::test]
