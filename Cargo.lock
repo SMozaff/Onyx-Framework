@@ -2164,6 +2164,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop-slint"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "futures-util",
+ "platform-kernel",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "sync-transport",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "uuid",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
