@@ -30,3 +30,64 @@ unused = "warn"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+
+# Slint packages declare multiple license alternatives in Cargo metadata.
+# ONYX selects the royalty-free desktop/mobile/web application license; keep
+# that exception scoped to Slint packages instead of globally permitting GPL or
+# Slint's paid commercial license identifiers.
+[[licenses.exceptions]]
+name = "i-slint-backend-linuxkms"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-backend-selector"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-backend-testing"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-backend-winit"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-common"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-compiler"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-core"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-core-macros"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-renderer-femtovg"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-renderer-skia"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "i-slint-renderer-software"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "slint"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "slint-build"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
+[[licenses.exceptions]]
+name = "slint-macros"
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+
