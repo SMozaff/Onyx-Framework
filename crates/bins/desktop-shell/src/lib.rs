@@ -27,7 +27,6 @@
 //! verified against v2.tauri.app before choosing this over a
 //! process-restart approach.
 
-#[path = "../../desktop-slint/src/relay_adapter.rs"]
 use relay_websocket_adapter as relay_socket;
 mod secure_storage;
 mod session;
