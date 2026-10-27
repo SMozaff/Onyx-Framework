@@ -6,7 +6,7 @@ yanked = "deny"
 
 [licenses]
 # cargo-deny 0.20+ denies licenses not present in this explicit allow-list.
-allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-DFS-2016", "Zlib", "CC0-1.0", "MPL-2.0", "Unicode-3.0", "Apache-2.0 WITH LLVM-exception", "CDLA-Permissive-2.0"]
+allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "ISC", "Unicode-DFS-2016", "Zlib", "CC0-1.0", "MPL-2.0", "Unicode-3.0", "Apache-2.0 WITH LLVM-exception", "CDLA-Permissive-2.0", "Unlicense"]
 
 # ONYX workspace crates are intentionally unpublished; third-party dependency
 # licensing remains enforced by the allow-list above.
@@ -36,15 +36,7 @@ unknown-git = "deny"
 # that exception scoped to Slint packages instead of globally permitting GPL or
 # Slint's paid commercial license identifiers.
 [[licenses.exceptions]]
-name = "i-slint-backend-linuxkms"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-
-[[licenses.exceptions]]
 name = "i-slint-backend-selector"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-
-[[licenses.exceptions]]
-name = "i-slint-backend-testing"
 allow = ["LicenseRef-Slint-Royalty-free-2.0"]
 
 [[licenses.exceptions]]
