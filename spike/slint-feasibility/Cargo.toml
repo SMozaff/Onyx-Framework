@@ -1,0 +1,17 @@
+[package]
+name = "slint-spike"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "slint-spike"
+path = "src/main.rs"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[dependencies]
+slint = "1.18"
+
+[workspace]
+# Standalone spike; not part of the root workspace.

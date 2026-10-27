@@ -1,0 +1,55 @@
+name: Slint spike artifacts
+
+on:
+  pull_request:
+    paths:
+      - "spike/slint-feasibility/**"
+      - ".github/workflows/slint-spike-artifacts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: spike/slint-feasibility
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: "1.97.1"
+      - name: Install Linux libraries for Slint
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libxcb1-dev libxcb-xfixes0-dev libxcb-shape0-dev xvfb
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: spike/slint-feasibility
+      - name: Test paging and sorting logic
+        run: cargo test --locked
+      - name: Build release binary
+        run: cargo build --release
+      - name: Smoke-run window (Linux, Xvfb, 15 s)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a sh -c './target/release/slint-spike & PID=$!; sleep 15; kill -0 $PID && echo "window running"; kill $PID'
+      - name: Package artifact
+        shell: bash
+        run: |
+          mkdir -p ../../artifact
+          if [ "$RUNNER_OS" = "Windows" ]; then cp target/release/slint-spike.exe ../../artifact/; else cp target/release/slint-spike ../../artifact/; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: slint-spike-${{ runner.os }}
+          path: artifact/
+          if-no-files-found: error
