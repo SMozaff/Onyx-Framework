@@ -276,3 +276,91 @@ impl RelaySocket for TungsteniteRelaySocket {
             .map_err(|_| TransportError::ConnectionLost)
     }
 }
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use axum::{
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        routing::post,
+        Json, Router,
+    };
+    use serde_json::{json, Value};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tokio::{net::TcpListener, sync::{Notify, RwLock}};
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Default)]
+    struct MockApi {
+        calls: AtomicUsize,
+        entered: Notify,
+        release: Notify,
+        authorization: std::sync::Mutex<Option<String>>,
+        body: std::sync::Mutex<Option<String>>,
+    }
+
+    async fn ticket_handler(
+        State(state): State<Arc<MockApi>>,
+        headers: HeaderMap,
+        Json(payload): Json<Value>,
+    ) -> (StatusCode, Json<Value>) {
+        state.calls.fetch_add(1, Ordering::SeqCst);
+        *state.authorization.lock().unwrap() = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        *state.body.lock().unwrap() = Some(payload.to_string());
+        state.entered.notify_one();
+        state.release.notified().await;
+        (StatusCode::OK, Json(json!({ "ticket": "single-use-test-ticket" })))
+    }
+
+    #[tokio::test]
+    async fn logout_cancels_an_in_flight_relay_ticket_request_without_url_token_leak() {
+        let api = Arc::new(MockApi::default());
+        let app = Router::new()
+            .route("/api/relay-ticket", post(ticket_handler))
+            .with_state(Arc::clone(&api));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let cancellation = Arc::new(RwLock::new(CancellationToken::new()));
+        let factory = Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
+            platform_kernel::ReplicaId::new_random(),
+            Arc::clone(&cancellation),
+        ));
+        let relay_url = format!("ws://{address}");
+        let peer = PeerInfo::dummy();
+        let connect_factory = Arc::clone(&factory);
+        let connect = tokio::spawn(async move {
+            connect_factory
+                .connect(
+                    &relay_url,
+                    &peer,
+                    "ACCESS_SECRET_DO_NOT_LEAK",
+                    Duration::from_secs(5),
+                )
+                .await
+        });
+
+        api.entered.notified().await;
+        cancellation.read().await.cancel();
+        let result = connect.await.unwrap();
+        assert!(matches!(result, Err(TransportError::ConnectionLost)));
+        assert_eq!(api.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            api.authorization.lock().unwrap().as_deref(),
+            Some("Bearer ACCESS_SECRET_DO_NOT_LEAK")
+        );
+        let body = api.body.lock().unwrap().clone().unwrap();
+        assert!(!body.contains("ACCESS_SECRET_DO_NOT_LEAK"));
+        api.release.notify_one();
+    }
+}
