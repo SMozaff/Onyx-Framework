@@ -665,6 +665,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logout_refreshes_an_expired_access_token_before_revocation() {
+        let (origin, api) = start_mock_api(false).await;
+        let service = SessionService::new(origin).unwrap();
+        service
+            .install_tokens("access-expired".into(), "refresh-current".into(), 1)
+            .await
+            .unwrap();
+
+        service.logout().await;
+
+        assert_eq!(api.refresh_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(api.logout_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            api.last_logout_refresh.lock().unwrap().as_deref(),
+            Some("refresh-rotated")
+        );
+        assert_eq!(
+            api.last_logout_bearer.lock().unwrap().as_deref(),
+            Some("Bearer access-rotated")
+        );
+        assert_eq!(service.current_access_token().await.unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn rejects_blank_or_zero_lifetime_tokens() {
         let service = SessionService::new("https://example.invalid").unwrap();
         assert!(service
