@@ -1,0 +1,23 @@
+name: B-01 Lockfile Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+        with:
+          toolchain: "1.97.1"
+      - name: Resolve lockfile and print diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 > /tmp/metadata.json
+          git diff -- Cargo.lock
