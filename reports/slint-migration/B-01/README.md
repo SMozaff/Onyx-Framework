@@ -1,6 +1,6 @@
 # B-01 Worker Client — Wave 0 documentation packet
 
-This directory contains the seven requested Wave 0 reports for ONYX Framework B-01.
+This directory contains the seven audit/draft/handover deliverables plus the final report for ONYX Framework B-01.
 
 ## Reports
 - `B-01_Final_Report.md`
@@ -19,5 +19,6 @@ This directory contains the seven requested Wave 0 reports for ONYX Framework B-
 - No production source code is included.
 - Local test suites were not run. Root CI run 40336191173 failed the security license audit; Slint scaffold run 40336190967 passed for scaffold only.
 - Proposed destination `reports/slint-migration/B-01/` was approved for documentation by the user. This does not authorize implementation or freeze contract drafts.
+- Candidate fixture examples exist in the separate local artifact package but are **not included in this repository PR**.
 
 Review the final report and blockers before implementation planning.
