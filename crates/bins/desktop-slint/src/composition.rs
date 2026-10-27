@@ -7,10 +7,7 @@
 use std::sync::Arc;
 
 use platform_kernel::ReplicaId;
-use sync_transport::{
-    cloud_relay::CloudRelayTransport,
-    placeholder_types::AuthorityProvider,
-};
+use sync_transport::{cloud_relay::CloudRelayTransport, placeholder_types::AuthorityProvider};
 
 use crate::{
     authority::{SessionAuthorityProvider, SessionTokenSource},
