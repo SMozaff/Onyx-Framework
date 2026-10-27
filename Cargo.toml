@@ -144,6 +144,7 @@ url = "2"
 # and RFC 6090 key import — supplied by BoringSSL-derived `ring`.
 ring = "0.17"
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 libc = "0.2"
 objc = "0.2"
 jni = "0.21"
