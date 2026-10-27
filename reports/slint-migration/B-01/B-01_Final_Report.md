@@ -1,7 +1,7 @@
 # B-01 Worker Client — BOUND Execution Status
 
-**BOUND status: WAVE 0 ONLY — PARTIAL.**  
-**Gate 0b: NOT APPROVED. Production client implementation is explicitly prohibited until the gate is signed.**
+**BOUND status: WAVE 0 / GATE 0b CLOSURE — IN PROGRESS.**  
+**Gate 0b: BLOCKED.** The project owner authorized the assistant to pursue closure and implement B-01 after all mandatory gate criteria are satisfied. This is not a substitute for signed Contract Freeze v1 or missing technical/workstream approvals; production client implementation remains blocked until then.
 
 ## 1. Repository baseline and current state
 
@@ -23,7 +23,7 @@
 
 ## 3. Contract and integration findings
 
-- The existing `docs/production/api-contract.md` contains 47 route rows and states that it is source-level evidence, not proof of deployed behavior. The current Worker source blob differs from the document's embedded source-baseline stamp; a route-by-route review must be pinned to the selected source revision before C-01 is frozen.
+- The existing `docs/production/api-contract.md` contains 47 route rows and states that it is source-level evidence, not proof of deployed behavior. The current Worker source blob differs from the document's embedded source-baseline stamp. Added `B-01_C01_Dispatch_Reconciliation.md` on the documentation branch, pinned to the inspected `main` source blob. It records dispatch predicates and gaps including required `organization_id` for `GET /api/allfather/admins`, broad prefix matching for profile/push/file routes, and broad prefix matching for `DELETE /api/admin/users/*`. Handler DTO/error reconciliation and deployed behavior remain unverified.
 - The organization-admin create discrepancy remains unresolved: the Worker response reportedly includes `is_admin` and `role`, while the UI's `OrganizationAdminRow` expects `created_at` and `updated_at`. B-10 and the Worker/API contract owner must approve the canonical DTO; do not fabricate timestamps or cast around the mismatch.
 - C-03 error normalization needs B-04 agreement; C-09 schema/version and fixture provenance need B-13 approval.
 - Policy-related implementation remains blocked by U-04. Session persistence remains blocked by Q-01. Profile-screen work remains dependent on Q-05. None of these decisions is resolved by this report.
@@ -31,11 +31,13 @@
 ## 4. CI evidence — exact current evidence, not historical inference
 
 - Baseline/root CI run [40336191173](https://github.com/SMozaff/Onyx-Framework/actions/runs/40336191173): **FAIL**. The failed job is **Security audits / rust-advisories**, specifically step 7, “Advisory and source-policy audit.” The command was `cargo deny check advisories bans licenses sources`; log summary: `advisories ok, bans ok, licenses FAILED, sources ok`. The log shows rejected license metadata including BSL-1.0, GPL-3.0-only, Unlicense, and Slint `LicenseRef-Slint-Royalty-free-2.0` / `LicenseRef-Slint-Software-3.0` not recognized as SPDX identifiers under the current policy. The job also emitted unresolved workspace-dependency diagnostics. The license-policy owner must determine the correct disposition; do not broaden the allowlist or suppress checks without review.
-- B-01 docs PR CI run [40424647061](https://github.com/SMozaff/Onyx-Framework/actions/runs/40424647061), head `d7978597821bd7c9382d061924f9df411df530df`: **FAIL**. It ran the same required CI workflow and is not green. This is a documentation-only PR; it does not validate Worker client behavior.
+- Latest verified docs PR run [40426925219](https://github.com/SMozaff/Onyx-Framework/actions/runs/40426925219), head at the time of that run `32d7dae99971d7b7cc70331298f62d4d844cfa05`: **FAIL**. `native-ui-evidence`, `web`, `i18n`, `mobile-pwa`, `check`, `source-contracts`, frontend dependency audits, SBOM, and container scans passed; `Security audits / rust-advisories` failed at `cargo deny check advisories bans licenses sources` because licenses failed; `merge-gate` failed as a consequence. The decoded logs identify `BSL-1.0` via `clipboard-win`/`error-code` in the Slint dependency chain and Slint license expression `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0`; the custom `LicenseRef` identifiers are not recognized as SPDX licenses by the current policy. Logs also show unresolved workspace dependency diagnostics. Security/CI owner disposition is required; do not weaken policy or suppress checks without approval.
 - Admin Slint scaffold run [40336190967](https://github.com/SMozaff/Onyx-Framework/actions/runs/40336190967): previously verified **PASS** for scaffold jobs only; it is not B-01 implementation evidence.
 - Local Worker tests/check, Admin UI tests, and Rust build/tests remain **NOT RUN**. No production Worker requests or mutations were performed.
 
 ## 5. Gate 0b status and unresolved evidence
+
+The project owner has explicitly authorized proceeding with Gate 0b closure and then B-01 implementation once mandatory criteria are demonstrably satisfied. The authorization is recorded; it does not itself decide the unresolved product/architecture questions or sign Contract Freeze v1.
 
 The BOUND plan explicitly says no production migration implementation starts until Gate 0b is signed. Required items still lack recorded approval/evidence in the accessible packet:
 - P-01 architecture confirmation.
