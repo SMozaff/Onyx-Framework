@@ -13,7 +13,7 @@
 //! matching §8.1's boundary ("Chapter 8 only gets them from one replica to
 //! another").
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
