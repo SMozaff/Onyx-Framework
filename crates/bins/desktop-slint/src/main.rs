@@ -5,8 +5,8 @@
 //! seam; this binary does not claim a live session or relay connection.
 
 pub mod authority;
-pub mod session_service;
 pub mod relay_adapter;
+pub mod session_service;
 
 slint::include_modules!();
 
