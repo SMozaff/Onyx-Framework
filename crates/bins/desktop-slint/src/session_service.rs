@@ -7,18 +7,11 @@
 //! in-flight rotation, then revokes the latest pair accepted by the server.
 //! Tokens are never persisted or formatted into diagnostics.
 
-use std::{
-    net::IpAddr,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Mutex as StdMutex,
-    },
-    time::Duration,
-};
+use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::authority::{SessionSourceError, SessionTokenSource};
@@ -411,6 +404,11 @@ impl SessionTokenSource for SessionService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Mutex as StdMutex,
+    };
+    use tokio::sync::Notify;
     use axum::{
         extract::State,
         http::{HeaderMap, StatusCode},
