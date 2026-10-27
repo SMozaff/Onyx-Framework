@@ -68,6 +68,23 @@ async fn mint_relay_ticket(
 ) -> Result<String, TransportError> {
     let mut ticket_url = reqwest::Url::parse(relay_url)
         .map_err(|e| TransportError::Platform(format!("invalid relay URL: {e}")))?;
+    let host = ticket_url.host_str().unwrap_or_default();
+    let is_loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    if ticket_url.scheme() == "ws" && !is_loopback {
+        return Err(TransportError::Platform(
+            "insecure relay URL rejected for non-loopback host".to_owned(),
+        ));
+    }
+    if !matches!(ticket_url.scheme(), "ws" | "wss") {
+        return Err(TransportError::Platform(
+            "relay URL must use ws or wss".to_owned(),
+        ));
+    }
     let https_scheme = match ticket_url.scheme() {
         "wss" => "https",
         "ws" => "http",
@@ -338,6 +355,22 @@ mod cancellation_tests {
             StatusCode::OK,
             Json(json!({ "ticket": "single-use-test-ticket" })),
         )
+    }
+
+    #[tokio::test]
+    async fn rejects_plaintext_remote_relay_without_disclosing_credentials() {
+        let factory = TungsteniteRelaySocketFactory::new(platform_kernel::ReplicaId::new_random());
+        let result = factory
+            .connect(
+                "ws://relay.example.invalid",
+                &test_peer(),
+                "ACCESS_SECRET_DO_NOT_LEAK",
+                Duration::from_secs(1),
+            )
+            .await;
+
+        assert!(matches!(result, Err(TransportError::Platform(_))));
+        assert!(!format!("{result:?}").contains("ACCESS_SECRET_DO_NOT_LEAK"));
     }
 
     #[tokio::test]
