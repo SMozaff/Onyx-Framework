@@ -784,6 +784,17 @@ async function commandRoute(request:Request,env:Env,session:Session){
      typeof envelope.operation_id!=="string"||!envelope.operation_id||envelope.operation_id.length>128||
      typeof envelope.command_type!=="string"||!envelope.command_type||envelope.command_type.length>128)
     return json({error:"INVALID_COMMAND_ENVELOPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  // Accept the "policy." prefixed names used by the Rust API and admin UI.
+  // Only these exact names are mapped; all other command names are unchanged.
+  const policyAliases:Record<string,string>={
+    "policy.CreatePolicyVersion":"CreatePolicyVersion",
+    "policy.PublishPolicyVersion":"PublishPolicyVersion",
+    "policy.EvaluatePolicy":"EvaluatePolicy",
+    "policy.RegisterViolation":"RegisterViolation",
+    "policy.RetirePolicy":"RetirePolicy",
+  };
+  if(Object.prototype.hasOwnProperty.call(policyAliases,envelope.command_type))
+    envelope.command_type=policyAliases[envelope.command_type];
   const targetValue=envelope.target;
   if(!targetValue||typeof targetValue!=="object"||Array.isArray(targetValue))
     return json({error:"INVALID_COMMAND_TARGET",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);

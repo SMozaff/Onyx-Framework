@@ -654,6 +654,16 @@ describe("Worker authorization and session security", () => {
     expect(db.writes).toHaveLength(0);
   });
 
+  it("accepts the policy.-prefixed command name and does not report UNKNOWN_COMMAND", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const response = await postCommand("admin", db, {
+      command_type: "policy.RetirePolicy",
+      target: { id: "policy-1", type: "policy", organization_id: ORG },
+    });
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.error).not.toBe("UNKNOWN_COMMAND");
+  });
+
   it("denies unknown and delete-shaped commands without mutation", async () => {
     const db = makeDb();
     const response = await postCommand("desktop", db, { command_type: "DeleteTask" });
