@@ -2148,6 +2148,7 @@ dependencies = [
  "platform-contracts",
  "platform-kernel",
  "query-application",
+ "relay-websocket-adapter",
  "reqwest",
  "serde",
  "serde_json",
@@ -2171,6 +2172,7 @@ dependencies = [
  "axum 0.7.9",
  "futures-util",
  "platform-kernel",
+ "relay-websocket-adapter",
  "reqwest",
  "serde",
  "serde_json",
@@ -2179,6 +2181,7 @@ dependencies = [
  "sync-transport",
  "tokio",
  "tokio-tungstenite 0.30.0",
+ "tokio-util",
  "uuid",
 ]
 
@@ -7123,6 +7126,23 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
+
+[[package]]
+name = "relay-websocket-adapter"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "futures-util",
+ "platform-kernel",
+ "reqwest",
+ "serde_json",
+ "sync-transport",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tokio-util",
+ "uuid",
+]
 
 [[package]]
 name = "reqwest"
