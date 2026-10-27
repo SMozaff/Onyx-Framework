@@ -43,13 +43,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           xvfb-run -a sh -c './target/release/slint-spike & PID=$!; sleep 15; kill -0 $PID && echo "window running"; kill $PID'
-      - name: Package artifact
+      - name: Package Linux .deb
+        if: runner.os == 'Linux'
+        run: |
+          bash packaging/build-deb.sh target/release/slint-spike "$GITHUB_WORKSPACE/dist"
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
         shell: bash
         run: |
-          mkdir -p ../../artifact
-          if [ "$RUNNER_OS" = "Windows" ]; then cp target/release/slint-spike.exe ../../artifact/; else cp target/release/slint-spike ../../artifact/; fi
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp target/release/slint-spike.exe "$GITHUB_WORKSPACE/dist/"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: slint-spike-${{ runner.os }}
-          path: artifact/
+          path: dist/
           if-no-files-found: error
