@@ -42,8 +42,9 @@ describe("policy: authorization (Worker, unprefixed names)", () => {
     });
   });
 
-  // Gap found in step 1: the Rust API and the admin UI use the "policy." prefix,
-  // the Worker does not. Current Worker result: UNKNOWN_COMMAND for prefixed names.
+  // authorizeCommand itself still knows only unprefixed names. The "policy." alias
+  // is mapped in the /api/command route (src/index.ts) before this check runs; the
+  // end-to-end test in security.test.ts covers the route.
   it.each([
     "policy.CreatePolicyVersion",
     "policy.PublishPolicyVersion",
