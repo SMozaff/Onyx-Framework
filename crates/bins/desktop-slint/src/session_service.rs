@@ -355,14 +355,14 @@ async fn coordinated_refresh(
     };
 
     if !response.status().is_success() {
-        invalidate_if_current(&state, session_generation).await;
+        invalidate_if_current(&state, &connection_cancellation, session_generation).await;
         return Err(SessionSourceError);
     }
 
     let rotated: RefreshResponse = match response.json().await {
         Ok(response) => response,
         Err(_) => {
-            invalidate_if_current(&state, session_generation).await;
+            invalidate_if_current(&state, &connection_cancellation, session_generation).await;
             return Err(SessionSourceError);
         }
     };
@@ -370,7 +370,7 @@ async fn coordinated_refresh(
         || rotated.refresh_token.trim().is_empty()
         || rotated.expires_in == 0
     {
-        invalidate_if_current(&state, session_generation).await;
+        invalidate_if_current(&state, &connection_cancellation, session_generation).await;
         return Err(SessionSourceError);
     }
 
