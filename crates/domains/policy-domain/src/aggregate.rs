@@ -226,6 +226,9 @@ impl AggregateRoot for Policy {
             },
 
             PolicyCommand::EvaluatePolicy { rule_key } => {
+                if self.status == PolicyStatus::Retired {
+                    return Err(self.invalid("EvaluatePolicy"));
+                }
                 let (version_number, rules) = self
                     .published_version()
                     .ok_or(PolicyError::NoPublishedVersion)?;
@@ -242,6 +245,9 @@ impl AggregateRoot for Policy {
             }
 
             PolicyCommand::RegisterViolation { rule_key, reason } => {
+                if self.status == PolicyStatus::Retired {
+                    return Err(self.invalid("RegisterViolation"));
+                }
                 if self.published_version().is_none() {
                     return Err(PolicyError::NoPublishedVersion);
                 }
@@ -737,6 +743,43 @@ mod tests {
             &ctx,
         );
         assert!(matches!(result, Err(PolicyError::NoPublishedVersion)));
+    }
+
+    #[test]
+    fn evaluate_on_retired_policy_is_rejected() {
+        let mut policy =
+            policy_with_published_rules(vec![toggle_rule("file_sharing.enabled", false)]);
+        let ctx = test_context();
+        let retire = policy
+            .decide(PolicyCommand::RetirePolicy, &ctx)
+            .expect("retire");
+        apply_all(&mut policy, &retire);
+        let result = policy.decide(
+            PolicyCommand::EvaluatePolicy {
+                rule_key: "file_sharing.enabled".to_string(),
+            },
+            &ctx,
+        );
+        assert!(matches!(result, Err(PolicyError::InvalidTransition(_))));
+    }
+
+    #[test]
+    fn register_violation_on_retired_policy_is_rejected() {
+        let mut policy =
+            policy_with_published_rules(vec![toggle_rule("file_sharing.enabled", false)]);
+        let ctx = test_context();
+        let retire = policy
+            .decide(PolicyCommand::RetirePolicy, &ctx)
+            .expect("retire");
+        apply_all(&mut policy, &retire);
+        let result = policy.decide(
+            PolicyCommand::RegisterViolation {
+                rule_key: "file_sharing.enabled".to_string(),
+                reason: "late".to_string(),
+            },
+            &ctx,
+        );
+        assert!(matches!(result, Err(PolicyError::InvalidTransition(_))));
     }
 
     // --- Policy: retirement ---
