@@ -1,0 +1,37 @@
+import { StandardTableView, TextEdit, Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component SpikeWindow inherits Window {
+    width: 1280px;
+    height: 800px;
+    title: "ONYX Slint feasibility spike";
+
+    in-out property <[[StandardListViewItem]]> rows;
+    in-out property <[TableColumn]> columns;
+    in-out property <string> page-label: "page 1";
+    in-out property <string> persian-sample: "سلام دنیا Hello world ۱۲۳ 123 — mixed بیدی test";
+
+    callback sort-ascending(column: int);
+    callback sort-descending(column: int);
+    callback next-page();
+    callback prev-page();
+
+    VerticalBox {
+        Text { text: "U-01 spike: sortable table, paging, multiline input, Persian text"; font-size: 14px; }
+        HorizontalBox {
+            Button { text: "Prev page"; clicked => { root.prev-page(); } }
+            Text { text: root.page-label; vertical-alignment: center; }
+            Button { text: "Next page"; clicked => { root.next-page(); } }
+        }
+        StandardTableView {
+            columns: root.columns;
+            rows: root.rows;
+            sort-ascending(column) => { root.sort-ascending(column); }
+            sort-descending(column) => { root.sort-descending(column); }
+        }
+        TextEdit {
+            text: root.persian-sample;
+            wrap: word-wrap;
+            height: 120px;
+        }
+    }
+}
