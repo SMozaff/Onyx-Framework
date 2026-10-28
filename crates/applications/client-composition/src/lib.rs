@@ -17,6 +17,7 @@
 //! respective clients' own concern.
 
 pub mod app_state;
+pub mod cloud_outbox;
 pub mod command_registry;
 pub mod event_bus;
 pub mod file_upload;
