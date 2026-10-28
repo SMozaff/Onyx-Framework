@@ -57,12 +57,25 @@ struct LoginResponse {
     user: LoginUser,
 }
 
+/// Mirrors the Worker's `user` object in the login response
+/// (`deploy/cloudflare/edge-gateway/src/index.ts`, `authLogin`). `email` and
+/// `class` are nullable on the wire. `role` decides admin navigation and is
+/// required.
+///
+/// `email` and `class` are parsed to match the contract but are not used yet;
+/// `#[allow(dead_code)]` keeps clippy strict for the fields that are used.
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct LoginUser {
     id: String,
     username: String,
+    #[serde(default)]
+    email: Option<String>,
     organization_id: String,
     is_admin: bool,
+    #[serde(default)]
+    class: Option<String>,
+    role: String,
 }
 
 /// Non-secret identity data returned by the authenticated API response.
@@ -72,6 +85,7 @@ pub struct SessionIdentity {
     pub organization_id: String,
     pub username: String,
     pub is_admin: bool,
+    pub role: String,
 }
 
 impl SessionService {
@@ -189,6 +203,7 @@ impl SessionService {
             || body.user.id.trim().is_empty()
             || body.user.username.trim().is_empty()
             || body.user.organization_id.trim().is_empty()
+            || body.user.role.trim().is_empty()
         {
             return Err(SessionSourceError);
         }
@@ -198,6 +213,7 @@ impl SessionService {
             organization_id: body.user.organization_id,
             username: body.user.username,
             is_admin: body.user.is_admin,
+            role: body.user.role,
         };
         let mut state = self.state.write().await;
         if state.session_generation != generation {
@@ -522,9 +538,11 @@ mod tests {
                 "user": {
                     "id": "user-123",
                     "username": "alice",
+                    "email": "alice@example.test",
                     "organization_id": "org-456",
                     "is_admin": true,
-                    "class": "staff"
+                    "class": null,
+                    "role": "ORGANIZATION_ADMIN"
                 }
             })),
         )
@@ -618,6 +636,7 @@ mod tests {
         assert_eq!(identity.user_id, "user-123");
         assert_eq!(identity.organization_id, "org-456");
         assert!(identity.is_admin);
+        assert_eq!(identity.role, "ORGANIZATION_ADMIN");
         assert_eq!(
             service.current_access_token().await.unwrap().as_deref(),
             Some("access-login")
@@ -820,5 +839,62 @@ mod tests {
         assert!(!diagnostic.contains("REFRESH_SECRET_DO_NOT_LEAK"));
         assert!(!diagnostic.contains("ACCESS_SECRET_DO_NOT_LEAK REFRESH_SECRET_DO_NOT_LEAK"));
         assert!(service.state.read().await.tokens.is_none());
+    }
+}
+
+#[cfg(test)]
+mod login_wire_tests {
+    use super::LoginResponse;
+
+    fn parse(user: serde_json::Value) -> Result<LoginResponse, serde_json::Error> {
+        serde_json::from_value(serde_json::json!({
+            "access_token": "a",
+            "refresh_token": "r",
+            "expires_in": 3600,
+            "user": user,
+        }))
+    }
+
+    #[test]
+    fn accepts_nullable_email_and_class_as_null() {
+        let body = parse(serde_json::json!({
+            "id": "u1", "username": "alice", "email": null,
+            "organization_id": "o1", "is_admin": false, "class": null, "role": "STAFF",
+        }))
+        .expect("null email and class are valid");
+        assert!(body.user.email.is_none());
+        assert!(body.user.class.is_none());
+        assert_eq!(body.user.role, "STAFF");
+    }
+
+    #[test]
+    fn accepts_missing_email_and_class() {
+        let body = parse(serde_json::json!({
+            "id": "u1", "username": "alice",
+            "organization_id": "o1", "is_admin": true, "role": "ALL_FATHER",
+        }))
+        .expect("missing email and class are valid");
+        assert!(body.user.email.is_none());
+        assert_eq!(body.user.role, "ALL_FATHER");
+    }
+
+    #[test]
+    fn ignores_fields_the_client_does_not_use() {
+        let body = parse(serde_json::json!({
+            "id": "u1", "username": "alice", "email": "a@example.test",
+            "organization_id": "o1", "is_admin": false, "class": "staff",
+            "role": "STAFF", "future_field": 42,
+        }))
+        .expect("unknown fields are ignored");
+        assert_eq!(body.user.class.as_deref(), Some("staff"));
+    }
+
+    #[test]
+    fn rejects_response_without_role() {
+        let result = parse(serde_json::json!({
+            "id": "u1", "username": "alice",
+            "organization_id": "o1", "is_admin": false,
+        }));
+        assert!(result.is_err(), "role is required");
     }
 }
