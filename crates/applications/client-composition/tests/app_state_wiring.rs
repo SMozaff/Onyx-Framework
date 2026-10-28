@@ -74,6 +74,7 @@ fn test_config() -> AppStateConfig {
         cloud_relay_auth_provider: Arc::new(StubAuthorityProvider),
         local_discovery: None,
         cloud_relay_socket_factory: Arc::new(StubRelaySocketFactory),
+        cloud_outbox_endpoint: None,
         // A unique per-call temp path. Deliberately NOT a `TempDir`
         // handle held for cleanup: `AppStateConfig` takes a plain
         // `PathBuf`, and a `TempDir` dropped at the end of this function

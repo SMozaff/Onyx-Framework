@@ -164,7 +164,8 @@ int mobile_core_trigger_sync(struct MobileApp *handle);
  */
 struct EventSubscription *mobile_core_subscribe_events(struct MobileApp *handle,
                                                        const char *filter_json,
-                                                       void (*callback)(void*, const char*),
+                                                       void (*callback)(void *context,
+                                                                        const char *json),
                                                        void *context);
 
 /**

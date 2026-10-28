@@ -180,6 +180,10 @@ pub struct AppStateConfig {
     /// delivered workspace yet either; same caller-supplies-it rationale
     /// as `cloud_relay_auth_provider`.
     pub cloud_relay_socket_factory: Arc<dyn sync_transport::cloud_relay::RelaySocketFactory>,
+    /// Full HTTPS URL of the Worker outbox ingest, e.g.
+    /// `https://<worker>/api/sync/outbox`. `None` keeps outbox rows pending
+    /// after local UI delivery (no cloud upload).
+    pub cloud_outbox_endpoint: Option<String>,
     /// Local-disk root for [`local_blob_storage::LocalBlobStore`] — see
     /// `query_application::BlobStore`'s doc comment for why this exists
     /// (Phase 1 addition). The composing client (desktop-shell) supplies
@@ -280,6 +284,10 @@ impl AppState {
         pool: SqlitePool,
         config: AppStateConfig,
     ) -> Result<Self, query_application::BlobStoreError> {
+        // Captured before `config` fields are moved below.
+        let outbox_endpoint = config.cloud_outbox_endpoint.clone();
+        let outbox_auth = Arc::clone(&config.cloud_relay_auth_provider);
+        let outbox_timeout = config.sync_agent_config.transport_timeout;
         let mission_repo: Arc<dyn query_application::Repository> =
             Arc::new(SqliteRepository::new(pool.clone(), "mission"));
         let task_repo: Arc<dyn query_application::Repository> =
@@ -554,7 +562,8 @@ impl AppState {
             )),
         ));
 
-        let sync_agent = Arc::new(SyncAgent::new(
+        let replica_for_outbox = config.local_replica;
+        let mut sync_agent = SyncAgent::new(
             config.local_replica,
             config.organization_id,
             // The outbox pump needs a real OutboxStore; SQLite's is
@@ -564,7 +573,21 @@ impl AppState {
             transport_selector,
             Arc::clone(&event_bus),
             config.sync_agent_config,
-        ));
+        );
+        if let Some(endpoint) = outbox_endpoint {
+            let replica_id = uuid::Uuid::from_bytes(replica_for_outbox.0).to_string();
+            match crate::cloud_outbox::HttpCloudOutboxUploader::new(
+                endpoint,
+                replica_id,
+                outbox_auth,
+                outbox_timeout,
+            ) {
+                Ok(uploader) => sync_agent = sync_agent.with_cloud_uploader(Arc::new(uploader)),
+                // Keep the app running; outbox rows stay pending until restart.
+                Err(e) => tracing::warn!(error = %e, "cloud outbox uploader not started"),
+            }
+        }
+        let sync_agent = Arc::new(sync_agent);
 
         Ok(Self {
             command_registry: Arc::new(command_registry),
