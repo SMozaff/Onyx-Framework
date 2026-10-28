@@ -26,6 +26,9 @@ platform-kernel = { workspace = true }
 futures-util = { workspace = true }
 tokio-tungstenite = { workspace = true }
 uuid = { workspace = true }
+client-composition = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
