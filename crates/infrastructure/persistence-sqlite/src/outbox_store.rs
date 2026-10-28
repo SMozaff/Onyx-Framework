@@ -178,8 +178,12 @@ impl OutboxStore for SqliteOutboxStore {
     }
 
     async fn mark_published(&self, outbox_id: OutboxId) -> Result<(), OutboxError> {
-        sqlx::query("UPDATE outbox SET published = 1, lease_token = NULL, lease_expires_at = NULL WHERE outbox_id = ?")
-            .bind(outbox_id.0 as i64)
+        let now_millis = timestamp_to_millis(platform_kernel::Timestamp::now());
+        sqlx::query(
+            "UPDATE outbox SET published = 1, cloud_acked_at = ?, lease_token = NULL, lease_expires_at = NULL WHERE outbox_id = ?",
+        )
+        .bind(now_millis)
+        .bind(outbox_id.0 as i64)
             .execute(&self.pool)
             .await
             .map_err(|e| OutboxError::Database(e.to_string()))?;

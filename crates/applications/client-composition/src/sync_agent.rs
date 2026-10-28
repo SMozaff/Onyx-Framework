@@ -22,9 +22,23 @@ use sync_transport::{CompositeDiscovery, PeerInfo, TransportError, TransportSele
 use synchronization_domain::{
     ConflictRecord, ConflictResolution, SyncCursor, SyncError, SynchronizationSession,
 };
-use worker_application::OutboxStore;
+use worker_application::{ClaimedMessage, OutboxStore};
+
+use crate::cloud_outbox::{CloudOutboxUploader, UploadAck, UploadItem};
+
+/// A row is retried this many times with a rejected/failed ack before it is
+/// moved to the dead-letter table. Offline attempts do not count.
+const MAX_CLOUD_ATTEMPTS: u32 = 10;
+/// Backoff is 2^attempt seconds, capped at this value.
+const MAX_BACKOFF_SECS: u64 = 300;
 
 use crate::event_bus::EventBus;
+
+/// Exponential backoff for cloud retries: 2^attempt seconds, capped.
+fn retry_backoff(attempt: u32) -> platform_kernel::Duration {
+    let secs = 2u64.saturating_pow(attempt.min(16)).min(MAX_BACKOFF_SECS);
+    platform_kernel::Duration(secs.saturating_mul(1_000_000_000))
+}
 
 /// Configuration for a `SyncAgent`. No prior increment specifies these
 /// values; chosen as reasonable defaults, not frozen contract.
@@ -79,6 +93,9 @@ pub struct SyncAgent {
     config: SyncAgentConfig,
     status: Arc<tokio::sync::RwLock<SyncStatus>>,
     open_conflicts: Arc<tokio::sync::RwLock<Vec<ConflictRecord>>>,
+    /// Cloud uploader for outbox rows. `None` leaves rows pending (they are
+    /// still delivered to the local UI bus once).
+    cloud_uploader: Option<Arc<dyn CloudOutboxUploader>>,
 }
 
 impl SyncAgent {
@@ -108,7 +125,14 @@ impl SyncAgent {
                 last_sync_result: None,
             })),
             open_conflicts: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            cloud_uploader: None,
         }
+    }
+
+    /// Attach the cloud uploader used by the outbox pump.
+    pub fn with_cloud_uploader(mut self, uploader: Arc<dyn CloudOutboxUploader>) -> Self {
+        self.cloud_uploader = Some(uploader);
+        self
     }
 
     /// Current sync status snapshot. Cheap; safe to call frequently from a
@@ -199,37 +223,7 @@ impl SyncAgent {
                 .await
             {
                 Ok(claimed) => {
-                    for msg in &claimed {
-                        // OutboxMessage.payload is Vec<u8> (JSON or binary,
-                        // per its own doc comment); the event bus expects
-                        // a serde_json::Value, so decode it here. A
-                        // payload that fails to parse as JSON is logged
-                        // and skipped rather than crashing the pump —
-                        // it's still marked published so a bad message
-                        // can't wedge the queue.
-                        if !msg.bus_delivered {
-                            match serde_json::from_slice::<serde_json::Value>(&msg.message.payload)
-                            {
-                                Ok(value) => {
-                                    self.event_bus.publish(value);
-                                    if let Err(e) =
-                                        self.outbox.mark_bus_delivered(msg.outbox_id).await
-                                    {
-                                        tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to record bus delivery");
-                                    }
-                                }
-                                Err(e) => tracing::warn!(
-                                    outbox_id = ?msg.outbox_id,
-                                    error = %e,
-                                    "outbox message payload was not valid JSON; skipping publish"
-                                ),
-                            }
-                        }
-                        if let Err(e) = self.outbox.mark_published(msg.outbox_id).await {
-                            tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to mark outbox message published");
-                        }
-                    }
-
+                    self.process_claimed(claimed).await;
                     if let Ok(pending) = self.outbox.pending_count().await {
                         self.status.write().await.pending_outbox_count = pending;
                     }
@@ -240,6 +234,121 @@ impl SyncAgent {
             }
 
             tokio::time::sleep(self.config.outbox_poll_interval).await;
+        }
+    }
+
+    /// One pump pass over claimed rows.
+    ///
+    /// 1. Malformed payloads go to the dead-letter table at once.
+    /// 2. Each valid row is delivered to the local UI bus once
+    ///    (`bus_delivered`), so a retry never repeats a UI event.
+    /// 3. Rows are uploaded to the cloud. Only a `stored` ack marks a row
+    ///    done. Rejections are retried with backoff and dead-lettered after
+    ///    `MAX_CLOUD_ATTEMPTS`. Whole-batch failures (offline, auth, server)
+    ///    do not count as attempts: the lease expires and the rows are
+    ///    claimed again later.
+    async fn process_claimed(&self, claimed: Vec<ClaimedMessage>) {
+        let mut uploadable: Vec<(ClaimedMessage, UploadItem)> = Vec::with_capacity(claimed.len());
+
+        for msg in claimed {
+            let payload = match serde_json::from_slice::<serde_json::Value>(&msg.message.payload) {
+                Ok(value) => value,
+                Err(e) => {
+                    self.dead_letter_row(&msg, &format!("malformed payload: {e}"))
+                        .await;
+                    continue;
+                }
+            };
+
+            if !msg.bus_delivered {
+                self.event_bus.publish(payload.clone());
+                if let Err(e) = self.outbox.mark_bus_delivered(msg.outbox_id).await {
+                    tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to record bus delivery");
+                }
+            }
+
+            let item = UploadItem {
+                outbox_id: msg.outbox_id.0,
+                event_id: uuid::Uuid::from_bytes(msg.message.event_id.0).to_string(),
+                event_type: msg.message.event_type.clone(),
+                aggregate_id: msg.message.aggregate_id.clone(),
+                organization_id: uuid::Uuid::from_bytes(msg.message.organization_id.0).to_string(),
+                occurred_at_millis: (msg.message.occurred_at.0 / 1_000_000) as i64,
+                payload,
+            };
+            uploadable.push((msg, item));
+        }
+
+        // Without an uploader the rows stay pending; UI delivery already happened.
+        let Some(uploader) = self.cloud_uploader.as_ref() else {
+            return;
+        };
+        if uploadable.is_empty() {
+            return;
+        }
+
+        let items: Vec<UploadItem> = uploadable.iter().map(|(_, item)| item.clone()).collect();
+        match uploader.upload(&items).await {
+            Ok(acks) => self.apply_acks(&uploadable, &acks).await,
+            Err(e) => {
+                tracing::warn!(error = %e, "cloud outbox upload failed; rows stay pending");
+            }
+        }
+    }
+
+    async fn apply_acks(&self, uploaded: &[(ClaimedMessage, UploadItem)], acks: &[UploadAck]) {
+        for (msg, _) in uploaded {
+            let Some(ack) = acks.iter().find(|a| match a {
+                UploadAck::Stored { outbox_id } | UploadAck::Rejected { outbox_id, .. } => {
+                    *outbox_id == msg.outbox_id.0
+                }
+            }) else {
+                // No answer for this row: leave it pending (lease expires).
+                continue;
+            };
+
+            match ack {
+                UploadAck::Stored { .. } => {
+                    if let Err(e) = self.outbox.mark_published(msg.outbox_id).await {
+                        tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to mark outbox row acknowledged");
+                    }
+                }
+                UploadAck::Rejected {
+                    retryable: false,
+                    reason,
+                    ..
+                } => {
+                    self.dead_letter_row(msg, &format!("rejected by cloud: {reason}"))
+                        .await;
+                }
+                UploadAck::Rejected {
+                    retryable: true,
+                    reason,
+                    ..
+                } => {
+                    let attempt = msg.retry_count.saturating_add(1);
+                    if attempt >= MAX_CLOUD_ATTEMPTS {
+                        self.dead_letter_row(msg, &format!("cloud retries exhausted: {reason}"))
+                            .await;
+                    } else {
+                        let backoff = retry_backoff(attempt);
+                        if let Err(e) = self
+                            .outbox
+                            .mark_failed(msg.outbox_id, reason, backoff)
+                            .await
+                        {
+                            tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to record outbox retry");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn dead_letter_row(&self, msg: &ClaimedMessage, reason: &str) {
+        tracing::warn!(outbox_id = ?msg.outbox_id, reason, "outbox row moved to dead letter");
+        if let Err(e) = self.outbox.dead_letter(msg.outbox_id, reason).await {
+            tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to dead-letter outbox row");
         }
     }
 
@@ -917,5 +1026,220 @@ mod tests {
         // this test (no `.run()` call) — referenced only to prove the
         // agent itself constructs successfully with these dependencies.
         let _ = agent.status().await;
+    }
+}
+
+#[cfg(test)]
+mod pump_tests {
+    use super::*;
+    use crate::cloud_outbox::{CloudOutboxUploader, UploadError, UploadItem};
+    use platform_kernel::{EventId, ObjectId, Timestamp, VectorClock};
+    use query_application::{OutboxId, OutboxMessage};
+    use std::sync::Mutex;
+    use sync_transport::placeholder_types::{CloudDiscovery, LocalDiscovery};
+    use worker_application::{ClaimedMessage, LeaseToken, OutboxError};
+
+    #[derive(Default)]
+    struct RecordingOutbox {
+        events: Mutex<Vec<String>>,
+    }
+
+    impl RecordingOutbox {
+        fn log(&self, entry: String) {
+            self.events.lock().unwrap().push(entry);
+        }
+        fn entries(&self) -> Vec<String> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl OutboxStore for RecordingOutbox {
+        async fn claim_unpublished(
+            &self,
+            _: &str,
+            _: usize,
+        ) -> Result<Vec<ClaimedMessage>, OutboxError> {
+            Ok(Vec::new())
+        }
+        async fn mark_published(&self, id: OutboxId) -> Result<(), OutboxError> {
+            self.log(format!("published:{}", id.0));
+            Ok(())
+        }
+        async fn mark_bus_delivered(&self, id: OutboxId) -> Result<(), OutboxError> {
+            self.log(format!("bus:{}", id.0));
+            Ok(())
+        }
+        async fn mark_failed(
+            &self,
+            id: OutboxId,
+            _: &str,
+            retry_after: platform_kernel::Duration,
+        ) -> Result<(), OutboxError> {
+            self.log(format!("failed:{}:{}", id.0, retry_after.0));
+            Ok(())
+        }
+        async fn dead_letter(&self, id: OutboxId, reason: &str) -> Result<(), OutboxError> {
+            self.log(format!("dead:{}:{}", id.0, reason));
+            Ok(())
+        }
+        async fn pending_count(&self) -> Result<u64, OutboxError> {
+            Ok(0)
+        }
+    }
+
+    struct FakeUploader {
+        response: Mutex<Result<Vec<UploadAck>, UploadError>>,
+        uploads: Mutex<usize>,
+    }
+
+    #[async_trait::async_trait]
+    impl CloudOutboxUploader for FakeUploader {
+        async fn upload(&self, _items: &[UploadItem]) -> Result<Vec<UploadAck>, UploadError> {
+            *self.uploads.lock().unwrap() += 1;
+            self.response.lock().unwrap().clone()
+        }
+    }
+
+    fn agent(outbox: Arc<RecordingOutbox>, uploader: Option<Arc<FakeUploader>>) -> SyncAgent {
+        let agent = SyncAgent::new(
+            ReplicaId::new_random(),
+            OrganizationId::new_random(),
+            outbox,
+            Arc::new(CompositeDiscovery::new(
+                CloudDiscovery::new(),
+                LocalDiscovery::new(),
+            )),
+            Arc::new(TransportSelector::new(
+                None,
+                None,
+                None,
+                Box::new(sync_transport::test_support::MockTransport::new(
+                    sync_transport::TransportType::CloudRelay,
+                    true,
+                    false,
+                )),
+            )),
+            Arc::new(EventBus::new(16)),
+            SyncAgentConfig::default(),
+        );
+        match uploader {
+            Some(u) => agent.with_cloud_uploader(u),
+            None => agent,
+        }
+    }
+
+    fn row(id: u64, payload: &[u8], bus_delivered: bool, retry_count: u32) -> ClaimedMessage {
+        ClaimedMessage {
+            outbox_id: OutboxId(id),
+            message: OutboxMessage {
+                event_id: EventId::new_random(),
+                event_type: "TestEvent".to_string(),
+                aggregate_id: "agg".to_string(),
+                organization_id: ObjectId::new_random(),
+                payload: payload.to_vec(),
+                vector_clock: VectorClock::new(),
+                occurred_at: Timestamp::now(),
+            },
+            lease_token: LeaseToken("l".to_string()),
+            retry_count,
+            bus_delivered,
+        }
+    }
+
+    fn uploader(response: Result<Vec<UploadAck>, UploadError>) -> Arc<FakeUploader> {
+        Arc::new(FakeUploader {
+            response: Mutex::new(response),
+            uploads: Mutex::new(0),
+        })
+    }
+
+    #[tokio::test]
+    async fn stored_ack_marks_row_done_and_delivers_to_bus_once() {
+        let outbox = Arc::new(RecordingOutbox::default());
+        let up = uploader(Ok(vec![UploadAck::Stored { outbox_id: 1 }]));
+        let a = agent(Arc::clone(&outbox), Some(Arc::clone(&up)));
+        a.process_claimed(vec![row(1, b"{\"k\":1}", false, 0)])
+            .await;
+        assert_eq!(outbox.entries(), vec!["bus:1", "published:1"]);
+        assert_eq!(*up.uploads.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn offline_failure_keeps_row_pending_without_counting_attempts() {
+        let outbox = Arc::new(RecordingOutbox::default());
+        let up = uploader(Err(UploadError::Unreachable("offline".into())));
+        let a = agent(Arc::clone(&outbox), Some(up));
+        a.process_claimed(vec![row(2, b"{}", true, 3)]).await;
+        // Already on the bus, so no second bus publish; no done, retry or dead-letter.
+        assert!(outbox.entries().is_empty(), "got {:?}", outbox.entries());
+    }
+
+    #[tokio::test]
+    async fn rejected_non_retryable_is_dead_lettered() {
+        let outbox = Arc::new(RecordingOutbox::default());
+        let up = uploader(Ok(vec![UploadAck::Rejected {
+            outbox_id: 3,
+            retryable: false,
+            reason: "bad schema".into(),
+        }]));
+        let a = agent(Arc::clone(&outbox), Some(up));
+        a.process_claimed(vec![row(3, b"{}", true, 0)]).await;
+        assert_eq!(
+            outbox.entries(),
+            vec!["dead:3:rejected by cloud: bad schema"]
+        );
+    }
+
+    #[tokio::test]
+    async fn retryable_rejection_backs_off_then_dead_letters_at_limit() {
+        let outbox = Arc::new(RecordingOutbox::default());
+        let rejected = || {
+            uploader(Ok(vec![UploadAck::Rejected {
+                outbox_id: 4,
+                retryable: true,
+                reason: "busy".into(),
+            }]))
+        };
+
+        // First failure: retry with 2^1 s backoff.
+        let a = agent(Arc::clone(&outbox), Some(rejected()));
+        a.process_claimed(vec![row(4, b"{}", true, 0)]).await;
+        assert_eq!(
+            outbox.entries(),
+            vec![format!("failed:4:{}", 2_000_000_000u64)]
+        );
+
+        // Tenth attempt (retry_count 9) is the limit: dead-letter.
+        let outbox2 = Arc::new(RecordingOutbox::default());
+        let a2 = agent(Arc::clone(&outbox2), Some(rejected()));
+        a2.process_claimed(vec![row(4, b"{}", true, 9)]).await;
+        assert_eq!(
+            outbox2.entries(),
+            vec!["dead:4:cloud retries exhausted: busy"]
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_payload_is_dead_lettered_and_not_uploaded() {
+        let outbox = Arc::new(RecordingOutbox::default());
+        let up = uploader(Ok(Vec::new()));
+        let a = agent(Arc::clone(&outbox), Some(Arc::clone(&up)));
+        a.process_claimed(vec![row(5, b"not json", false, 0)]).await;
+        let entries = outbox.entries();
+        assert_eq!(entries.len(), 1);
+        assert!(
+            entries[0].starts_with("dead:5:malformed payload"),
+            "{entries:?}"
+        );
+        assert_eq!(*up.uploads.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn without_uploader_rows_stay_pending_after_one_bus_delivery() {
+        let outbox = Arc::new(RecordingOutbox::default());
+        let a = agent(Arc::clone(&outbox), None);
+        a.process_claimed(vec![row(6, b"{}", false, 0)]).await;
+        assert_eq!(outbox.entries(), vec!["bus:6"]);
     }
 }
