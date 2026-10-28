@@ -522,6 +522,8 @@ async fn build_app_state(
         cloud_relay_socket_factory: Arc::new(relay_socket::TungsteniteRelaySocketFactory::new(
             local_replica,
         )),
+        // Tauri shell: outbox upload is not wired (Slint desktop is the target).
+        cloud_outbox_endpoint: None,
         blob_store_root,
         // Real HierarchyCache only for an actual logged-in session
         // (mirrors the `cloud_relay_auth_provider` conditional above) —

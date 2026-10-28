@@ -288,6 +288,8 @@ pub unsafe extern "C" fn mobile_core_new(
                 sync_transport::placeholder_types::StaticAuthorityProvider(String::new()),
             ),
             cloud_relay_socket_factory: Arc::new(NotYetImplementedSocketFactory),
+            // No outbox endpoint wired for mobile yet: rows stay pending.
+            cloud_outbox_endpoint: None,
             blob_store_root,
             // Handed in empty (see `hierarchy_cache` above); populated
             // later by `mobile_core_set_hierarchy` once the Dart side

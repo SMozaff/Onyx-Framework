@@ -328,6 +328,55 @@ async function verifyRelayTicket(env:Env,token:string):Promise<RelayTicketClaims
   if(c.typ!=="relay_ticket"||!looksLikeUuid(c.sub)||!looksLikeUuid(c.organization_id)||!looksLikeUuid(c.target_id)||!looksLikeUuid(c.self_replica)||typeof c.jti!=="string"||!c.jti||!Number.isSafeInteger(c.exp)||c.exp<=now()||!Number.isSafeInteger(c.iat)||c.iat>now()+5||c.exp-c.iat>RELAY_TICKET_TTL_SECONDS)throw new Error("invalid relay ticket");
   return c;
 }
+// Offline outbox ingest: a device uploads its pending outbox rows. A row is
+// acknowledged as "stored" only after the batch is written to D1. Re-sending a
+// row is safe: (replica_id, outbox_id) is the primary key.
+const OUTBOX_MAX_ITEMS=100;
+const OUTBOX_MAX_PAYLOAD_BYTES=64*1024;
+const OUTBOX_MAX_BODY_BYTES=1024*1024;
+async function syncOutboxIngest(request:Request,env:Env,session:Session){
+  const raw=await request.text().catch(()=>null);
+  if(raw===null||raw.length>OUTBOX_MAX_BODY_BYTES)return json({error:"INVALID_OUTBOX_BATCH",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  let body:Json|null=null;
+  try{body=JSON.parse(raw) as Json}catch{body=null}
+  if(!body||Array.isArray(body)||typeof body.replica_id!=="string"||!looksLikeUuid(body.replica_id)||
+     !Array.isArray(body.items)||body.items.length===0||body.items.length>OUTBOX_MAX_ITEMS)
+    return json({error:"INVALID_OUTBOX_BATCH",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  if(!looksLikeUuid(session.sub)||!looksLikeUuid(session.organization_id))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+  const replica=body.replica_id.toLowerCase();
+  const owner=await env.DB.prepare("SELECT user_id,organization_id FROM replica_ownership WHERE replica_id=? LIMIT 1").bind(replica).first<{user_id:string;organization_id:string}>();
+  if(!owner||owner.user_id!==session.sub||owner.organization_id!==session.organization_id)
+    return json({error:"REPLICA_OWNERSHIP_REJECTED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+
+  const received=Date.now();
+  const acks:Json[]=[];
+  const statements:unknown[]=[];
+  for(const entry of body.items as unknown[]){
+    const item=entry as Json|null;
+    if(!item||Array.isArray(item)||typeof item.outbox_id!=="number"||!Number.isSafeInteger(item.outbox_id)||item.outbox_id<0)
+      return json({error:"INVALID_OUTBOX_BATCH",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    const outboxId=item.outbox_id as number;
+    let reason:string|null=null;
+    const payloadText=item.payload===undefined?"":JSON.stringify(item.payload);
+    if(typeof item.event_id!=="string"||!looksLikeUuid(item.event_id))reason="invalid event_id";
+    else if(typeof item.event_type!=="string"||item.event_type.length===0)reason="invalid event_type";
+    else if(typeof item.aggregate_id!=="string"||item.aggregate_id.length===0)reason="invalid aggregate_id";
+    else if(!Number.isSafeInteger(item.occurred_at_millis))reason="invalid occurred_at_millis";
+    else if(typeof item.organization_id!=="string"||item.organization_id.toLowerCase()!==session.organization_id.toLowerCase())reason="organization mismatch";
+    else if(payloadText===""||payloadText.length>OUTBOX_MAX_PAYLOAD_BYTES)reason="invalid or oversized payload";
+    if(reason!==null){acks.push({outbox_id:outboxId,status:"rejected",retryable:false,reason});continue}
+    statements.push(env.DB.prepare(
+      "INSERT OR IGNORE INTO outbox_ingest (replica_id,outbox_id,organization_id,user_id,event_id,event_type,aggregate_id,occurred_at_millis,payload,received_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
+    ).bind(replica,outboxId,session.organization_id,session.sub,(item.event_id as string).toLowerCase(),item.event_type,item.aggregate_id,item.occurred_at_millis,payloadText,received));
+    acks.push({outbox_id:outboxId,status:"stored"});
+  }
+  if(statements.length>0){
+    try{await env.DB.batch(statements as never[])}
+    catch{return json({error:"OUTBOX_STORE_UNAVAILABLE",category:"INFRASTRUCTURE",retryability:"RETRYABLE"},503)}
+  }
+  return json({acks});
+}
+
 async function issueRelayTicket(request:Request,env:Env,session:Session){
   if(!await mobileCapabilityGranted(env,session))return json({error:"CLIENT_CAPABILITY_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   const body=await request.json().catch(()=>null) as Json|null;
@@ -1797,6 +1846,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
     if(url.pathname==="/api/relay-ticket"&&request.method==="POST")return await issueRelayTicket(request,env,session);
+    if(url.pathname==="/api/sync/outbox"&&request.method==="POST")return await syncOutboxIngest(request,env,session);
     if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);

@@ -30,6 +30,10 @@ pub trait OutboxStore: Send + Sync {
         retry_after: Duration,
     ) -> Result<(), OutboxError>;
 
+    /// Record that a claimed message has been published to the local event
+    /// bus, so a later retry does not publish the same UI event again.
+    async fn mark_bus_delivered(&self, outbox_id: OutboxId) -> Result<(), OutboxError>;
+
     /// Move a message to the dead-letter table (permanent failure).
     async fn dead_letter(&self, outbox_id: OutboxId, error: &str) -> Result<(), OutboxError>;
 
@@ -45,6 +49,9 @@ pub struct ClaimedMessage {
     pub message: OutboxMessage,
     pub lease_token: LeaseToken,
     pub retry_count: u32,
+    /// True once the message has already been published to the local event
+    /// bus (UI). Retries must not publish it to the bus again.
+    pub bus_delivered: bool,
 }
 
 /// Opaque lease token proving exclusive claim over an outbox row for the
