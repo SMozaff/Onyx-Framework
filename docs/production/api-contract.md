@@ -25,6 +25,7 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 | POST | `/api/command` | ONYX access session; explicit command policy | Validated command envelope; unknown command denied. |
 | GET | `/api/events` | ONYX session; origin allowlist | Realtime WebSocket upgrade; tenant and staff ownership filtering. |
 | POST | `/api/relay-ticket` | ONYX access session; replica ownership | `{target_id,self_replica}` → short-lived scoped relay ticket. Staff capability uses server-managed class policy, not `client_type`. |
+| POST | `/api/sync/outbox` | ONYX access session; replica ownership (`replica_ownership` must match the user and organization) | `{replica_id,items:[{outbox_id,event_id,event_type,aggregate_id,organization_id,occurred_at_millis,payload}]}` (max 100 items, 64 KiB payload each) → `{acks:[{outbox_id,status:"stored"}\|{outbox_id,status:"rejected",retryable,reason}]}`. Rows are keyed by `(replica_id,outbox_id)`, so re-sending is idempotent. A batch-level `503 OUTBOX_STORE_UNAVAILABLE` is retryable. |
 | GET | `/api/relay/:target_id` | Short-lived, scoped relay ticket | WebSocket upgrade; ticket target, expiry and single-use redemption checked. |
 | GET | `/api/users` | ONYX access session | Active tenant-scoped identity picker. |
 | GET | `/api/users/hierarchy` | ONYX access session | Canonical JSON array of hierarchy records; All-Father returns an empty array. |

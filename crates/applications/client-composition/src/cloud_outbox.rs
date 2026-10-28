@@ -11,7 +11,7 @@
 //!
 //! Request body:
 //! ```json
-//! { "items": [ { "outbox_id": 1, "event_id": "<uuid>", "event_type": "...",
+//! { "replica_id": "<uuid>", "items": [ { "outbox_id": 1, "event_id": "<uuid>", "event_type": "...",
 //!                "aggregate_id": "...", "organization_id": "<uuid>",
 //!                "occurred_at_millis": 0, "payload": { } } ] }
 //! ```
@@ -21,7 +21,8 @@
 //!             { "outbox_id": 2, "status": "rejected", "retryable": false,
 //!               "reason": "..." } ] }
 //! ```
-//! Storing is keyed by `outbox_id` per device, so a retry after a lost
+//! `replica_id` must be owned by the authenticated user (Worker checks
+//! `replica_ownership`). Storing is keyed by (replica_id, outbox_id), so a retry after a lost
 //! response re-stores nothing new (idempotent).
 
 use async_trait::async_trait;
@@ -73,6 +74,7 @@ pub trait CloudOutboxUploader: Send + Sync {
 
 #[derive(Serialize)]
 struct RequestBody<'a> {
+    replica_id: &'a str,
     items: &'a [UploadItem],
 }
 
@@ -123,12 +125,14 @@ pub fn parse_acks(body: &[u8]) -> Result<Vec<UploadAck>, UploadError> {
 pub struct HttpCloudOutboxUploader {
     client: reqwest::Client,
     endpoint: String,
+    replica_id: String,
     auth: std::sync::Arc<dyn sync_transport::placeholder_types::AuthorityProvider>,
 }
 
 impl HttpCloudOutboxUploader {
     pub fn new(
         endpoint: String,
+        replica_id: String,
         auth: std::sync::Arc<dyn sync_transport::placeholder_types::AuthorityProvider>,
         timeout: std::time::Duration,
     ) -> Result<Self, UploadError> {
@@ -139,6 +143,7 @@ impl HttpCloudOutboxUploader {
         Ok(Self {
             client,
             endpoint,
+            replica_id,
             auth,
         })
     }
@@ -156,7 +161,10 @@ impl CloudOutboxUploader for HttpCloudOutboxUploader {
             .client
             .post(&self.endpoint)
             .bearer_auth(token)
-            .json(&RequestBody { items })
+            .json(&RequestBody {
+                replica_id: &self.replica_id,
+                items,
+            })
             .send()
             .await
             .map_err(|e| UploadError::Unreachable(e.to_string()))?;

@@ -111,6 +111,7 @@ describe("migration sequence integrity", () => {
       "0005_admin_settings.sql",
       "0006_b1_admin_routes.sql",
       "0007_file_asset_acl.sql",
+      "0008_outbox_ingest.sql",
     ]);
   });
 });

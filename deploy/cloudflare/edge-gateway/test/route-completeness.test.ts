@@ -36,6 +36,7 @@ const REQUIRED_ROUTES: RequiredRoute[] = [
   { method: "GET", path: "/api/profiles", source: "Profiles.tsx" },
   { method: "GET", path: "/api/users/hierarchy", source: "Rust/Android hierarchy contract" },
   { method: "POST", path: "/api/relay-ticket", source: "Staff relay client" },
+  { method: "POST", path: "/api/sync/outbox", source: "Desktop/Android outbox uploader (cloud_outbox.rs)" },
   { method: "POST", path: "/api/auth/login", source: "Admin/Staff login" },
   { method: "POST", path: "/api/auth/refresh", source: "HTTP client interceptor" },
   { method: "POST", path: "/api/auth/logout", source: "All shells logout" },
