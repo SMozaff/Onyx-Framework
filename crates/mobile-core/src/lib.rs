@@ -41,10 +41,11 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Arc;
 
 use client_composition::app_state::{AppState, AppStateConfig};
-use platform_kernel::{OrganizationId, ReplicaId};
+use platform_kernel::OrganizationId;
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::runtime::Runtime;
 
+pub mod access_token;
 pub mod android_workmanager;
 pub mod ffi_commands;
 pub mod ffi_events;
@@ -78,6 +79,9 @@ pub struct MobileApp {
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<AppState>,
     pub(crate) background_task: tokio::task::JoinHandle<()>,
+    /// Bearer token for cloud uploads. Set by the Kotlin layer after login and
+    /// each refresh (`mobile_core_set_access_token`), cleared on sign-out.
+    pub(crate) access_token: access_token::AccessTokenCell,
     /// The same interior-mutable cache handed into `state`'s
     /// `owner_authority` at construction (see `mobile_core_new`) — kept
     /// here too so `mobile_core_set_hierarchy` can populate it after the
@@ -151,6 +155,10 @@ static REGISTERED_BACKGROUND_APP: AtomicPtr<MobileApp> = AtomicPtr::new(std::ptr
 struct MobileConfig {
     organization_id: OrganizationId,
     cloud_relay_endpoint: String,
+    /// Full HTTPS URL of the Worker outbox ingest. Absent or null keeps rows
+    /// pending (no cloud upload).
+    #[serde(default)]
+    cloud_outbox_endpoint: Option<String>,
     #[serde(default = "default_sync_interval_secs")]
     sync_interval_secs: u64,
 }
@@ -215,6 +223,8 @@ pub unsafe extern "C" fn mobile_core_new(
     // this makes a later, post-login population (via
     // `mobile_core_set_hierarchy`) work without any `AppState` rebuild.
     let hierarchy_cache = client_composition::hierarchy_cache::HierarchyCache::new();
+    let access_token = access_token::AccessTokenCell::default();
+    let outbox_endpoint = config.cloud_outbox_endpoint.clone();
 
     let state = runtime.block_on(async {
         let pool = SqlitePoolOptions::new()
@@ -236,7 +246,14 @@ pub unsafe extern "C" fn mobile_core_new(
             let _ = sqlx::query(stmt).execute(&pool).await;
         }
 
-        let local_replica = ReplicaId::new_random();
+        // Stored next to the database so the same install keeps one replica
+        // id across launches (outbox uploads are keyed by it).
+        let data_dir = std::path::Path::new(&db_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let local_replica =
+            client_composition::device_identity::load_or_create_replica_id(&data_dir).ok()?;
 
         // Phones are the case LAN discovery exists for: a handset joining the
         // site Wi-Fi has no way to know the other replicas' addresses, and no
@@ -284,12 +301,9 @@ pub unsafe extern "C" fn mobile_core_new(
             // for either client. mobile-core additionally has no
             // real ffi_secure_storage-backed AuthorityProvider wired in
             // here either — see ffi_secure_storage.rs's own doc comment.
-            cloud_relay_auth_provider: Arc::new(
-                sync_transport::placeholder_types::StaticAuthorityProvider(String::new()),
-            ),
+            cloud_relay_auth_provider: Arc::new(access_token.clone()),
             cloud_relay_socket_factory: Arc::new(NotYetImplementedSocketFactory),
-            // No outbox endpoint wired for mobile yet: rows stay pending.
-            cloud_outbox_endpoint: None,
+            cloud_outbox_endpoint: outbox_endpoint,
             blob_store_root,
             // Handed in empty (see `hierarchy_cache` above); populated
             // later by `mobile_core_set_hierarchy` once the Dart side
@@ -322,6 +336,7 @@ pub unsafe extern "C" fn mobile_core_new(
         runtime,
         state,
         background_task,
+        access_token,
         hierarchy_cache,
     }));
     REGISTERED_BACKGROUND_APP.store(app, Ordering::Release);
@@ -380,6 +395,41 @@ pub unsafe extern "C" fn mobile_core_set_hierarchy(
             -1
         }
     }
+}
+
+/// Sets the bearer token used for cloud outbox uploads. Called by the Kotlin
+/// layer after login and after every token refresh.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `mobile_core_new`. `token` must be a
+/// valid, NUL-terminated C string pointer.
+#[no_mangle]
+pub unsafe extern "C" fn mobile_core_set_access_token(
+    handle: *mut MobileApp,
+    token: *const c_char,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    let Some(token) = cstr_to_string(token) else {
+        return -1;
+    };
+    (*handle).access_token.set(Some(token));
+    0
+}
+
+/// Clears the upload bearer token. Called on sign-out. Pending outbox rows
+/// stay in the local database.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `mobile_core_new`.
+#[no_mangle]
+pub unsafe extern "C" fn mobile_core_clear_access_token(handle: *mut MobileApp) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    (*handle).access_token.set(None);
+    0
 }
 
 /// Runs one background synchronization cycle against the registered mobile

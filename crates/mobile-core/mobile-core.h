@@ -70,6 +70,25 @@ struct MobileApp *mobile_core_new(const char *db_path, const char *config_json);
 int32_t mobile_core_set_hierarchy(struct MobileApp *handle, const char *hierarchy_json);
 
 /**
+ * Sets the bearer token used for cloud outbox uploads. Called by the Kotlin
+ * layer after login and after every token refresh.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`. `token` must be a
+ * valid, NUL-terminated C string pointer.
+ */
+int32_t mobile_core_set_access_token(struct MobileApp *handle, const char *token);
+
+/**
+ * Clears the upload bearer token. Called on sign-out. Pending outbox rows
+ * stay in the local database.
+ *
+ * # Safety
+ * `handle` must be a valid pointer from `mobile_core_new`.
+ */
+int32_t mobile_core_clear_access_token(struct MobileApp *handle);
+
+/**
  * Runs one background synchronization cycle against the registered mobile
  * core instance. Intended for iOS `BGAppRefreshTask` and Android WorkManager.
  */

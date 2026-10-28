@@ -119,12 +119,15 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
             val configJson = JSONObject()
                 .put("organization_id", org.json.JSONArray(UuidCodec.uuidToBytes(organizationId)))
                 .put("cloud_relay_endpoint", sessionPrefs.relayEndpoint)
+                .put("cloud_outbox_endpoint", AuthApi.OUTBOX_ENDPOINT)
                 .toString()
             val handle = MobileCoreBridge.nativeNew(dbPath, configJson)
             if (handle == 0L) {
                 throw IllegalStateException("mobile_core_new failed (invalid config, or local database/migration setup failed)")
             }
             nativeHandle = handle
+            // Upload token for outbox sync; the core keeps it until sign-out.
+            tokenStore.readAccessToken()?.let { MobileCoreBridge.nativeSetAccessToken(handle, it) }
 
             // Best-effort hierarchy population, same "logged, not
             // propagated as a startup failure" handling as
@@ -195,6 +198,7 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
     fun signOutAndRetry() {
         viewModelScope.launch {
             refreshJob?.cancel()
+            nativeHandle.takeIf { it != 0L }?.let { MobileCoreBridge.nativeClearAccessToken(it) }
             freeNativeHandleIfAny()
             val refreshToken = tokenStore.readRefreshToken()
             if (refreshToken != null) {
@@ -230,6 +234,8 @@ class OnyxSessionViewModel(application: Application) : AndroidViewModel(applicat
                 try {
                     val result = AuthApi().refresh(refreshToken)
                     tokenStore.save(accessToken = result.accessToken, refreshToken = result.refreshToken)
+                    nativeHandle.takeIf { it != 0L }
+                        ?.let { MobileCoreBridge.nativeSetAccessToken(it, result.accessToken) }
                     // Refresh at 80% of the token's real TTL, the same
                     // "well inside the TTL, not only reactively after a
                     // request already failed" reasoning Dart's own doc

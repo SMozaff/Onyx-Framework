@@ -188,6 +188,52 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSetHierarchy<
     .resolve::<LogErrorAndDefault>()
 }
 
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeSetAccessToken` --
+/// `MobileCoreBridge.nativeSetAccessToken(handle: Long, token: String): Int`.
+///
+/// Sets the bearer token for cloud outbox uploads after login and each
+/// refresh. Returns `mobile_core_set_access_token`'s own result (`0` success,
+/// `-1` invalid arguments).
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeSetAccessToken<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    token: JString<'local>,
+) -> i32 {
+    env.with_env(|env| -> Result<i32, JniError> {
+        let Some(token) = jstring_to_cstring(env, &token) else {
+            return Ok(-1);
+        };
+        // Safety: `handle` is the Kotlin caller's responsibility (must be a
+        // live value from nativeNew); `token` is a freshly built C string.
+        let result = unsafe {
+            mobile_core::mobile_core_set_access_token(handle as *mut MobileApp, token.as_ptr())
+        };
+        Ok(result)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Java_com_onyx_bridge_MobileCoreBridge_nativeClearAccessToken` --
+/// `MobileCoreBridge.nativeClearAccessToken(handle: Long): Int`.
+///
+/// Clears the upload bearer token on sign-out. Local outbox rows are kept.
+#[no_mangle]
+pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeClearAccessToken<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> i32 {
+    env.with_env(|_env| -> Result<i32, JniError> {
+        // Safety: `handle` is the Kotlin caller's responsibility (must be a
+        // live value from nativeNew).
+        let result = unsafe { mobile_core::mobile_core_clear_access_token(handle as *mut MobileApp) };
+        Ok(result)
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
 /// `Java_com_onyx_bridge_MobileCoreBridge_nativeExecuteCommand` --
 /// `com.onyx.bridge.MobileCoreBridge.nativeExecuteCommand(handle: Long, commandJson: String): String?`.
 ///
