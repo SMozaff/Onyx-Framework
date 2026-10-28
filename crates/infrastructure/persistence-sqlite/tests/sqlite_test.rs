@@ -19,9 +19,13 @@ async fn test_pool() -> sqlx::SqlitePool {
 
     // Apply the schema migration inline (no sqlx-cli needed for tests).
     let schema = include_str!("../../../../migrations/sqlite/20260101000000_initial_schema.up.sql");
+    // Outbox acknowledgement columns (bus_delivered, cloud_acked_at) are read
+    // by the outbox claim query, so apply them as well.
+    let outbox_ack =
+        include_str!("../../../../migrations/sqlite/20260112000000_add_outbox_cloud_ack.up.sql");
     // SQLite can't execute multiple statements in one query() call;
     // split on ";" and execute each statement individually, skipping blanks.
-    for stmt in schema.split(';') {
+    for stmt in schema.split(';').chain(outbox_ack.split(';')) {
         let stmt = stmt.trim();
         if stmt.is_empty() {
             continue;
@@ -277,4 +281,57 @@ async fn sqlite_claim_unpublished_returns_an_error_for_a_malformed_vector_clock_
             panic!("expected Err(OutboxError::Serialization(_)) for a corrupt row, got {other:?}")
         }
     }
+}
+
+/// A cloud-upload retry must not republish a UI event that already reached
+/// the local bus: `bus_delivered` is recorded and comes back on re-claim.
+#[tokio::test]
+async fn outbox_bus_delivered_survives_failed_cloud_retry() {
+    use worker_application::OutboxStore;
+
+    let pool = test_pool().await;
+    let repo = persistence_sqlite::SqliteRepository::new(pool.clone(), "mission");
+    let (mission, organization_id) = create_test_mission();
+    let initial_state = serde_json::to_value(&mission).unwrap();
+
+    let mut uow = persistence_sqlite::SqliteUnitOfWork::begin(&pool, organization_id)
+        .await
+        .unwrap();
+    repo.commit(initial_state, &[], &mut uow).await.unwrap();
+    uow.register_outbox(query_application::OutboxMessage {
+        event_id: platform_kernel::EventId(*uuid::Uuid::new_v4().as_bytes()),
+        event_type: "MissionCreated".to_string(),
+        aggregate_id: "test".to_string(),
+        organization_id,
+        payload: b"{}".to_vec(),
+        vector_clock: platform_kernel::VectorClock::new(),
+        occurred_at: platform_kernel::Timestamp::now(),
+    });
+    uow.commit().await.expect("commit should succeed");
+
+    let store = persistence_sqlite::SqliteOutboxStore::new(pool.clone());
+    let first = store.claim_unpublished("test", 10).await.unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(
+        !first[0].bus_delivered,
+        "a fresh row has not reached the bus"
+    );
+    store.mark_bus_delivered(first[0].outbox_id).await.unwrap();
+
+    // Simulate a failed cloud upload: release the lease with a retry delay of zero.
+    store
+        .mark_failed(
+            first[0].outbox_id,
+            "cloud unreachable",
+            platform_kernel::Duration(0),
+        )
+        .await
+        .unwrap();
+
+    let retry = store.claim_unpublished("test", 10).await.unwrap();
+    assert_eq!(retry.len(), 1, "failed row must be claimable again");
+    assert!(
+        retry[0].bus_delivered,
+        "retry must see that the bus already has it"
+    );
 }

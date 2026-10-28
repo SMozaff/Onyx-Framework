@@ -126,12 +126,21 @@ impl OutboxStore for PostgresOutboxStore {
                 },
                 lease_token: LeaseToken(lease_token.to_string()),
                 retry_count: row.retry_count as u32,
+                // Server-side outbox: the bus-delivery flag is client-only
+                // (SQLite migration 20260112000000). Always false here.
+                bus_delivered: false,
             });
         }
 
         let _ = consumer_id; // consumer_id is not persisted per-row in the frozen §4.1 schema (no consumer_group column); accepted for interface compatibility. See DECISIONS.md item P4.
 
         Ok(claimed)
+    }
+
+    async fn mark_bus_delivered(&self, _outbox_id: OutboxId) -> Result<(), OutboxError> {
+        // No bus_delivered column on the Postgres outbox; the server does not
+        // run the client UI pump, so there is nothing to record.
+        Ok(())
     }
 
     async fn mark_published(&self, outbox_id: OutboxId) -> Result<(), OutboxError> {
@@ -222,6 +231,7 @@ impl OutboxStore for PostgresOutboxStore {
             },
             lease_token: LeaseToken(String::new()),
             retry_count: row.retry_count as u32,
+            bus_delivered: false,
         };
 
         self.dead_letter_store

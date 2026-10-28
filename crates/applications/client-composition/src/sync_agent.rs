@@ -207,13 +207,23 @@ impl SyncAgent {
                         // and skipped rather than crashing the pump —
                         // it's still marked published so a bad message
                         // can't wedge the queue.
-                        match serde_json::from_slice::<serde_json::Value>(&msg.message.payload) {
-                            Ok(value) => self.event_bus.publish(value),
-                            Err(e) => tracing::warn!(
-                                outbox_id = ?msg.outbox_id,
-                                error = %e,
-                                "outbox message payload was not valid JSON; skipping publish"
-                            ),
+                        if !msg.bus_delivered {
+                            match serde_json::from_slice::<serde_json::Value>(&msg.message.payload)
+                            {
+                                Ok(value) => {
+                                    self.event_bus.publish(value);
+                                    if let Err(e) =
+                                        self.outbox.mark_bus_delivered(msg.outbox_id).await
+                                    {
+                                        tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to record bus delivery");
+                                    }
+                                }
+                                Err(e) => tracing::warn!(
+                                    outbox_id = ?msg.outbox_id,
+                                    error = %e,
+                                    "outbox message payload was not valid JSON; skipping publish"
+                                ),
+                            }
                         }
                         if let Err(e) = self.outbox.mark_published(msg.outbox_id).await {
                             tracing::warn!(outbox_id = ?msg.outbox_id, error = %e, "failed to mark outbox message published");
@@ -689,12 +699,17 @@ mod tests {
                     message,
                     lease_token: LeaseToken("test-lease".to_string()),
                     retry_count: 0,
+                    bus_delivered: false,
                 })
                 .collect())
         }
 
         async fn mark_published(&self, outbox_id: OutboxId) -> Result<(), OutboxError> {
             self.published.lock().unwrap().push(outbox_id);
+            Ok(())
+        }
+
+        async fn mark_bus_delivered(&self, _outbox_id: OutboxId) -> Result<(), OutboxError> {
             Ok(())
         }
 

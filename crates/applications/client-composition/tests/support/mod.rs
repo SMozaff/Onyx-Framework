@@ -49,7 +49,11 @@ pub async fn test_pool() -> sqlx::SqlitePool {
     // this path has one more `../` than their original copies did.
     let schema =
         include_str!("../../../../../migrations/sqlite/20260101000000_initial_schema.up.sql");
-    for stmt in schema.split(';') {
+    // The outbox acknowledgement columns (bus_delivered, cloud_acked_at) are
+    // read by the outbox claim query, so the harness must apply them too.
+    let outbox_ack =
+        include_str!("../../../../../migrations/sqlite/20260112000000_add_outbox_cloud_ack.up.sql");
+    for stmt in schema.split(';').chain(outbox_ack.split(';')) {
         let stmt = stmt.trim();
         if stmt.is_empty() {
             continue;

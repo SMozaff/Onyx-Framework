@@ -57,11 +57,12 @@ impl OutboxStore for SqliteOutboxStore {
                 String,
                 i64,
                 i64,
+                i64,
             ),
         >(
             r#"
             SELECT outbox_id, event_id, event_type, aggregate_id, organization_id,
-                   payload, vector_clock, occurred_at, retry_count
+                   payload, vector_clock, occurred_at, retry_count, bus_delivered
             FROM outbox
             WHERE published = 0
               AND next_attempt_at <= ?
@@ -112,6 +113,7 @@ impl OutboxStore for SqliteOutboxStore {
             vector_clock_text,
             occurred_at_millis,
             retry_count,
+            bus_delivered,
         ) in rows
         {
             // Ruling V2 (DECISIONS.md): previously an `.ok().and_then(...)
@@ -159,10 +161,20 @@ impl OutboxStore for SqliteOutboxStore {
                 },
                 lease_token: LeaseToken(lease_token.clone()),
                 retry_count: retry_count as u32,
+                bus_delivered: bus_delivered != 0,
             });
         }
 
         Ok(claimed)
+    }
+
+    async fn mark_bus_delivered(&self, outbox_id: OutboxId) -> Result<(), OutboxError> {
+        sqlx::query("UPDATE outbox SET bus_delivered = 1 WHERE outbox_id = ?")
+            .bind(outbox_id.0 as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| OutboxError::Database(e.to_string()))?;
+        Ok(())
     }
 
     async fn mark_published(&self, outbox_id: OutboxId) -> Result<(), OutboxError> {
@@ -277,6 +289,7 @@ impl OutboxStore for SqliteOutboxStore {
             },
             lease_token: LeaseToken(String::new()),
             retry_count: retry_count as u32,
+            bus_delivered: false,
         };
 
         self.dead_letter_store
