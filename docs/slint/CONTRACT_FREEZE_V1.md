@@ -31,8 +31,11 @@ Refresh and logout contract (Worker `authRefresh`, `authLogout`):
 - Logout accepts a bearer token, a refresh token, or both from the same session family.
 
 ### Gaps that block freeze of C-07
-- **G-07-1 (behaviour gap):** when a refresh call fails with a non-success HTTP status, the client keeps the old pair (`return Some(pair)`). A revoked or replayed session therefore keeps working locally until the access token expires (up to 3600 s). The owner must decide the intended behaviour: clear authority on 401, or keep the current grace behaviour and document it.
-- **G-07-2:** Desktop's persistent restore (OS keyring) is not wired into the Slint host. `main.rs` states this is gated.
+- **G-07-1 (decided by owner, 2026-10-28):** behaviour depends on the app.
+  - **ONYX Admin (administration):** fail closed. Any refresh failure (401, network, or server error) clears the session and requires a fresh login. Admin tokens are memory-only (Q-01), so a restart also requires login.
+  - **ONYX Desktop (staff operations):** keep the session until the user logs out intentionally. Refresh failures keep the current session and retry. Desktop must persist the session across restarts. The server still rejects revoked access tokens, so the app must show a clear message when a request is refused.
+  - The Slint Desktop host does not yet implement this. Its current behaviour keeps the old pair on any failed refresh, and it has no persistent restore. Both are implementation work.
+- **G-07-2:** Desktop's persistent restore (OS keyring) is not wired into the Slint host. Required by the decision above.
 - **G-07-3:** Startup rule (what a fresh launch does with no restored session) is not defined in the Slint host.
 
 ## 2. C-08 Secret storage
@@ -87,11 +90,10 @@ Slint host view models:
 - U-10: reduced-motion API per OS. Not verified.
 - Q-14: persistence implementation.
 - Unmaintained-crate decision for ttf-parser, zbus_names, zvariant, proc-macro-error (upgrade or documented acceptance).
-- G-07-1: refresh-failure behaviour (owner decision).
 
 ## 6. Freeze procedure
 
-1. Owner resolves G-07-1 and approves the behaviour.
+1. G-07-1 is decided (see section 1). Owner confirms the Admin and Desktop rules are final.
 2. Each gap in sections 1 to 3 is closed or explicitly deferred with an owner and date.
 3. Blockers in section 5 have evidence and an approved disposition.
 4. Owner approves freezing C-02, C-07, and C-08 at version 1. C-01 is frozen by reference to `docs/production/api-contract.md` at a named commit.
