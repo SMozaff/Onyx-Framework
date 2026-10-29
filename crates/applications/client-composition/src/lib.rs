@@ -16,6 +16,7 @@
 //! `sync-transport`) — no Tauri, no Flutter/FFI types. Those are the
 //! respective clients' own concern.
 
+pub mod admin_session;
 pub mod app_state;
 pub mod cloud_outbox;
 pub mod command_registry;

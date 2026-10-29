@@ -1531,6 +1531,7 @@ dependencies = [
  "uuid",
  "work-domain",
  "worker-application",
+ "zeroize",
 ]
 
 [[package]]
