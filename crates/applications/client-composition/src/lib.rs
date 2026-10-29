@@ -24,6 +24,7 @@ pub mod file_upload;
 pub mod handlers;
 pub mod hierarchy_cache;
 pub mod query_registry;
+pub mod session_policy;
 pub mod sync_agent;
 
 pub use app_state::{AppState, AppStateConfig};
