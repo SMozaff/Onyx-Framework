@@ -3,3 +3,6 @@ node_modules/
 
 # Cargo build output (local)
 /target/
+
+# Cargo build output
+/target/
