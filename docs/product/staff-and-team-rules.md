@@ -27,14 +27,15 @@ Dropped: `date_of_birth`.
 - Format example: `st26sm0035` = `st` (staff) + `26` (year) + `sm` (initials of first and last name) + `0035` (number).
 - The number is counted per year, starts at 1 each year, and is never reused.
 - Initials and full names may be shown across the organization.
-- **OPEN:** Number width (4 digits assumed from the example); initials rule when names have more than two parts.
+- Number is always 4 digits.
+- Names always have two main parts, so initials are always two letters (first name, last name).
 
 ## Team ID
 
-- Format: `tm` + year + creation order + creation date + team leader data at creation.
+- Format: `tm` + creation date as `YYMMDD` + team leader initials (two letters) + creation order as 4 digits, counted per year.
+- Example: `tm261030sm0007` = team created 2026-10-30, leader initials `sm`, 7th team created in 2026.
 - A team leader change updates the system but not the ID.
-- The ID changes only if the team is removed and recreated.
-- **OPEN:** Exact layout of the segments (example needed).
+- The ID changes only if the team is removed and recreated. Order numbers are never reused.
 
 ## Roles and team management
 
