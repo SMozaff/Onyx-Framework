@@ -29,6 +29,9 @@ tracing.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 sha2.workspace = true
+argon2.workspace = true
+# Encrypted local database (SQLCipher). Same libsqlite3-sys version sqlx uses.
+libsqlite3-sys = { version = "=0.37.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 reqwest.workspace = true
 
 [dev-dependencies]
