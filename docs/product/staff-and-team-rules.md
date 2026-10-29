@@ -46,6 +46,6 @@ Dropped: `date_of_birth`.
 - **Supervisor:** Optional on a team. Same rank as staff, below team leader. Informal, verbal authority only. No real authority and no special access.
 - **Parent:** The manager who created the team is its parent. Every team has a parent manager.
 
-## Not yet defined
+## Deferred
 
-- **Employee board** (organization-wide search of names, phones, emails, managers): not established.
+- **Employee board** (organization-wide search of names, phones, emails, managers): a separate, modular feature to be added later. Not part of the current design.
