@@ -19,6 +19,10 @@ object MobileCoreBridge {
     external fun nativeFree(handle: Long)
     external fun nativeExecuteCommand(handle: Long, commandJson: String): String?
     external fun nativeSetHierarchy(handle: Long, hierarchyJson: String): Int
+    /** Bearer token for cloud outbox uploads. Set after login and every refresh. */
+    external fun nativeSetAccessToken(handle: Long, token: String): Int
+    /** Clears the upload token on sign-out; local outbox rows are kept. */
+    external fun nativeClearAccessToken(handle: Long): Int
 
     // Added for A4 (core screens) -- the shared-refresh cycle's data calls.
     external fun nativeListAggregates(handle: Long, aggregateType: String): String?

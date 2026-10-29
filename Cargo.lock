@@ -2170,6 +2170,7 @@ version = "1.0.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
+ "client-composition",
  "futures-util",
  "platform-kernel",
  "relay-websocket-adapter",
@@ -2178,10 +2179,12 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "sqlx",
  "sync-transport",
  "tokio",
  "tokio-tungstenite 0.30.0",
  "tokio-util",
+ "tracing",
  "uuid",
 ]
 

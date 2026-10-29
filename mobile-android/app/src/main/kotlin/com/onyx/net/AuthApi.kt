@@ -56,6 +56,9 @@ class RefreshResult(val accessToken: String, val refreshToken: String, val expir
 class AuthApi {
     companion object {
         private const val CLOUD_API_BASE = "https://onyx-framework.soheil-mozaffari.workers.dev"
+
+        /** Worker endpoint the core uploads pending outbox rows to. */
+        const val OUTBOX_ENDPOINT = "$CLOUD_API_BASE/api/sync/outbox"
     }
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)

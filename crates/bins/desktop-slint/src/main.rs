@@ -8,16 +8,18 @@ use std::sync::Arc;
 
 pub mod authority;
 pub mod composition;
+pub mod device;
 pub mod session_service;
 
 slint::include_modules!();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let composition = composition::SlintComposition::new()
-        .map_err(|_| std::io::Error::other("failed to initialize ONYX session service"))?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    let composition = runtime
+        .block_on(composition::SlintComposition::open())
+        .map_err(|e| std::io::Error::other(format!("failed to initialize ONYX: {e}")))?;
     let ui = DesktopWindow::new()?;
 
     let login_composition = Arc::clone(&composition);
