@@ -75,3 +75,21 @@ These items are not closed by the decisions above:
 - The plan path `common/ONYX_Slint_Migration_BOUND_Plan_Execution_Ready.md` returned 404 on the current main branch. The supplied planning artifact remains the governing source for this work, but its in-repository canonical location must be reconciled.
 - Existing Slint feasibility CI is evidence for a spike only; it is not proof of full production UI, Persian IME, accessibility, font shaping, reduced motion, or theme-contrast readiness.
 - Do not start B-01 production Worker-client implementation until Gate 0b's required evidence and formal approval are complete.
+
+## Gate 0b formal sign-off record
+
+**Status:** Owner approval recorded; Gate 0b NOT passed. Blockers 1–14 above remain open, and the required fields below are incomplete.
+
+| Field | Value |
+|---|---|
+| Owner approval (verbatim) | "Approved for full migration" |
+| Approver | Project owner (fanoos.media@gmail.com) |
+| Approval date | 2026-10-29 |
+| Scope | Full migration (Admin and Desktop, Slint), per the BOUND plan |
+| Exact baseline | origin/main `9ac3964` (PR #342 and #343 merged) |
+| Integration coordinator | **OWNER TO PROVIDE** |
+| Accepted evidence (blockers 1–14) | **OWNER TO PROVIDE** — none accepted yet |
+| Frozen contract versions | **OWNER TO PROVIDE** |
+| Approved fallbacks | **OWNER TO PROVIDE** |
+
+**Effect:** Tauri/React remains the production default. No production change, B-01 implementation, or Worker deploy follows from this record alone.
