@@ -23,6 +23,7 @@ pub mod event_bus;
 pub mod file_upload;
 pub mod handlers;
 pub mod hierarchy_cache;
+pub mod local_key;
 pub mod query_registry;
 pub mod session_policy;
 pub mod sync_agent;
