@@ -18,8 +18,8 @@
 
 pub mod app_state;
 pub mod cloud_outbox;
-pub mod device_identity;
 pub mod command_registry;
+pub mod device_identity;
 pub mod event_bus;
 pub mod file_upload;
 pub mod handlers;

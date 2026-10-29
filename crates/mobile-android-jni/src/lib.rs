@@ -228,7 +228,8 @@ pub extern "system" fn Java_com_onyx_bridge_MobileCoreBridge_nativeClearAccessTo
     env.with_env(|_env| -> Result<i32, JniError> {
         // Safety: `handle` is the Kotlin caller's responsibility (must be a
         // live value from nativeNew).
-        let result = unsafe { mobile_core::mobile_core_clear_access_token(handle as *mut MobileApp) };
+        let result =
+            unsafe { mobile_core::mobile_core_clear_access_token(handle as *mut MobileApp) };
         Ok(result)
     })
     .resolve::<LogErrorAndDefault>()

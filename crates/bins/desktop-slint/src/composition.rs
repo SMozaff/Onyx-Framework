@@ -67,7 +67,8 @@ impl SlintComposition {
             .await
             .map_err(|e| format!("apply migrations: {e}"))?;
 
-        let session = SessionService::new(ONYX_API_ORIGIN).map_err(|e| format!("session: {e:?}"))?;
+        let session =
+            SessionService::new(ONYX_API_ORIGIN).map_err(|e| format!("session: {e:?}"))?;
         let token_source: Arc<dyn SessionTokenSource> = session.clone();
         let authority: Arc<dyn AuthorityProvider> =
             Arc::new(SessionAuthorityProvider::new(token_source));
@@ -142,7 +143,10 @@ impl SlintComposition {
                 let state = Arc::new(state);
                 let agent = Arc::clone(&state.sync_agent);
                 let task = tokio::spawn(async move { agent.run().await });
-                *self.outbox.lock().await = Some(OutboxRuntime { _state: state, task });
+                *self.outbox.lock().await = Some(OutboxRuntime {
+                    _state: state,
+                    task,
+                });
             }
             Err(e) => tracing::warn!(error = %e, "outbox not started"),
         }
