@@ -104,5 +104,8 @@ These items are not closed by the decisions above:
 **Gate 0b status:** still OPEN. Approvals here do not close blockers 1–14 and do not pass the gate.
 
 **Open:**
-- Bundled font (U-03): proposed Vazirmatn (Latin and Persian coverage, SIL Open Font License 1.1). Pending owner license confirmation.
-- Integration coordinator (blocker 15): owner to name.
+
+## Gate 0b coordination and font (2026-10-29)
+
+- **Bundled font (U-03):** Vazirmatn, SIL Open Font License 1.1. Owner confirmed the font and its license.
+- **Integration coordinator (blocker 15):** Claude (AI assistant), named by the owner. Coordinates evidence collection and keeps this record current. The owner remains the approver of record for Gate 0b sign-off.
