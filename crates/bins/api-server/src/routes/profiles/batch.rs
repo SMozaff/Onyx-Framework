@@ -391,3 +391,72 @@ pub async fn export_profiles(
         Ok((StatusCode::OK, [("content-type", "text/csv")], body).into_response())
     }
 }
+
+#[cfg(test)]
+mod team_membership_contract_tests {
+    //! Q-05 contract tests. The CSV form is `;`-delimited. The Rust list is
+    //! `Vec<String>`. These tests pin the current behavior so any change is
+    //! deliberate.
+    use super::*;
+
+    fn csv_row(team: &str) -> CsvRow {
+        CsvRow {
+            user_id: "u1".into(),
+            full_name: "Name".into(),
+            contact_email: String::new(),
+            contact_phone: String::new(),
+            job_title: String::new(),
+            department: String::new(),
+            photo_blob_key: String::new(),
+            class_label: String::new(),
+            parent_display_name: String::new(),
+            team_memberships: team.into(),
+        }
+    }
+
+    fn parsed(team: &str) -> Vec<String> {
+        ImportExportRow::from(csv_row(team)).team_memberships
+    }
+
+    #[test]
+    fn whitespace_is_trimmed_around_each_entry() {
+        assert_eq!(parsed("  Alpha ;Beta  "), vec!["Alpha", "Beta"]);
+    }
+
+    #[test]
+    fn empty_and_blank_entries_are_dropped() {
+        assert_eq!(parsed(""), Vec::<String>::new());
+        assert_eq!(parsed(" ; ;;  ;"), Vec::<String>::new());
+        assert_eq!(parsed("A;;B;"), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn duplicates_are_preserved_not_deduplicated() {
+        assert_eq!(parsed("A;A;B"), vec!["A", "A", "B"]);
+    }
+
+    #[test]
+    fn semicolon_inside_a_name_splits_into_two_entries() {
+        // Known limit of the `;` delimiter: a value cannot carry `;` through
+        // CSV. Changing this needs an owner decision (see Q-05 notes).
+        assert_eq!(parsed("Ops;Field"), vec!["Ops", "Field"]);
+    }
+
+    #[test]
+    fn export_then_import_round_trips_plain_values() {
+        let original = vec!["Platform Team".to_string(), "Ops".to_string()];
+        let joined = original.join(";");
+        assert_eq!(parsed(&joined), original);
+    }
+
+    #[test]
+    fn json_row_keeps_entries_as_given_without_trimming() {
+        // The JSON import path does not apply the CSV trim/drop rules.
+        // The Worker trims and drops blanks before forwarding, so this only
+        // matters for direct API-server calls. Pinned, not endorsed.
+        let json = r#"{"user_id":"u1","full_name":"N","contact_email":"","contact_phone":"",
+            "job_title":"","department":"","team_memberships":[" A ",""]}"#;
+        let row: ImportExportRow = serde_json::from_str(json).expect("json row");
+        assert_eq!(row.team_memberships, vec![" A ".to_string(), String::new()]);
+    }
+}
