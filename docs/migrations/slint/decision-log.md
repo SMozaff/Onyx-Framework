@@ -93,3 +93,19 @@ These items are not closed by the decisions above:
 | Approved fallbacks | **OWNER TO PROVIDE** |
 
 **Effect:** Tauri/React remains the production default. No production change, B-01 implementation, or Worker deploy follows from this record alone.
+
+## Owner decisions recorded 2026-10-29
+
+- **P-01 (desktop boundary):** Owner approved the boundary. Reference: [P-01 B1 investigation](P-01-B1-investigation-2026-10-27.md). The boundary text is not yet committed as its own file; it must be added before Gate 0b evidence review.
+- **Q-14 (preference schema):** Owner approved the schema. The schema itself must be committed (fields, defaults, fallback) before it can be frozen.
+- **C-09 (fixture schema):** Owner approved the fixture schema. Provenance must be committed alongside it.
+- **C-03 (typed error mapping):** Owner approved the mapping. Reference the committed mapping file when it exists.
+
+**Gate 0b status:** still OPEN. Approvals here do not close blockers 1–14 and do not pass the gate.
+
+**Open:**
+
+## Gate 0b coordination and font (2026-10-29)
+
+- **Bundled font (U-03):** Vazirmatn, SIL Open Font License 1.1. Owner confirmed the font and its license.
+- **Integration coordinator (blocker 15):** Claude (AI assistant), named by the owner. Coordinates evidence collection and keeps this record current. The owner remains the approver of record for Gate 0b sign-off.
