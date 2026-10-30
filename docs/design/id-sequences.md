@@ -1,6 +1,6 @@
 # Storage for generated IDs (staff and team)
 
-**Status:** Design draft, 2026-10-30. Not implemented. One decision is marked **OPEN**.
+**Status:** Design draft, 2026-10-30. Not implemented. All decisions are recorded.
 
 ## Context
 
@@ -67,11 +67,9 @@ RETURNING last_value;
 
 ## Open decisions
 
-1. **Year boundary:** Staff and team IDs always use the Gregorian year. Which timezone decides the year boundary: UTC, or Iran local time (Asia/Tehran, UTC+03:30)? A record created on 31 December near midnight can fall into a different year, so this matters.
-
 ## Decided (2026-10-30)
 
-- **ID year:** Always the Gregorian calendar year, regardless of locale.
+- **ID year:** Always the Gregorian calendar year, regardless of locale. The year boundary uses the Asia/Tehran timezone (UTC+03:30).
 - **Scope:** Numbers are counted per organization. The `id_sequences` key already includes `organization_id`.
 - **Timestamps in the app:** Shown in local time. The calendar shown follows the locale: English uses the Gregorian calendar; Farsi uses the Iranian solar (Solar Hijri) calendar. Generated IDs are unaffected by this and always use Gregorian.
 
