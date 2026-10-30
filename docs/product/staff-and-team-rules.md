@@ -7,8 +7,10 @@
 | Column | Required | Notes |
 |---|---|---|
 | `onyx_id` | yes | System-generated (see IDs). Existing `user_id`. |
-| `first_name` | yes | Split from `full_name`. |
-| `last_name` | yes | Split from `full_name`. |
+| `first_name` | yes | English. Split from `full_name`. |
+| `last_name` | yes | English. |
+| `first_name_fa` | no | Persian/Arabic (Farsi in Iran). |
+| `last_name_fa` | no | Persian/Arabic (Farsi in Iran). |
 | `national_id` | yes | Iran only: exactly 10 digits. Digits only for now. |
 | `contact_email` | | |
 | `contact_phone` | | |
@@ -29,6 +31,7 @@ Dropped: `date_of_birth`.
 - Initials and full names may be shown across the organization.
 - Number is always 4 digits.
 - Names always have two main parts, so initials are always two letters (first name, last name).
+- Initials come from the English names.
 
 ## Team ID
 
