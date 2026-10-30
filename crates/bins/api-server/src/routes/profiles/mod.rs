@@ -23,6 +23,7 @@
 
 pub mod batch;
 pub mod staff_sheet;
+pub mod id_generator;
 
 use axum::{
     extract::{Path, State},
