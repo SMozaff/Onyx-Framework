@@ -233,17 +233,23 @@ pub unsafe extern "C" fn mobile_core_new(
             .await
             .ok()?;
 
-        let schema =
-            include_str!("../../../migrations/sqlite/20260101000000_initial_schema.up.sql");
-        for stmt in schema.split(';') {
-            let stmt = stmt.trim();
-            if stmt.is_empty() {
-                continue;
+        // Outbox acknowledgement columns (bus_delivered, cloud_acked_at).
+        // The outbox claim query selects them, so they must exist.
+        let schema = [
+            include_str!("../../../migrations/sqlite/20260101000000_initial_schema.up.sql"),
+            include_str!("../../../migrations/sqlite/20260112000000_add_outbox_cloud_ack.up.sql"),
+        ];
+        for migration in schema {
+            for stmt in migration.split(';') {
+                let stmt = stmt.trim();
+                if stmt.is_empty() {
+                    continue;
+                }
+                // Second launch: tables and columns already exist. Only a
+                // first-launch failure to even connect (handled above) is
+                // treated as fatal, matching desktop-shell's rationale.
+                let _ = sqlx::query(stmt).execute(&pool).await;
             }
-            // Second launch: tables already exist; only a first-launch
-            // failure to even connect (handled above) is treated as
-            // fatal, matching desktop-shell's identical rationale.
-            let _ = sqlx::query(stmt).execute(&pool).await;
         }
 
         // Stored next to the database so the same install keeps one replica
