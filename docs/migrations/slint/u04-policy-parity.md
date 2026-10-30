@@ -29,14 +29,17 @@ Sources:
 - Optimistic concurrency (`expected_version`). Check the Worker's version check against Rust's handling.
 - Retire is terminal on both sides. Behavior is consistent in the code read so far; a test is still needed.
 
-## Owner decision required
+## Decision (2026-10-31): specific error codes
 
-Rows 1, 2, 3, and 6: decide the error codes the API returns. Options:
+Rows 1, 2, 3, and 6 use the Rust names on the API:
 
-1. **Keep the Rust names.** The Worker returns `DRAFT_ALREADY_PENDING`, `NO_DRAFT_VERSION`, and `NO_PUBLISHED_VERSION`. This changes Worker responses for rows 1 and 2.
-2. **Keep the Worker's generic code.** Rust maps every precondition failure to `COMMAND_PRECONDITION_UNSUPPORTED`. This loses information in Rust.
+| Rust error | API code |
+|---|---|
+| `DraftAlreadyPending` | `DRAFT_ALREADY_PENDING` |
+| `NoDraftVersion` | `NO_DRAFT_VERSION` |
+| `NoPublishedVersion` | `NO_PUBLISHED_VERSION` |
 
-Recommended: option 1, because it gives the Slint UI specific messages. Owner to confirm.
+Status: **decided, not yet implemented.** The Worker change alters production responses and needs a deploy through the normal gate. Implementation is a separate step.
 
 ## Stale comment
 
