@@ -4,6 +4,8 @@
 //! - One sheet, one row per person, first row is the header.
 //! - Required columns: `onyx_id`, `first_name`, `last_name`, `national_id`.
 //! - `onyx_id` may be blank: a blank cell means the system generates the ID.
+//! - Names: English (`first_name`, `last_name`) is required. Persian/Arabic
+//!   (`first_name_fa`, `last_name_fa`) is optional. Generated IDs use the English names.
 //! - `national_id` is Iran only: exactly 10 ASCII digits. It must be stored
 //!   as text in Excel. A numeric cell is rejected, because Excel drops
 //!   leading zeros and we will not guess the lost digits.
@@ -22,6 +24,8 @@ pub struct StaffSheetRow {
     pub onyx_id: String,
     pub first_name: String,
     pub last_name: String,
+    pub first_name_fa: String,
+    pub last_name_fa: String,
     pub national_id: String,
     pub contact_email: String,
     pub contact_phone: String,
@@ -146,6 +150,8 @@ pub fn parse_staff_sheet(bytes: &[u8]) -> Result<StaffSheetOutcome, StaffSheetEr
             onyx_id: text("onyx_id"),
             first_name: text("first_name"),
             last_name: text("last_name"),
+            first_name_fa: text("first_name_fa"),
+            last_name_fa: text("last_name_fa"),
             national_id,
             contact_email: text("contact_email"),
             contact_phone: text("contact_phone"),
@@ -405,6 +411,51 @@ mod tests {
             parse_staff_sheet(&bytes),
             Err(StaffSheetError::MissingColumn("national_id"))
         );
+    }
+
+    #[test]
+    fn persian_names_are_optional_and_kept_as_entered() {
+        let mut header: Vec<&str> = HEADER.to_vec();
+        header.push("first_name_fa");
+        header.push("last_name_fa");
+        let mut with_fa = row([
+            "st26sm0001",
+            "Soheil",
+            "Mozaffari",
+            "0012345678",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ])
+        .to_vec();
+        with_fa.push("سهیل");
+        with_fa.push("مظفری");
+        let mut without_fa = row([
+            "st26sm0002",
+            "Ali",
+            "Ahmadi",
+            "0098765432",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ])
+        .to_vec();
+        without_fa.push("");
+        without_fa.push("");
+        let bytes = workbook(&[header, with_fa, without_fa], false);
+        let out = parse_staff_sheet(&bytes).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert_eq!(out.rows[0].first_name_fa, "سهیل");
+        assert_eq!(out.rows[0].last_name_fa, "مظفری");
+        assert_eq!(out.rows[1].first_name_fa, "");
     }
 
     #[test]
