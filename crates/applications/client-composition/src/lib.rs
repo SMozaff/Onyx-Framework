@@ -25,6 +25,7 @@ pub mod event_bus;
 pub mod file_upload;
 pub mod handlers;
 pub mod hierarchy_cache;
+pub mod id_display;
 pub mod local_db;
 pub mod local_key;
 pub mod query_registry;
