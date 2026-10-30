@@ -65,4 +65,4 @@ reqwest.workspace = true
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true
-rust_xlsxwriter = "0.92"
+rust_xlsxwriter = "0.102"
