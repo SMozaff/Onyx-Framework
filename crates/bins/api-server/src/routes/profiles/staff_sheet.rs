@@ -3,6 +3,7 @@
 //! Rules (owner-confirmed, see `docs/product/staff-and-team-rules.md`):
 //! - One sheet, one row per person, first row is the header.
 //! - Required columns: `onyx_id`, `first_name`, `last_name`, `national_id`.
+//! - `onyx_id` may be blank: a blank cell means the system generates the ID.
 //! - `national_id` is Iran only: exactly 10 ASCII digits. It must be stored
 //!   as text in Excel. A numeric cell is rejected, because Excel drops
 //!   leading zeros and we will not guess the lost digits.
@@ -100,7 +101,7 @@ pub fn parse_staff_sheet(bytes: &[u8]) -> Result<StaffSheetOutcome, StaffSheetEr
 
         let mut errs: Vec<String> = Vec::new();
         for required in REQUIRED_COLUMNS {
-            if required == "national_id" {
+            if required == "national_id" || required == "onyx_id" {
                 continue;
             }
             if text(required).is_empty() {
@@ -335,6 +336,33 @@ mod tests {
     }
 
     #[test]
+    fn blank_onyx_id_is_accepted_and_left_for_generation() {
+        let bytes = workbook(
+            &[
+                HEADER.to_vec(),
+                row([
+                    "",
+                    "Sara",
+                    "Karimi",
+                    "0011223344",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ])
+                .to_vec(),
+            ],
+            false,
+        );
+        let out = parse_staff_sheet(&bytes).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert_eq!(out.rows[0].onyx_id, "");
+    }
+
+    #[test]
     fn errors_report_row_numbers_and_all_missing_fields() {
         let bytes = workbook(
             &[
@@ -361,7 +389,6 @@ mod tests {
         assert_eq!(out.rows.len(), 1);
         assert_eq!(out.errors.len(), 1);
         assert_eq!(out.errors[0].row, 2);
-        assert!(out.errors[0].message.contains("onyx_id is required"));
         assert!(out.errors[0].message.contains("first_name is required"));
         assert!(out.errors[0].message.contains("last_name is required"));
     }
