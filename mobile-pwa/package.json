@@ -55,5 +55,8 @@
   },
   "allowScripts": {
     "esbuild@0.28.2": true
+  },
+  "overrides": {
+    "follow-redirects": "1.16.2"
   }
 }
