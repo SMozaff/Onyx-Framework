@@ -62,3 +62,9 @@ Dropped: `date_of_birth`.
 - Staff must change their password after the first login.
 - Passwords are never stored, logged, prefilled, or requested in chat.
 - This replaces the 2026-08-13 rule that import does not create accounts.
+
+## Creation report (owner decision, 2026-11-01)
+
+- After every batch import, and after every single creation, the admin gets an exported report.
+- The report contains all staff information needed, including each account's one-time password.
+- Implied constraints: the system stores only a hash of each password. The plain password exists only in the report. The password is never written to logs.

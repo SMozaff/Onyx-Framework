@@ -152,3 +152,10 @@ These items are not closed by the decisions above:
 - Sign-in uses the Onyx ID. Each new account gets a system-generated one-time password, which must be changed at first login.
 - This replaces the 2026-08-13 rule that import does not create accounts.
 - **Open:** How the one-time password reaches the admin. Passwords must not be stored, logged, or shown in chat.
+
+## Creation report with one-time passwords (owner decision, 2026-11-01)
+
+- Each batch import and each single creation produces an export report for the admin.
+- The report includes all staff fields and each new account's one-time password.
+- The system stores only password hashes. Plain passwords are never stored or logged.
+- **Open:** report format (CSV or Excel) and the report's exact column list.
