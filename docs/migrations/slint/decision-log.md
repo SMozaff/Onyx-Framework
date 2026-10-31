@@ -159,3 +159,8 @@ These items are not closed by the decisions above:
 - The report includes all staff fields and each new account's one-time password.
 - The system stores only password hashes. Plain passwords are never stored or logged.
 - **Open:** report format (CSV or Excel) and the report's exact column list.
+
+## Creation report format (owner decision, 2026-11-01)
+
+- The creation report is an Excel (.xlsx) file.
+- **Open:** exact column list.
