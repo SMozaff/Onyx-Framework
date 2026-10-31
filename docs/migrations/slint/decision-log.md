@@ -145,3 +145,10 @@ These items are not closed by the decisions above:
 - **Reason:** Reduced motion is the safer default for users who may need it. It is also the value `MotionPreference::resolve(None)` already returns in `crates/applications/client-composition/src/motion.rs`.
 - **Decided by:** Coordinator, per the owner's standing instruction. Owner confirmed on 2026-10-31.
 - **Still to do:** Per-OS readers and Slint wiring.
+
+## Staff accounts on import (owner decision, 2026-11-01)
+
+- Import creates an account for each staff row and assigns its staff ID. Single admin creation follows the same rule.
+- Sign-in uses the Onyx ID. Each new account gets a system-generated one-time password, which must be changed at first login.
+- This replaces the 2026-08-13 rule that import does not create accounts.
+- **Open:** How the one-time password reaches the admin. Passwords must not be stored, logged, or shown in chat.
