@@ -31,6 +31,7 @@ pub mod local_key;
 pub mod query_registry;
 pub mod session_policy;
 pub mod sync_agent;
+pub mod theme_contrast;
 
 pub use app_state::{AppState, AppStateConfig};
 pub use command_registry::{
