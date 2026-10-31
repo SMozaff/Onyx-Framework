@@ -115,3 +115,7 @@ These items are not closed by the decisions above:
 - **Decision:** Policy precondition failures use the specific codes `DRAFT_ALREADY_PENDING`, `NO_DRAFT_VERSION`, and `NO_PUBLISHED_VERSION` on the API. The Worker's generic `COMMAND_PRECONDITION_UNSUPPORTED` is not used for these cases.
 - **Status:** Decided. Worker implementation pending.
 - Source matrix: `docs/migrations/slint/u04-policy-parity.md`.
+## C-09 fixture provenance (2026-10-31)
+
+- **Recorded:** Inventory of fixtures with git provenance in `docs/production/fixture-provenance.md`.
+- **OPEN:** The approved fixture schema is not identified in the repo. Owner to confirm which schema (candidate: `shared/diagnostics/diagnostic-event.schema.json`, version 1.0).
