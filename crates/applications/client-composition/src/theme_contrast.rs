@@ -3,6 +3,7 @@
 //! Token values are copied from the Slint sources:
 //! - `crates/bins/desktop-slint/ui/main.slint` (feasibility palette)
 //! - `crates/bins/admin-slint/ui/app.slint` (theme tokens, light and dark)
+//!
 //! Text needs at least 4.5:1 (WCAG AA, normal text).
 
 /// Relative luminance per WCAG 2.x.
