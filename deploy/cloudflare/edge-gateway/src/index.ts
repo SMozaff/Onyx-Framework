@@ -925,7 +925,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const semantic=validateCommandSemantics(envelope.command_type,previousState,effectiveCommandPayload,session.sub);
   if(!semantic.allowed){
     const status=semantic.reason==="INVALID_COMMAND_PAYLOAD"?400:
-      semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"||semantic.reason==="NO_PUBLISHED_VERSION"?409:403;
+      semantic.reason==="INVALID_STATE_TRANSITION"||semantic.reason==="RESOURCE_ALREADY_EXISTS"||semantic.reason==="RESOURCE_STATE_UNVERIFIED"||semantic.reason==="NO_PUBLISHED_VERSION"||semantic.reason==="DRAFT_ALREADY_PENDING"||semantic.reason==="NO_DRAFT_VERSION"?409:403;
     return json({error:semantic.reason,category:status===403?"AUTHORITY":"DOMAIN",retryability:"NON_RETRYABLE"},status);
   }
   if(policy.ownerRequiredOnCreate&&policy.effect==="create"&&payloadOwnerIds(payload).length===0)

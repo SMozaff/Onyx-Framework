@@ -87,12 +87,12 @@ describe("policy: state transitions (validateCommandSemantics)", () => {
 
   it("CreatePolicyVersion is rejected while a Draft already exists", () => {
     const result = validateCommandSemantics("CreatePolicyVersion", activeWithDraftOnly, { rules }, ACTOR);
-    expect(result).toEqual({ allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" });
+    expect(result).toEqual({ allowed: false, reason: "DRAFT_ALREADY_PENDING" });
   });
 
   it("PublishPolicyVersion needs a Draft", () => {
     expect(validateCommandSemantics("PublishPolicyVersion", activeWithPublished, {}, ACTOR))
-      .toEqual({ allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" });
+      .toEqual({ allowed: false, reason: "NO_DRAFT_VERSION" });
     expect(validateCommandSemantics("PublishPolicyVersion", activeWithDraftOnly, {}, ACTOR))
       .toMatchObject({ allowed: true, nextStatus: "Active" });
   });
