@@ -130,3 +130,11 @@ These items are not closed by the decisions above:
 - **Decision:** Team names containing `;` are rejected at input. Team member lists keep the `;`-separated format.
 - **Reason:** `;` is the separator in `team_ids` and the editor list. A name containing it would be split into two entries. Team IDs (`tm…`) never contain `;`, and no legitimate name needs it.
 - **Decided by:** Coordinator, per the owner's standing instruction to decide minor matters and document them. Owner informed.
+
+## Future priority: diagnostics collection (after migration, 2026-10-31)
+
+- **Status:** Not started. Deliberately deferred until the Slint migration is complete.
+- **Goal:** Store diagnostic events (`shared/diagnostics/diagnostic-event.schema.json`, v1.0) on Cloudflare so failures can be counted by `error_code` and component.
+- **Current state:** Admin Shell login events go only to the browser console and a window event. Worker events are not collected.
+- **Candidate approach (not decided):** Cloudflare-native logging. Volume is small and needs no computation. Options to evaluate: Workers Logs, Logpush, or a D1 table.
+- **Owner:** To be assigned when the migration closes.
