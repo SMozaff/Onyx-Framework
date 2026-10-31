@@ -52,3 +52,13 @@ Dropped: `date_of_birth`.
 ## Deferred
 
 - **Employee board** (organization-wide search of names, phones, emails, managers): a separate, modular feature to be added later. Not part of the current design.
+
+## Accounts and sign-in (owner decision, 2026-11-01)
+
+- Every staff row in an import creates an account, and the import assigns that person's staff ID.
+- Every staff member must have an account. Single creation by an admin follows the same rule.
+- Staff sign in with their Onyx ID.
+- The system generates a one-time password for each new account.
+- Staff must change their password after the first login.
+- Passwords are never stored, logged, prefilled, or requested in chat.
+- This replaces the 2026-08-13 rule that import does not create accounts.
