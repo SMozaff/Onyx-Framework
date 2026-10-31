@@ -124,3 +124,9 @@ These items are not closed by the decisions above:
 - **Decision:** `docs/production/api-contract.md` re-pinned to main `98a2258`. Verified by the route-completeness test (42 passing).
 - **Reason:** The contract's routes already matched the Worker. Only the baseline commit was stale.
 - **Not changed:** Historical B-01 reports keep their original baseline. They record what was reviewed at that time, and rewriting them would misstate the history.
+
+## Q-05 team names and semicolons (2026-10-31)
+
+- **Decision:** Team names containing `;` are rejected at input. Team member lists keep the `;`-separated format.
+- **Reason:** `;` is the separator in `team_ids` and the editor list. A name containing it would be split into two entries. Team IDs (`tm…`) never contain `;`, and no legitimate name needs it.
+- **Decided by:** Coordinator, per the owner's standing instruction to decide minor matters and document them. Owner informed.
