@@ -351,7 +351,7 @@ export function validateCommandSemantics(
   if (semantics.special === "policy-create-version") {
     const versions = Array.isArray(current.versions) ? current.versions.filter(isRecord) : null;
     if (!versions || versions.some((version) => version.status === "Draft")) {
-      return { allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" };
+      return { allowed: false, reason: "DRAFT_ALREADY_PENDING" };
     }
     return {
       allowed: true,
@@ -366,7 +366,7 @@ export function validateCommandSemantics(
   if (semantics.special === "policy-publish-version") {
     const versions = Array.isArray(current.versions) ? current.versions.filter(isRecord) : null;
     const draftIndex = versions?.findIndex((version) => version.status === "Draft") ?? -1;
-    if (!versions || draftIndex < 0) return { allowed: false, reason: "COMMAND_PRECONDITION_UNSUPPORTED" };
+    if (!versions || draftIndex < 0) return { allowed: false, reason: "NO_DRAFT_VERSION" };
     const nextVersions = versions.map((version, index) => index === draftIndex ? { ...version, status: "Published" } : version);
     return { allowed: true, nextStatus: status, statePatch: { versions: nextVersions } };
   }
