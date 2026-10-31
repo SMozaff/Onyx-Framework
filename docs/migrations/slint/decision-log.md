@@ -164,3 +164,8 @@ These items are not closed by the decisions above:
 
 - The creation report is an Excel (.xlsx) file.
 - **Open:** exact column list.
+
+## Creation report columns (owner decision, 2026-11-01)
+
+- Columns: the staff sheet fields, plus the assigned `onyx_id`, the one-time password, and the account status.
+- Format: Excel (.xlsx).
