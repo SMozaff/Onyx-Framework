@@ -1,0 +1,34 @@
+    Finished `test` profile [unoptimized] target(s) in 0.30s
+     Running unittests src/lib.rs (/home/claude/scratch-spike/target/debug/deps/onyx_slint_spike-ea6b5a607c76ab10)
+
+running 8 tests
+test logic::tests::gsettings_output_parsing ... ok
+test logic::tests::header_click_toggles_direction ... ok
+test logic::tests::kde_animation_factor_parsing ... ok
+test logic::tests::motion_unknown_falls_back_to_reduced ... ok
+test logic::tests::page_count_edges ... ok
+test logic::tests::page_slice_clamps_and_sizes ... ok
+test logic::tests::sort_by_name_both_directions ... ok
+test logic::tests::sort_by_score_ascending_is_monotonic ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/home/claude/scratch-spike/target/debug/deps/onyx_slint_spike-465c41837f38bfc8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ui_behaviour.rs (/home/claude/scratch-spike/target/debug/deps/ui_behaviour-fac7929d1be0131b)
+
+running 1 test
+test ui_behaviour_checks ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+
+   Doc-tests onyx_slint_spike
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,238 @@
+// Feasibility spike UI for brief B-13 (U-01, U-02, U-03, U-10).
+// Test data only. Not product UI.
+import { Button, LineEdit, TextEdit, ScrollView } from "std-widgets.slint";
+// Font embedded at compile time (U-03). OFL-1.1, see fonts/OFL.txt.
+import "../fonts/Vazirmatn-Regular.ttf";
+
+export struct Row {
+    name: string,
+    role: string,
+    score: string,
+}
+
+// Motion flag. Rust sets it from the OS reading (U-10). true means reduced motion.
+export global Motion {
+    in-out property <bool> reduced: true;
+}
+
+export global Theme {
+    in-out property <bool> dark: false;
+    out property <color> background: dark ? #141821 : #f5f6f9;
+    out property <color> surface: dark ? #1f2430 : #ffffff;
+    out property <color> header-bg: dark ? #2a3142 : #e3e8f1;
+    out property <color> text: dark ? #f2f4f8 : #1d2330;
+    out property <color> text-dim: dark ? #b4bccc : #4f5a6e;
+    out property <color> accent: dark ? #7aa7ff : #2f5fd0;
+    out property <color> focus-ring: dark ? #ffd166 : #b35900;
+}
+
+// U-01 item 1: sortable table. Sorting is done in Rust; this component only shows rows.
+component SortableTable inherits Rectangle {
+    in property <[Row]> rows;
+    in property <string> sort-label;
+    callback sort-requested(string);
+
+    background: Theme.surface;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 4px;
+            Button {
+                text: "Name";
+                accessible-role: button;
+                accessible-label: "Sort by name";
+                clicked => { root.sort-requested("name"); }
+            }
+            Button {
+                text: "Role";
+                accessible-role: button;
+                accessible-label: "Sort by role";
+                clicked => { root.sort-requested("role"); }
+            }
+            Button {
+                text: "Score";
+                accessible-role: button;
+                accessible-label: "Sort by score";
+                clicked => { root.sort-requested("score"); }
+            }
+        }
+        Text {
+            text: root.sort-label;
+            color: Theme.text-dim;
+            accessible-role: text; accessible-label: "Sort state";
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 200px; text: "Name"; color: Theme.text; font-weight: 700; accessible-role: text; accessible-label: "Column header Name"; }
+            Text { width: 150px; text: "Role"; color: Theme.text; font-weight: 700; accessible-role: text; accessible-label: "Column header Role"; }
+            Text { width: 80px; text: "Score"; color: Theme.text; font-weight: 700; accessible-role: text; accessible-label: "Column header Score"; }
+        }
+        for row in root.rows: HorizontalLayout {
+            spacing: 8px;
+            Text { width: 200px; text: row.name; color: Theme.text; accessible-role: text; accessible-label: "cell-name: " + row.name; }
+            Text { width: 150px; text: row.role; color: Theme.text; accessible-role: text; accessible-label: "cell-role: " + row.role; }
+            Text { width: 80px; text: row.score; color: Theme.text; accessible-role: text; accessible-label: "cell-score: " + row.score; }
+        }
+    }
+}
+
+// U-01 item 2: paged table. Paging is done in Rust; this component only shows the page.
+component PagedTable inherits Rectangle {
+    in property <[Row]> rows;
+    in property <string> page-label;
+    in property <bool> can-prev;
+    in property <bool> can-next;
+    callback prev-page();
+    callback next-page();
+
+    background: Theme.surface;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 4px;
+        for row in root.rows: HorizontalLayout {
+            spacing: 8px;
+            Text { width: 200px; text: row.name; color: Theme.text; accessible-role: text; accessible-label: "page-cell-name: " + row.name; }
+            Text { width: 80px; text: row.score; color: Theme.text; accessible-role: text; accessible-label: "page-cell-score: " + row.score; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                text: "Previous";
+                accessible-role: button;
+                accessible-label: "Previous page";
+                enabled: root.can-prev;
+                clicked => { root.prev-page(); }
+            }
+            Text {
+                text: root.page-label;
+                color: Theme.text;
+                accessible-role: text; accessible-label: "Page count";
+                vertical-alignment: center;
+            }
+            Button {
+                text: "Next";
+                accessible-role: button;
+                accessible-label: "Next page";
+                enabled: root.can-next;
+                clicked => { root.next-page(); }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "ONYX Slint feasibility spike";
+    preferred-width: 1000px;
+    preferred-height: 1500px;
+    default-font-family: "Vazirmatn";
+    background: Theme.background;
+
+    in property <[Row]> sort-rows;
+    in property <string> sort-label;
+    in property <[Row]> page-rows;
+    in property <string> page-label;
+    in property <bool> can-prev;
+    in property <bool> can-next;
+    in property <string> motion-label;
+    in property <bool> flash;
+    in-out property <string> multiline-text;
+    in-out property <string> persian-text;
+    in-out property <string> bidi-text;
+
+    callback sort-requested(string);
+    callback prev-page();
+    callback next-page();
+    callback toggle-theme();
+
+    // Lets tests focus the multiline editor through the public API.
+    public function focus-multiline() {
+        multiline-editor.focus();
+    }
+    public function focus-persian() {
+        persian-field.focus();
+    }
+    public function focus-bidi() {
+        bidi-field.focus();
+    }
+
+    ScrollView {
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "ONYX Slint feasibility spike (test data only)"; color: Theme.text; font-size: 18px; font-weight: 700; }
+                Button {
+                    text: Theme.dark ? "Light theme" : "Dark theme";
+                    accessible-role: button;
+                    accessible-label: "Toggle theme";
+                    clicked => { root.toggle-theme(); }
+                }
+            }
+            Text { text: root.motion-label; color: Theme.text-dim; accessible-role: text; accessible-label: "Motion setting"; }
+
+            Text { text: "U-01.1 Sortable table"; color: Theme.text; font-weight: 700; }
+            SortableTable {
+                rows: root.sort-rows;
+                sort-label: root.sort-label;
+                sort-requested(key) => { root.sort-requested(key); }
+            }
+
+            Text { text: "U-01.2 Paged table"; color: Theme.text; font-weight: 700; }
+            PagedTable {
+                rows: root.page-rows;
+                page-label: root.page-label;
+                can-prev: root.can-prev;
+                can-next: root.can-next;
+                prev-page => { root.prev-page(); }
+                next-page => { root.next-page(); }
+            }
+
+            Text { text: "U-01.3 Multiline text (Enter inserts a newline; text wraps)"; color: Theme.text; font-weight: 700; }
+            multiline-editor := TextEdit {
+                text <=> root.multiline-text;
+                wrap: word-wrap;
+                height: 120px;
+                accessible-role: text-input; accessible-label: "Multiline notes";
+            }
+
+            Text { text: "U-01.4 Persian input (use an IME; manual test)"; color: Theme.text; font-weight: 700; }
+            persian-field := LineEdit {
+                text <=> root.persian-text;
+                placeholder-text: "متن فارسی را اینجا بنویسید";
+                accessible-role: text-input; accessible-label: "Persian input";
+            }
+
+            Text { text: "U-01.5 Mixed direction (Persian and English in one field)"; color: Theme.text; font-weight: 700; }
+            bidi-field := LineEdit {
+                text <=> root.bidi-text;
+                accessible-role: text-input; accessible-label: "Mixed direction input";
+            }
+
+            Text { text: "U-03 font samples (Vazirmatn 33.0.3, OFL-1.1)"; color: Theme.text; font-weight: 700; }
+            Rectangle {
+                background: Theme.surface;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+                    Text { text: "Latin: abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ"; color: Theme.text; accessible-role: text; accessible-label: "font sample latin"; }
+                    Text { text: "Persian: سلام، این یک متن آزمایشی فارسی است."; color: Theme.text; accessible-role: text; accessible-label: "font sample persian"; }
+                    Text { text: "Joining and ZWNJ: می‌خواهم کتاب‌ها را بخوانم"; color: Theme.text; accessible-role: text; accessible-label: "font sample joining"; }
+                    Text { text: "Combining marks (harakat): بِسْمِ اللَّه"; color: Theme.text; accessible-role: text; accessible-label: "font sample marks"; }
+                    Text { text: "Digits: 0123456789   ۰۱۲۳۴۵۶۷۸۹"; color: Theme.text; accessible-role: text; accessible-label: "font sample digits"; }
+                }
+            }
+
+            Text { text: "U-02.4 Focus indicator: Tab to a control; check the ring in light and dark"; color: Theme.text-dim; }
+
+            Rectangle {
+                height: 10px;
+                background: root.flash ? Theme.accent : Theme.header-bg;
+                animate background { duration: Motion.reduced ? 0ms : 250ms; }
+                accessible-role: image; accessible-label: "Motion indicator";
+            }
+        }
+    }
+}
