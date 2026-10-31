@@ -138,3 +138,10 @@ These items are not closed by the decisions above:
 - **Current state:** Admin Shell login events go only to the browser console and a window event. Worker events are not collected.
 - **Candidate approach (not decided):** Cloudflare-native logging. Volume is small and needs no computation. Options to evaluate: Workers Logs, Logpush, or a D1 table.
 - **Owner:** To be assigned when the migration closes.
+
+## U-10 motion preference fallback (2026-10-31)
+
+- **Decision:** If the OS motion setting is unknown or unreadable, the app uses reduced motion.
+- **Reason:** Reduced motion is the safer default for users who may need it. It is also the value `MotionPreference::resolve(None)` already returns in `crates/applications/client-composition/src/motion.rs`.
+- **Decided by:** Coordinator, per the owner's standing instruction. Owner confirmed on 2026-10-31.
+- **Still to do:** Per-OS readers and Slint wiring.
