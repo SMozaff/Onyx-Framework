@@ -109,3 +109,9 @@ These items are not closed by the decisions above:
 
 - **Bundled font (U-03):** Vazirmatn, SIL Open Font License 1.1. Owner confirmed the font and its license.
 - **Integration coordinator (blocker 15):** Claude (AI assistant), named by the owner. Coordinates evidence collection and keeps this record current. The owner remains the approver of record for Gate 0b sign-off.
+
+## U-04 error codes (2026-10-31)
+
+- **Decision:** Policy precondition failures use the specific codes `DRAFT_ALREADY_PENDING`, `NO_DRAFT_VERSION`, and `NO_PUBLISHED_VERSION` on the API. The Worker's generic `COMMAND_PRECONDITION_UNSUPPORTED` is not used for these cases.
+- **Status:** Decided. Worker implementation pending.
+- Source matrix: `docs/migrations/slint/u04-policy-parity.md`.
