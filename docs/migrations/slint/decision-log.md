@@ -119,3 +119,8 @@ These items are not closed by the decisions above:
 
 - **Recorded:** Inventory of fixtures with git provenance in `docs/production/fixture-provenance.md`.
 - **OPEN:** The approved fixture schema is not identified in the repo. Owner to confirm which schema (candidate: `shared/diagnostics/diagnostic-event.schema.json`, version 1.0).
+## C-01 API contract re-pin (2026-10-31)
+
+- **Decision:** `docs/production/api-contract.md` re-pinned to main `98a2258`. Verified by the route-completeness test (42 passing).
+- **Reason:** The contract's routes already matched the Worker. Only the baseline commit was stale.
+- **Not changed:** Historical B-01 reports keep their original baseline. They record what was reviewed at that time, and rewriting them would misstate the history.
