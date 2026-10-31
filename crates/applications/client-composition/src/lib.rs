@@ -28,6 +28,7 @@ pub mod hierarchy_cache;
 pub mod id_display;
 pub mod local_db;
 pub mod local_key;
+pub mod motion;
 pub mod query_registry;
 pub mod session_policy;
 pub mod sync_agent;
