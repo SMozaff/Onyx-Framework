@@ -1,7 +1,7 @@
 # ONYX Cloudflare Worker API Contract
 
 **Source of truth:** `deploy/cloudflare/edge-gateway/src/index.ts`, especially `dispatch()`.
-**Source baseline:** `98a2258` (main, re-pinned 2026-10-31; previous baseline `38c8975`, 2026-10-23). Verified by `deploy/cloudflare/edge-gateway/test/route-completeness.test.ts` (42 passing). This is a source-level contract, not proof of deployed behavior.
+**Source baseline:** `d330451` (main, re-pinned 2026-11-01; previous baseline `98a2258`, 2026-10-31). Verified by `deploy/cloudflare/edge-gateway/test/route-completeness.test.ts` (42 passing on 2026-11-01). This is a source-level contract, not proof of deployed behavior.
 **Unknown paths:** the Worker currently returns `501 ROUTE_NOT_MIGRATED` with `FEATURE_UNAVAILABLE`. Its response text generically says an equivalent Axum route exists; that text is not evidence that a native route actually exists. Check the native router separately, and never treat a `501` as success.
 
 Status terms: `implemented-in-source` means a dispatch branch and handler exist in this revision. It does not imply production deployment or successful end-to-end verification.
