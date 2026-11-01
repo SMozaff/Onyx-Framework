@@ -172,7 +172,7 @@ These items are not closed by the decisions above:
 
 ## Postponed: staff account import and creation report (owner decision, 2026-11-01)
 
-- **Decision:** Postponed until after the Slint migration.
+- **Decision:** Postponed until after the Slint migration. **Superseded (2026-11-01):** the owner later allowed this lane to run in parallel. See "Backend accounts: decisions".
 - **Scope when resumed:** Batch import and single creation create accounts with Onyx ID sign-in, a one-time password, forced change at first login, and the Excel creation report. Rules are recorded in `docs/product/staff-and-team-rules.md`.
 - **Reason:** The migration plan keeps the Worker and D1 as the identity authority and puts backend changes out of scope.
 - **Open items to resolve when resumed:** Worker-side password hashing (PBKDF2 or a library for Argon2id) and the one-time password delivery in the report.
