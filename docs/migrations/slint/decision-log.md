@@ -197,3 +197,9 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Password minimums:** Unchanged (8 on create, 12 on reset). One-time passwords are generated to satisfy the 12-character minimum.
 - **Postponed entry:** Superseded by the parallel-lane decision above.
 - **Excel report:** Columns as in `backend-accounts-creation-report-spec.md`. Spreadsheet formula-injection protection applies to every text cell.
+
+## Rust toolchain in local sandboxes (2026-11-01)
+
+- **Repo pin:** `rust-toolchain.toml` pins 1.97.1. CI and release workflows use 1.97.1. Unchanged.
+- **Sandbox limit:** the coordinator sandbox cannot download 1.97.1 (egress policy blocks static.rust-lang.org). Local runs use the installed stable toolchain via `RUSTUP_TOOLCHAIN=stable`.
+- **Consequence:** results from local sandbox runs are labelled "stable 1.97.0". Re-run on CI or on a machine with 1.97.1 before relying on them.
