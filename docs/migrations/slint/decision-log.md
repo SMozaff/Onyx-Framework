@@ -176,3 +176,9 @@ These items are not closed by the decisions above:
 - **Scope when resumed:** Batch import and single creation create accounts with Onyx ID sign-in, a one-time password, forced change at first login, and the Excel creation report. Rules are recorded in `docs/product/staff-and-team-rules.md`.
 - **Reason:** The migration plan keeps the Worker and D1 as the identity authority and puts backend changes out of scope.
 - **Open items to resolve when resumed:** Worker-side password hashing (PBKDF2 or a library for Argon2id) and the one-time password delivery in the report.
+
+## Backend accounts lane: status (2026-11-01)
+
+- **Status:** Current-state review, draft migration, draft report spec and pending tests are on branch `feat/backend-accounts`. No decision is recorded here.
+- **Open for owner:** O-1 to O-6 in `docs/migrations/slint/backend-accounts-current-state.md`.
+- **Conflict to confirm:** The entry "Postponed" above says the lane waits until after the migration. The handover says the owner allowed it to run in parallel on the same date.
