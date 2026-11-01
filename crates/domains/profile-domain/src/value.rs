@@ -166,3 +166,54 @@ impl WorkStats {
 /// profile belongs to" the way `StaffProfileId` is distinguished from a
 /// generic `ObjectId`.
 pub type ProfileOwnerId = UserId;
+
+/// Validates a team name for input (decision Q-05, 2026-10-31).
+///
+/// A team name must not contain `;`, because `;` separates entries in the
+/// team-membership list and a name containing it would be split in two.
+/// Surrounding whitespace is trimmed; an empty name is rejected.
+pub fn validate_team_name(raw: &str) -> Result<String, &'static str> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("TEAM_NAME_EMPTY");
+    }
+    if name.contains(';') {
+        return Err("TEAM_NAME_CONTAINS_SEMICOLON");
+    }
+    Ok(name.to_string())
+}
+
+#[cfg(test)]
+mod team_name_tests {
+    use super::validate_team_name;
+
+    #[test]
+    fn accepts_plain_names_and_trims_whitespace() {
+        assert_eq!(
+            validate_team_name("  Platform Team  "),
+            Ok("Platform Team".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_semicolon_anywhere_in_the_name() {
+        assert_eq!(
+            validate_team_name("A;B"),
+            Err("TEAM_NAME_CONTAINS_SEMICOLON")
+        );
+        assert_eq!(
+            validate_team_name(";A"),
+            Err("TEAM_NAME_CONTAINS_SEMICOLON")
+        );
+        assert_eq!(
+            validate_team_name("A ;"),
+            Err("TEAM_NAME_CONTAINS_SEMICOLON")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_and_whitespace_only_names() {
+        assert_eq!(validate_team_name(""), Err("TEAM_NAME_EMPTY"));
+        assert_eq!(validate_team_name("   "), Err("TEAM_NAME_EMPTY"));
+    }
+}
