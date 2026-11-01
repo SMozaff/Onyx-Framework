@@ -1,6 +1,6 @@
 # U-04: Policy Worker/Rust parity matrix
 
-**Status:** Evidence gathered 2026-10-30 by reading both implementations. Behavior tests for the cases marked "Not yet verified" are still needed.
+**Status:** Evidence gathered 2026-10-30. Worker behavior tests added 2026-11-01 in `deploy/cloudflare/edge-gateway/test/u04-parity-behavior.test.ts` (11 passing). Remaining gaps are listed below as todo.
 
 Sources:
 - Rust: `crates/domains/policy-domain/src/aggregate.rs` (`decide`), `error.rs`.
@@ -23,11 +23,13 @@ Sources:
 | 9 | Retire an already Retired policy | `InvalidTransition` | `from: ["Active"]` rejects | Match: reject | Not compared |
 | 10 | Create a policy with an empty name | `MissingField` | Not checked here (create-scope check only) | Not verified | Not verified |
 
-## Not yet verified
+## Verification status
 
-- Published versions are immutable (no command edits a Published version). Check both sides.
-- Optimistic concurrency (`expected_version`). Check the Worker's version check against Rust's handling.
-- Retire is terminal on both sides. Behavior is consistent in the code read so far; a test is still needed.
+- Rows 1 to 9: covered by Worker tests (2026-11-01).
+- Published versions are immutable on the Worker side: publish needs a Draft, and creating a version does not edit a Published one.
+- Retire is terminal on the Worker side (rows 7 to 9).
+- **Still todo:** row 10 (empty policy name) and optimistic concurrency (`expected_version`). Both need a decision on the Worker change, or a Rust-side check on the same case.
+- Rust-side behavior tests for these rows are not in this lane.
 
 ## Decision (2026-10-31): specific error codes
 
