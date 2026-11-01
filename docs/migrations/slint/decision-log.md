@@ -203,3 +203,8 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Repo pin:** `rust-toolchain.toml` pins 1.97.1. CI and release workflows use 1.97.1. Unchanged.
 - **Sandbox limit:** the coordinator sandbox cannot download 1.97.1 (egress policy blocks static.rust-lang.org). Local runs use the installed stable toolchain via `RUSTUP_TOOLCHAIN=stable`.
 - **Consequence:** results from local sandbox runs are labelled "stable 1.97.0". Re-run on CI or on a machine with 1.97.1 before relying on them.
+
+## C-01 API contract re-pin (2026-11-01)
+
+- **Decision:** `docs/production/api-contract.md` re-pinned to main `d330451`. Route-completeness test: 42 passing on that commit.
+- **Reason:** The contract matches the current Worker source. Only the baseline commit was stale. This closes the C-01 part of Gate 0b blocker 12.
