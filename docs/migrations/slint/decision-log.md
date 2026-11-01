@@ -208,3 +208,9 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 
 - **Decision:** `docs/production/api-contract.md` re-pinned to main `d330451`. Route-completeness test: 42 passing on that commit.
 - **Reason:** The contract matches the current Worker source. Only the baseline commit was stale. This closes the C-01 part of Gate 0b blocker 12.
+
+## Q-05 implementation: team name validator (2026-11-01)
+
+- **Implemented:** `validate_team_name` in `crates/domains/profile-domain/src/value.rs`. Rejects `;` (`TEAM_NAME_CONTAINS_SEMICOLON`) and empty or whitespace-only names (`TEAM_NAME_EMPTY`). Trims surrounding whitespace.
+- **Tests:** 3 unit tests; profile-domain suite 12 passing.
+- **Not yet wired:** no route accepts team names as input today. The CSV/JSON/XLSX import splits `team_ids` on `;`, so it cannot produce a `;` inside a name. Wire the validator when a team write path exists.
