@@ -182,3 +182,19 @@ These items are not closed by the decisions above:
 - **Status:** Current-state review, draft migration, draft report spec and pending tests are on branch `feat/backend-accounts`. No decision is recorded here.
 - **Open for owner:** O-1 to O-6 in `docs/migrations/slint/backend-accounts-current-state.md`.
 - **Conflict to confirm:** The entry "Postponed" above says the lane waits until after the migration. The handover says the owner allowed it to run in parallel on the same date.
+
+## Backend accounts: decisions (owner approved "decide and document", 2026-11-01)
+
+Decided by the coordinator under the owner's standing authority. Owner may override any item by a new entry.
+
+- **O-1 Hashing:** Argon2id via the existing Worker library (`argon2-wasm-edge`). Reason: already in use, memory-hard, matches the Rust side.
+- **O-2 Account store:** D1 is the account authority. Reason: the migration plan makes the Worker and D1 the identity authority. The Rust `UserStore` is not written.
+- **O-3 Sign-in identifier:** The Onyx ID becomes the login identifier. The username and email stay accepted as aliases during transition. Reason: the owner requires sign-in with the Onyx ID.
+- **O-4 Forced password change:** A `must_change_password` flag on the account. When set, `requireSession` allows only the password-change and logout routes; all others return `PASSWORD_CHANGE_REQUIRED` (409). The flag clears on a successful change. Reason: simplest enforcement that the Worker already applies centrally.
+- **O-5 Blank `onyx_id` on import:** Rejected per row (`ONYX_ID_REQUIRED`) for staff rows. Staff rows create the account and the ID together only through the same flow as single creation, which is the single source of IDs. Reason: keeps one path for account and ID creation.
+  - **Correction (2026-11-01):** The above conflicts with "every import row creates an account and assigns an ID". Final rule: **every import row creates an account and gets a generated staff ID; a supplied `onyx_id` is ignored and reported.** Reason: owner's latest instruction.
+- **O-6 Existing import:** Extended. `POST /api/admin/profiles/import` accepts `.xlsx` as well as CSV and JSON, and creates accounts per row. Reason: one endpoint for the owner's import flow.
+- **Email:** Account email is required. For a row without `contact_email`, the system uses a generated placeholder address in the form `<onyx_id>@accounts.invalid`, flagged in the report. Reason: account creation requires an email; placeholder keeps rows importable and is marked for follow-up.
+- **Password minimums:** Unchanged (8 on create, 12 on reset). One-time passwords are generated to satisfy the 12-character minimum.
+- **Postponed entry:** Superseded by the parallel-lane decision above.
+- **Excel report:** Columns as in `backend-accounts-creation-report-spec.md`. Spreadsheet formula-injection protection applies to every text cell.
