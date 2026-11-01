@@ -1,14 +1,15 @@
--- DRAFT ONLY. NOT APPLIED. NOT IN migrations/ (Wrangler reads migrations/, not this folder).
--- Source: docs/design/id-sequences.md (proposed tables, migration 0009_public_ids.sql).
--- Blocked by: O-2 (confirm D1 as account store before any migration is applied).
--- Moving this file into migrations/ and applying it is an owner decision.
--- Allocation statement and import flow are in docs/design/id-sequences.md, not here.
+-- Staff and team public IDs (docs/design/id-sequences.md).
+-- Promoted from drafts/backend-accounts/ with owner decision O-2 (D1 is the account store).
+-- id_sequences.last_value is capped at 9999: an allocation above the cap fails the
+-- whole D1 batch, so a failed row leaves no gap (per the design doc requirement).
+-- Staff IDs are allocated inside the same batch that writes the account (see src/index.ts,
+-- createStaffAccount). Rows are never deleted from public_ids.
 
 CREATE TABLE IF NOT EXISTS id_sequences (
   organization_id TEXT    NOT NULL,
   kind            TEXT    NOT NULL CHECK (kind IN ('staff','team')),
   year            INTEGER NOT NULL,
-  last_value      INTEGER NOT NULL DEFAULT 0,
+  last_value      INTEGER NOT NULL DEFAULT 0 CHECK (last_value BETWEEN 0 AND 9999),
   PRIMARY KEY (organization_id, kind, year)
 );
 
