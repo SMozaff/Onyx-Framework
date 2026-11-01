@@ -93,6 +93,14 @@ describe("U-04 parity: retire is terminal", () => {
 });
 
 describe("U-04 parity: known gaps (recorded, not hidden)", () => {
-  it.todo("row 10: empty policy name is rejected (Rust MissingField; Worker does not check here)");
-  it.todo("optimistic concurrency: expected_version mismatch returns VERSION_CONFLICT on both sides");
+  it("row 10: empty or whitespace policy name is rejected (Worker: INVALID_COMMAND_PAYLOAD; Rust: MissingField)", () => {
+    for (const name of ["", "   "]) {
+      expect(validateCommandSemantics("CreatePolicy", undefined, { name, scope }, ACTOR)).toEqual({
+        allowed: false,
+        reason: "INVALID_COMMAND_PAYLOAD",
+      });
+    }
+  });
+
+  it.todo("optimistic concurrency: expected_version mismatch returns VERSION_CONFLICT (both sides use this code; a test needs a D1 mock)");
 });
