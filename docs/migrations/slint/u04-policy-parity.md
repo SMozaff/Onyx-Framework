@@ -26,9 +26,11 @@ Sources:
 ## Verification status
 
 - Rows 1 to 9: covered by Worker tests (2026-11-01).
+- Row 10 (empty policy name): Worker rejects with `INVALID_COMMAND_PAYLOAD`; Rust rejects with `MissingField`. Same outcome (reject), different code. Covered by a Worker test. **Decision:** keep both codes; the API code for this case is `INVALID_COMMAND_PAYLOAD`.
+- Optimistic concurrency: both sides return `VERSION_CONFLICT` (category CONCURRENCY, RETRYABLE). Confirmed by reading the code; a behavior test needs a D1 mock.
 - Published versions are immutable on the Worker side: publish needs a Draft, and creating a version does not edit a Published one.
 - Retire is terminal on the Worker side (rows 7 to 9).
-- **Still todo:** row 10 (empty policy name) and optimistic concurrency (`expected_version`). Both need a decision on the Worker change, or a Rust-side check on the same case.
+- **Still todo:** a behavior test for optimistic concurrency (needs a D1 mock). No decision is open.
 - Rust-side behavior tests for these rows are not in this lane.
 
 ## Decision (2026-10-31): specific error codes
