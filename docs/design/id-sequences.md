@@ -1,6 +1,6 @@
 # Storage for generated IDs (staff and team)
 
-**Status:** Design draft, 2026-10-30. Not implemented. All decisions are recorded.
+**Status:** Design, 2026-10-30. Implemented 2026-11-01 in `deploy/cloudflare/edge-gateway/migrations/0009_public_ids.sql` and `src/index.ts` (`createStaffAccount`). All decisions are recorded. Implementation notes: `id_sequences.last_value` is capped at 9999 by a CHECK, so an allocation above the cap fails the whole D1 batch. The ID is built inside the same batch as the account, so no separate allocation step exists.
 
 ## Context
 
@@ -16,7 +16,7 @@
 3. A failed import leaves no gaps in the numbering and no half-written rows.
 4. The sequence is atomic under concurrent imports.
 
-## Proposed tables (migration `0009_public_ids.sql`)
+## Tables (migration `0009_public_ids.sql`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS id_sequences (

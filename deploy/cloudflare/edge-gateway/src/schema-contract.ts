@@ -43,7 +43,11 @@ export const AUTH_SCHEMA_CONTRACT: {
       "parent_user_id",
       "created_at",
       "updated_at",
+      "onyx_id",
+      "must_change_password",
     ],
+    id_sequences: ["organization_id", "kind", "year", "last_value"],
+    public_ids: ["organization_id", "public_id", "kind", "aggregate_id", "issued_at", "retired_at"],
     organizations: ["id", "name", "is_active", "created_at", "updated_at"],
     token_revocations: ["token_hash", "revoked_at"],
     user_session_revocations: ["user_id", "revoked_before_ms", "updated_at"],
@@ -55,12 +59,14 @@ export const AUTH_SCHEMA_CONTRACT: {
   indexes: [
     "idx_users_username_lower",
     "idx_users_email_lower",
+    "idx_users_org_onyx_id",
   ],
   tableIndexes: {
     mobile_access_settings: ["idx_mobile_access_settings_updated_at"],
     replica_ownership: ["idx_replica_ownership_org"],
     relay_ticket_redemptions: ["idx_relay_ticket_expiry"],
     file_asset_acl: ["idx_file_asset_acl_user_org"],
+    public_ids: ["idx_public_ids_aggregate"],
   },
 };
 

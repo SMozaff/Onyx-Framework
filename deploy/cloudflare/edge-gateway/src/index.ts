@@ -12,6 +12,8 @@ import { mobileCapabilityGranted } from "./mobile-capability";
 import { validateCommandSemantics } from "./command-semantics";
 import { staffOwnedPredicateSql, staffOwnedBindings, resourceIdFromReference } from "./resource-scope";
 import { makeApiFailureEvent, makeWorkerLoginDiagnosticEvent, trustedRequestId, type SafeCauseType } from "./diagnostics";
+import { buildXlsx, readFirstSheet, XlsxError, type XlsxSheet } from "./xlsx";
+import { generateOneTimePassword, initialsFrom, missingRequiredColumn, prepareStaffRow, PLACEHOLDER_EMAIL_DOMAIN, tehranGregorianYear, type PreparedStaffRow, type RawStaffRow, type RawStaffValue } from "./staff-rules";
 
 type Json = Record<string, unknown>;
 
@@ -144,7 +146,7 @@ async function jwtVerify(
   return session;
 }
 function authorization(request:Request){const value=request.headers.get("authorization");return value?value.replace(/^Bearer\s+/i,""):null;}
-async function requireSession(request:Request,env:Env){
+async function requireSession(request:Request,env:Env,options:{allowPasswordChange?:boolean}={}){
   const token=authorization(request);
   if(!token)throw new Error("AUTH_REQUIRED");
   const session=await jwtVerify(env,token);
@@ -153,7 +155,7 @@ async function requireSession(request:Request,env:Env){
   // Account and organization status, role and tenant are re-read on EVERY
   // protected request. Long-lived JWT claims are not authority.
   const current=await env.DB.prepare(
-    "SELECT u.id,u.username,u.organization_id,u.is_active,u.role,u.is_admin,u.class FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
+    "SELECT u.id,u.username,u.organization_id,u.is_active,u.role,u.is_admin,u.class,u.must_change_password FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
   ).bind(session.sub).first<Record<string,unknown>>();
   const currentRole=current?roleForUser(current):"";
   if(!current||!ONYX_ROLES.includes(currentRole as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(current,currentRole)&&!isCanonicalAllFather(current,currentRole)))throw new Error("AUTH_REQUIRED");
@@ -162,6 +164,10 @@ async function requireSession(request:Request,env:Env){
   if(String(current.username)!==session.username||String(current.organization_id)!==session.organization_id||currentRole!==session.role||
      Boolean(current.is_admin)!==Boolean(session.is_admin))throw new Error("AUTH_REQUIRED");
   if(currentRole==="ALL_FATHER"&&!isCanonicalAllFather(current,currentRole))throw new Error("AUTH_REQUIRED");
+  // Forced password change (O-4): until the flag clears, only the
+  // password-change route is reachable through this gate. Logout does not
+  // call requireSession, so it stays available.
+  if(Number(current.must_change_password??0)===1&&!options.allowPasswordChange)throw new Error("PASSWORD_CHANGE_REQUIRED");
   return session;
 }
 function corsOrigin(request:Request,env:Env){const origin=request.headers.get("origin");const configured=env.ONYX_CORS_ORIGINS?.split(",").map(x=>x.trim()).filter(Boolean)??[];if(!origin)return null;return configured.includes(origin)&&!configured.includes("*")?origin:null;}
@@ -196,7 +202,7 @@ async function issuePair(env:Env,user:Record<string,unknown>,type:string,session
   const role=roleForUser(user);
   const base={sub:String(user.id),username:String(user.username),organization_id:String(user.organization_id),is_admin:Boolean(user.is_admin),class:(user.class as string|null)??null,role,client_type:type,sid:sessionId??uuid()};
   const access=await jwtSign(env,{...base,exp:now()+3600,typ:"access"}); const refresh=await jwtSign(env,{...base,exp:now()+7*86400,typ:"refresh"});
-  return {access_token:access,refresh_token:refresh,expires_in:3600,user:{id:user.id,username:user.username,email:user.email??null,organization_id:user.organization_id,is_admin:Boolean(user.is_admin),class:user.class??null,role}};
+  return {access_token:access,refresh_token:refresh,expires_in:3600,user:{id:user.id,username:user.username,email:user.email??null,onyx_id:user.onyx_id??null,organization_id:user.organization_id,is_admin:Boolean(user.is_admin),class:user.class??null,role,must_change_password:Number(user.must_change_password??0)===1}};
 }
 async function authLogin(request:Request,env:Env):Promise<Response>{
   let parsed:unknown;
@@ -217,7 +223,7 @@ async function authLogin(request:Request,env:Env):Promise<Response>{
   if(!identifier||!password)return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
   let stage="credential_lookup";
   try{
-    const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier).first<Record<string,unknown>>();
+    const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.onyx_id,u.must_change_password,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (u.onyx_id=LOWER(?) OR LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier,identifier).first<Record<string,unknown>>();
     stage="credential_verification";
     const role=user?roleForUser(user):"";
     if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
@@ -259,7 +265,7 @@ async function authRefresh(request:Request,env:Env){
     const claims=await jwtVerify(env,token);
     if(claims.typ!=="refresh")throw new Error("wrong token type");
     const user=await env.DB.prepare(
-      "SELECT u.id,u.username,u.email,u.organization_id,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
+      "SELECT u.id,u.username,u.email,u.onyx_id,u.must_change_password,u.organization_id,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE u.id=? AND u.is_active=1 LIMIT 1"
     ).bind(claims.sub).first<Record<string,unknown>>();
     if(!user)throw new Error("inactive user or organization");
     const revocation=await env.DB.prepare("SELECT revoked_before_ms FROM user_session_revocations WHERE user_id=? LIMIT 1").bind(String(user.id)).first<{revoked_before_ms:number}>();
@@ -528,30 +534,27 @@ async function listOrganizationAdmins(env:Env,session:Session,organizationId:str
     .bind(organizationId).all<Record<string,unknown>>();
   return json((rows.results??[]).map(row=>({id:String(row.id),username:String(row.username),email:row.email??null,organization_id:String(row.organization_id),is_active:Boolean(row.is_active),created_at:Number(row.created_at),updated_at:Number(row.updated_at)})));
 }
-async function createUser(request:Request,env:Env,session:Session,targetRole:"ORGANIZATION_ADMIN"|"STAFF"){
-  requireRole(session,targetRole==="ORGANIZATION_ADMIN"?"ALL_FATHER":"ORGANIZATION_ADMIN");
+async function createUser(request:Request,env:Env,session:Session){
+  requireRole(session,"ALL_FATHER");
   const body=await request.json().catch(()=>null) as Json|null;
-  const allowedKeys=targetRole==="ORGANIZATION_ADMIN"?["username","password","email","organization_id"]:["username","password","email","class"];
-  if(!body||Array.isArray(body)||!exactBody(body,allowedKeys)||(targetRole==="STAFF"&&!Object.prototype.hasOwnProperty.call(body,"class")))throw new Error("INVALID_BODY");
+  const allowedKeys=["username","password","email","organization_id"];
+  if(!body||Array.isArray(body)||!exactBody(body,allowedKeys))throw new Error("INVALID_BODY");
   const username=requiredString(body,"username"),password=requiredString(body,"password"),email=optionalEmail(body);
   if(password.length<8)throw new Error("PASSWORD_TOO_SHORT");
   if(!email)throw new Error("EMAIL_REQUIRED");
-  const userClass=targetRole==="STAFF"?body.class:null;
-  if(targetRole==="STAFF"&&userClass!==null&&(typeof userClass!=="string"||!MOBILE_ACCESS_CLASSES.includes(userClass as MobileAccessClass)))throw new Error("INVALID_USER_CLASS");
-  const organizationId=targetRole==="STAFF"?session.organization_id:requiredString(body,"organization_id");
+  const organizationId=requiredString(body,"organization_id");
   const org=await env.DB.prepare("SELECT id FROM organizations WHERE id=? AND is_active=1 LIMIT 1").bind(organizationId).first();
   if(!org)throw new Error("ORGANIZATION_NOT_FOUND");
   const existing=await env.DB.prepare("SELECT id FROM users WHERE LOWER(username)=LOWER(?) OR (? IS NOT NULL AND LOWER(email)=LOWER(?)) LIMIT 1").bind(username,email,email).first();
   if(existing)return json({error:"USER_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
-  const id=uuid(),timestamp=Date.now(),isAdmin=targetRole==="ORGANIZATION_ADMIN"?1:0,parent=targetRole==="STAFF"?session.sub:"__allfather__";
+  const id=uuid(),timestamp=Date.now(),parent="__allfather__";
   const passwordHash=await hashPassword(password);
-  const action=targetRole==="STAFF"?"staff.create":"admin.create";
   // Re-check organization activity in the INSERT predicate so a concurrent
   // deactivation cannot provision an admin into a disabled tenant.
   const create=env.DB.prepare("INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM organizations WHERE id=? AND is_active=1)")
-    .bind(id,username,email,organizationId,passwordHash,isAdmin,1,userClass,targetRole,parent,timestamp,timestamp,organizationId);
+    .bind(id,username,email,organizationId,passwordHash,1,1,null,"ORGANIZATION_ADMIN",parent,timestamp,timestamp,organizationId);
   const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
-    .bind(session.organization_id,session.sub,action,uuid(),JSON.stringify({target:id,username,email,organization_id:organizationId}),timestamp);
+    .bind(session.organization_id,session.sub,"admin.create",uuid(),JSON.stringify({target:id,organization_id:organizationId}),timestamp);
   try{
     const result=await env.DB.batch([create,auditStatement]);
     if(Number(result[0]?.meta?.changes??0)!==1)return json({error:"USER_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
@@ -560,8 +563,184 @@ async function createUser(request:Request,env:Env,session:Session,targetRole:"OR
     if(/unique constraint|already exists/i.test(message))return json({error:"USER_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
     throw error;
   }
-  return json({id,username,email,organization_id:organizationId,is_admin:Boolean(isAdmin),is_active:true,role:targetRole},201);
+  return json({id,username,email,organization_id:organizationId,is_admin:true,is_active:true,role:"ORGANIZATION_ADMIN"},201);
 }
+
+// ---- Staff accounts (backend accounts lane: O-1 to O-6) -------------------
+// Every staff row creates an account, a generated staff ID, a profile and a
+// one-time password. Only the Argon2id hash is stored. The plain password
+// exists only in the creation report returned to the calling admin.
+
+const CREATION_REPORT_COLUMNS = [
+  "onyx_id","first_name","last_name","first_name_fa","last_name_fa","national_id",
+  "contact_email","contact_phone","job_title","department","class_label","parent_onyx_id",
+  "team_ids","account_status","one_time_password","source_row","row_notes",
+];
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+interface ReportRow {
+  onyxId: string;
+  row: Partial<PreparedStaffRow>;
+  accountStatus: string;
+  password: string;
+  sourceRow: number;
+  notes: string[];
+}
+
+function reportValue(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+/** Creation report (.xlsx), one sheet, text cells only. Admin-only; never stored. */
+function creationReport(rows: ReportRow[]): Uint8Array {
+  const data = rows.map((item) => [
+    item.onyxId,
+    reportValue(item.row.firstName),
+    reportValue(item.row.lastName),
+    reportValue(item.row.firstNameFa),
+    reportValue(item.row.lastNameFa),
+    reportValue(item.row.nationalId),
+    reportValue(item.row.contactEmail),
+    reportValue(item.row.contactPhone),
+    reportValue(item.row.jobTitle),
+    reportValue(item.row.department),
+    reportValue(item.row.classLabel),
+    reportValue(item.row.parentOnyxId),
+    (item.row.teamIds ?? []).join(";"),
+    item.accountStatus,
+    item.password,
+    String(item.sourceRow),
+    item.notes.join("; "),
+  ]);
+  return buildXlsx("Creation report", [CREATION_REPORT_COLUMNS, ...data]);
+}
+
+function reportResponse(bytes: Uint8Array, filename: string, status: number, headers: Record<string,string> = {}): Response {
+  return new Response(bytes, {
+    status,
+    headers: {
+      "content-type": XLSX_MIME,
+      "content-disposition": `attachment; filename="${filename}"`,
+      "cache-control": "no-store",
+      "access-control-expose-headers": "Content-Disposition, X-Onyx-Import-Total, X-Onyx-Import-Created, X-Onyx-Import-Failed",
+      ...headers,
+    },
+  });
+}
+
+/** Resolves parent_onyx_id to an active account in the caller's organization. */
+async function resolveParentUserId(env:Env,organizationId:string,parentOnyxId:string|null,fallback:string):Promise<string|null>{
+  if(!parentOnyxId)return fallback;
+  const parent=await env.DB.prepare("SELECT id FROM users WHERE organization_id=? AND onyx_id=LOWER(?) AND is_active=1 LIMIT 1")
+    .bind(organizationId,parentOnyxId).first<{id:string}>();
+  return parent?.id??null;
+}
+
+type StaffCreateResult =
+  | {ok:true;onyxId:string;email:string;password:string}
+  | {ok:false;code:string};
+
+function staffCreateFailureCode(error:unknown):string{
+  const message=error instanceof Error?error.message:"";
+  if(/CHECK constraint failed.*last_value/i.test(message))return "ID_SEQUENCE_EXHAUSTED";
+  if(/idx_users_email_lower|users\.email/i.test(message))return "EMAIL_EXISTS";
+  if(/idx_users_username_lower|users\.username|idx_users_org_onyx_id|users\.onyx_id/i.test(message)&&/UNIQUE/i.test(message))return "ACCOUNT_ID_CONFLICT";
+  if(/NOT NULL constraint failed: users\.username/i.test(message))return "ORGANIZATION_NOT_FOUND";
+  return "STAFF_CREATE_UNAVAILABLE";
+}
+
+/**
+ * Creates one staff account, its profile, its staff ID and its one-time
+ * password in a single D1 batch (one transaction). The ID is allocated inside
+ * the batch, so a failed row leaves no gap in the sequence and no partial rows.
+ */
+async function createStaffAccount(env:Env,session:Session,row:PreparedStaffRow,parentUserId:string,userClass:string|null):Promise<StaffCreateResult>{
+  const year=tehranGregorianYear();
+  const initials=initialsFrom(row.firstName,row.lastName);
+  if(!initials||year<2000||year>2099)return {ok:false,code:"INVALID_STAFF_ROW"};
+  const yy=String(year-2000).padStart(2,"0");
+  const orgId=session.organization_id;
+  const password=generateOneTimePassword();
+  const passwordHash=await hashPassword(password);
+  const userId=uuid(),profileId=uuid(),eventId=uuid(),operationId=uuid(),timestamp=Date.now();
+  const profileJson=JSON.stringify({
+    profile_id:profileId,owner_id:userId,full_name:`${row.firstName} ${row.lastName}`,
+    photo_blob_key:null,job_title:row.jobTitle,contact_email:row.contactEmail,contact_phone:row.contactPhone,
+    department:row.department,class_label:row.classLabel,parent_display_name:null,team_memberships:row.teamIds,
+    work_stats:{assigned_items_count:null,completed_items_count:null,target_summary:null},
+  });
+  const pidOf=`(SELECT public_id FROM public_ids WHERE organization_id=? AND aggregate_id=?)`;
+  try{
+    const batch=await env.DB.batch([
+      // 1. Advance the per-organization, per-year counter. CHECK fails above 9999.
+      env.DB.prepare("INSERT INTO id_sequences(organization_id,kind,year,last_value) VALUES(?,'staff',?,1) ON CONFLICT(organization_id,kind,year) DO UPDATE SET last_value=last_value+1")
+        .bind(orgId,year),
+      // 2. Issue the public ID. Yields no row when the organization is inactive.
+      env.DB.prepare("INSERT INTO public_ids(organization_id,public_id,kind,aggregate_id,issued_at) SELECT ?,'st'||?||?||printf('%04d',last_value),'staff',?,? FROM id_sequences WHERE organization_id=? AND kind='staff' AND year=? AND EXISTS (SELECT 1 FROM organizations WHERE id=? AND is_active=1)")
+        .bind(orgId,yy,initials,profileId,timestamp,orgId,year,orgId),
+      // 3. The account. username is the Onyx ID. A missing ID makes username NULL and fails the batch.
+      env.DB.prepare(`INSERT INTO users(id,username,email,organization_id,password_hash,is_admin,is_active,class,role,parent_user_id,created_at,updated_at,onyx_id,must_change_password) SELECT ?,p.pid,COALESCE(?,p.pid||'@${PLACEHOLDER_EMAIL_DOMAIN}'),?,?,0,1,?,'STAFF',?,?,?,p.pid,1 FROM (SELECT ${pidOf} AS pid) AS p`)
+        .bind(userId,row.contactEmail,orgId,passwordHash,userClass,parentUserId,timestamp,timestamp,orgId,profileId),
+      // 4. The profile aggregate, carrying the staff ID.
+      env.DB.prepare(`INSERT INTO aggregates(id,aggregate_type,version,lifecycle_epoch,authority_epoch,state,updated_at,organization_id) VALUES(?,'staff_profile',1,0,0,json_set(?,'$.onyx_id',${pidOf}),?,?)`)
+        .bind(profileId,profileJson,orgId,profileId,timestamp,orgId),
+      // 5. Domain event for the profile.
+      env.DB.prepare(`INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,causation_id,actor,organization_id) VALUES(?,?,1,'ProfileCreated',json_set(?,'$.onyx_id',${pidOf}),?,'{}',?,?,NULL,?,?)`)
+        .bind(eventId,profileId,profileJson,orgId,profileId,timestamp,operationId,operationId,JSON.stringify({user_id:session.sub,organization_id:orgId}),orgId),
+      // 6. Audit. No email, name or password in the detail.
+      env.DB.prepare(`INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,'staff.create',?,json_object('target',?,'onyx_id',${pidOf}),?)`)
+        .bind(orgId,session.sub,operationId,userId,orgId,profileId,timestamp),
+    ]);
+    const changes=batch.map(result=>Number(result?.meta?.changes??0));
+    if(batch.length!==6||batch.some(result=>result?.success!==true)||changes[1]!==1||changes[2]!==1||changes[3]!==1||changes[4]!==1||changes[5]!==1)
+      return {ok:false,code:"STAFF_CREATE_UNAVAILABLE"};
+  }catch(error){
+    return {ok:false,code:staffCreateFailureCode(error)};
+  }
+  const issued=await env.DB.prepare("SELECT public_id FROM public_ids WHERE organization_id=? AND aggregate_id=? LIMIT 1")
+    .bind(orgId,profileId).first<{public_id:string}>();
+  if(!issued?.public_id)return {ok:false,code:"STAFF_CREATE_UNAVAILABLE"};
+  return {ok:true,onyxId:issued.public_id,email:row.contactEmail??`${issued.public_id}@${PLACEHOLDER_EMAIL_DOMAIN}`,password};
+}
+
+const STAFF_CREATE_STATUS: Record<string,{status:number;category:string}> = {
+  EMAIL_EXISTS:{status:409,category:"DOMAIN"},
+  ACCOUNT_ID_CONFLICT:{status:409,category:"DOMAIN"},
+  ID_SEQUENCE_EXHAUSTED:{status:409,category:"DOMAIN"},
+  ORGANIZATION_NOT_FOUND:{status:404,category:"DOMAIN"},
+  STAFF_CREATE_UNAVAILABLE:{status:503,category:"INFRASTRUCTURE"},
+};
+const STAFF_CREATE_RETRY_NOTE="failed: account not created; nothing was written for this row";
+
+/** POST /api/admin/users and /api/admin/staff: one staff account, report as the response. */
+async function createStaffRoute(request:Request,env:Env,session:Session){
+  requireRole(session,"ORGANIZATION_ADMIN");
+  const body=await request.json().catch(()=>null) as Json|null;
+  const allowed=["first_name","last_name","first_name_fa","last_name_fa","national_id","contact_email","email","contact_phone","job_title","department","class_label","parent_onyx_id","team_ids","onyx_id","class"];
+  // Passwords and usernames are never accepted here: the system generates the one-time password.
+  if(!body||Array.isArray(body)||!exactBody(body,allowed)||(body.email!==undefined&&body.contact_email!==undefined))
+    return json({error:"INVALID_BODY",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const userClass=body.class===undefined||body.class===null?null:body.class;
+  if(userClass!==null&&(typeof userClass!=="string"||!MOBILE_ACCESS_CLASSES.includes(userClass as MobileAccessClass)))
+    return json({error:"INVALID_USER_CLASS",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const raw:RawStaffRow={};
+  for(const key of allowed) if(key!=="class"&&key!=="email"&&body[key]!==undefined) raw[key]=body[key] as RawStaffValue;
+  if(body.email!==undefined) raw.contact_email=body.email as RawStaffValue;
+  const prepared=prepareStaffRow(raw,1);
+  if(!prepared.ok)return json({error:"INVALID_STAFF_ROW",category:"DOMAIN",retryability:"NON_RETRYABLE",messages:prepared.messages},400);
+  const parentUserId=await resolveParentUserId(env,session.organization_id,prepared.row.parentOnyxId,session.sub);
+  if(!parentUserId)return json({error:"PARENT_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const result=await createStaffAccount(env,session,prepared.row,parentUserId,userClass);
+  if(!result.ok){
+    const mapped=STAFF_CREATE_STATUS[result.code]??STAFF_CREATE_STATUS.STAFF_CREATE_UNAVAILABLE;
+    const error=result.code==="EMAIL_EXISTS"||result.code==="ACCOUNT_ID_CONFLICT"?"USER_EXISTS":result.code;
+    return json({error,category:mapped.category,retryability:mapped.status===503?"TRANSIENT":"NON_RETRYABLE"},mapped.status);
+  }
+  const notes=[...prepared.notes,"password change required at first sign-in"];
+  const report=creationReport([{onyxId:result.onyxId,row:{...prepared.row,contactEmail:result.email},accountStatus:"created",password:result.password,sourceRow:1,notes}]);
+  return reportResponse(report,"onyx-creation-report.xlsx",201);
+}
+
 async function reactivateOrganizationAdmin(env:Env,session:Session,userId:string){
   requireRole(session,"ALL_FATHER");
   const target=await env.DB.prepare("SELECT id,organization_id,role,is_active FROM users WHERE id=? LIMIT 1").bind(userId).first<Record<string,unknown>>();
@@ -1550,7 +1729,7 @@ type ProfileRecord = {
 };
 function profileDto(state: Json, session: Session): Json {
   const dto: Json = {};
-  for (const key of ["profile_id","owner_id","full_name","photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name","team_memberships"]) {
+  for (const key of ["profile_id","owner_id","onyx_id","full_name","photo_blob_key","job_title","contact_email","contact_phone","department","class_label","parent_display_name","team_memberships"]) {
     if (Object.prototype.hasOwnProperty.call(state,key)) dto[key] = state[key];
   }
   if (session.role === "ORGANIZATION_ADMIN" || session.class === "top_level_manager") {
@@ -1628,8 +1807,9 @@ async function listProfiles(env: Env, session: Session, ownerId?: string) {
   if (ownerId && profiles.length === 0) return json({ error: "PROFILE_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
   return json(ownerId ? profileDto(profiles[0].state, session) : profiles.map(row => profileDto(row.state, session)));
 }
-function parseCsvRows(input: string): Json[] {
-  const rows: string[][] = [];
+/** CSV parser for the staff sheet. Blank records are skipped, as in the Rust parser. */
+function parseCsvRecords(input: string): { headers: string[]; rows: Array<{ sourceRow: number; raw: RawStaffRow }> } {
+  const records: string[][] = [];
   let row: string[] = [], field = "", quoted = false;
   for (let i=0; i<input.length; i++) {
     const c=input[i];
@@ -1638,55 +1818,173 @@ function parseCsvRows(input: string): Json[] {
     else if (c === ',' && !quoted) { row.push(field); field=""; }
     else if ((c === '\n' || c === '\r') && !quoted) {
       if (c === '\r' && input[i+1] === '\n') i++;
-      row.push(field); if (row.some(value => value.length)) rows.push(row); row=[]; field="";
+      row.push(field); if (row.some(value => value.trim().length)) records.push(row); row=[]; field="";
     } else field += c;
   }
-  row.push(field); if (row.some(value => value.length)) rows.push(row);
-  if (rows.length < 2) return [];
-  const headers=rows[0].map(value=>value.trim());
-  return rows.slice(1).map(values => {
-    const obj: Json = {};
-    headers.forEach((key,index)=>{ if (key === "team_memberships") obj[key]=(values[index]||"").split(";").map(x=>x.trim()).filter(Boolean); else obj[key]=values[index]||null; });
-    return obj;
+  row.push(field); if (row.some(value => value.trim().length)) records.push(row);
+  if (records.length < 1) return { headers: [], rows: [] };
+  const headers = records[0].map(value => value.trim().toLowerCase());
+  const rows = records.slice(1).map((values, index) => {
+    const raw: RawStaffRow = {};
+    headers.forEach((key, position) => { if (key) raw[key] = (values[position] ?? "").trim(); });
+    return { sourceRow: index + 2, raw };
   });
+  return { headers, rows };
 }
+
+/** Excel cell to staff value. A numeric national_id is passed as a number so the row is rejected, not guessed. */
+function rawFromXlsxCells(cells: Record<string, { text: string; numeric: boolean }>): RawStaffRow {
+  const raw: RawStaffRow = {};
+  for (const [key, cell] of Object.entries(cells)) {
+    raw[key] = cell.numeric && key === "national_id" ? Number(cell.text) : cell.text.trim();
+  }
+  return raw;
+}
+
+function rawFromJsonObject(value: unknown): RawStaffRow {
+  const raw: RawStaffRow = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return raw;
+  for (const [key, item] of Object.entries(value as Json)) {
+    const normalized = key.trim().toLowerCase();
+    if (item === null || item === undefined) raw[normalized] = "";
+    else if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") raw[normalized] = item;
+    else if (Array.isArray(item) && item.every(x => typeof x === "string")) raw[normalized] = item as string[];
+    else raw[normalized] = "";
+  }
+  return raw;
+}
+
+/** Report fields for a row that did not produce an account (taken from the input row, not from D1). */
+function reportFieldsFromRaw(raw: RawStaffRow): Partial<PreparedStaffRow> {
+  const text = (key: string) => {
+    const value = raw[key];
+    if (value === null || value === undefined) return "";
+    return Array.isArray(value) ? value.join(";") : String(value).trim();
+  };
+  return {
+    firstName: text("first_name"), lastName: text("last_name"),
+    firstNameFa: text("first_name_fa"), lastNameFa: text("last_name_fa"),
+    nationalId: text("national_id"), contactEmail: text("contact_email") || null,
+    contactPhone: text("contact_phone") || null, jobTitle: text("job_title") || null,
+    department: text("department") || null, classLabel: text("class_label") || null,
+    parentOnyxId: text("parent_onyx_id") || null,
+    teamIds: text("team_ids").split(";").map(x => x.trim()).filter(Boolean),
+  };
+}
+
+function isBlankRaw(raw: RawStaffRow): boolean {
+  return Object.values(raw).every(value => value === "" || value === null || value === undefined || (Array.isArray(value) && value.length === 0));
+}
+
+/**
+ * POST /api/admin/profiles/import. Accepts .xlsx (detected by content), CSV or
+ * JSON. Every non-empty row creates an account, a staff ID and a one-time
+ * password. The response is the creation report (.xlsx) for the whole batch;
+ * row counts are repeated in X-Onyx-Import-* headers.
+ */
 async function importProfiles(request: Request, env: Env, session: Session) {
   requireRole(session, "ORGANIZATION_ADMIN");
-  const contentType=(request.headers.get("content-type")||"text/csv").toLowerCase();
-  const raw=await request.text();
-  if (raw.length > 2_000_000) return json({ error:"IMPORT_TOO_LARGE",category:"DOMAIN",retryability:"NON_RETRYABLE" },413);
-  let rows: Json[];
+  const contentType = (request.headers.get("content-type") || "text/csv").toLowerCase();
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength > 2_000_000) return json({ error: "IMPORT_TOO_LARGE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 413);
+  const isXlsx = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b;
+  const isJson = !isXlsx && contentType.includes("json");
+  let headers: string[] = [];
+  let rows: Array<{ sourceRow: number; raw: RawStaffRow }> = [];
   try {
-    if (contentType.includes("json")) { const parsed=JSON.parse(raw); rows=Array.isArray(parsed)?parsed:[]; }
-    else rows=parseCsvRows(raw);
-  } catch { return json({ error:"INVALID_PROFILE_IMPORT",category:"DOMAIN",retryability:"NON_RETRYABLE" },400); }
-  if (rows.length > 500) return json({ error:"IMPORT_TOO_MANY_ROWS",category:"DOMAIN",retryability:"NON_RETRYABLE" },400);
-  let created=0, updated=0, failed=0;
-  const results:Json[]=[];
-  for (let index=0; index<rows.length; index++) {
-    const row=rows[index];
-    const userId=row&&typeof row.user_id==="string"?row.user_id:null;
-    if (!row || Array.isArray(row) || typeof row!=="object") {
-      failed++; results.push({outcome:"failed",user_id:userId,reason:"INVALID_PROFILE_ROW"}); continue;
-    }
-    const ownerId=typeof row.user_id==="string"?row.user_id:row.owner_id;
-    const normalized:Json={...row,owner_id:ownerId};
-    if (typeof ownerId!=="string" || !looksLikeUuid(ownerId) ||
-        ["full_name","contact_email","contact_phone","job_title","department"].some(key=>typeof row[key]!=="string"||!(row[key] as string).trim()) ||
-        !validProfileBody(normalized)) {
-      failed++; results.push({outcome:"failed",user_id:userId,reason:"INVALID_PROFILE_ROW"}); continue;
-    }
-    const response=await upsertProfile(new Request(request.url,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(normalized)}),env,session);
-    if (response.ok) {
-      const isCreated=response.status===201;
-      if(isCreated)created++;else updated++;
-      results.push({outcome:isCreated?"created":"updated",user_id:ownerId});
+    if (isXlsx) {
+      const sheet: XlsxSheet = await readFirstSheet(bytes);
+      headers = sheet.headers;
+      rows = sheet.rows.map(row => ({ sourceRow: row.rowNumber, raw: rawFromXlsxCells(row.cells) }));
+    } else if (isJson) {
+      const parsed = JSON.parse(new TextDecoder().decode(bytes));
+      if (!Array.isArray(parsed)) throw new SyntaxError("JSON import must be an array");
+      rows = parsed.map((value, index) => ({ sourceRow: index + 1, raw: rawFromJsonObject(value) }));
     } else {
-      const error=await response.json().catch(()=>({error:"PROFILE_IMPORT_FAILED"})) as Json;
-      failed++; results.push({outcome:"failed",user_id:ownerId,reason:String(error.error||"PROFILE_IMPORT_FAILED")});
+      const parsed = parseCsvRecords(new TextDecoder().decode(bytes));
+      headers = parsed.headers;
+      rows = parsed.rows;
     }
+  } catch {
+    // Parser messages are not returned: they can echo file content.
+    return json({ error: "INVALID_PROFILE_IMPORT", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
   }
-  return json({total_rows:rows.length,created,updated,failed,results});
+  if (!isJson) {
+    const missing = missingRequiredColumn(headers);
+    if (missing) return json({ error: "IMPORT_MISSING_COLUMN", column: missing, category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  }
+  const nonEmpty = rows.filter(item => !isBlankRaw(item.raw));
+  if (nonEmpty.length > 500) return json({ error: "IMPORT_TOO_MANY_ROWS", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+
+  const reportRows: ReportRow[] = [];
+  let created = 0, failed = 0;
+  for (const item of nonEmpty) {
+    const prepared = prepareStaffRow(item.raw, item.sourceRow);
+    if (!prepared.ok) {
+      failed++;
+      reportRows.push({ onyxId: "", row: reportFieldsFromRaw(item.raw), accountStatus: "failed: INVALID_STAFF_ROW", password: "", sourceRow: item.sourceRow, notes: prepared.messages });
+      continue;
+    }
+    const parentUserId = await resolveParentUserId(env, session.organization_id, prepared.row.parentOnyxId, session.sub);
+    if (!parentUserId) {
+      failed++;
+      reportRows.push({ onyxId: "", row: prepared.row, accountStatus: "failed: PARENT_NOT_FOUND", password: "", sourceRow: item.sourceRow, notes: ["parent_onyx_id does not match an active account in this organization"] });
+      continue;
+    }
+    const result = await createStaffAccount(env, session, prepared.row, parentUserId, null);
+    if (!result.ok) {
+      failed++;
+      reportRows.push({ onyxId: "", row: prepared.row, accountStatus: `failed: ${result.code}`, password: "", sourceRow: item.sourceRow, notes: [STAFF_CREATE_RETRY_NOTE] });
+      continue;
+    }
+    created++;
+    reportRows.push({
+      onyxId: result.onyxId,
+      row: { ...prepared.row, contactEmail: result.email },
+      accountStatus: "created",
+      password: result.password,
+      sourceRow: item.sourceRow,
+      notes: [...prepared.notes, "password change required at first sign-in"],
+    });
+  }
+  return reportResponse(creationReport(reportRows), "onyx-creation-report.xlsx", 200, {
+    "x-onyx-import-total": String(nonEmpty.length),
+    "x-onyx-import-created": String(created),
+    "x-onyx-import-failed": String(failed),
+  });
+}
+
+/**
+ * POST /api/auth/password. Self-service change, and the only route allowed
+ * while must_change_password is set. Requires the current password. Clears the
+ * flag and revokes every session for the account, so the user signs in again.
+ */
+async function changeOwnPassword(request: Request, env: Env, session: Session) {
+  const body = await request.json().catch(() => null) as Json | null;
+  if (!body || Array.isArray(body) || !exactBody(body, ["current_password", "new_password"]) ||
+      typeof body.current_password !== "string" || typeof body.new_password !== "string")
+    return json({ error: "INVALID_PASSWORD_CHANGE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  if (body.new_password.length < 12 || body.new_password.length > 1024)
+    return json({ error: "WEAK_PASSWORD", message: "Password must contain at least 12 characters.", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  if (body.new_password === body.current_password)
+    return json({ error: "PASSWORD_UNCHANGED", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
+  const user = await env.DB.prepare("SELECT id,password_hash FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
+    .bind(session.sub, session.organization_id).first<{ id: string; password_hash: string }>();
+  if (!user || !(await verifyPassword(body.current_password, String(user.password_hash))))
+    return json({ error: "CURRENT_PASSWORD_INCORRECT", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 403);
+  try {
+    const hash = await hashPassword(body.new_password), timestamp = Date.now(), operationId = uuid();
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE users SET password_hash=?,must_change_password=0,updated_at=? WHERE id=? AND organization_id=? AND is_active=1").bind(hash, timestamp, user.id, session.organization_id),
+      env.DB.prepare("INSERT INTO user_session_revocations(user_id,revoked_before_ms,updated_at) SELECT ?,?,? WHERE changes()=1 ON CONFLICT(user_id) DO UPDATE SET revoked_before_ms=MAX(user_session_revocations.revoked_before_ms,excluded.revoked_before_ms),updated_at=excluded.updated_at").bind(user.id, timestamp, timestamp),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.password.change", operationId, JSON.stringify({ target: user.id }), timestamp),
+    ]);
+    if (batch.length !== 3 || batch.some(result => result?.success !== true) || Number(batch[0]?.meta?.changes ?? 0) !== 1)
+      return json({ error: "USER_CHANGED", category: "CONCURRENCY", retryability: "RETRYABLE" }, 409);
+    return json({ success: true, reauthentication_required: true });
+  } catch {
+    return json({ error: "PASSWORD_CHANGE_UNAVAILABLE", category: "INFRASTRUCTURE", retryability: "TRANSIENT" }, 503);
+  }
 }
 
 async function exportProfiles(request: Request, env: Env, session: Session) {
@@ -1813,6 +2111,7 @@ async function websocketEvents(request: Request, env: Env): Promise<Response> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message === "FORBIDDEN_ROLE") return json({ error: "FORBIDDEN", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 403);
+    if (message === "PASSWORD_CHANGE_REQUIRED") return json({ error: "PASSWORD_CHANGE_REQUIRED", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 409);
     if (message === "AUTH_REQUIRED" || message.includes("token") || message.includes("expired") || message.includes("revoked")) {
       return json({ error: "UNAUTHORIZED", category: "AUTHORITY", retryability: "NON_RETRYABLE" }, 401);
     }
@@ -1825,7 +2124,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
   const url=new URL(request.url);const origin=corsOrigin(request,env);
   if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":origin??"*","access-control-allow-methods":"GET,POST,PUT,PATCH,DELETE,OPTIONS","access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key,X-ONYX-Request-ID","access-control-allow-credentials":"true","access-control-max-age":"86400"}});
   if(url.pathname==="/api/auth/login"&&request.method!=="POST")return json({error:"METHOD_NOT_ALLOWED",category:"VALIDATION",retryability:"NON_RETRYABLE"},405,origin);
-  if(url.pathname.startsWith("/api/auth/")&&!["/api/auth/login","/api/auth/refresh","/api/auth/logout"].includes(url.pathname))return json({error:"AUTH_ROUTE_NOT_FOUND",category:"ROUTING",retryability:"NON_RETRYABLE"},404,origin);
+  if(url.pathname.startsWith("/api/auth/")&&!["/api/auth/login","/api/auth/refresh","/api/auth/logout","/api/auth/password"].includes(url.pathname))return json({error:"AUTH_ROUTE_NOT_FOUND",category:"ROUTING",retryability:"NON_RETRYABLE"},404,origin);
   if(url.pathname==="/health")return json({status:"ok",service:"onyx-cloudflare-worker",runtime:"cloudflare-workers-free"},200,origin);
   if(url.pathname==="/ready"){
     try{
@@ -1842,7 +2141,9 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/auth/login"&&request.method==="POST")return await authLogin(request,env);
     if(url.pathname==="/api/auth/refresh"&&request.method==="POST")return await authRefresh(request,env);
     if(url.pathname==="/api/auth/logout"&&request.method==="POST")return await authLogout(request,env);
-    const session=await requireSession(request,env);
+    const passwordChangeRoute=url.pathname==="/api/auth/password"&&request.method==="POST";
+    const session=await requireSession(request,env,{allowPasswordChange:passwordChangeRoute});
+    if(passwordChangeRoute)return await changeOwnPassword(request,env,session);
     if(url.pathname==="/api/query"&&request.method==="GET")return await queryRoute(request,env,session);
     if(url.pathname==="/api/command"&&request.method==="POST")return await commandRoute(request,env,session);
     if(url.pathname==="/api/relay-ticket"&&request.method==="POST")return await issueRelayTicket(request,env,session);
@@ -1850,7 +2151,7 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(url.pathname==="/api/users"&&request.method==="GET")return await listUsers(env,session);
     if(url.pathname==="/api/users/hierarchy"&&request.method==="GET")return await hierarchy(env,session);
     if(url.pathname==="/api/admin/users"&&request.method==="GET")return await listAdminUsers(env,session);
-    if(url.pathname==="/api/admin/users"&&request.method==="POST")return await createUser(request,env,session,"STAFF");
+    if(url.pathname==="/api/admin/users"&&request.method==="POST")return await createStaffRoute(request,env,session);
     if(/^\/api\/admin\/users\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,false);
     if(/^\/api\/admin\/users\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setUserActive(env,session,url.pathname.split("/").at(-2)!,true);
     if(/^\/api\/admin\/users\/[^/]+\/password$/.test(url.pathname)&&request.method==="POST")return await setUserPassword(request,env,session,url.pathname.split("/").at(-2)!);
@@ -1887,12 +2188,12 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
       if(!organizationId)return json({error:"INVALID_ADMIN_QUERY",category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);
       return await listOrganizationAdmins(env,session,organizationId);
     }
-    if(url.pathname==="/api/allfather/admins"&&request.method==="POST")return await createUser(request,env,session,"ORGANIZATION_ADMIN");
+    if(url.pathname==="/api/allfather/admins"&&request.method==="POST")return await createUser(request,env,session);
     if(/^\/api\/allfather\/admins\/[^/]+\/reactivate$/.test(url.pathname)&&request.method==="POST")return await reactivateOrganizationAdmin(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!));
-    if(url.pathname==="/api/admin/staff"&&request.method==="POST")return await createUser(request,env,session,"STAFF");
+    if(url.pathname==="/api/admin/staff"&&request.method==="POST")return await createStaffRoute(request,env,session);
     if(url.pathname.startsWith("/api/admin/users/")&&request.method==="DELETE")return await deactivateUser(request,env,session,url.pathname.split("/").pop()!);
     return json({error:"ROUTE_NOT_MIGRATED",route:url.pathname,method:request.method,message:"This feature is not available on the Cloudflare Worker yet. The equivalent Axum route exists but has not been ported with equivalent authorization and persistence semantics.",category:"FEATURE_UNAVAILABLE",retryability:"NON_RETRYABLE",correlation_id:uuid()},501,origin);
-  }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);if(message==="FORBIDDEN_ROLE")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403,origin);if(message.startsWith("INVALID_")||message==="PASSWORD_TOO_SHORT"||message==="ORGANIZATION_NOT_FOUND")return json({error:message,category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
+  }catch(error){const message=error instanceof Error?error.message:"internal error";if(message==="AUTH_REQUIRED"||message.includes("token")||message.includes("expired")||message.includes("revoked"))return json({error:"UNAUTHORIZED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401,origin);if(message==="FORBIDDEN_ROLE")return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403,origin);if(message==="PASSWORD_CHANGE_REQUIRED")return json({error:"PASSWORD_CHANGE_REQUIRED",category:"AUTHORITY",retryability:"NON_RETRYABLE"},409,origin);if(message.startsWith("INVALID_")||message==="PASSWORD_TOO_SHORT"||message==="ORGANIZATION_NOT_FOUND")return json({error:message,category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);return json({error:"INTERNAL_SERVER_ERROR",category:"INFRASTRUCTURE",retryability:"TRANSIENT"},500,origin);}
 }
 /**
  * Apply one exact-origin CORS policy to every route, including helper
@@ -1912,7 +2213,9 @@ function applyCors(request:Request,env:Env,response:Response):Response{
   if(origin&&allowed.includes(origin)&&!allowed.includes("*")){
     headers.set("access-control-allow-origin",origin);
     headers.set("access-control-allow-credentials","true");
-      if(headers.has("x-onyx-request-id"))headers.set("access-control-expose-headers","X-ONYX-Request-ID");
+      // Merge with headers the route already exposes (for example the import counts).
+      const exposed=[headers.get("access-control-expose-headers"),headers.has("x-onyx-request-id")?"X-ONYX-Request-ID":null].filter(Boolean).join(", ");
+      if(exposed)headers.set("access-control-expose-headers",exposed);
     const vary=headers.get("vary");
     if(!vary)headers.set("vary","Origin");
     else if(!vary.split(",").some(value=>value.trim().toLowerCase()==="origin"))headers.set("vary",`${vary}, Origin`);

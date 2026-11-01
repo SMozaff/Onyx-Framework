@@ -12,7 +12,8 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 |---|---|---|---|
 | GET | `/health` | None | Reachability only; `{status:"ok",service,runtime}`. |
 | GET | `/ready` | None | `200` when required D1 schema is present; otherwise `503` with missing schema items. |
-| POST | `/api/auth/login` | None | `{username|email,password,client_type?}` → access/refresh token pair; All-Father is allowed only for canonical `__allfather__` with explicit `ALL_FATHER` role and admin flag. |
+| POST | `/api/auth/login` | None | `{username|onyx_id|email,password,client_type?}` → access/refresh token pair. Staff sign in with their Onyx ID; username and email remain accepted aliases during transition. The `user` object includes `onyx_id` and `must_change_password`. All-Father is allowed only for canonical `__allfather__` with explicit `ALL_FATHER` role and admin flag. |
+| POST | `/api/auth/password` | ONYX access session; allowed while `must_change_password` is set | `{current_password,new_password}` → self-service password change. New password 12+ characters, must differ from the current one. Clears `must_change_password` and revokes all sessions for the account (the user signs in again). `403 CURRENT_PASSWORD_INCORRECT` on a wrong current password. |
 | GET | `/api/allfather/organizations` | ALL_FATHER | Lists organizations from the Worker/D1 store. |
 | PATCH | `/api/allfather/organizations/:id` | ALL_FATHER | Renames the selected organization. |
 | POST | `/api/allfather/organizations/:id/activate` | ALL_FATHER | Reactivates an eligible organization. |
@@ -30,8 +31,8 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 | GET | `/api/users` | ONYX access session | Active tenant-scoped identity picker. |
 | GET | `/api/users/hierarchy` | ONYX access session | Canonical JSON array of hierarchy records; All-Father returns an empty array. |
 | GET | `/api/admin/users` | ONYX access session | Tenant-scoped user directory. |
-| POST | `/api/admin/users` | ORGANIZATION_ADMIN; own tenant | Creates a STAFF user; this alias matches the Admin UI contract. |
-| POST | `/api/admin/staff` | ORGANIZATION_ADMIN; own tenant | Legacy STAFF creation alias. |
+| POST | `/api/admin/users` | ORGANIZATION_ADMIN; own tenant | Creates one staff account with a generated staff ID (`onyx_id`) and a generated one-time password. Body: staff-sheet fields (`first_name`, `last_name`, `national_id` required; `contact_email` or `email`, `contact_phone`, `job_title`, `department`, `class_label`, `parent_onyx_id`, `team_ids`, `first_name_fa`, `last_name_fa`, `class` optional; `onyx_id` ignored). A `password` or `username` key is rejected (`400 INVALID_BODY`). Response `201` is the creation report (`.xlsx`, `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), the only place the one-time password is returned. The account must change the password at first sign-in. |
+| POST | `/api/admin/staff` | ORGANIZATION_ADMIN; own tenant | Legacy alias of `POST /api/admin/users`, same body and response. |
 | POST | `/api/admin/users/:id/activate` | ORGANIZATION_ADMIN; tenant-scoped | Activates eligible STAFF account. |
 | POST | `/api/admin/users/:id/deactivate` | ORGANIZATION_ADMIN; tenant-scoped | Deactivates eligible STAFF account. |
 | POST | `/api/admin/users/:id/password` | ORGANIZATION_ADMIN; tenant-scoped | Resets STAFF password and revokes sessions. |
@@ -46,7 +47,7 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 | GET | `/api/profiles` | ONYX access session | Profile list under role and ownership rules. |
 | GET | `/api/profiles/:ownerId` | ONYX access session; STAFF own profile only | Owner-scoped profile list. |
 | PUT | `/api/admin/profiles` | ORGANIZATION_ADMIN | Upserts a profile. |
-| POST | `/api/admin/profiles/import` | ORGANIZATION_ADMIN | Imports profile records. |
+| POST | `/api/admin/profiles/import` | ORGANIZATION_ADMIN | Batch staff import. Body: `.xlsx` (detected by content; first sheet, header row required), CSV, or a JSON array of objects, all using the staff-sheet column names (`onyx_id`, `first_name`, `last_name`, `national_id` are required columns for `.xlsx` and CSV). **Every non-empty row creates an account, a generated staff ID, a profile and a one-time password.** A supplied `onyx_id` is ignored and reported in the row notes. Row results are per row in `account_status` (`created`, or `failed: <CODE>`); a failed row creates nothing and consumes no ID number. Response `200` is the creation report (`.xlsx`), for the whole batch. Counts are in headers `X-Onyx-Import-Total`, `X-Onyx-Import-Created`, `X-Onyx-Import-Failed`. Limits: 2,000,000 bytes, 500 non-empty rows. Errors before any row is processed: `400 INVALID_PROFILE_IMPORT` (unreadable file), `400 IMPORT_MISSING_COLUMN` (with `column`), `400 IMPORT_TOO_MANY_ROWS`, `413 IMPORT_TOO_LARGE`. Replaces the earlier profile-only import, which required an existing account per row (`user_id`). |
 | GET | `/api/admin/profiles/export` | ORGANIZATION_ADMIN | Exports profile records. |
 | POST | `/api/todo/lists` | ONYX access session + mobile capability policy | Creates todo-list aggregate; staff class must be allowed by current organization policy. |
 | POST | `/api/todo/targets` | ONYX access session + mobile capability policy | Creates target-list aggregate; staff class must be allowed by current organization policy. |
@@ -58,6 +59,10 @@ Status terms: `implemented-in-source` means a dispatch branch and handler exist 
 | DELETE | `/api/admin/files/:hash/acl/:userId` | ORGANIZATION_ADMIN | Revokes tenant-scoped file ACL access. |
 | POST | `/api/allfather/organizations` | ALL_FATHER | Creates an organization. |
 | POST | `/api/allfather/admins` | ALL_FATHER | Creates an organization administrator. |
+
+### Forced password change (backend accounts)
+
+While an account's `must_change_password` is set, `requireSession` returns `409 PASSWORD_CHANGE_REQUIRED` for every route except `POST /api/auth/password` and `POST /api/auth/logout`. This applies to the WebSocket upgrade (`/api/events`) and to relay tickets (`/api/relay-ticket`), because both verify the session through `requireSession`. Refresh (`/api/auth/refresh`) is not gated.
 
 ## Known Worker/native API differences
 
