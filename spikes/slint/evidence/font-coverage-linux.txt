@@ -1,0 +1,15 @@
+file: /home/claude/onyx-framework/spikes/slint/fonts/Vazirmatn-Regular.ttf
+sha256: b69fd4c680b8f3f225feabcc655a2c585d97627b8f5f5c0f9985e894069f3a56
+family: Vazirmatn
+version: Version 33.003
+license: This Font Software is licensed under the SIL Open Font License, Versio...
+GSUB present: True  GPOS present: True
+        OK  Latin a-z
+        OK  Latin A-Z
+        OK  Persian letters (peh, cheh, zheh, keheh, gaf, farsi yeh, alef madda, heh goal)
+        OK  Arabic-Indic digits 0-9
+        OK  Extended Arabic-Indic (Persian) digits 0-9
+        OK  Zero-width non-joiner and joiner
+        OK  Harakat (fatha, damma, kasra, shadda, sukun)
+        OK  Bidi marks (LRM, RLM)
+        OK  Persian punctuation (comma, question mark, full stop)

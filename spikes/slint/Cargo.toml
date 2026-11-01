@@ -1,0 +1,26 @@
+[package]
+name = "onyx-slint-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone spike crate. Not a member of the repository workspace.
+[workspace]
+
+[dependencies]
+slint = { version = "1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2"] }
+
+[dev-dependencies]
+i-slint-backend-testing = "=1.18.1"
+
+[build-dependencies]
+slint-build = "1"
+
+# The container has little free disk. Debug info is the largest part of the
+# build output, so it is turned off for this spike.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.dev.package."*"]
+debug = 0

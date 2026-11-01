@@ -1,0 +1,8 @@
+PASS  gnome=false -> reduced in Slint  -> {"os_animations": false, "resolved": "reduced", "slint_reduced": true}
+PASS  gnome=true (toggle) -> full in Slint  -> {"os_animations": true, "resolved": "full", "slint_reduced": false}
+PASS  unreadable setting -> reduced (fallback)  -> {"os_animations": null, "resolved": "reduced", "slint_reduced": true}
+PASS  KDE factor=0 -> reduced  -> {"os_animations": false, "resolved": "reduced", "slint_reduced": true}
+PASS  KDE factor=1 -> full  -> {"os_animations": true, "resolved": "full", "slint_reduced": false}
+PASS  corrupt KDE value -> reduced (fallback)  -> {"os_animations": null, "resolved": "reduced", "slint_reduced": true}
+----
+passed=6 failed=0

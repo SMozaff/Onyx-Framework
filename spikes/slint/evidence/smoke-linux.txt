@@ -1,0 +1,1 @@
+still_running_after_wait=yes captured=yes exit_after_kill=143
