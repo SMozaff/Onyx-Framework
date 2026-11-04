@@ -30,8 +30,29 @@
 use relay_websocket_adapter as relay_socket;
 mod secure_storage;
 mod session;
+mod session_authority;
 
 use std::sync::Arc;
+
+use session_authority::{SessionAuthority, SessionBearerProvider, SessionSummary};
+
+/// Canonical ONYX Cloud API origin. Distributed clients must not accept
+/// endpoint overrides.
+const CLOUD_API_BASE: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
+
+/// Keys owned by the session authority. The generic secret commands below
+/// refuse them, so the webview cannot read or overwrite the stored refresh
+/// token.
+const RESERVED_SECRET_PREFIX: &str = "auth.";
+
+fn reject_reserved_secret_key(key: &str) -> Result<(), ShellError> {
+    if key.starts_with(RESERVED_SECRET_PREFIX) {
+        return Err(ShellError::InvalidArgument(
+            "reserved secret key".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 use client_composition::app_state::{AppState, AppStateConfig};
 use client_composition::event_bus::EventFilter;
@@ -40,7 +61,6 @@ use platform_contracts::CommandEnvelope;
 use platform_kernel::{ObjectId, OrganizationId, ReplicaId};
 use secure_storage::keyring_adapter::KeyringSecureStorage;
 use secure_storage::SecureStorage;
-use session::StoredSession;
 use sqlx::sqlite::SqlitePoolOptions;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::RwLock;
@@ -264,6 +284,7 @@ async fn store_secret(
     key: String,
     value: String,
 ) -> Result<(), ShellError> {
+    reject_reserved_secret_key(&key)?;
     storage
         .store_secret(&key, value.as_bytes())
         .await
@@ -276,6 +297,7 @@ async fn get_secret(
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
     key: String,
 ) -> Result<Option<String>, ShellError> {
+    reject_reserved_secret_key(&key)?;
     let bytes = storage
         .get_secret(&key)
         .await
@@ -293,6 +315,7 @@ async fn delete_secret(
     storage: tauri::State<'_, Arc<dyn SecureStorage>>,
     key: String,
 ) -> Result<(), ShellError> {
+    reject_reserved_secret_key(&key)?;
     storage
         .delete_secret(&key)
         .await
@@ -300,11 +323,11 @@ async fn delete_secret(
 }
 
 /// What the frontend receives after a successful login (or from
-/// `get_current_session` on startup). Deliberately omits
-/// `access_token`/`refresh_token` — the frontend never needs to see raw
-/// tokens (all authenticated calls happen server-side, in Rust, via
-/// `SecureStorage`/`session.rs`), so there is no reason to put them
-/// where a compromised webview context could read them.
+/// `get_current_session` on startup). Carries no tokens: the frontend never
+/// needs them, so they never enter a webview context.
+///
+/// `persistence_notice` is set when the keyring could not store the session.
+/// The session still works for this launch, and the message is safe to show.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionInfo {
@@ -314,24 +337,23 @@ struct SessionInfo {
     user_id: String,
     organization_id: String,
     device_id: String,
+    persistence_notice: Option<String>,
 }
 
 impl SessionInfo {
-    /// Builds the browser-safe session shape from the persisted identity and
-    /// the native app's local replica. `user_id` is a non-secret identity
-    /// needed to construct the existing local command envelopes; tokens stay
-    /// inside `StoredSession`/`SecureStorage`. `device_id` deliberately
-    /// derives from the same stable-for-this-process `ReplicaId` used by the
-    /// local `AppState` and relay socket, so the frontend no longer invents a
-    /// second, unrelated actor device id.
-    fn from_session(session: &StoredSession, local_replica: ReplicaId) -> Self {
+    fn from_summary(
+        summary: &SessionSummary,
+        local_replica: ReplicaId,
+        persistence_notice: Option<String>,
+    ) -> Self {
         Self {
-            username: session.username.clone(),
-            is_admin: session.is_admin,
-            server_address: session.server_address.clone(),
-            user_id: session.user_id.to_string(),
-            organization_id: session.organization_id.to_string(),
+            username: summary.username.clone(),
+            is_admin: summary.is_admin,
+            server_address: summary.server_address.clone(),
+            user_id: summary.user_id.to_string(),
+            organization_id: summary.organization_id.to_string(),
             device_id: uuid::Uuid::from_bytes(local_replica.0).to_string(),
+            persistence_notice,
         }
     }
 }
@@ -342,18 +364,23 @@ impl SessionInfo {
 /// install or after `logout`, not an error.
 #[tauri::command]
 async fn get_current_session(
-    storage: tauri::State<'_, Arc<dyn SecureStorage>>,
+    authority: tauri::State<'_, Arc<SessionAuthority>>,
     local_replica: tauri::State<'_, ReplicaId>,
 ) -> Result<Option<SessionInfo>, ShellError> {
-    let session = session::load(&storage).await?;
-    Ok(session
+    // A stored record alone does not mean signed in. Only a live session,
+    // established by a successful restore or sign-in, counts.
+    Ok(authority
+        .current_summary()
+        .await
         .as_ref()
-        .map(|stored| SessionInfo::from_session(stored, *local_replica.inner())))
+        .map(|summary| SessionInfo::from_summary(summary, *local_replica.inner(), None)))
 }
 
-/// Authenticates against `server_address`, and on success:
-/// 1. Persists the session (`session::save`) so the next launch resumes
-///    it automatically instead of starting under a fresh random org.
+/// Signs in through `SessionAuthority`, and on success:
+/// 1. Installs the access token in memory and persists only the refresh
+///    token (keyring). The next launch restores the session under the same
+///    organization. If the keyring is unavailable, the session lasts for this
+///    launch and the response carries a `persistenceNotice`.
 /// 2. Rebuilds `AppState` under the real, server-issued
 ///    `organization_id` (fixing the frontend/backend org-id mismatch bug
 ///    `useSession.ts` flagged) and atomically swaps it into the shared
@@ -383,39 +410,40 @@ struct LoginRequest {
 async fn login(
     app: AppHandle,
     state: tauri::State<'_, SharedAppState>,
-    storage: tauri::State<'_, Arc<dyn SecureStorage>>,
+    authority: tauri::State<'_, Arc<SessionAuthority>>,
     local_replica: tauri::State<'_, ReplicaId>,
     hierarchy_cache: tauri::State<'_, client_composition::hierarchy_cache::HierarchyCache>,
     credentials: LoginRequest,
 ) -> Result<SessionInfo, ShellError> {
     let LoginRequest { username, password } = credentials;
-    const CLOUD_API_BASE: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
-    let authenticated = session::authenticate(CLOUD_API_BASE, &username, &password).await?;
+    let outcome = authority.sign_in(&username, &password).await?;
 
-    session::save(&storage, &authenticated).await?;
-
-    let new_state =
-        build_app_state(&app, authenticated.organization_id, Some(&authenticated)).await?;
+    let new_state = build_app_state(
+        &app,
+        outcome.summary.organization_id,
+        Some(&outcome.summary),
+    )
+    .await?;
 
     *state.write().await = new_state;
 
     // Best-effort, same reasoning as the startup-resume case in
-    // setup(): a person who can reach the server well enough to
-    // authenticate but hits a transient failure on this second call
-    // should not be locked out of logging in entirely — they simply
-    // can't approve anything until the cache is populated (by a later
-    // successful refresh, or the next login). Logged, not propagated
-    // as a login failure.
-    if let Err(e) = hierarchy_cache
-        .refresh(CLOUD_API_BASE, &authenticated.access_token)
-        .await
-    {
-        tracing::warn!(error = %e, "failed to refresh approval-authority cache after login");
+    // setup(): a transient failure here must not lock the person out of
+    // logging in. Logged, not propagated.
+    if let Some(access_token) = authority.current_access_token().await {
+        if let Err(e) = hierarchy_cache.refresh(CLOUD_API_BASE, &access_token).await {
+            tracing::warn!(error = %e, "failed to refresh approval-authority cache after login");
+        }
     }
 
-    Ok(SessionInfo::from_session(
-        &authenticated,
+    let notice = (!outcome.persisted).then(|| {
+        "Your secure keyring is unavailable. You stay signed in until this app closes, then you will need to sign in again."
+            .to_string()
+    });
+    Ok(SessionInfo::from_summary(
+        &outcome.summary,
         *local_replica.inner(),
+        notice,
     ))
 }
 
@@ -428,10 +456,12 @@ async fn login(
 async fn logout(
     app: AppHandle,
     state: tauri::State<'_, SharedAppState>,
-    storage: tauri::State<'_, Arc<dyn SecureStorage>>,
+    authority: tauri::State<'_, Arc<SessionAuthority>>,
     hierarchy_cache: tauri::State<'_, client_composition::hierarchy_cache::HierarchyCache>,
 ) -> Result<(), ShellError> {
-    session::clear(&storage).await?;
+    // Clears the in-memory pair and the keyring record, then revokes the
+    // latest pair server-side. See session_authority::sign_out.
+    authority.sign_out().await;
     let new_state = build_app_state(&app, OrganizationId::new_random(), None).await?;
     *state.write().await = new_state;
     // Defensive: a different person logging in next on this same
@@ -459,8 +489,9 @@ async fn logout(
 async fn build_app_state(
     app: &AppHandle,
     organization_id: OrganizationId,
-    session: Option<&StoredSession>,
+    session: Option<&SessionSummary>,
 ) -> Result<Arc<AppState>, ShellError> {
+    let authority = app.state::<Arc<SessionAuthority>>().inner().clone();
     let pool = app.state::<sqlx::SqlitePool>().inner().clone();
     let local_replica = *app.state::<ReplicaId>().inner();
     let data_dir = app
@@ -498,16 +529,14 @@ async fn build_app_state(
     ) = match session {
         Some(s) => (
             relay_ws_endpoint_from_http(&s.server_address),
-            Arc::new(sync_transport::placeholder_types::StaticAuthorityProvider(
-                s.access_token.clone(),
-            )),
+            Arc::new(SessionBearerProvider::new(Arc::clone(&authority))),
         ),
+        // Logged out: the same session-backed provider. It has no token, so
+        // every call returns NoCredentials (fail closed).
         None => (
             std::env::var("ONYX_RELAY_ENDPOINT")
                 .unwrap_or_else(|_| "ws://127.0.0.1:3000".to_string()),
-            Arc::new(sync_transport::placeholder_types::StaticAuthorityProvider(
-                String::new(),
-            )),
+            Arc::new(SessionBearerProvider::new(Arc::clone(&authority))),
         ),
     };
 
@@ -519,9 +548,14 @@ async fn build_app_state(
         cloud_relay_endpoint,
         local_discovery: lan_discovery,
         cloud_relay_auth_provider,
-        cloud_relay_socket_factory: Arc::new(relay_socket::TungsteniteRelaySocketFactory::new(
-            local_replica,
-        )),
+        // Logout and session replacement cancel in-flight relay ticket and
+        // handshake attempts through this shared source.
+        cloud_relay_socket_factory: Arc::new(
+            relay_socket::TungsteniteRelaySocketFactory::with_cancellation(
+                local_replica,
+                authority.connection_cancellation_source(),
+            ),
+        ),
         // Tauri shell: outbox upload is not wired (Slint desktop is the target).
         cloud_outbox_endpoint: None,
         blob_store_root,
@@ -652,22 +686,27 @@ pub fn run() {
                 // via a real fetch, never assumed non-empty before that.
                 app_handle_for_state.manage(client_composition::hierarchy_cache::HierarchyCache::new());
 
-                // Real login/org resolution (2026-08-19): check for a
-                // previously-saved session first. If one exists, resume
-                // it under its real organization_id instead of starting
-                // fresh under a random one every launch — this was the
-                // exact bug flagged by the removed
-                // TODO(auth/org resolution) comment that used to sit at
-                // this call site. If none exists (fresh install, or after
-                // logout), fall back to the same random-org placeholder
-                // behavior as before; the frontend's login gate keeps the
-                // main app inaccessible until a real login succeeds and
-                // swaps this out via the `login` command.
-                let existing_session = session::load(&storage).await.unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, "failed to load saved session, starting fresh");
+                // Startup restore. The keyring holds only the refresh token.
+                // Restore exchanges it for a new access token, and the
+                // rotated refresh token is written back. Any failure leaves
+                // the person on the login screen. None of them is fatal.
+                let api = Arc::new(session::HttpSessionApi::new(CLOUD_API_BASE)?);
+                let authority = session_authority::SessionAuthority::new(
+                    CLOUD_API_BASE,
+                    api,
+                    storage.clone(),
+                );
+                app_handle_for_state.manage(Arc::clone(&authority));
+
+                let stored = session::load(&storage).await.unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "failed to load saved session, starting signed out");
                     None
                 });
-                let organization_id = existing_session
+                let restored = match stored {
+                    Some(stored) => authority.restore(stored).await,
+                    None => None,
+                };
+                let organization_id = restored
                     .as_ref()
                     .map(|s| s.organization_id)
                     .unwrap_or_else(OrganizationId::new_random);
@@ -675,26 +714,20 @@ pub fn run() {
                 let state = build_app_state(
                     &app_handle_for_state,
                     organization_id,
-                    existing_session.as_ref(),
+                    restored.as_ref(),
                 )
                 .await?;
 
-                // Populate the hierarchy cache for a resumed session too
-                // — not just fresh logins (below) — since approvals must
-                // work correctly on a normal app restart, not only
-                // immediately after typing a password. Best-effort: a
-                // stale/offline cache degrades to "cannot approve until
-                // reachable," not a crash or a silent bypass — logged,
-                // not surfaced as a fatal setup error, since being unable
-                // to refresh this on startup must not block the rest of
-                // the app from opening.
-                if let Some(existing) = existing_session.as_ref() {
-                    let cache = app_handle_for_state.state::<client_composition::hierarchy_cache::HierarchyCache>();
-                    if let Err(e) = cache
-                        .refresh(&existing.server_address, &existing.access_token)
-                        .await
-                    {
-                        tracing::warn!(error = %e, "failed to refresh approval-authority cache on startup");
+                // Populate the approval-authority cache for a restored session.
+                // Best-effort: a stale or offline cache degrades to "cannot
+                // approve until reachable", and this must not block startup.
+                if restored.is_some() {
+                    if let Some(access_token) = authority.current_access_token().await {
+                        let cache = app_handle_for_state
+                            .state::<client_composition::hierarchy_cache::HierarchyCache>();
+                        if let Err(e) = cache.refresh(CLOUD_API_BASE, &access_token).await {
+                            tracing::warn!(error = %e, "failed to refresh approval-authority cache on startup");
+                        }
                     }
                 }
 
@@ -737,21 +770,19 @@ fn hostname_or_none() -> Option<String> {
 
 #[cfg(test)]
 mod lib_tests {
-    use super::{relay_ws_endpoint_from_http, SessionInfo, StoredSession};
+    use super::{relay_ws_endpoint_from_http, SessionInfo, SessionSummary};
     use platform_kernel::{ObjectId, ReplicaId};
 
     #[test]
     fn session_info_exposes_non_secret_actor_and_device_ids() {
-        let stored = StoredSession {
+        let summary = SessionSummary {
             server_address: "https://onyx.example.com".to_string(),
-            access_token: "access-token-must-not-cross-ipc".to_string(),
-            refresh_token: "refresh-token-must-not-cross-ipc".to_string(),
             user_id: ObjectId([1; 16]),
             organization_id: ObjectId([2; 16]),
             username: "staff".to_string(),
             is_admin: false,
         };
-        let info = SessionInfo::from_session(&stored, ReplicaId([3; 16]));
+        let info = SessionInfo::from_summary(&summary, ReplicaId([3; 16]), None);
         let json = serde_json::to_value(info).expect("SessionInfo must serialize");
 
         assert_eq!(json["username"], "staff");
@@ -763,6 +794,7 @@ mod lib_tests {
         );
         assert!(json.get("accessToken").is_none());
         assert!(json.get("refreshToken").is_none());
+        assert!(json["persistenceNotice"].is_null());
     }
 
     #[test]
