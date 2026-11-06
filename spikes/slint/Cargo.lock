@@ -2880,6 +2880,7 @@ dependencies = [
  "i-slint-backend-testing",
  "slint",
  "slint-build",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

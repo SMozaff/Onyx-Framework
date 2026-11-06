@@ -3,7 +3,13 @@ name: Slint spike artifacts
 on:
   pull_request:
     paths:
-      - "spike/slint-feasibility/**"
+      - "spikes/slint/**"
+      - ".github/workflows/slint-spike-artifacts.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "spikes/slint/**"
       - ".github/workflows/slint-spike-artifacts.yml"
   workflow_dispatch:
 
@@ -20,7 +26,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
-        working-directory: spike/slint-feasibility
+        working-directory: spikes/slint
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
@@ -34,25 +40,24 @@ jobs:
             libwayland-dev libxcb1-dev libxcb-xfixes0-dev libxcb-shape0-dev xvfb
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: spike/slint-feasibility
-      - name: Test paging and sorting logic
+          workspaces: spikes/slint
+      - name: Test spike logic (paging, sorting, motion, OS reader parsing)
         run: cargo test --locked
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked
       - name: Smoke-run window (Linux, Xvfb, 15 s)
         if: runner.os == 'Linux'
         run: |
-          xvfb-run -a sh -c './target/release/slint-spike & PID=$!; sleep 15; kill -0 $PID && echo "window running"; kill $PID'
-      - name: Package Linux .deb
-        if: runner.os == 'Linux'
-        run: |
-          bash packaging/build-deb.sh target/release/slint-spike "$GITHUB_WORKSPACE/dist"
-      - name: Package Windows binary
-        if: runner.os == 'Windows'
+          xvfb-run -a sh -c './target/release/onyx-slint-spike & PID=$!; sleep 15; kill -0 $PID && echo "window running"; kill $PID'
+      - name: Collect binary
         shell: bash
         run: |
           mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp target/release/slint-spike.exe "$GITHUB_WORKSPACE/dist/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp target/release/onyx-slint-spike.exe "$GITHUB_WORKSPACE/dist/"
+          else
+            cp target/release/onyx-slint-spike "$GITHUB_WORKSPACE/dist/"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: slint-spike-${{ runner.os }}

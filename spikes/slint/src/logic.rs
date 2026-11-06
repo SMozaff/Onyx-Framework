@@ -170,8 +170,37 @@ pub fn read_linux_animations(xdg_config_home: Option<&Path>) -> Option<bool> {
     parse_kde_animation_factor(&contents)
 }
 
-/// Windows reader. Not implemented in this spike; see spike-results.md (U-10, Windows row).
-/// Returns None, so the fallback applies on Windows until the reader is written and tested.
+/// Windows reader (U-10). Calls `SystemParametersInfoW` with
+/// `SPI_GETCLIENTAREAANIMATION`, which reports whether client-area animations
+/// are enabled (the "Show animations in Windows" setting). TRUE means animations
+/// are on, so reduced motion is not requested.
+///
+/// Returns `None` when the call fails; the caller then applies the reduced-motion
+/// fallback (decision U-10, 2026-11-01).
+#[cfg(target_os = "windows")]
+pub fn read_windows_animations() -> Option<bool> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION,
+    };
+    let mut enabled: i32 = 0;
+    // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL (i32) to pvParam.
+    // `enabled` is a live, correctly sized and aligned i32 for the call's duration.
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            (&mut enabled as *mut i32).cast(),
+            0,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    Some(enabled != 0)
+}
+
+/// On non-Windows targets this reader is never used; kept so the call site compiles.
+#[cfg(not(target_os = "windows"))]
 pub fn read_windows_animations() -> Option<bool> {
     None
 }

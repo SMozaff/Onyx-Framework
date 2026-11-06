@@ -228,3 +228,16 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **RUSTSEC-2026-0436 (high, 7.5):** `calamine` 0.37.0 panics or allocates without bound on malformed CFB/OLE2 input. ONYX parses staff spreadsheets uploaded by admins, so this is a real input path. **Fix:** upgrade `calamine` to 0.38.0 (workspace dependency). Parser tests pass unchanged; a regression test for malformed OLE2 input was added.
 - **RUSTSEC-2026-0433 (high, 7.5):** `pulldown-cmark` 0.13.5 (pulled in by Slint's markdown path) has quadratic parsing of nested wikilinks. **Fix:** lock bump to 0.13.6, which is the patched version the advisory names. No code change.
 - **bincode 2.0.1:** an "unmaintained" warning only, not a failure. Tracked for later; not changed here.
+
+## U-10 Windows reduce-motion reader implemented (2026-11-07)
+
+- **Implemented:** `read_windows_animations` in `spikes/slint/src/logic.rs` calls `SystemParametersInfoW` with `SPI_GETCLIENTAREAANIMATION` (the "Show animations in Windows" setting). Returns `None` on call failure, so the reduced-motion fallback applies (U-10 decision).
+- **Compile and test evidence:** Linux tests pass (8 unit tests). The Win32 path is compiled and built only on the `windows-latest` runner in `slint-spike-artifacts.yml`. The Windows result is the evidence for this row; it is not manual proof.
+- **Still manual:** the setting must be toggled on a real Windows machine to confirm the live value changes (spike-results Windows row).
+- **CI fix:** `slint-spike-artifacts.yml` pointed at `spike/slint-feasibility`, which no longer exists, and called a `packaging/build-deb.sh` script that does not exist. It now targets `spikes/slint`, uses the real binary name, and runs on changes under `spikes/slint/`.
+
+### U-10 Windows follow-up (2026-11-07)
+
+- First Windows CI run failed (E0432): `windows-sys` 0.48 needs the `Win32_Foundation` feature for `SystemParametersInfoW`. Root cause: the feature was missing in `spikes/slint/Cargo.toml`. Fixed in b6a06e4. Linux does not compile the `cfg(windows)` block, so only Windows CI could catch it.
+- Windows CI green on b6a06e4 (`Build and test (windows-latest)`).
+- Still manual: confirm the Windows setting toggles the live value on a real machine.

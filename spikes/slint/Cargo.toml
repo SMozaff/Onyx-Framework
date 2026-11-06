@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 slint = { version = "1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.48", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
 [dev-dependencies]
 i-slint-backend-testing = "=1.18.1"
 
