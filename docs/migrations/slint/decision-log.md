@@ -241,3 +241,9 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - First Windows CI run failed (E0432): `windows-sys` 0.48 needs the `Win32_Foundation` feature for `SystemParametersInfoW`. Root cause: the feature was missing in `spikes/slint/Cargo.toml`. Fixed in b6a06e4. Linux does not compile the `cfg(windows)` block, so only Windows CI could catch it.
 - Windows CI green on b6a06e4 (`Build and test (windows-latest)`).
 - Still manual: confirm the Windows setting toggles the live value on a real machine.
+
+### PR #409 merge order (2026-11-07)
+
+- PR #409 was merged at 2026-11-06T22:31:50Z on head 3083e78, while its first commit (85adc7b) had a failing Windows job. I did not trigger this merge. The fix (b6a06e4) and docs commit (3083e78) were already on the branch, so `main` (8a44ab9) contains the fix.
+- Verified on `main`: `Build and test (windows-latest)` and `Build and test (ubuntu-latest)` both completed successfully on 8a44ab9.
+- Process note: merge only after every required check on the head commit is green.
