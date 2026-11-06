@@ -37,9 +37,16 @@ pub enum AuthorityError {
     RefreshFailed(String),
 }
 
-/// A trivial provider for tests: always returns a fixed token.
+/// TEST-ONLY fixed-token provider. Compiled only for this crate's own tests or
+/// with the `test-support` feature, so a shipping binary cannot link it.
+///
+/// Production composition must use a session-backed provider that reads the
+/// current access token on each call, fails closed when logged out, and
+/// performs refresh and revocation (see desktop-shell `session_authority`).
+#[cfg(any(test, feature = "test-support"))]
 pub struct StaticAuthorityProvider(pub String);
 
+#[cfg(any(test, feature = "test-support"))]
 #[async_trait]
 impl AuthorityProvider for StaticAuthorityProvider {
     async fn bearer_token(&self) -> Result<String, AuthorityError> {
