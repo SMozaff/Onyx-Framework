@@ -221,3 +221,10 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Condition:** Track A first. Replace the test-only `StaticAuthorityProvider` in the production relay path, with fail-closed logged-out behaviour, refresh/expiry/revocation handling, and tests. Track B (shell-independent runtime boundary and Tauri-free dependency proof) starts only after Track A passes.
 - **Not decided by this entry:** token-storage policy for desktop vs Admin, and relay-only fallback when LAN discovery fails. These remain open owner decisions (see `P-01-evidence-summary-2026-11-01.md`, section 5).
 - **Gate 0b:** blocker 1 is partly closed by this approval. Gate 0b itself is still not passed.
+
+## RustSec advisories: root-cause fix (2026-11-06)
+
+- **Correction:** The earlier plan to upgrade Slint was wrong. Slint 1.18.1 is the latest published version. The failing advisories were not caused by Slint.
+- **RUSTSEC-2026-0436 (high, 7.5):** `calamine` 0.37.0 panics or allocates without bound on malformed CFB/OLE2 input. ONYX parses staff spreadsheets uploaded by admins, so this is a real input path. **Fix:** upgrade `calamine` to 0.38.0 (workspace dependency). Parser tests pass unchanged; a regression test for malformed OLE2 input was added.
+- **RUSTSEC-2026-0433 (high, 7.5):** `pulldown-cmark` 0.13.5 (pulled in by Slint's markdown path) has quadratic parsing of nested wikilinks. **Fix:** lock bump to 0.13.6, which is the patched version the advisory names. No code change.
+- **bincode 2.0.1:** an "unmaintained" warning only, not a failure. Tracked for later; not changed here.

@@ -465,4 +465,19 @@ mod tests {
             Err(StaffSheetError::NotXlsx)
         );
     }
+
+    /// RUSTSEC-2026-0436 (calamine < 0.38): malformed CFB/OLE2 input could panic
+    /// or allocate without bound. The parser must reject such input cleanly.
+    #[test]
+    fn malformed_ole2_container_is_rejected_without_panic() {
+        // OLE2/CFB magic followed by a header that declares a huge sector count.
+        let mut bytes = vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+        bytes.extend_from_slice(&[0xFF; 1016]);
+        assert_eq!(parse_staff_sheet(&bytes), Err(StaffSheetError::NotXlsx));
+        // Truncated container.
+        assert_eq!(
+            parse_staff_sheet(&bytes[..16]),
+            Err(StaffSheetError::NotXlsx)
+        );
+    }
 }
