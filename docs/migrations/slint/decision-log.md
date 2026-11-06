@@ -235,3 +235,9 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Compile and test evidence:** Linux tests pass (8 unit tests). The Win32 path is compiled and built only on the `windows-latest` runner in `slint-spike-artifacts.yml`. The Windows result is the evidence for this row; it is not manual proof.
 - **Still manual:** the setting must be toggled on a real Windows machine to confirm the live value changes (spike-results Windows row).
 - **CI fix:** `slint-spike-artifacts.yml` pointed at `spike/slint-feasibility`, which no longer exists, and called a `packaging/build-deb.sh` script that does not exist. It now targets `spikes/slint`, uses the real binary name, and runs on changes under `spikes/slint/`.
+
+### U-10 Windows follow-up (2026-11-07)
+
+- First Windows CI run failed (E0432): `windows-sys` 0.48 needs the `Win32_Foundation` feature for `SystemParametersInfoW`. Root cause: the feature was missing in `spikes/slint/Cargo.toml`. Fixed in b6a06e4. Linux does not compile the `cfg(windows)` block, so only Windows CI could catch it.
+- Windows CI green on b6a06e4 (`Build and test (windows-latest)`).
+- Still manual: confirm the Windows setting toggles the live value on a real machine.

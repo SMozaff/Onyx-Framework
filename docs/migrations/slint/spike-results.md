@@ -14,7 +14,7 @@
 - U-10 Linux GNOME read and toggle (isolated GSettings keyfile backend), and the unknown or unreadable fallback to reduced motion.
 
 **Failed:**
-- U-10 Windows: the OS reduce-motion setting is not read. The Windows reader is a stub (`read_windows_animations()` returns `None`), so Windows always takes the fallback. Limit: this code cannot be compiled or run in this environment. Proposed fix (for review): read `SPI_GETCLIENTAREAANIMATION` with `SystemParametersInfoW`, in the platform layer (B-12).
+- U-10 Windows: `read_windows_animations()` reads `SPI_GETCLIENTAREAANIMATION` via `SystemParametersInfoW`. Evidence: the Windows CI job (`Slint spike artifacts`, `windows-latest`) compiles and runs the tests on commit b6a06e4 (PR #409), which is green. Still open: a manual toggle on a real Windows machine to confirm the live value changes. Live-change handling is not covered (see below).
 
 **Partial (automated evidence, but a visible or OS-level part is not verified):**
 - U-01.3 multiline: Enter inserts a newline (value level). Visual wrapping is not checked.
