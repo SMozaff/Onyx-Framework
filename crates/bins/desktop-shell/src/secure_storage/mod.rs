@@ -15,29 +15,6 @@
 //! an architectural deviation — the `SecureStorage` port itself is
 //! unchanged.
 
-use async_trait::async_trait;
-
-/// Store a secret under a given key (scoped to current user/organization).
-/// Keys are strings (e.g., "auth.refresh_token", "sync.sync_key").
-#[async_trait]
-pub trait SecureStorage: Send + Sync {
-    async fn store_secret(&self, key: &str, value: &[u8]) -> Result<(), StorageError>;
-
-    /// Retrieve a secret; returns None if not found.
-    async fn get_secret(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError>;
-
-    /// Delete a secret.
-    async fn delete_secret(&self, key: &str) -> Result<(), StorageError>;
-}
-
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum StorageError {
-    #[error("Key not found")]
-    NotFound,
-    #[error("Access denied: {0}")]
-    AccessDenied(String),
-    #[error("Platform error: {0}")]
-    Platform(String),
-}
+pub use desktop_session::secure_storage::{SecureStorage, StorageError};
 
 pub mod keyring_adapter;

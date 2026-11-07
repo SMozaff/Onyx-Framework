@@ -263,3 +263,11 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Track A (production relay auth):** implemented and merged (PR #407). `desktop-shell` uses `SessionBearerProvider` on both the logged-in and logged-out paths. Logged-out returns `NoCredentials` (fail closed). Unit tests in `session_authority.rs` (16) and `session.rs` (17) cover fail-closed, logout, and restore-rejected paths. Still pending: the two live relay ticket checks (need deployed Worker and granted account). The P-01 evidence summary dated 2026-11-01 is stale on this point.
 - **Track B step 4, dependency proof (partial):** `cargo tree -p desktop-slint --locked -e normal` contains 0 Tauri-family crates (`tauri`, `wry`, `tao`, `webkit2gtk`) out of 1901 crates. This is evidence for the dependency proof only; it does not cover startup, shutdown, or data-directory coexistence.
 - **Track B open work:** `desktop-slint` still has its own `session_service.rs` and `authority.rs`, duplicating `desktop-shell`'s `session_authority`. Consolidating to one session owner (step 3) is the next chunk. The subscription and sync-task lifecycle on login, logout, and restart (step 3) is not defined yet.
+
+## Track B session owner: step 1 (2026-11-07)
+
+- **Decision:** the session authority (login, refresh rotation, logout, bearer provider, storage record) moves out of `desktop-shell` into a new shell-independent crate, `crates/applications/desktop-session`. Owner decision given to proceed. The crate names no Tauri, UI, or keyring type.
+- **Moved, unchanged logic:** `session.rs`, `session_authority.rs`, and the `SecureStorage` port (`secure_storage.rs`). The keyring adapter stays in `desktop-shell` (platform code).
+- **Evidence:** `desktop-session` tests: 34 passing. `cargo clippy -D warnings` clean for both crates. `desktop-shell` compiles.
+- **Known environment failure, not caused by this change:** two `keyring_adapter` tests fail in this sandbox ("No default store has been set"). They fail the same way on `main`.
+- **Not done yet (next step):** `desktop-slint` still runs its own in-memory `session_service.rs` and `authority.rs`. Switching it to `desktop-session` is step 2 and is a behaviour change (it would adopt the keyring-backed desktop token policy). It needs its own decision entry.
