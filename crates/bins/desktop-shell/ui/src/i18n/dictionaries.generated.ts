@@ -1085,6 +1085,6 @@ export const fa: Record<string, string> = {
   "language.title": "زبان",
   "theme.dark": "تیره",
   "theme.light": "روشن",
-  "theme.title": "قالب"
+  "theme.title": "پوسته"
 } as Record<string, string>;
 export const dictionaries = { en, fa } as const;
