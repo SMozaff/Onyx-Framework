@@ -30,10 +30,19 @@ Status: decisions recorded. Implementation not started. Open questions listed at
 - Not implemented now. Placeholder only.
 - Goals: the most secure and reliable transfer in emergencies.
 
-## Open questions (owner input needed)
+## Decisions on open questions (2026-11-07)
 
-1. **LAN recognition:** how does the app know another system is an Onyx system on the LAN? Options include a broadcast announcement signed with the organisation key, or a server-side registry. Which?
-2. **Pending retention:** how long may a pending file stay on the server, and what is the storage limit per user?
-3. **Notifications channel:** in-app only, or also push (mobile) and email? Which for each platform?
-4. **Web UI:** a browser cannot discover LAN peers directly. Should web show only the Internet route and a disabled LAN item?
-5. **Documentation home for the emergency module:** the "spiral organisation chart" is not present in this repository (see `docs/audits/2026-10-25/ONYX_Audit_Report.md`, GAP-06). Should this module be documented in `docs/product/` as shown here?
+1. **LAN recognition:** server-side registry (owner choice). Each Onyx system registers with the server; the app lists peers on the same network from that registry. Trade-off: needs the server to be reachable to discover peers, so LAN discovery needs one server contact per session.
+2. **Pending retention:** 1 week. The app warns the recipient and sender before deletion. Pending files are deleted at the end of that week.
+3. **Notifications:** push notifications on every platform (web, Android, desktop). Email and SMS are future modules: list them as options in the Settings screen, disabled, and document them as future modules. Not implemented now.
+4. **Web UI:** Internet route only. LAN item shown disabled.
+5. **Emergency module:** separate module with its own screen and section. Document it as a future module.
+
+## Future modules (placeholders only)
+
+- Email and SMS notification channels (shown disabled in Settings).
+- BLE and Wi-Fi Direct emergency P2P transfer (own screen and section).
+
+## Open item
+
+- The "spiral organisation chart" is not in this repository, its git history, or the project documents I searched. Only the 2026-10-25 audit mentions it, and it flags it as unverified. Location of the existing doc needs owner input.
