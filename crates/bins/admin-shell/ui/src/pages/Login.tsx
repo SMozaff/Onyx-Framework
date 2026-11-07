@@ -141,11 +141,11 @@ export default function Login() {
             <p className="mt-2 text-sm leading-5 text-onyx-text-dim">{t("auth.useAssignedCredentials")}</p>
             <div className="mt-6">
               <label htmlFor="username" className="block text-xs font-bold text-onyx-text">{t("auth.username")}</label>
-              <input id="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none" />
+              <input id="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-onyx-surface px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-onyx-text-dim focus:border-onyx-accent focus:outline-none" />
             </div>
             <div className="mt-4">
               <label htmlFor="password" className="block text-xs font-bold text-onyx-text">{t("auth.password")}</label>
-              <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none" />
+              <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-onyx-surface px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-onyx-text-dim focus:border-onyx-accent focus:outline-none" />
             </div>
             <button type="submit" disabled={loading} className="mt-5 w-full rounded-lg bg-onyx-accent px-3 py-2.5 text-sm font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
               {loading ? t("auth.signingIn") : t("auth.signIn")}

@@ -550,7 +550,10 @@ export const en: Record<string, string> = {
   "settings.signingOut": "Signing out…",
   "settings.title": "Settings",
   "language.note": "Interface language. Applies instantly and is remembered on this device.",
-  "language.title": "Language"
+  "language.title": "Language",
+  "theme.dark": "Dark",
+  "theme.light": "Light",
+  "theme.title": "Theme"
 } as Record<string, string>;
 export const fa: Record<string, string> = {
   "app.name": "ONYX",
@@ -1079,6 +1082,9 @@ export const fa: Record<string, string> = {
   "settings.signingOut": "در حال خروج…",
   "settings.title": "تنظیمات",
   "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
-  "language.title": "زبان"
+  "language.title": "زبان",
+  "theme.dark": "تیره",
+  "theme.light": "روشن",
+  "theme.title": "قالب"
 } as Record<string, string>;
 export const dictionaries = { en, fa } as const;
