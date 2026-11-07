@@ -247,3 +247,13 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - PR #409 was merged at 2026-11-06T22:31:50Z on head 3083e78, while its first commit (85adc7b) had a failing Windows job. I did not trigger this merge. The fix (b6a06e4) and docs commit (3083e78) were already on the branch, so `main` (8a44ab9) contains the fix.
 - Verified on `main`: `Build and test (windows-latest)` and `Build and test (ubuntu-latest)` both completed successfully on 8a44ab9.
 - Process note: merge only after every required check on the head commit is green.
+
+## File-send route selection (owner decision, 2026-11-07)
+
+- **Decision:** Before a file is sent, the app asks the user to choose the route:
+  1. **Local:** BLE and LAN.
+  2. **Internet:** cloud and internet.
+- **If Internet is chosen:** send directly over the internet.
+- **If Local is chosen:** go through the relay path, with P2P connections as described by the owner.
+- **Effect on open items:** this makes the "relay-only fallback when LAN discovery fails" question moot for file sends. The fallback is no longer automatic; the user chooses the route.
+- **Open detail (not decided):** what "P2P connections, etc." covers in the Local route, and whether the choice applies to every file send or only the first.
