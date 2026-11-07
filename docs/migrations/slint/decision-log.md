@@ -301,3 +301,23 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Caller change:** `KeyringSecureStorage::new()` and `for_service()` now return `Result`. Callers in `desktop-shell` and `desktop-slint` map the error.
 - **Dependency:** `keyring-core` is an optional dependency behind the `keyring` feature.
 - **Not verified:** the device test on Windows, macOS, and Linux desktops (needs a real unlocked store).
+
+## desktop-slint lifecycle tests (Track B step 4, 2026-11-08)
+
+- **Change:** `SlintComposition::open` now delegates to `open_with(OpenOptions { data_dir, storage, api_origin })`. Production behaviour is unchanged: the same data folder, the `com.onyx.platform.slint` keyring service, and the production origin. Tests inject a temporary folder, an in-memory store, and an unreachable origin (`http://127.0.0.1:9`).
+- **Tests (3, passing):**
+  - Fresh start is signed out. Restart over the same folder keeps the replica identity and migrations are idempotent.
+  - An offline restart does not sign the user in, and keeps the stored session record for the next launch (a network failure is not a verdict; matches `RefreshError::Unavailable` handling).
+  - Logout with no session is idempotent.
+- **Evidence:** `cargo test -p desktop-slint` passes. `clippy -D warnings` and `fmt --check` are clean.
+- **Not covered:** a real successful login and refresh (needs a deployed Worker and a test account), and the two-host coexistence on a device.
+
+## desktop-slint lifecycle tests (Track B step 4, 2026-11-08)
+
+- **Change:** `SlintComposition::open` now delegates to `open_with(OpenOptions { data_dir, storage, api_origin })`. Production behaviour is unchanged: the same data folder, the `com.onyx.platform.slint` keyring service, and the production origin. Tests inject a temporary folder, an in-memory store, and an unreachable origin (`http://127.0.0.1:9`).
+- **Tests (3, passing):**
+  - Fresh start is signed out. Restart over the same folder keeps the replica identity, and migrations are idempotent.
+  - An offline restart does not sign the user in, and keeps the stored session record for the next launch. A network failure is not a verdict (matches `RefreshError::Unavailable`).
+  - Logout with no session is idempotent.
+- **Evidence:** `cargo test -p desktop-slint` passes. `clippy -D warnings` and `fmt --check` are clean.
+- **Not covered:** a real successful login and refresh (needs a deployed Worker and a test account), and two-host coexistence on a device.
