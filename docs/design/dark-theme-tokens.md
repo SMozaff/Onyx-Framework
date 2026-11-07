@@ -38,3 +38,14 @@ Status and border colours. Text contrast is measured against Void/Deep/Midnight.
 | status-closed | `#8B95A8` | Inactive state; same as muted text. | 6.8 / 6.6 / 5.8 |
 
 Note: green and red are new colours not in the brand palette. Owner may replace them with palette values later.
+
+## Status (2026-11-07)
+
+- **Wired** in the admin UI. A Theme switch (Light/Dark) sits in the top bar and remembers the choice on the device. Default is Light.
+- **Hard-coded light colours removed** from admin components and `index.css` surfaces (`bg-white`, `bg-slate-*`, `bg-sky-50`, auth card and page background, workspace header). Status notices, the connection banner, and sidebar keep their own colours.
+- **Light-mode shift:** `bg-slate-50/100` and `bg-sky-50` became `#e8f0f8` (Onyx surface-hover). A small visual change in Light mode.
+- **Checked:** the login page renders in both themes (screenshots). Admin tests pass (31/31) and the build passes.
+- **Not checked:** the signed-in layout in a browser, which needs a session.
+- **Pre-existing, not changed:** on the login card the "Language" label overlaps the "ONYX Admin" title. It is in both themes.
+- **Translations:** the Theme labels in Persian (قالب، روشن، تیره) were written by the team and should be reviewed by a Persian speaker.
+- **Sync:** running `scripts/sync-i18n.mjs` also regenerated the dictionaries for desktop-shell, mobile-pwa, and web-ui. Only the new `theme.*` keys changed there.

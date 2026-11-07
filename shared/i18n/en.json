@@ -525,5 +525,8 @@
   "settings.signingOut": "Signing out…",
   "settings.title": "Settings",
   "language.note": "Interface language. Applies instantly and is remembered on this device.",
-  "language.title": "Language"
+  "language.title": "Language",
+  "theme.dark": "Dark",
+  "theme.light": "Light",
+  "theme.title": "Theme"
 }

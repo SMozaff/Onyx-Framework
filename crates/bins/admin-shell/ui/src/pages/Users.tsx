@@ -63,9 +63,9 @@ export default function Users() {
       {users === null && !error && <p className="mt-4 text-sm text-onyx-text-dim">{t("common.loading")}</p>}
 
       {users && (
-        <div className="mt-6 overflow-x-auto rounded-xl border border-onyx-border bg-white shadow-sm">
+        <div className="mt-6 overflow-x-auto rounded-xl border border-onyx-border bg-onyx-surface shadow-sm">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-onyx-border bg-slate-50 text-onyx-text-dim">
+            <thead className="border-b border-onyx-border bg-onyx-surface-hover text-onyx-text-dim">
               <tr>
                 <th className="px-3 py-2 font-medium">{t("auth.username")}</th>
                 <th className="px-3 py-2 font-medium">{t("common.admin")}</th>
@@ -119,13 +119,13 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <section className="mt-6 rounded-xl border border-onyx-border bg-white p-5 shadow-sm">
+    <section className="mt-6 rounded-xl border border-onyx-border bg-onyx-surface p-5 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-onyx-text">{t("common.createUser")}</h2>
           <p className="mt-1 text-xs text-onyx-text-dim">{t("common.newAccountDescription")}</p>
         </div>
-        <span className="onyx-state-chip bg-sky-50 text-onyx-accent">{t("common.newAccount")}</span>
+        <span className="onyx-state-chip bg-onyx-surface-hover text-onyx-accent">{t("common.newAccount")}</span>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <label className="block text-xs font-bold text-onyx-text">
@@ -134,7 +134,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder={t("auth.username")}
-            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none"
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-onyx-surface px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-onyx-text-dim focus:border-onyx-accent focus:outline-none"
           />
         </label>
         <label className="block text-xs font-bold text-onyx-text">
@@ -144,7 +144,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             onChange={(e) => setEmail(e.target.value)}
             type="email"
             required
-            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-onyx-surface px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
           />
         </label>
         <label className="block text-xs font-bold text-onyx-text">
@@ -154,7 +154,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             onChange={(e) => setPassword(e.target.value)}
             type="password"
             placeholder={t("auth.password")}
-            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none"
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-onyx-surface px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-onyx-text-dim focus:border-onyx-accent focus:outline-none"
           />
         </label>
         <label className="block text-xs font-bold text-onyx-text">
@@ -162,7 +162,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
           <select
             value={userClass}
             onChange={(e) => setUserClass(e.target.value)}
-            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
+            className="mt-1.5 w-full rounded-lg border border-onyx-border bg-onyx-surface px-3 py-2.5 text-sm text-onyx-text shadow-sm focus:border-onyx-accent focus:outline-none"
           >
             <option value="">{t("common.noClass")}</option>
             {USER_CLASSES.map((c) => (

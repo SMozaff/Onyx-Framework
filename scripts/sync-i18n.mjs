@@ -222,6 +222,7 @@ const CANONICAL_NAMESPACE_ORDER = [
   "files",
   "settings",
   "language",
+  "theme",
 ];
 
 function canonicalSortKey(key) {

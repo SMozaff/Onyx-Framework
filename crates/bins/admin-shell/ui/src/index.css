@@ -151,7 +151,7 @@ select:focus-visible {
 }
 
 .onyx-workspace-header {
-  background: rgba(255, 255, 255, 0.93);
+  background: var(--color-onyx-surface);
   box-shadow: 0 1px 0 rgba(16, 43, 77, 0.07);
 }
 
@@ -190,7 +190,7 @@ select:focus-visible {
 
 .onyx-auth-shell {
   min-height: 100vh;
-  background: #f5f8fc;
+  background: var(--color-onyx-bg);
 }
 
 .onyx-auth-aside {
@@ -225,9 +225,9 @@ select:focus-visible {
 
 .onyx-auth-card {
   width: min(100%, 25rem);
-  border: 1px solid #e0e8f0;
+  border: 1px solid var(--color-onyx-border);
   border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.97);
+  background: var(--color-onyx-surface);
   box-shadow: 0 24px 55px rgba(28, 55, 87, 0.16);
 }
 

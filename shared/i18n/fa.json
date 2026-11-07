@@ -525,5 +525,8 @@
   "settings.signingOut": "در حال خروج…",
   "settings.title": "تنظیمات",
   "language.note": "زبان رابط کاربری. بلافاصله اعمال می‌شود و در این دستگاه به خاطر سپرده می‌شود.",
-  "language.title": "زبان"
+  "language.title": "زبان",
+  "theme.dark": "تیره",
+  "theme.light": "روشن",
+  "theme.title": "قالب"
 }

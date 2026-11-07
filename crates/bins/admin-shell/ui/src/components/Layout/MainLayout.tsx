@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useI18n } from "@/i18n/I18nContext";
 import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 import { useAuthStore } from "@/stores/authStore";
 import { navigationForRole } from "./adminNavigation";
 
@@ -51,8 +52,9 @@ export default function MainLayout() {
             <p className="mt-0.5 text-[0.65rem] text-onyx-text-dim">{t("common.administrativeControlPlane")}</p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
+            <ThemeSwitcher />
             <LanguageSwitcher />
-            <span className="onyx-state-chip bg-sky-50 text-onyx-accent">{t("auth.adminSession")}</span>
+            <span className="onyx-state-chip bg-onyx-surface-hover text-onyx-accent">{t("auth.adminSession")}</span>
             <div className="hidden border-l border-onyx-border pl-3 text-right sm:block">
               <p className="text-xs font-semibold text-onyx-text">{user?.username}</p>
               <p className="text-[0.64rem] text-onyx-text-dim">{t("common.administrator")}</p>
@@ -60,7 +62,7 @@ export default function MainLayout() {
             <button
               type="button"
               onClick={() => useAuthStore.getState().logout()}
-              className="rounded-md border border-onyx-border bg-white px-3 py-1.5 text-xs font-bold text-onyx-text transition-colors hover:bg-onyx-surface-hover"
+              className="rounded-md border border-onyx-border bg-onyx-surface px-3 py-1.5 text-xs font-bold text-onyx-text transition-colors hover:bg-onyx-surface-hover"
             >
               {t("auth.signOut")}
             </button>
