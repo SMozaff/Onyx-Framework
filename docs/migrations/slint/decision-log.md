@@ -257,3 +257,9 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **If Local is chosen:** go through the relay path, with P2P connections as described by the owner.
 - **Effect on open items:** this makes the "relay-only fallback when LAN discovery fails" question moot for file sends. The fallback is no longer automatic; the user chooses the route.
 - **Open detail (not decided):** what "P2P connections, etc." covers in the Local route, and whether the choice applies to every file send or only the first.
+
+## Track A and Track B status (2026-11-07)
+
+- **Track A (production relay auth):** implemented and merged (PR #407). `desktop-shell` uses `SessionBearerProvider` on both the logged-in and logged-out paths. Logged-out returns `NoCredentials` (fail closed). Unit tests in `session_authority.rs` (16) and `session.rs` (17) cover fail-closed, logout, and restore-rejected paths. Still pending: the two live relay ticket checks (need deployed Worker and granted account). The P-01 evidence summary dated 2026-11-01 is stale on this point.
+- **Track B step 4, dependency proof (partial):** `cargo tree -p desktop-slint --locked -e normal` contains 0 Tauri-family crates (`tauri`, `wry`, `tao`, `webkit2gtk`) out of 1901 crates. This is evidence for the dependency proof only; it does not cover startup, shutdown, or data-directory coexistence.
+- **Track B open work:** `desktop-slint` still has its own `session_service.rs` and `authority.rs`, duplicating `desktop-shell`'s `session_authority`. Consolidating to one session owner (step 3) is the next chunk. The subscription and sync-task lifecycle on login, logout, and restart (step 3) is not defined yet.
