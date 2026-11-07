@@ -64,7 +64,7 @@ jobs:
         run: rustup component add rustfmt
       # Shared key lets other Rust build jobs in this workflow reuse the
       # workspace release-build artifacts instead of recompiling from scratch.
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           shared-key: "release-build"
       - name: Format
