@@ -2187,6 +2187,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "keyring",
+ "keyring-core",
  "platform-kernel",
  "reqwest",
  "serde",

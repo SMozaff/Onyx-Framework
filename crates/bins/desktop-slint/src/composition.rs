@@ -75,8 +75,10 @@ impl SlintComposition {
         );
         // Separate keyring service from the Tauri shell so both can be installed on
         // one device without overwriting each other's session (decision-log).
-        let storage: Arc<dyn SecureStorage> =
-            Arc::new(KeyringSecureStorage::for_service("com.onyx.platform.slint"));
+        let storage: Arc<dyn SecureStorage> = Arc::new(
+            KeyringSecureStorage::for_service("com.onyx.platform.slint")
+                .map_err(|e| format!("credential store: {e}"))?,
+        );
         let session = SessionAuthority::new(ONYX_API_ORIGIN, api, Arc::clone(&storage));
         let authority: Arc<dyn AuthorityProvider> =
             Arc::new(SessionBearerProvider::new(Arc::clone(&session)));
@@ -108,7 +110,8 @@ impl SlintComposition {
         match session::load(storage).await {
             Ok(Some(stored)) => {
                 if let Some(summary) = self.session.restore(stored).await {
-                    self.start_outbox(&summary.organization_id.to_string()).await;
+                    self.start_outbox(&summary.organization_id.to_string())
+                        .await;
                 }
             }
             Ok(None) => {}
@@ -126,7 +129,8 @@ impl SlintComposition {
             tracing::warn!("session is active in memory only; keyring save failed");
         }
         let summary = outcome.summary;
-        self.start_outbox(&summary.organization_id.to_string()).await;
+        self.start_outbox(&summary.organization_id.to_string())
+            .await;
         Ok(summary)
     }
 
@@ -155,7 +159,9 @@ impl SlintComposition {
             event_bus_capacity: 1024,
             cloud_relay_endpoint: ONYX_API_ORIGIN.replacen("https://", "wss://", 1),
             local_discovery: None,
-            cloud_relay_auth_provider: Arc::new(SessionBearerProvider::new(Arc::clone(&self.session))),
+            cloud_relay_auth_provider: Arc::new(SessionBearerProvider::new(Arc::clone(
+                &self.session,
+            ))),
             cloud_relay_socket_factory: Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
                 self.replica,
                 self.session.connection_cancellation_source(),

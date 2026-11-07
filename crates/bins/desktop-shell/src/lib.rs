@@ -659,7 +659,9 @@ pub fn run() {
                     let _ = sqlx::query(stmt).execute(&pool).await;
                 }
 
-                let storage: Arc<dyn SecureStorage> = Arc::new(KeyringSecureStorage::new());
+                let storage: Arc<dyn SecureStorage> = Arc::new(
+                    KeyringSecureStorage::new().map_err(|e| ShellError::Storage(e.to_string()))?,
+                );
 
                 // Generated once here and shared with the relay socket
                 // factory (via build_app_state, called below and again by

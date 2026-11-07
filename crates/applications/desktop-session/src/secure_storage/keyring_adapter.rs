@@ -1,68 +1,70 @@
-//! Unified `SecureStorage` adapter for all three desktop platforms,
-//! backed by the `keyring` crate — ruling S2 (`DECISIONS.md`).
+//! OS credential-store adapter for `SecureStorage`, backed by `keyring-core`.
 //!
-//! Uses `keyring::v1::Entry`, the crate's simple, direct API (gated
-//! behind the `v1` Cargo feature): `Entry::new`, `set_secret`,
-//! `get_secret`, `delete_credential`. Verified against the crate's real,
-//! current docs (v4.1.5) before writing this — in particular,
-//! `delete_credential` (not `delete_secret`, which doesn't exist), and
-//! `Error::NoEntry` (not a generic "not found" string to match on) as
-//! the "no such key" signal.
+//! The credential store is injected. `for_service` uses the platform default
+//! (initialised once by the `keyring` crate); `with_store` takes any store,
+//! which lets tests run against the in-memory mock without an OS keyring.
 //!
-//! `Entry`'s methods are synchronous (blocking) calls into the platform
-//! credential store, not async I/O — each is wrapped in
-//! `tokio::task::spawn_blocking` so it doesn't stall the caller's async
-//! runtime.
+//! `keyring-core` calls are synchronous platform I/O, so each is wrapped in
+//! `tokio::task::spawn_blocking` to avoid stalling the async runtime.
+
+use std::sync::Arc;
 
 use super::{SecureStorage, StorageError};
 use async_trait::async_trait;
-use keyring::v1::{Entry, Error as KeyringError};
+use keyring_core::{CredentialStore, Error as KeyringError};
 
-/// Default service identity under which secrets are stored. Matches Team
-/// Prompt 5 §3.1's macOS entry (`com.onyx.platform`), applied uniformly
-/// across all three platforms via this single adapter.
+/// Default service identity for the Tauri desktop shell. Matches Team Prompt 5
+/// §3.1's macOS entry (`com.onyx.platform`).
 pub const DEFAULT_SERVICE: &str = "com.onyx.platform";
 
-/// Keyring adapter scoped to one service name. Two hosts installed on the same
-/// device must use different service names, or one host's session overwrites
-/// the other's (both store the same keys).
 pub struct KeyringSecureStorage {
     service: String,
+    store: Arc<CredentialStore>,
 }
 
 impl KeyringSecureStorage {
-    /// Uses `DEFAULT_SERVICE` (the Tauri desktop shell).
-    pub fn new() -> Self {
+    /// Platform store, scoped to `DEFAULT_SERVICE`.
+    pub fn new() -> Result<Self, StorageError> {
         Self::for_service(DEFAULT_SERVICE)
     }
 
-    pub fn for_service(service: impl Into<String>) -> Self {
-        Self {
+    /// Platform store, scoped to `service`. Two hosts installed on one device
+    /// must use different service names, or one host's session overwrites the
+    /// other's (both store the same keys).
+    pub fn for_service(service: impl Into<String>) -> Result<Self, StorageError> {
+        keyring::v1::Entry::store_status()
+            .as_ref()
+            .map_err(|e| StorageError::Platform(format!("credential store unavailable: {e}")))?;
+        let store = keyring_core::get_default_store()
+            .ok_or_else(|| StorageError::Platform("no default credential store".to_string()))?;
+        Ok(Self {
             service: service.into(),
-        }
-    }
-
-    fn entry_in(service: &str, key: &str) -> Result<Entry, StorageError> {
-        Entry::new(service, key).map_err(|e| {
-            StorageError::Platform(format!("failed to open credential store entry: {e}"))
+            store,
         })
     }
-}
 
-impl Default for KeyringSecureStorage {
-    fn default() -> Self {
-        Self::new()
+    /// Any credential store, scoped to `service`. Used by tests (mock store).
+    pub fn with_store(service: impl Into<String>, store: Arc<CredentialStore>) -> Self {
+        Self {
+            service: service.into(),
+            store,
+        }
     }
 }
 
 #[async_trait]
 impl SecureStorage for KeyringSecureStorage {
     async fn store_secret(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
-        let key = key.to_string();
-        let service = self.service.clone();
-        let value = value.to_vec();
+        let (store, service, key, value) = (
+            Arc::clone(&self.store),
+            self.service.clone(),
+            key.to_string(),
+            value.to_vec(),
+        );
         tokio::task::spawn_blocking(move || {
-            let entry = Self::entry_in(&service, &key)?;
+            let entry = store
+                .build(&service, &key, None)
+                .map_err(map_keyring_error)?;
             entry.set_secret(&value).map_err(map_keyring_error)
         })
         .await
@@ -70,10 +72,15 @@ impl SecureStorage for KeyringSecureStorage {
     }
 
     async fn get_secret(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let key = key.to_string();
-        let service = self.service.clone();
+        let (store, service, key) = (
+            Arc::clone(&self.store),
+            self.service.clone(),
+            key.to_string(),
+        );
         tokio::task::spawn_blocking(move || {
-            let entry = Self::entry_in(&service, &key)?;
+            let entry = store
+                .build(&service, &key, None)
+                .map_err(map_keyring_error)?;
             match entry.get_secret() {
                 Ok(bytes) => Ok(Some(bytes)),
                 Err(KeyringError::NoEntry) => Ok(None),
@@ -85,10 +92,15 @@ impl SecureStorage for KeyringSecureStorage {
     }
 
     async fn delete_secret(&self, key: &str) -> Result<(), StorageError> {
-        let key = key.to_string();
-        let service = self.service.clone();
+        let (store, service, key) = (
+            Arc::clone(&self.store),
+            self.service.clone(),
+            key.to_string(),
+        );
         tokio::task::spawn_blocking(move || {
-            let entry = Self::entry_in(&service, &key)?;
+            let entry = store
+                .build(&service, &key, None)
+                .map_err(map_keyring_error)?;
             match entry.delete_credential() {
                 Ok(()) => Ok(()),
                 Err(KeyringError::NoEntry) => Err(StorageError::NotFound),
@@ -100,7 +112,7 @@ impl SecureStorage for KeyringSecureStorage {
     }
 }
 
-/// Maps `keyring::v1::Error` to `StorageError`, distinguishing the
+/// Maps `keyring_core::Error` to `StorageError`, distinguishing the
 /// frozen contract's `AccessDenied` (the credential store existing but
 /// being inaccessible — e.g. locked, or a permission failure) from a
 /// generic `Platform` failure, using `Error::NoStorageAccess` (the real
@@ -119,78 +131,80 @@ fn map_keyring_error(e: KeyringError) -> StorageError {
 mod tests {
     use super::*;
 
-    /// Real, live test against this machine's actual credential store
-    /// (Linux Secret Service in this sandbox — no mocking). Uses a
-    /// randomized key so repeated test runs don't collide with each
-    /// other or leave stale state.
+    /// Each test gets its own in-memory store, so tests do not share state and
+    /// do not depend on the machine's OS credential store.
+    fn mock_store() -> Arc<CredentialStore> {
+        keyring_core::mock::Store::new().expect("mock store")
+    }
+
     fn test_key() -> String {
         format!("onyx-test-{}", uuid::Uuid::new_v4())
     }
 
-    /// # Verification status (flagged, not silently assumed)
-    /// Run for real in this session against a live, freshly-installed
-    /// `gnome-keyring-daemon` + session D-Bus (not the default sandbox
-    /// state — both were installed and started specifically to get real
-    /// evidence for this adapter, the same "install real infrastructure"
-    /// treatment given to Postgres earlier in this session).
-    /// `get_secret_for_unknown_key_returns_none_not_error` and
-    /// `delete_secret_for_unknown_key_returns_not_found` (below) both
-    /// PASS against the real Secret Service. This one — the full
-    /// store/get/delete round-trip — FAILS specifically at
-    /// `store_secret`, with `AccessDenied("SS error: prompt dismissed")`:
-    /// `gnome-keyring-daemon` requires an interactive `pinentry` GUI
-    /// prompt to unlock the collection for a *write*, which this headless,
-    /// display-less sandbox cannot satisfy (no non-interactive unlock
-    /// path was found for this keyring configuration). This is a real
-    /// environment limitation, not a defect in the adapter — same
-    /// category as Team 4's documented "no Xcode/Android NDK" constraint
-    /// for mobile FFI verification. Notably, this failure is itself
-    /// positive evidence the adapter's error mapping works correctly:
-    /// `map_keyring_error`'s `NoStorageAccess` → `StorageError::AccessDenied`
-    /// branch (added specifically to satisfy strict clippy's dead-code
-    /// lint on that variant) correctly caught and categorized this exact
-    /// real-world failure, rather than lumping it into `Platform`.
+    fn storage(service: &str) -> KeyringSecureStorage {
+        KeyringSecureStorage::with_store(service, mock_store())
+    }
+
     #[tokio::test]
-    #[ignore = "requires an interactive keyring-unlock prompt (pinentry) this headless sandbox cannot satisfy for a write; read-only cases below pass against the real Secret Service"]
     async fn store_then_get_then_delete_round_trips() {
-        let storage = KeyringSecureStorage::new();
+        let storage = storage("com.onyx.platform.test");
         let key = test_key();
 
         storage
             .store_secret(&key, b"hello secret world")
             .await
             .unwrap();
-
-        let retrieved = storage.get_secret(&key).await.unwrap();
-        assert_eq!(retrieved, Some(b"hello secret world".to_vec()));
+        assert_eq!(
+            storage.get_secret(&key).await.unwrap(),
+            Some(b"hello secret world".to_vec())
+        );
 
         storage.delete_secret(&key).await.unwrap();
-
-        let after_delete = storage.get_secret(&key).await.unwrap();
-        assert_eq!(after_delete, None);
+        assert_eq!(storage.get_secret(&key).await.unwrap(), None);
     }
 
-    /// Passes for real against a live Secret Service (verified this
-    /// session — see the note on `store_then_get_then_delete_round_trips`
-    /// above for the environment this was run in).
     #[tokio::test]
     async fn get_secret_for_unknown_key_returns_none_not_error() {
-        let storage = KeyringSecureStorage::new();
-        let key = test_key(); // never stored
-
-        let result = storage.get_secret(&key).await.unwrap();
-        assert_eq!(result, None);
+        let storage = storage("com.onyx.platform.test");
+        assert_eq!(storage.get_secret(&test_key()).await.unwrap(), None);
     }
 
-    /// Passes for real against a live Secret Service (verified this
-    /// session — see the note on `store_then_get_then_delete_round_trips`
-    /// above for the environment this was run in).
     #[tokio::test]
     async fn delete_secret_for_unknown_key_returns_not_found() {
-        let storage = KeyringSecureStorage::new();
-        let key = test_key();
-
-        let result = storage.delete_secret(&key).await;
+        let storage = storage("com.onyx.platform.test");
+        let result = storage.delete_secret(&test_key()).await;
         assert!(matches!(result, Err(StorageError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn services_are_isolated_from_each_other() {
+        let store = mock_store();
+        let key = test_key();
+        let tauri = KeyringSecureStorage::with_store("com.onyx.platform", Arc::clone(&store));
+        let slint = KeyringSecureStorage::with_store("com.onyx.platform.slint", store);
+
+        tauri.store_secret(&key, b"tauri-session").await.unwrap();
+        assert_eq!(slint.get_secret(&key).await.unwrap(), None);
+        slint.store_secret(&key, b"slint-session").await.unwrap();
+        assert_eq!(
+            tauri.get_secret(&key).await.unwrap(),
+            Some(b"tauri-session".to_vec())
+        );
+    }
+
+    /// Real OS credential store. Device test only, on a machine with an
+    /// unlocked keychain or Secret Service:
+    /// `cargo test -p desktop-session --features keyring -- --ignored`
+    #[tokio::test]
+    #[ignore = "device test: needs an unlocked OS credential store"]
+    async fn real_os_store_round_trips() {
+        let storage = KeyringSecureStorage::for_service("com.onyx.platform.device-test").unwrap();
+        let key = test_key();
+        storage.store_secret(&key, b"device-secret").await.unwrap();
+        assert_eq!(
+            storage.get_secret(&key).await.unwrap(),
+            Some(b"device-secret".to_vec())
+        );
+        storage.delete_secret(&key).await.unwrap();
     }
 }

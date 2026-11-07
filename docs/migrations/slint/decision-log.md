@@ -292,3 +292,12 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Step 5, coexistence (defect found and fixed):** both hosts stored secrets under keyring service `com.onyx.platform` with the same keys. Installing both would make one overwrite the other's session. `desktop-slint` now uses service `com.onyx.platform.slint`. `desktop-shell` keeps `com.onyx.platform`. Data folders already differ (`onyx-slint` vs `com.onyx.platform`).
 - **Still not done:** a device test that installs both hosts and confirms separate sessions. Startup and shutdown tests for `desktop-slint` need a runnable keyring and database, which this sandbox does not have.
 - **Evidence:** `clippy -D warnings` is clean for `desktop-session` (keyring feature), `desktop-slint`, and `desktop-shell`. `desktop-session` tests: 34 pass. The two keyring-adapter tests still fail here (no default store).
+
+## Keyring adapter: hermetic tests (fix for the two failing keyring tests, 2026-11-07)
+
+- **Root cause:** the keyring tests depended on the machine's OS credential store. This sandbox and CI have none unlocked, so two tests failed with "No default store". The `keyring` crate's own store initialisation cannot be replaced by a test store, so the tests could not be fixed by changing only the test.
+- **Fix:** the adapter takes an injected `CredentialStore` (`keyring-core`). `for_service` / `new` use the platform default (returning `Result`). `with_store` takes any store.
+- **Tests:** round-trip, unknown-key, not-found, and service-isolation tests run against the in-memory mock store, one store per test. 38 pass. The real OS-store round trip is an ignored device test (`cargo test -p desktop-session --features keyring -- --ignored`).
+- **Caller change:** `KeyringSecureStorage::new()` and `for_service()` now return `Result`. Callers in `desktop-shell` and `desktop-slint` map the error.
+- **Dependency:** `keyring-core` is an optional dependency behind the `keyring` feature.
+- **Not verified:** the device test on Windows, macOS, and Linux desktops (needs a real unlocked store).
