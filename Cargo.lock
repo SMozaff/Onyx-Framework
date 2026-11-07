@@ -2181,6 +2181,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop-session"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "platform-kernel",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sync-transport",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "desktop-shell"
 version = "1.0.0"
 dependencies = [
@@ -2189,6 +2207,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "client-composition",
+ "desktop-session",
  "futures-util",
  "keyring",
  "lan-discovery",

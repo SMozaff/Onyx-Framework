@@ -15,6 +15,7 @@ members = [
     "crates/applications/query-application",
     "crates/applications/worker-application",
     "crates/applications/client-composition",
+    "crates/applications/desktop-session",
     "crates/applications/security-application",
     "crates/applications/audit-application",
     "crates/infrastructure/persistence-common",
@@ -104,6 +105,7 @@ notification-domain = { path = "crates/domains/notification-domain" }
 query-application = { path = "crates/applications/query-application" }
 worker-application = { path = "crates/applications/worker-application" }
 client-composition = { path = "crates/applications/client-composition" }
+desktop-session = { path = "crates/applications/desktop-session" }
 security-application = { path = "crates/applications/security-application" }
 audit-application = { path = "crates/applications/audit-application" }
 observability-adapter = { path = "crates/infrastructure/observability-adapter" }

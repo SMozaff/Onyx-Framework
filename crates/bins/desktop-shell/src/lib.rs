@@ -29,12 +29,11 @@
 
 use relay_websocket_adapter as relay_socket;
 mod secure_storage;
-mod session;
-mod session_authority;
 
 use std::sync::Arc;
 
-use session_authority::{SessionAuthority, SessionBearerProvider, SessionSummary};
+use desktop_session::session;
+use desktop_session::session_authority::{SessionAuthority, SessionBearerProvider, SessionSummary};
 
 /// Canonical ONYX Cloud API origin. Distributed clients must not accept
 /// endpoint overrides.
@@ -691,7 +690,7 @@ pub fn run() {
                 // rotated refresh token is written back. Any failure leaves
                 // the person on the login screen. None of them is fatal.
                 let api = Arc::new(session::HttpSessionApi::new(CLOUD_API_BASE)?);
-                let authority = session_authority::SessionAuthority::new(
+                let authority = desktop_session::session_authority::SessionAuthority::new(
                     CLOUD_API_BASE,
                     api,
                     storage.clone(),
