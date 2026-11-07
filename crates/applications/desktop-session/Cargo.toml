@@ -15,6 +15,10 @@ tracing.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+keyring = { version = "4", features = ["v1"], optional = true }
+
+[features]
+keyring = ["dep:keyring"]
 
 [dev-dependencies]
 uuid.workspace = true

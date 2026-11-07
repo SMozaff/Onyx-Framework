@@ -271,3 +271,13 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Evidence:** `desktop-session` tests: 34 passing. `cargo clippy -D warnings` clean for both crates. `desktop-shell` compiles.
 - **Known environment failure, not caused by this change:** two `keyring_adapter` tests fail in this sandbox ("No default store has been set"). They fail the same way on `main`.
 - **Not done yet (next step):** `desktop-slint` still runs its own in-memory `session_service.rs` and `authority.rs`. Switching it to `desktop-session` is step 2 and is a behaviour change (it would adopt the keyring-backed desktop token policy). It needs its own decision entry.
+
+## Track B session owner: step 2, desktop-slint switched (2026-11-07)
+
+- **Decision (minor, documented):** `desktop-slint` uses the shared `desktop-session` crate and removes its own `session_service.rs` and `authority.rs`. This is the one session owner the B1 condition requires.
+- **Behaviour change:** the refresh token is now stored in the OS keyring (desktop token policy, `desktop-token-storage-policy.md`), where `desktop-slint` previously kept it in memory only. The app also restores a stored session at startup and starts the outbox for that organization. The access token stays in memory.
+- **Keyring adapter:** moved into `desktop-session` behind a `keyring` feature. `desktop-shell` and `desktop-slint` both enable it. `desktop-shell` behaviour is unchanged.
+- **Tests:** the four `authority.rs` tests and the `session_service.rs` tests are removed with their code. The same fail-closed, redaction, and logout behaviour is covered by `desktop-session` tests (34 total).
+- **Evidence:** `cargo check` passes for `desktop-slint` and `desktop-shell`. `clippy -D warnings` is clean for `desktop-session` (with keyring), `desktop-slint`, and `desktop-shell`. The two keyring-adapter tests fail in this sandbox (no default credential store), as on `main`.
+- **Not verified:** a real keyring round trip on Windows, macOS, or Linux desktop. Needs a device test.
+- **Stacked:** this branch is based on PR #413. Merge #413 first.

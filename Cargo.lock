@@ -2186,6 +2186,7 @@ version = "1.0.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
+ "keyring",
  "platform-kernel",
  "reqwest",
  "serde",
@@ -2209,7 +2210,6 @@ dependencies = [
  "client-composition",
  "desktop-session",
  "futures-util",
- "keyring",
  "lan-discovery",
  "persistence-sqlite",
  "platform-contracts",
@@ -2239,6 +2239,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "client-composition",
+ "desktop-session",
  "futures-util",
  "platform-kernel",
  "relay-websocket-adapter",

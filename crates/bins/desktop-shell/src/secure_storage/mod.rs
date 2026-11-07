@@ -15,6 +15,6 @@
 //! an architectural deviation — the `SecureStorage` port itself is
 //! unchanged.
 
-pub use desktop_session::secure_storage::{SecureStorage, StorageError};
+pub use desktop_session::secure_storage::SecureStorage;
 
-pub mod keyring_adapter;
+pub use desktop_session::secure_storage::keyring_adapter;

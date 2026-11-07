@@ -1,8 +1,9 @@
 //! Native Slint composition root.
 //!
 //! Keeps authentication and relay authority in Rust. The UI receives only
-//! non-secret identity fields; access and refresh tokens remain in the
-//! in-memory session service and are never exposed as Slint properties.
+//! non-secret identity fields. Session authority is the shared
+//! `desktop-session` crate: the refresh token lives in the OS keyring, and the
+//! access token stays in memory. Neither is exposed as a Slint property.
 //!
 //! Offline outbox: the local SQLite store opens at startup. After a login the
 //! app state for that organization is built and its sync agent starts, so
@@ -18,18 +19,20 @@ use sqlx::SqlitePool;
 use sync_transport::{cloud_relay::CloudRelayTransport, placeholder_types::AuthorityProvider};
 use tokio::sync::Mutex;
 
-use crate::{
-    authority::{SessionAuthorityProvider, SessionTokenSource},
-    device,
-    session_service::{SessionIdentity, SessionService},
+use desktop_session::{
+    secure_storage::{keyring_adapter::KeyringSecureStorage, SecureStorage},
+    session::{self, HttpSessionApi, SessionError},
+    session_authority::{SessionAuthority, SessionBearerProvider, SessionSummary},
 };
+
+use crate::device;
 use relay_websocket_adapter::TungsteniteRelaySocketFactory;
 
 /// The same canonical API origin used by the current desktop-shell login flow.
 pub const ONYX_API_ORIGIN: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
 
 pub struct SlintComposition {
-    pub session: Arc<SessionService>,
+    pub session: Arc<SessionAuthority>,
     pub relay: Arc<CloudRelayTransport>,
     replica: ReplicaId,
     data_dir: PathBuf,
@@ -67,11 +70,13 @@ impl SlintComposition {
             .await
             .map_err(|e| format!("apply migrations: {e}"))?;
 
-        let session =
-            SessionService::new(ONYX_API_ORIGIN).map_err(|e| format!("session: {e:?}"))?;
-        let token_source: Arc<dyn SessionTokenSource> = session.clone();
+        let api = Arc::new(
+            HttpSessionApi::new(ONYX_API_ORIGIN).map_err(|e| format!("session api: {e}"))?,
+        );
+        let storage: Arc<dyn SecureStorage> = Arc::new(KeyringSecureStorage::new());
+        let session = SessionAuthority::new(ONYX_API_ORIGIN, api, Arc::clone(&storage));
         let authority: Arc<dyn AuthorityProvider> =
-            Arc::new(SessionAuthorityProvider::new(token_source));
+            Arc::new(SessionBearerProvider::new(Arc::clone(&session)));
         let socket_factory = Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
             replica,
             session.connection_cancellation_source(),
@@ -82,29 +87,49 @@ impl SlintComposition {
             socket_factory,
         ));
 
-        Ok(Arc::new(Self {
+        let composition = Arc::new(Self {
             session,
             relay,
             replica,
             data_dir,
             pool,
             outbox: Mutex::new(None),
-        }))
+        });
+        composition.restore_session(&storage).await;
+        Ok(composition)
+    }
+
+    /// Restores a stored refresh token from the keyring at startup. On success
+    /// the sync agent starts for that organization, as after a fresh sign-in.
+    async fn restore_session(&self, storage: &Arc<dyn SecureStorage>) {
+        match session::load(storage).await {
+            Ok(Some(stored)) => {
+                if let Some(summary) = self.session.restore(stored).await {
+                    self.start_outbox(&summary.organization_id.to_string()).await;
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e, "stored session could not be read"),
+        }
     }
 
     pub async fn login(
         &self,
         username: &str,
         password: &str,
-    ) -> Result<SessionIdentity, crate::authority::SessionSourceError> {
-        let identity = self.session.login(username, password).await?;
-        self.start_outbox(&identity.organization_id).await;
-        Ok(identity)
+    ) -> Result<SessionSummary, SessionError> {
+        let outcome = self.session.sign_in(username, password).await?;
+        if !outcome.persisted {
+            tracing::warn!("session is active in memory only; keyring save failed");
+        }
+        let summary = outcome.summary;
+        self.start_outbox(&summary.organization_id.to_string()).await;
+        Ok(summary)
     }
 
     pub async fn logout(&self) {
         self.stop_outbox().await;
-        self.session.logout().await;
+        self.session.sign_out().await;
     }
 
     /// Builds the app state for `organization_id` and starts its sync agent.
@@ -120,7 +145,6 @@ impl SlintComposition {
             }
         };
 
-        let token_source: Arc<dyn SessionTokenSource> = self.session.clone();
         let config = AppStateConfig {
             local_replica: self.replica,
             organization_id: org,
@@ -128,7 +152,7 @@ impl SlintComposition {
             event_bus_capacity: 1024,
             cloud_relay_endpoint: ONYX_API_ORIGIN.replacen("https://", "wss://", 1),
             local_discovery: None,
-            cloud_relay_auth_provider: Arc::new(SessionAuthorityProvider::new(token_source)),
+            cloud_relay_auth_provider: Arc::new(SessionBearerProvider::new(Arc::clone(&self.session))),
             cloud_relay_socket_factory: Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
                 self.replica,
                 self.session.connection_cancellation_source(),
