@@ -73,7 +73,10 @@ impl SlintComposition {
         let api = Arc::new(
             HttpSessionApi::new(ONYX_API_ORIGIN).map_err(|e| format!("session api: {e}"))?,
         );
-        let storage: Arc<dyn SecureStorage> = Arc::new(KeyringSecureStorage::new());
+        // Separate keyring service from the Tauri shell so both can be installed on
+        // one device without overwriting each other's session (decision-log).
+        let storage: Arc<dyn SecureStorage> =
+            Arc::new(KeyringSecureStorage::for_service("com.onyx.platform.slint"));
         let session = SessionAuthority::new(ONYX_API_ORIGIN, api, Arc::clone(&storage));
         let authority: Arc<dyn AuthorityProvider> =
             Arc::new(SessionBearerProvider::new(Arc::clone(&session)));

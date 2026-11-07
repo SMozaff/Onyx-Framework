@@ -281,3 +281,14 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Evidence:** `cargo check` passes for `desktop-slint` and `desktop-shell`. `clippy -D warnings` is clean for `desktop-session` (with keyring), `desktop-slint`, and `desktop-shell`. The two keyring-adapter tests fail in this sandbox (no default credential store), as on `main`.
 - **Not verified:** a real keyring round trip on Windows, macOS, or Linux desktop. Needs a device test.
 - **Stacked:** this branch is based on PR #413. Merge #413 first.
+
+## Track B steps 3 and 5: lifecycle and coexistence (2026-11-07)
+
+- **Step 3, lifecycle (decided, minor):** `desktop-slint` has no event subscriptions. Its only lifecycle is the sync task (outbox):
+  - Sign-in builds one `AppState` and starts the sync agent. `start_outbox` stops any previous task first.
+  - Sign-out stops the sync task, then cancels in-flight relay connections via the shared cancellation token.
+  - Startup restores a stored session and starts the same sync task.
+  - Event subscriptions exist only in `desktop-shell` (Tauri `subscribe_events`). That path is out of Slint scope, and its existing gap stays recorded for the cutover gate.
+- **Step 5, coexistence (defect found and fixed):** both hosts stored secrets under keyring service `com.onyx.platform` with the same keys. Installing both would make one overwrite the other's session. `desktop-slint` now uses service `com.onyx.platform.slint`. `desktop-shell` keeps `com.onyx.platform`. Data folders already differ (`onyx-slint` vs `com.onyx.platform`).
+- **Still not done:** a device test that installs both hosts and confirms separate sessions. Startup and shutdown tests for `desktop-slint` need a runnable keyring and database, which this sandbox does not have.
+- **Evidence:** `clippy -D warnings` is clean for `desktop-session` (keyring feature), `desktop-slint`, and `desktop-shell`. `desktop-session` tests: 34 pass. The two keyring-adapter tests still fail here (no default store).
