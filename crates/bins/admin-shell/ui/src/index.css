@@ -27,6 +27,25 @@
   --color-onyx-status-closed: #64748b;
 }
 
+/* Dark theme: opt-in via data-theme="dark" on <html>. Light stays the default.
+   Values: docs/design/dark-theme-tokens.md (owner approved, 2026-11-07). */
+:root[data-theme="dark"] {
+  --color-onyx-bg: #010314;
+  --color-onyx-surface: #020728;
+  --color-onyx-surface-hover: #061250;
+  --color-onyx-border: #33466e;
+  --color-onyx-text: #f2f5fc;
+  --color-onyx-text-dim: #8b95a8;
+  --color-onyx-accent: #1747ff;
+  --color-onyx-status-draft: #8b95a8;
+  --color-onyx-status-active: #39d9ff;
+  --color-onyx-status-review: #a77bff;
+  --color-onyx-status-approved: #3ddc97;
+  --color-onyx-status-blocked: #ff6b6b;
+  --color-onyx-status-closed: #8b95a8;
+  color-scheme: dark;
+}
+
 :root {
   color: var(--color-onyx-text);
   background: var(--color-onyx-bg);
