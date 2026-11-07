@@ -16,9 +16,10 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 keyring = { version = "4", features = ["v1"], optional = true }
+keyring-core = { version = "1.0.0", optional = true }
 
 [features]
-keyring = ["dep:keyring"]
+keyring = ["dep:keyring", "dep:keyring-core"]
 
 [dev-dependencies]
 uuid.workspace = true
