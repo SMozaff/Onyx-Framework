@@ -23,7 +23,18 @@ Contrast ratios are WCAG 2.x, measured against the dark backgrounds.
 - Graphite `#59657A` is not used for text on dark backgrounds (2.95–3.48:1, fails AA).
 - Signal Blue `#0B60FA` is not used for text on dark backgrounds (3.4–4.0:1).
 
-## Still open (owner input needed)
+## Decided by the team (2026-11-07, owner delegated)
 
-- `border` value for dark theme (not in the approved mapping).
-- Status colours for dark theme (draft, active, review, approved, blocked, closed).
+Status and border colours. Text contrast is measured against Void/Deep/Midnight.
+
+| Token | Value | Reason | Contrast (Void/Deep/Midnight) |
+|---|---|---|---|
+| border | `#33466E` | Strongest tone that stays subtle. Non-text boundary; no palette colour is both subtle and 3:1. | 2.2 / 2.1 / 1.9 (non-text) |
+| status-draft | `#8B95A8` | Same as muted text; neutral state. | 6.8 / 6.6 / 5.8 |
+| status-active | `#39D9FF` | Cyan Edge (palette, live signal). | 12.2 / 11.8 / 10.4 |
+| status-review | `#A77BFF` | Violet family lightened from Ion Violet to pass 4.5:1 on all dark backgrounds. | 6.8 / 6.5 / 5.7 |
+| status-approved | `#3DDC97` | New green (not in palette). Chosen for clear meaning and contrast. | 11.6 / 11.2 / 9.8 |
+| status-blocked | `#FF6B6B` | New red (not in palette). Chosen for clear meaning and contrast. | 7.4 / 7.1 / 6.3 |
+| status-closed | `#8B95A8` | Inactive state; same as muted text. | 6.8 / 6.6 / 5.8 |
+
+Note: green and red are new colours not in the brand palette. Owner may replace them with palette values later.
