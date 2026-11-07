@@ -18,20 +18,32 @@ use super::{SecureStorage, StorageError};
 use async_trait::async_trait;
 use keyring::v1::{Entry, Error as KeyringError};
 
-/// Service identity under which every secret is stored. Matches Team
+/// Default service identity under which secrets are stored. Matches Team
 /// Prompt 5 §3.1's macOS entry (`com.onyx.platform`), applied uniformly
 /// across all three platforms via this single adapter.
-const SERVICE: &str = "com.onyx.platform";
+pub const DEFAULT_SERVICE: &str = "com.onyx.platform";
 
-pub struct KeyringSecureStorage;
+/// Keyring adapter scoped to one service name. Two hosts installed on the same
+/// device must use different service names, or one host's session overwrites
+/// the other's (both store the same keys).
+pub struct KeyringSecureStorage {
+    service: String,
+}
 
 impl KeyringSecureStorage {
+    /// Uses `DEFAULT_SERVICE` (the Tauri desktop shell).
     pub fn new() -> Self {
-        Self
+        Self::for_service(DEFAULT_SERVICE)
     }
 
-    fn entry(key: &str) -> Result<Entry, StorageError> {
-        Entry::new(SERVICE, key).map_err(|e| {
+    pub fn for_service(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+
+    fn entry_in(service: &str, key: &str) -> Result<Entry, StorageError> {
+        Entry::new(service, key).map_err(|e| {
             StorageError::Platform(format!("failed to open credential store entry: {e}"))
         })
     }
@@ -47,9 +59,10 @@ impl Default for KeyringSecureStorage {
 impl SecureStorage for KeyringSecureStorage {
     async fn store_secret(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
         let key = key.to_string();
+        let service = self.service.clone();
         let value = value.to_vec();
         tokio::task::spawn_blocking(move || {
-            let entry = Self::entry(&key)?;
+            let entry = Self::entry_in(&service, &key)?;
             entry.set_secret(&value).map_err(map_keyring_error)
         })
         .await
@@ -58,8 +71,9 @@ impl SecureStorage for KeyringSecureStorage {
 
     async fn get_secret(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         let key = key.to_string();
+        let service = self.service.clone();
         tokio::task::spawn_blocking(move || {
-            let entry = Self::entry(&key)?;
+            let entry = Self::entry_in(&service, &key)?;
             match entry.get_secret() {
                 Ok(bytes) => Ok(Some(bytes)),
                 Err(KeyringError::NoEntry) => Ok(None),
@@ -72,8 +86,9 @@ impl SecureStorage for KeyringSecureStorage {
 
     async fn delete_secret(&self, key: &str) -> Result<(), StorageError> {
         let key = key.to_string();
+        let service = self.service.clone();
         tokio::task::spawn_blocking(move || {
-            let entry = Self::entry(&key)?;
+            let entry = Self::entry_in(&service, &key)?;
             match entry.delete_credential() {
                 Ok(()) => Ok(()),
                 Err(KeyringError::NoEntry) => Err(StorageError::NotFound),

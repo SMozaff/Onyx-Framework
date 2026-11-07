@@ -26,3 +26,7 @@ pub enum StorageError {
     #[error("Platform error: {0}")]
     Platform(String),
 }
+
+/// Platform adapter (OS credential store). Enabled by the `keyring` feature.
+#[cfg(feature = "keyring")]
+pub mod keyring_adapter;

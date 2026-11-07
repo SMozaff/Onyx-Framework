@@ -6,10 +6,8 @@
 
 use std::sync::Arc;
 
-pub mod authority;
 pub mod composition;
 pub mod device;
-pub mod session_service;
 
 slint::include_modules!();
 

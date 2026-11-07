@@ -27,6 +27,7 @@ futures-util = { workspace = true }
 tokio-tungstenite = { workspace = true }
 uuid = { workspace = true }
 client-composition = { workspace = true }
+desktop-session = { workspace = true, features = ["keyring"] }
 sqlx = { workspace = true }
 tracing = { workspace = true }
 
