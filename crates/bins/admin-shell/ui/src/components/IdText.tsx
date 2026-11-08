@@ -1,4 +1,4 @@
-import { isolateLtr, toLatinDigits } from "@/utils/displayDigits";
+import { toLatinDigits } from "@/utils/displayDigits";
 
 /**
  * Renders an identifier for display: Latin digits and an LTR isolate so it reads
