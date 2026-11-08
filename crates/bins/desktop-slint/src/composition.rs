@@ -32,6 +32,7 @@ use relay_websocket_adapter::TungsteniteRelaySocketFactory;
 pub const ONYX_API_ORIGIN: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
 
 pub struct SlintComposition {
+    api_origin: String,
     pub session: Arc<SessionAuthority>,
     pub relay: Arc<CloudRelayTransport>,
     replica: ReplicaId,
@@ -52,6 +53,29 @@ impl SlintComposition {
     /// service and relay. Must be awaited inside the Tokio runtime.
     pub async fn open() -> Result<Arc<Self>, String> {
         let data_dir = device::data_dir()?;
+        // Separate keyring service from the Tauri shell so both can be installed on
+        // one device without overwriting each other's session (decision-log).
+        let storage: Arc<dyn SecureStorage> = Arc::new(
+            KeyringSecureStorage::for_service("com.onyx.platform.slint")
+                .map_err(|e| format!("credential store: {e}"))?,
+        );
+        Self::open_with(OpenOptions {
+            data_dir,
+            storage,
+            api_origin: ONYX_API_ORIGIN.to_string(),
+        })
+        .await
+    }
+
+    /// Opens the composition with explicit data folder, credential store, and
+    /// API origin. `open` uses the device defaults; tests use temporary folders,
+    /// an in-memory store, and an unreachable origin.
+    pub async fn open_with(options: OpenOptions) -> Result<Arc<Self>, String> {
+        let OpenOptions {
+            data_dir,
+            storage,
+            api_origin,
+        } = options;
         std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data folder: {e}"))?;
         let replica = device::load_or_create_replica_id(&data_dir)?;
 
@@ -70,16 +94,9 @@ impl SlintComposition {
             .await
             .map_err(|e| format!("apply migrations: {e}"))?;
 
-        let api = Arc::new(
-            HttpSessionApi::new(ONYX_API_ORIGIN).map_err(|e| format!("session api: {e}"))?,
-        );
-        // Separate keyring service from the Tauri shell so both can be installed on
-        // one device without overwriting each other's session (decision-log).
-        let storage: Arc<dyn SecureStorage> = Arc::new(
-            KeyringSecureStorage::for_service("com.onyx.platform.slint")
-                .map_err(|e| format!("credential store: {e}"))?,
-        );
-        let session = SessionAuthority::new(ONYX_API_ORIGIN, api, Arc::clone(&storage));
+        let api =
+            Arc::new(HttpSessionApi::new(&api_origin).map_err(|e| format!("session api: {e}"))?);
+        let session = SessionAuthority::new(&api_origin, api, Arc::clone(&storage));
         let authority: Arc<dyn AuthorityProvider> =
             Arc::new(SessionBearerProvider::new(Arc::clone(&session)));
         let socket_factory = Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
@@ -87,12 +104,13 @@ impl SlintComposition {
             session.connection_cancellation_source(),
         ));
         let relay = Arc::new(CloudRelayTransport::new(
-            ONYX_API_ORIGIN,
+            &api_origin,
             authority,
             socket_factory,
         ));
 
         let composition = Arc::new(Self {
+            api_origin,
             session,
             relay,
             replica,
@@ -157,7 +175,7 @@ impl SlintComposition {
             organization_id: org,
             sync_agent_config: client_composition::sync_agent::SyncAgentConfig::default(),
             event_bus_capacity: 1024,
-            cloud_relay_endpoint: ONYX_API_ORIGIN.replacen("https://", "wss://", 1),
+            cloud_relay_endpoint: self.api_origin.replacen("https://", "wss://", 1),
             local_discovery: None,
             cloud_relay_auth_provider: Arc::new(SessionBearerProvider::new(Arc::clone(
                 &self.session,
@@ -168,7 +186,7 @@ impl SlintComposition {
             )),
             blob_store_root: self.data_dir.join("blobs"),
             owner_authority: None,
-            cloud_outbox_endpoint: Some(format!("{ONYX_API_ORIGIN}/api/sync/outbox")),
+            cloud_outbox_endpoint: Some(format!("{}/api/sync/outbox", self.api_origin)),
         };
 
         match AppState::new(self.pool.clone(), config).await {
@@ -189,5 +207,99 @@ impl SlintComposition {
         if let Some(runtime) = self.outbox.lock().await.take() {
             runtime.task.abort();
         }
+    }
+}
+
+/// Inputs for `SlintComposition::open_with`.
+pub struct OpenOptions {
+    pub data_dir: std::path::PathBuf,
+    pub storage: Arc<dyn SecureStorage>,
+    pub api_origin: String,
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use desktop_session::session::{self, StoredSession};
+    use keyring_core::mock::Store as MockStore;
+    use platform_kernel::{ObjectId, OrganizationId};
+
+    /// Unreachable origin: refresh fails fast with a network error, not a verdict.
+    const OFFLINE_ORIGIN: &str = "http://127.0.0.1:9";
+
+    fn options(dir: &std::path::Path, storage: Arc<dyn SecureStorage>) -> OpenOptions {
+        OpenOptions {
+            data_dir: dir.to_path_buf(),
+            storage,
+            api_origin: OFFLINE_ORIGIN.to_string(),
+        }
+    }
+
+    fn mock_storage() -> Arc<dyn SecureStorage> {
+        let store = MockStore::new().expect("mock store");
+        Arc::new(KeyringSecureStorage::with_store(
+            "com.onyx.platform.slint.test",
+            store,
+        ))
+    }
+
+    #[tokio::test]
+    async fn fresh_start_opens_signed_out_with_stable_replica() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = mock_storage();
+
+        let first = SlintComposition::open_with(options(dir.path(), Arc::clone(&storage)))
+            .await
+            .expect("first open");
+        assert!(first.session.current_summary().await.is_none());
+        let replica = first.replica;
+        drop(first);
+
+        // Restart over the same folder: migrations are idempotent and the
+        // replica identity persists.
+        let second = SlintComposition::open_with(options(dir.path(), storage))
+            .await
+            .expect("second open");
+        assert_eq!(second.replica, replica);
+        assert!(second.session.current_summary().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn offline_restart_keeps_stored_session_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = mock_storage();
+        let stored = StoredSession {
+            server_address: OFFLINE_ORIGIN.to_string(),
+            refresh_token: "refresh-token-for-offline-test".to_string(),
+            user_id: ObjectId::new_random(),
+            organization_id: OrganizationId::new_random(),
+            username: "tester".to_string(),
+            is_admin: false,
+        };
+        session::save(&storage, &stored).await.expect("save record");
+
+        let composition = SlintComposition::open_with(options(dir.path(), Arc::clone(&storage)))
+            .await
+            .expect("open offline");
+
+        // Network failure is not a verdict: the app starts signed out, but the
+        // stored record survives for the next launch.
+        assert!(composition.session.current_summary().await.is_none());
+        let still_stored = session::load(&storage)
+            .await
+            .expect("load")
+            .expect("record kept");
+        assert_eq!(still_stored.username, "tester");
+    }
+
+    #[tokio::test]
+    async fn logout_without_session_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let composition = SlintComposition::open_with(options(dir.path(), mock_storage()))
+            .await
+            .expect("open");
+        composition.logout().await;
+        composition.logout().await;
+        assert!(composition.session.current_summary().await.is_none());
     }
 }
