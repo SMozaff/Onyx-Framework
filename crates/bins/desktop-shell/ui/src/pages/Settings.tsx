@@ -29,6 +29,24 @@ export default function Settings({
           {t("auth.logOut")}
         </button>
       </section>
+      <section className="mt-6 rounded-lg border border-onyx-border bg-onyx-surface p-5">
+        <h2 className="text-base font-semibold text-onyx-text">{t("settings.notificationsTitle")}</h2>
+        <ul className="mt-3 space-y-2">
+          {[t("settings.notificationsEmail"), t("settings.notificationsSms")].map((label) => (
+            <li key={label}>
+              <button
+                type="button"
+                disabled
+                aria-disabled
+                className="flex w-full items-center justify-between rounded border border-onyx-border px-3 py-2 text-start text-sm text-onyx-text-dim"
+              >
+                <span>{label}</span>
+                <span className="text-xs">{t("settings.notificationsFutureModule")}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }
