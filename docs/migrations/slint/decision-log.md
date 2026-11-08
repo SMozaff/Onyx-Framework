@@ -321,3 +321,14 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
   - Logout with no session is idempotent.
 - **Evidence:** `cargo test -p desktop-slint` passes. `clippy -D warnings` and `fmt --check` are clean.
 - **Not covered:** a real successful login and refresh (needs a deployed Worker and a test account), and two-host coexistence on a device.
+
+## Ready-to-build items: status (2026-11-08)
+
+- **Q-16 / U-05 (ID digit display): done.** `crates/bins/admin-shell/ui/src/utils/displayDigits.ts` converts Persian and Arabic-Indic digits to Latin for display only. `IdText` wraps the result in an LTR isolate for mixed RTL/LTR text. The stored value is never changed. 8 tests pass (`tests/displayDigits.test.ts`). The helper is not yet used by any screen, and it is not shared with the desktop UI.
+- **File-transfer route placeholders: done (desktop).** `TransferRoutes` on the Files page shows Internet as enabled with the 100 MB limit, and LAN and the emergency BLE/Wi-Fi Direct module as disabled.
+- **Settings notification placeholders: done (desktop).** Email and SMS are disabled options under "Notification channels", marked as future modules. Push is not part of this placeholder.
+- **i18n:** new keys added in `shared/i18n/en.json` and `fa.json` (flat keys, to pass the schema). Dictionaries regenerated. The Persian strings need review by a Persian speaker.
+- **Not done, needs owner input:**
+  - **Q-14 (theme and language preferences):** the owner approved the schema, but it is not in the repo. Fields, defaults, and fallback must be provided before they can be implemented.
+  - **C-09 (fixture schema):** the candidate is `shared/diagnostics/diagnostic-event.schema.json` (v1.0). The owner has not confirmed it, so no provenance commit was made.
+  - **Web UI file route:** web-ui has no Files page. Adding one (Internet-only, LAN disabled) is new screen scope and needs a decision.

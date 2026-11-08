@@ -7,6 +7,7 @@ import { useQuery } from "@/hooks/useQuery";
 import { useCommand } from "@/hooks/useCommand";
 import { useSession } from "@/hooks/useSession";
 import { useI18n } from "@/i18n/I18nContext";
+import { TransferRoutes } from "@/components/TransferRoutes";
 
 export default function Files() {
   const { fileAssetId } = useParams<{ fileAssetId?: string }>();
@@ -20,6 +21,7 @@ export default function Files() {
   return (
     <div className="max-w-3xl">
       <h1 className="text-xl font-semibold text-onyx-text">{t("files.title")}</h1>
+      <TransferRoutes />
 
       <IdLookup onLookup={(id) => navigate(`/files/${JSON.stringify(id)}`)} />
 
