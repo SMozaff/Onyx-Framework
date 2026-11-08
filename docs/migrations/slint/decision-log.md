@@ -332,3 +332,14 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
   - **Q-14 (theme and language preferences):** the owner approved the schema, but it is not in the repo. Fields, defaults, and fallback must be provided before they can be implemented.
   - **C-09 (fixture schema):** the candidate is `shared/diagnostics/diagnostic-event.schema.json` (v1.0). The owner has not confirmed it, so no provenance commit was made.
   - **Web UI file route:** web-ui has no Files page. Adding one (Internet-only, LAN disabled) is new screen scope and needs a decision.
+
+## CI: web-ui and mobile-pwa checks removed (2026-11-09)
+
+- **Decision (owner):** remove the `web` and `mobile-pwa` jobs from every CI check. Web UI is postponed (`docs/product/web-ui-postponed.md`), and these jobs cost significant CI time.
+- **Changes:**
+  - `ci.yml`: deleted the `web` and `mobile-pwa` jobs, and their entries in `merge-gate` (`needs`, env, and result checks).
+  - `security.yml`: removed `web-ui` and `mobile-pwa` from the frontend-audit matrix and from the lockfile presence checks.
+- **Kept on purpose:** the `i18n` job still runs `sync-i18n.mjs --audit-scope=web-ui/src/pages/Dashboard`. It checks shared catalogues, not the web app, and it is cheap. The owner can remove it too if wanted.
+- **Not changed:** the code and `dependabot.yml` entries for web-ui and mobile-pwa. Dependabot PRs for those folders will open but will not run these checks.
+- **Branch protection:** the `main` branch has no protection rules, so no required checks had to be removed.
+- **To restore:** re-add the jobs from git history (commit that removes them) when web UI resumes.
