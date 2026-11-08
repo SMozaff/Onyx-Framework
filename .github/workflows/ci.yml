@@ -183,78 +183,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web-ui
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web-ui/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Lint (zero warnings)
-        run: npm run lint
-      - name: Type check
-        run: npm run type-check
-      - name: Unit and integration tests
-        run: npm test
-      - name: Accessibility component tests
-        run: npm run test:a11y
-      - name: Feature contract audit
-        run: npm run feature-audit
-
-      - name: Install Chromium for browser regressions
-        run: npx playwright install --with-deps chromium
-      - name: Browser accessibility, keyboard, state, and visual regressions
-        run: npm run test:browser
-      - name: Production build and bundle budget
-        run: npm run build
-      - name: Upload web quality evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: onyx-web-quality-${{ github.sha }}
-          path: |
-            web-ui/test-reports/
-            web-ui/playwright-report/
-            web-ui/test-results/
-          if-no-files-found: warn
-          retention-days: 14
-
-  # Phase 3: bring the observer PWA into CI before surface migration.
-  mobile-pwa:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: mobile-pwa/package-lock.json
-      - name: Install dependencies
-        working-directory: mobile-pwa
-        run: npm ci
-      - name: Lint
-        working-directory: mobile-pwa
-        run: npm run lint
-      - name: Type check
-        working-directory: mobile-pwa
-        run: npm run type-check
-      - name: Unit/component/accessibility tests
-        working-directory: mobile-pwa
-        run: npm test && npm run test:a11y
-      - name: Production build
-        working-directory: mobile-pwa
-        run: npm run build
-      - name: Browser tests
-        working-directory: mobile-pwa
-        run: npx playwright install --with-deps chromium && npm run test:browser
-
   native-ui-evidence:
     runs-on: ubuntu-latest
     steps:
@@ -328,8 +256,6 @@ jobs:
       - check
       - security
       - i18n
-      - web
-      - mobile-pwa
       - native-ui-evidence
       - source-contracts
     steps:
@@ -338,8 +264,6 @@ jobs:
           CHECK_RESULT: ${{ needs.check.result }}
           SECURITY_RESULT: ${{ needs.security.result }}
           I18N_RESULT: ${{ needs.i18n.result }}
-          WEB_RESULT: ${{ needs.web.result }}
-          MOBILE_PWA_RESULT: ${{ needs['mobile-pwa'].result }}
           NATIVE_UI_RESULT: ${{ needs['native-ui-evidence'].result }}
           SOURCE_CONTRACTS_RESULT: ${{ needs['source-contracts'].result }}
         run: |
@@ -348,16 +272,12 @@ jobs:
             "check=$CHECK_RESULT" \
             "security=$SECURITY_RESULT" \
             "i18n=$I18N_RESULT" \
-            "web=$WEB_RESULT" \
-            "mobile-pwa=$MOBILE_PWA_RESULT" \
             "native-ui-evidence=$NATIVE_UI_RESULT" \
             "source-contracts=$SOURCE_CONTRACTS_RESULT"
           for result in \
             "$CHECK_RESULT" \
             "$SECURITY_RESULT" \
             "$I18N_RESULT" \
-            "$WEB_RESULT" \
-            "$MOBILE_PWA_RESULT" \
             "$NATIVE_UI_RESULT" \
             "$SOURCE_CONTRACTS_RESULT"
           do

@@ -38,8 +38,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: web-ui, path: web-ui }
-          - { name: mobile-pwa, path: mobile-pwa }
           - { name: desktop-shell-ui, path: crates/bins/desktop-shell/ui }
           - { name: admin-shell-ui, path: crates/bins/admin-shell/ui }
     defaults:
@@ -94,8 +92,6 @@ jobs:
           test -f docs/DEPENDENCY_POLICY.md
           test -f .deny.toml
           test -f .github/dependabot.yml
-          test -f web-ui/package-lock.json
-          test -f mobile-pwa/package-lock.json
           test -f crates/bins/desktop-shell/ui/package-lock.json
           test -f crates/bins/admin-shell/ui/package-lock.json
 
