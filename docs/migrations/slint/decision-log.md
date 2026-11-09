@@ -343,3 +343,25 @@ Decided by the coordinator under the owner's standing authority. Owner may overr
 - **Not changed:** the code and `dependabot.yml` entries for web-ui and mobile-pwa. Dependabot PRs for those folders will open but will not run these checks.
 - **Branch protection:** the `main` branch has no protection rules, so no required checks had to be removed.
 - **To restore:** re-add the jobs from git history (commit that removes them) when web UI resumes.
+
+## Open items reconciled against the log (2026-11-09)
+
+Recorded from the log entries above. Each item is marked by what the log actually shows. Anything marked "not recorded" needs the owner to confirm.
+
+| Item | Status in the log | What is missing |
+|---|---|---|
+| P-01 desktop boundary | Approved conditionally (2026-10-29, 2026-11-04) | Boundary text not committed as its own file |
+| Q-14 preference schema | Approved (2026-10-29) | Schema content (fields, defaults, fallback) not committed |
+| C-09 fixture schema | Approved (2026-10-29). The 2026-10-31 provenance section still says "OPEN" | Which schema file is approved (candidate `shared/diagnostics/diagnostic-event.schema.json` v1.0) and its provenance commit |
+| C-03 typed error mapping | Approved (2026-10-29) | Committed mapping file |
+| U-03 font | Vazirmatn (OFL 1.1) confirmed (2026-10-29) | Per-OS render evidence |
+| U-10 reduce-motion fallback | Confirmed (2026-10-31) | Windows toggle check on a device |
+| File-send route | Decided (2026-11-07): Local or Internet, chosen by the user before each send | Whether the choice applies to every send or only the first; what "P2P" covers in Local |
+| Token storage policy (desktop vs Admin) | Open in P-01 evidence summary (section 5) | Owner decision; the Track A relay work does not record one |
+| Relay-only fallback when LAN discovery fails | Moot for file sends (see route decision) | Whether it still applies to other flows |
+| Backend accounts O-1 to O-6 | O-1 to O-6 decided by the coordinator (2026-11-01); owner may override | Owner override or confirmation; the "Postponed" entry conflicts with the parallel-lane decision and should be confirmed |
+| Persian review | Not recorded | Persian-speaker review of new `fa.json` strings |
+| Device and live checks | Not recorded as done | Keyring on Windows/macOS/Linux, two-app separation, U-01, U-02, U-03, live relay checks |
+| Gate 0b | Not passed. Blockers 1 to 14 open | Evidence per blocker and formal sign-off |
+
+**Correction:** the 2026-11-08 "ready-to-build" note said C-09 was not confirmed. That was wrong. The owner approved it on 2026-10-29. What is still missing is the committed provenance.
