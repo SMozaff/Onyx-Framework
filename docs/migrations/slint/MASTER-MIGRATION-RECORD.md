@@ -333,7 +333,7 @@ Never delete the old decision or overwrite the original source evidence. Add dat
 
 ## 9. Document disposition and navigation
 
-See [DOCUMENT-INVENTORY.md](DOCUMENT-INVENTORY.md) for the path-by-path inventory, classification, conflicts and disposition.
+See [DOCUMENT-INVENTORY.md](DOCUMENT-INVENTORY.md) for the path-by-path inventory, classification, conflicts and disposition. It currently contains 62 inspected entries, including two missing referenced documents and one unverified directory reference; it is not a claim of exhaustive repository enumeration.
 
 No files are deleted, renamed or retired by this audit. Historical reports remain in place. The master links to detailed supporting material rather than copying full specifications.
 
