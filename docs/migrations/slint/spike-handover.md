@@ -61,3 +61,8 @@ Record pass or fail per feature per OS. Mark items that need a screen reader as 
 
 - A Slint version or dependency cannot be installed: record it and stop that spike.
 - A result needs a product decision: record it as an open question, then continue.
+
+
+## Migration record reference
+
+Before starting or reporting spike work, consult the [Slint Migration Master Record](MASTER-MIGRATION-RECORD.md) for current gate status, blocker ownership and evidence acceptance rules. This handover remains the detailed test procedure.

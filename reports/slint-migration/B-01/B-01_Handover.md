@@ -55,3 +55,7 @@
 6. Then implement the approved client modules under `crates/bins/admin-slint/src/client/` in a separate bounded PR, preserving Tauri Admin and PR #304 behavior, and run the BOUND-required tests on the pinned toolchain.
 
 **Do not mark B-01 complete until the approved client, contract tests, required CI, review, and downstream integration evidence exist.**
+
+## Migration record reference
+
+Before acting on this handover, consult the [Slint Migration Master Record](../../../docs/migrations/slint/MASTER-MIGRATION-RECORD.md). It governs current status and decision authority; this file remains the detailed B-01 handover and does not authorize implementation before Gate 0b.

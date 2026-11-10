@@ -80,3 +80,46 @@ Route: `POST /api/auth/login` (`src/index.ts`, `authLogin`; route wired in `fetc
 
 - `npx vitest run` in `deploy/cloudflare/edge-gateway`: baseline 191 passing before this lane's changes. See the PR for the post-change run.
 - No production D1 access. No deploy. No merge.
+
+
+## Dated status correction — 2026-11-10
+
+The “Open items (not decided by the agent)” section above is a **2026-11-01 current-state snapshot**, not the current decision status. The decision log subsequently records O-1 through O-6 as decided by the coordinator under the owner's standing “decide and document” instruction on 2026-11-01.
+
+Current recorded decisions:
+- **O-1:** Argon2id via the existing Worker library, `argon2-wasm-edge`.
+- **O-2:** Cloudflare D1 is the account authority; this lane does not write the Rust `UserStore`.
+- **O-3:** Onyx ID is the primary login identifier; username and email remain accepted aliases during transition.
+- **O-4:** `must_change_password`; while set, only password-change and logout routes are permitted; other session routes return `PASSWORD_CHANGE_REQUIRED` (409).
+- **O-5:** Generate a new Onyx ID for every imported row; ignore a supplied ID and report that fact in the row result.
+- **O-6:** Extend `POST /api/admin/profiles/import` to accept XLSX as well as CSV/JSON and create accounts per row.
+
+These are **RECORDED delegated coordinator decisions**, not direct owner approvals of each technical detail. The owner may override them through a new decision-log entry. Do not ask the owner to repeat O-1–O-6 absent new contradictory evidence or an explicit override.
+
+The observed implementation gaps and schema findings above remain a dated source baseline; they must not be mistaken for current implementation status. Use the current [Worker API contract](../../production/api-contract.md) and the exact current Worker source/tests for implementation verification. The API contract is source-level evidence, not proof of production deployment. The “Rust side not read” limitation in this 2026-11-01 snapshot remains historically true for that review; it is not a claim that the current repository has never since changed.
+
+The parallel backend lane was authorized by the owner on 2026-11-01; the earlier postponed-lane wording in the decision log was superseded by the later parallel-lane entry. See [decision log](decision-log.md) and [staff/team rules](../../product/staff-and-team-rules.md).
+
+
+### Staff creation/report decisions and remaining open points
+
+The 2026-11-01 owner decisions are also recorded in `decision-log.md` and `docs/product/staff-and-team-rules.md`:
+- Each staff import row and each single admin creation creates an account, assigns a generated Onyx ID, generates a one-time password and requires password change at first sign-in.
+- Each batch import and single creation produces an Excel (.xlsx) report. Owner-approved report content is the staff-sheet fields plus assigned `onyx_id`, one-time password and account status.
+- The coordinator separately recorded under delegated authority that account email is required; if `contact_email` is absent, generate `<onyx_id>@accounts.invalid` and flag it in the report. Password minimums remain 8 characters on create and 12 on reset; generated one-time passwords meet 12 characters.
+
+The old “password minimum mismatch”, “email rule” and “report format/columns” findings above are historical observations from the 2026-11-01 baseline. They are not open owner questions. The exact `account_status` values, failed-row sheet/file arrangement, and secure delivery/retention/deletion of the plaintext-password report remain unresolved; see [creation report spec](backend-accounts-creation-report-spec.md). Do not invent those details or ask the owner to repeat the settled Excel format/content decision.
+
+
+### Current Worker implementation reconciliation — 2026-11-10
+
+The 2026-11-01 read-only baseline above predates the current Worker implementation. The following source paths are present at the audited `main` baseline:
+
+- `src/index.ts` uses `argon2-wasm-edge` Argon2id; login accepts Onyx ID, username and email aliases; `must_change_password` is returned and enforced; password change clears the flag and revokes sessions.
+- Staff creation and `POST /api/admin/profiles/import` generate Onyx IDs and one-time passwords, create D1 accounts/profiles, support XLSX plus CSV/JSON import, ignore supplied Onyx IDs, and return an XLSX creation report.
+- `migrations/0009_public_ids.sql` is now present in Wrangler's `migrations/` directory, and `docs/design/id-sequences.md` records the migration/source implementation date as 2026-11-01. The earlier statement that this migration existed only in a draft folder is historical.
+- `test/backend-accounts.test.ts` contains tests for O-1–O-6, account creation, Onyx ID generation, failed-row atomicity, password handling, report generation, formula-injection protection and email placeholders.
+
+**Status distinction:** these are source-level implementation facts in the repository. The test file exists, but this audit did not run it or verify a passing run for its exact current revision. No production D1 migration status or deployed Worker revision was inspected. Do not claim production deployment, live account behavior or production schema application.
+
+**Decision attribution conflict:** the header comment in `migrations/0009_public_ids.sql` calls O-2 an “owner decision”; the migration decision log records O-2 as a coordinator decision under the owner's standing “decide and document” instruction. Use the decision log's explicit attribution: O-2 remains RECORDED, not direct owner-approved, unless separate approval evidence is produced. This documentation audit does not alter the migration file.
