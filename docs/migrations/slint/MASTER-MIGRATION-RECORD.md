@@ -371,6 +371,7 @@ No files are deleted, renamed or retired by this audit. Historical reports remai
 - [x] Stale backend/P-01/B-01 statements receive dated amendments.
 - [x] Gate 0b remains blocked.
 - [x] No application source, schema, CI policy or deployment file is changed.
+- Required PR checks must be read from the latest PR head; no CI success is claimed by this audit record before those checks complete.
 - [ ] Required PR checks are reviewed before merge.
 
 ---
