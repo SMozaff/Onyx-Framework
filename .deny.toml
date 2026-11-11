@@ -1,4 +1,10 @@
 [advisories]
+# Time-boxed exception approved by the owner on 2026-11-11. Expires 2026-12-11.
+# Reason: libsqlite3-sys 0.37.0 is pinned by sqlx-sqlite 0.9.0, and the fix needs >= 0.39.0.
+# Keep this in step with .cargo/audit.toml. Remove both once sqlx supports libsqlite3-sys >= 0.39.0.
+ignore = [
+    { id = "RUSTSEC-2026-0459", reason = "sqlx-sqlite 0.9.0 pins libsqlite3-sys 0.37.0; fix needs >= 0.39.0. Time-boxed, expires 2026-12-11." },
+]
 # cargo-deny 0.20+ treats vulnerability and unsound advisories as errors by default.
 # Unmaintained advisories are enforced for direct workspace dependencies.
 unmaintained = "workspace"
