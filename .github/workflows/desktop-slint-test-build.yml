@@ -1,0 +1,171 @@
+# TEST BUILD / NOT FOR PRODUCTION.
+# Builds an installable Debian 13 x86_64 package of the desktop-slint feasibility host
+# and verifies install, launch, exit and uninstall in a clean Debian 13 container.
+# Manual only. Publishes an Actions artifact, never a GitHub release.
+name: Desktop Slint TEST BUILD (Debian 13)
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_origin:
+        description: "API origin compiled into the test build (https only)"
+        required: true
+        default: "https://onyx-framework.soheil-mozaffari.workers.dev"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build test package (Debian 13 x86_64)
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 90
+    env:
+      API_ORIGIN: ${{ inputs.api_origin }}
+    steps:
+      - name: Validate API origin
+        run: |
+          set -euo pipefail
+          if [[ ! "$API_ORIGIN" =~ ^https://[a-z0-9.-]+(:[0-9]+)?$ ]]; then
+            echo "::error::api_origin must be an https origin without a path."
+            exit 1
+          fi
+          echo "Test build API origin: $API_ORIGIN"
+
+      - name: Install build prerequisites
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config dpkg-dev \
+            libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libxcb1-dev libxcb-xfixes0-dev libxcb-shape0-dev
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: "1.97.1"
+
+      - name: Build release binary (test label and API origin)
+        env:
+          ONYX_TEST_BUILD_LABEL: "TEST BUILD / NOT FOR PRODUCTION"
+        run: cargo build -p desktop-slint --release --locked
+
+      - name: Build test package
+        id: pkg
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 --locked \
+            | sed -n 's/.*"name":"desktop-slint","version":"\([^"]*\)".*/\1/p' | head -1)"
+          version="${version:-0.0.0}~test+$(git rev-parse --short=12 HEAD)"
+          outdir="$RUNNER_TEMP/test-package"
+          deb="$(scripts/build-desktop-slint-test-package.sh \
+            target/release/desktop-slint "$version" "$(git rev-parse HEAD)" "$API_ORIGIN" "$outdir")"
+          echo "deb=$deb" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Write checksums, build info and instructions
+        env:
+          DEB: ${{ steps.pkg.outputs.deb }}
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          set -euo pipefail
+          dir="$(dirname "$DEB")"
+          cd "$dir"
+          sha256sum "$(basename "$DEB")" > SHA256SUMS
+          cat > BUILD-INFO.txt <<INFO
+          ONYX Desktop Slint: TEST BUILD / NOT FOR PRODUCTION
+          Version: $VERSION
+          Source commit: $(cd "$GITHUB_WORKSPACE" && git rev-parse HEAD)
+          Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          API origin (compiled in): $API_ORIGIN
+          Target: Debian 13 (trixie), amd64
+          Toolchain: Rust 1.97.1
+          INFO
+          cat > INSTALL.md <<'DOC'
+          # ONYX Desktop Slint: TEST BUILD / NOT FOR PRODUCTION
+
+          Feasibility host only. Not a production release and not a replacement for the Tauri desktop app.
+
+          ## Verify the download
+              sha256sum -c SHA256SUMS
+
+          ## Install (Debian 13, amd64)
+              sudo apt install ./onyx-desktop-slint-test_*_amd64.deb
+
+          ## Run
+              onyx-desktop-slint-test
+          Or start "ONYX Desktop Slint (TEST BUILD)" from the application menu.
+
+          ## Uninstall
+              sudo apt remove onyx-desktop-slint-test
+
+          The app stores its data in your home directory. Uninstalling the package does not delete it.
+          DOC
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp "$DEB" SHA256SUMS BUILD-INFO.txt INSTALL.md "$GITHUB_WORKSPACE/out/"
+
+      - name: Upload test artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: onyx-desktop-slint-TEST-BUILD-debian13-amd64-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  verify:
+    name: Clean Debian 13 install, launch, exit, uninstall
+    needs: build
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 45
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: onyx-desktop-slint-TEST-BUILD-debian13-amd64-${{ github.sha }}
+          path: artifact
+
+      - name: Install prerequisites for a headless display
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates xvfb xauth coreutils
+
+      - name: Verify checksum
+        working-directory: artifact
+        run: sha256sum -c SHA256SUMS
+
+      - name: Install package
+        working-directory: artifact
+        run: apt-get install -y -qq --no-install-recommends ./onyx-desktop-slint-test_*_amd64.deb
+
+      - name: Launch and exit cleanly under a virtual display
+        run: |
+          set -euo pipefail
+          # The app keeps running until stopped. SIGTERM after 15 s counts as a clean run.
+          set +e
+          xvfb-run -a sh -c 'timeout -s TERM 15 onyx-desktop-slint-test'
+          rc=$?
+          set -e
+          echo "exit code: $rc"
+          if [[ "$rc" != "124" && "$rc" != "143" ]]; then
+            echo "::error::App did not stay running for 15 s and stop on SIGTERM (exit $rc)."
+            exit 1
+          fi
+
+      - name: Uninstall and confirm removal
+        run: |
+          set -euo pipefail
+          apt-get remove -y -qq onyx-desktop-slint-test
+          if dpkg -s onyx-desktop-slint-test >/dev/null 2>&1; then
+            echo "::error::Package still installed after remove."
+            exit 1
+          fi
+          if command -v onyx-desktop-slint-test >/dev/null; then
+            echo "::error::Binary still on PATH after uninstall."
+            exit 1
+          fi
+          echo "Uninstall verified."
