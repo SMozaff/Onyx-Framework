@@ -1,0 +1,6 @@
+# Time-boxed exception approved by the owner on 2026-11-11.
+# RUSTSEC-2026-0459 (libsqlite3-sys 0.37.0): the fix needs libsqlite3-sys >= 0.39.0.
+# sqlx-sqlite 0.9.0 (latest) pins 0.37.0, and client-composition pins =0.37.0 for SQLCipher.
+# Expires 2026-12-11. Remove this entry once sqlx supports libsqlite3-sys >= 0.39.0.
+[advisories]
+ignore = ["RUSTSEC-2026-0459"]
