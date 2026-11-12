@@ -6,11 +6,12 @@ export component DesktopWindow inherits Window {
     in-out property <string> status: "Sign in to ONYX";
     in-out property <string> display-name: "";
     in-out property <bool> busy: false;
+    in property <string> build-label: "";
     in-out property <bool> authenticated: false;
     callback login-requested(string, string);
     callback logout-requested();
 
-    title: "ONYX Desktop — Feasibility";
+    title: "ONYX Desktop — Feasibility" + build-label;
     width: 720px;
     height: 520px;
     background: #10141f;

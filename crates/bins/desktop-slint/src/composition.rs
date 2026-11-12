@@ -29,7 +29,11 @@ use crate::device;
 use relay_websocket_adapter::TungsteniteRelaySocketFactory;
 
 /// The same canonical API origin used by the current desktop-shell login flow.
-pub const ONYX_API_ORIGIN: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
+/// Build-time override via `ONYX_API_ORIGIN`. Unset builds use the production origin.
+pub const ONYX_API_ORIGIN: &str = match option_env!("ONYX_API_ORIGIN") {
+    Some(origin) => origin,
+    None => "https://onyx-framework.soheil-mozaffari.workers.dev",
+};
 
 pub struct SlintComposition {
     api_origin: String,

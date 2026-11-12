@@ -391,3 +391,27 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 - Track B has progressed through shared `desktop-session`, Tauri-free normal dependency proof and Slint lifecycle tests. Real OS keyring device tests and two-host coexistence remain unverified.
 - The P-01 evidence summary dated 2026-11-01 is a historical snapshot. Its “Track A not started” and token-policy questions are superseded by later entries; retain its original findings as historical evidence.
 - Gate 0b remains OPEN/BLOCKED. None of these corrections passes the gate or authorizes B-01 production implementation.
+## Desktop Slint TEST BUILD workflow (issue #445, 2026-11-11)
+
+- **Owner decision:** the test build targets the production Worker origin (`https://onyx-framework.soheil-mozaffari.workers.dev`), the same origin the current desktop-shell uses.
+- **Consequence recorded for the owner:** once signed in, the test build can sync and read production data through the same endpoints as the Tauri app. Production writes still require explicit owner approval per the governance rules.
+- **Changes:**
+  - `crates/bins/desktop-slint/src/composition.rs`: `ONYX_API_ORIGIN` can be set at build time. Unset builds keep the production default.
+  - `crates/bins/desktop-slint/ui/*.slint` and `main.rs`: the window title gets a `build-label` suffix from `ONYX_TEST_BUILD_LABEL`, so test builds show "TEST BUILD / NOT FOR PRODUCTION".
+  - `scripts/build-desktop-slint-test-package.sh`: builds `onyx-desktop-slint-test` .deb with runtime dependencies from `dpkg-shlibdeps` plus the libraries winit, Slint and the GL stack load at runtime (`dlopen`), which `dpkg-shlibdeps` cannot detect.
+  - `.github/workflows/desktop-slint-test-build.yml`: manual only, separate from CI and release. Builds in `debian:trixie`, uploads an Actions artifact with `SHA256SUMS`, `BUILD-INFO.txt` and `INSTALL.md`. A second job installs the package in a clean Debian 13 container, launches it under Xvfb, stops it with SIGTERM, and uninstalls it.
+- **Not included:** Windows and macOS packages, production release, and any change to the Tauri default.
+- **Evidence status:** the release build and package build succeed locally on Ubuntu 24.04 (not Debian 13). The Debian 13 install, launch, exit and uninstall checks run only in the workflow's `verify` job and are not yet recorded.
+
+## Desktop Slint TEST BUILD: first passing run (issue #445, 2026-11-12)
+
+- **Run:** `desktop-slint-test-build.yml`, run 43194818545, on `main`. Build and clean Debian 13 verify both passed.
+- **Verified in CI (Debian 13 x86_64 container):** SHA-256 check, `apt install`, launch under Xvfb for 15 s, SIGTERM exit, `apt remove`, and confirmation that the package and binary are gone.
+- **Artifact:** `onyx-desktop-slint-TEST-BUILD-debian13-amd64-<sha>` in that run. Contains the `.deb`, `SHA256SUMS`, `BUILD-INFO.txt` (commit, API origin, toolchain) and `INSTALL.md`.
+- **API origin compiled in:** production Worker, as the owner chose. Signed-in use can read and sync production data.
+- **Findings from the failing runs, fixed:**
+  1. The Debian container's default shell is `dash`. Steps now run with bash.
+  2. The container rejected the workspace's git ownership. The build now reads `GITHUB_SHA`.
+  3. The app exits at startup without a Secret Service (D-Bus keyring). The app behavior is unchanged. The verify job now provides a D-Bus session and unlocked keyring, as CI does for tests. **Open question for the owner:** whether a machine without a keyring should refuse to start, as now, or run with a warning. This is a product decision. Current behavior is kept.
+- **Not covered by this evidence:** interactive sign-in, OS-keyring save and restore on a real desktop, Persian IME, screen readers, Windows and macOS (not in scope for this milestone).
+- **PRs:** #446 (workflow and code), #448, #449, #450 (CI fixes), all merged.
