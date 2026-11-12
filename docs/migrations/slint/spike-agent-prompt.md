@@ -31,3 +31,8 @@ Deliverables: spikes/slint/ code (small, runnable where possible), docs/migratio
 
 - The pinned Rust toolchain 1.97.1 was not available in that environment; the agent used 1.97.0. Rebuild with the pinned toolchain before relying on results.
 - The first run's results are in PR #391 (merged).
+
+
+## Mandatory migration record reference
+
+Before executing this prompt, read the [Slint Migration Master Record](MASTER-MIGRATION-RECORD.md) and linked [spike handover](spike-handover.md). The master governs current blockers and gate status; this prompt does not authorize work outside the approved scope.

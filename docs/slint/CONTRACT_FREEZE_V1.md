@@ -99,3 +99,8 @@ Slint host view models:
 4. Owner approves freezing C-02, C-07, and C-08 at version 1. C-01 is frozen by reference to `docs/production/api-contract.md` at a named commit.
 
 Until step 4, this document remains a draft and Gate 0b remains NOT PASSED.
+
+
+## Migration governance reference
+
+For current migration status, decision authority, outstanding blockers and Gate 0b requirements, consult [docs/migrations/slint/MASTER-MIGRATION-RECORD.md](../migrations/slint/MASTER-MIGRATION-RECORD.md). This contract snapshot is not itself a signed Gate 0b approval.

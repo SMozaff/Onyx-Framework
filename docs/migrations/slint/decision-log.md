@@ -366,6 +366,31 @@ Recorded from the log entries above. Each item is marked by what the log actuall
 
 **Correction:** the 2026-11-08 "ready-to-build" note said C-09 was not confirmed. That was wrong. The owner approved it on 2026-10-29. What is still missing is the committed provenance.
 
+
+## Audit reconciliation addendum (2026-11-10)
+
+This addendum corrects current-status interpretation without rewriting the dated history above.
+
+### File route selection cadence — owner clarification
+
+The 2026-11-07 owner decision requires the user to choose **Local or Internet before each file is sent**. The owner explicitly confirmed this per-file scope in the 2026-11-10 documentation-audit instruction. The earlier open question asking whether the choice applies to every file or only the first is therefore **resolved**. Do not ask the owner to decide this again.
+
+The separate question of what the Local route actually transports remains unresolved. The decision-log wording describes Local as BLE + LAN using relay/P2P; `docs/product/file-transfer.md` describes routine LAN as direct transfer and BLE/Wi-Fi Direct as a deferred emergency module. Preserve this conflict until the owner/technical authority supplies a reconciled Local transport contract. The per-file selection decision does not settle that transport question.
+
+### Desktop/Admin session policy status
+
+The owner-approved high-level distinction is already recorded in Contract Freeze v1 (2026-10-28): Desktop session persists across restarts; Admin is memory-only (Q-01). The detailed Desktop refresh-token-only keyring rules were recorded separately by the coordinator under the owner's standing authority in `desktop-token-storage-policy.md` (2026-11-04). The 2026-11-01 P-01 evidence summary's request to confirm the distinction is stale. The delegated attribution for the detailed rules remains unchanged.
+
+### Backend O-1–O-6 status
+
+O-1 through O-6 were decided by the coordinator under the owner's standing “decide and document” instruction on 2026-11-01. They are recorded delegated decisions, not six unanswered owner questions and not direct verbatim owner approvals. The older “not decided” labels in `backend-accounts-current-state.md` and `backend-accounts-handover.md` are historical snapshots and must not be used as current decision status. The owner retains the ability to override an item with a new decision entry.
+
+### Current status versus historical evidence
+
+- Track A is recorded as implemented and merged in PR #407; live relay-ticket checks remain outstanding.
+- Track B has progressed through shared `desktop-session`, Tauri-free normal dependency proof and Slint lifecycle tests. Real OS keyring device tests and two-host coexistence remain unverified.
+- The P-01 evidence summary dated 2026-11-01 is a historical snapshot. Its “Track A not started” and token-policy questions are superseded by later entries; retain its original findings as historical evidence.
+- Gate 0b remains OPEN/BLOCKED. None of these corrections passes the gate or authorizes B-01 production implementation.
 ## Desktop Slint TEST BUILD workflow (issue #445, 2026-11-11)
 
 - **Owner decision:** the test build targets the production Worker origin (`https://onyx-framework.soheil-mozaffari.workers.dev`), the same origin the current desktop-shell uses.

@@ -99,3 +99,8 @@ These need an owner or design decision. None was made here.
 - No display, screen reader, IME, or Windows host. Screenshots were captured under Xvfb and inspected by the agent. Visual results are not human-confirmed.
 - Disk space in the container was exhausted during the build. To free space, the spike removed the regenerable `~/.cargo/registry/src` extraction and stale spike build outputs. The repository `target/` directory was not touched.
 - The Slint testing backend (`i-slint-backend-testing 1.18.1`, pinned) drives clicks and key events without a real pointer or IME. It does not test real focus traversal.
+
+
+## Migration record reference
+
+Use the [Slint Migration Master Record](MASTER-MIGRATION-RECORD.md) for current decision authority, gate status and blocker ownership. This file remains the dated evidence record for the 2026-11-01 spike run; its results are not current platform certification.

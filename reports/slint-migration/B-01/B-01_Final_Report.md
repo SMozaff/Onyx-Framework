@@ -62,3 +62,7 @@ The BOUND plan explicitly says no production migration implementation starts unt
 6. Only then create `crates/bins/admin-slint/src/client/{mod.rs,login.rs,users.rs,profiles.rs,policy.rs,orgs.rs}` as appropriate to the approved contract and file ownership; retain PR #304's Tauri behavior unchanged.
 
 **Completion statement:** This is not a completed B-01 implementation. It is an evidence refresh within the only scope currently authorized by the governing BOUND plan. No production client implementation, commit to `main`, or merge is claimed.
+
+## Migration record reference
+
+Before continuing B-01, consult the [Slint Migration Master Record](../../../docs/migrations/slint/MASTER-MIGRATION-RECORD.md) for current gate status, reconciled decisions and blocker closure criteria. This report remains the dated Wave 0 execution/evidence snapshot.

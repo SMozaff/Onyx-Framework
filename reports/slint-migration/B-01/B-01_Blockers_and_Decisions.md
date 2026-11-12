@@ -38,3 +38,28 @@
 - Modifying shared license policy or required CI conditions without the responsible owner's review.
 
 **The project owner's authorization to proceed is recorded, but no technical decision, feasibility report, cross-workstream approval, license-policy disposition, or Contract Freeze v1 is inferred from that authorization. No item is resolved by this register alone; closure requires the evidence/approval stated in the exit column.**
+
+## Dated reconciliation addendum — 2026-11-10
+
+The table above is retained as the original B-01 blocker snapshot. Several rows describe earlier open questions and must not be used as the current decision register. This addendum does not close any Gate 0b blocker.
+
+| Existing ID / area | Later evidence or decision | Current interpretation | Closure status |
+|---|---|---|---|
+| G0B-01 | Owner's “Approved for full migration” approval is recorded in the decision log, but exact accepted evidence, frozen contract versions, fallbacks and scoped Gate 0b sign-off fields remain incomplete | Migration direction approval is not Gate 0b approval | OPEN / BLOCKED |
+| G0B-02 | B-01 packet identifies `crates/bins/admin-slint/src/client/` as the crate-relative destination | Path is documented in packet; record/accept it in the canonical gate record before implementation | OPEN pending gate acceptance |
+| G0B-03 | `docs/production/api-contract.md` was re-pinned to a 2026-11-01 source baseline; B-01 dispatch reconciliation later adds source-pinned findings | Source-level contract still requires current-baseline review and DTO/handler reconciliation; it does not prove deployed Worker behavior | IN PROGRESS |
+| G0B-04 | Q-01 Admin memory-only rule is owner-approved; Desktop persistence distinction is owner-recorded in Contract Freeze v1; detailed refresh-token-only policy is coordinator-recorded under standing authority | No longer an unanswered choice of Admin vs Desktop persistence; lifecycle contracts, tests and real OS-keyring verification remain | IN PROGRESS |
+| G0B-05 | Q-05 membership representation is recorded in decision log; validator work is documented | Decision exists; route-level validation and read/write round-trip evidence remain | IN PROGRESS |
+| G0B-06 | Q-14 preference schema direction was owner-approved 2026-10-29 | Decision exists; committed schema, defaults, fallback and tests remain missing | OPEN |
+| G0B-07 | Q-16/U-05 display-only Latin digit policy is recorded; Admin helper and tests exist | Policy is not an unanswered question; cross-screen/Desktop use and locale tests remain | IN PROGRESS |
+| G0B-08 | U-04 lifecycle decision and related Worker/Rust evidence are in decision log | Decision exists; full parity/concurrency/error tests remain | IN PROGRESS |
+| G0B-09 | Spike results and later Windows/Slint evidence exist | Original “spikes pending” label is historical; manual/device/platform evidence and accepted dispositions remain incomplete | IN PROGRESS |
+| G0B-10 | C-03 mapping direction approval is recorded; proposal file remains draft | Approval of direction does not freeze a concrete mapping artifact | OPEN |
+| G0B-11 | C-09 schema direction approval is recorded 2026-10-29; provenance inventory exists | Exact schema identity/version, validator, fixtures and provenance acceptance remain | OPEN |
+| G0B-12 | B-01 final report and dispatch reconciliation retain DTO mismatch | No canonical DTO decision/test found in reviewed evidence | OPEN |
+| G0B-13 | Recorded CI runs failed the license audit | Policy-owner disposition and fresh green required-check run remain required | OPEN |
+| G0B-14 | Run 40426925219 is a historical failing docs-PR run, not a current-head status | Re-run required checks on the intended current PR head | OPEN |
+| DEP-01 | Earlier local toolchain limitation was environment-specific | Require pinned Rust 1.97.1 CI evidence for the relevant implementation commit | OPEN |
+| DEP-02 | B-01 packet PR #329 was merged on 2026-10-27 (merge commit `09c7ba0e691cf0061ec5f9c898e27ecc8b881018`). Follow-up run 40428710390 completed with security audit jobs cancelled and `merge-gate` failed. | Handover packet is merged; the required-check evidence is not green. Keep distinct from Gate 0b approval. | IN PROGRESS; current required checks and any missing review evidence must be verified |
+
+For current consolidated status, dependencies, responsible parties and explicit closure evidence, see [MASTER-MIGRATION-RECORD.md](../../../docs/migrations/slint/MASTER-MIGRATION-RECORD.md). The project remains in Wave 0 / Gate 0b closure. No production B-01 client modules, deployment or cutover are authorized by this addendum.

@@ -44,3 +44,16 @@ Approve B1 conditionally: Track A first, with tests, then Track B. Do not start 
 ## 7. Gate 0b blocker 1 status
 
 **Open.** This summary is evidence, not sign-off. The owner's approval, the boundary text, and Track A evidence are still required.
+
+
+## Dated status amendment — 2026-11-10
+
+This file remains a historical evidence snapshot from 2026-11-01. The following status statements above are stale and are superseded by later decision-log entries and implementation evidence:
+
+- The request to confirm the Desktop/Admin persistence distinction is no longer an open owner question. Contract Freeze v1 records the owner's 2026-10-28 decision: Desktop persists its session across restarts; Admin remains memory-only (Q-01).
+- The detailed Desktop policy (refresh token only in OS keyring; access token memory-only; startup restore; no plaintext-file fallback; logout clearing) was separately recorded by the coordinator under the owner's standing authority on 2026-11-04. Preserve that delegated attribution; do not relabel it as direct owner approval.
+- Track A is recorded as implemented and merged in PR #407. Its fail-closed session-provider and unit-test evidence supersedes the “not started” statement above. The two live relay-ticket checks remain outstanding and require a deployed Worker plus an authorized test account.
+- Track B has progressed beyond the state described above: `desktop-session` is shared by the Slint host; normal dependency-tree evidence reports zero Tauri-family crates; lifecycle tests are recorded passing. This does not close physical OS-keyring tests, two-host coexistence, or all B1 architecture evidence.
+- The relay-only fallback question is moot for file sends under the 2026-11-07 per-file route-choice decision. Whether a related fallback applies to other product flows is not resolved here.
+
+Do not delete or rewrite the original 2026-11-01 findings. Use the current [decision log](decision-log.md), [Desktop token policy](desktop-token-storage-policy.md), and [master migration record](MASTER-MIGRATION-RECORD.md) for current status. Gate 0b remains blocked.

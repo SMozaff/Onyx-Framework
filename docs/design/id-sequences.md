@@ -77,3 +77,10 @@ RETURNING last_value;
 
 - The team aggregate itself (team table and routes). Only the ID storage is covered here.
 - Changing the existing UUID-based routes.
+
+
+## Decision attribution and deployment boundary — 2026-11-10
+
+The `0009_public_ids.sql` migration and `createStaffAccount` implementation are present in the repository. The migration header says “owner decision O-2”; the migration decision log attributes O-2 to the coordinator under the owner's standing “decide and document” instruction. Unless separate explicit owner approval evidence is recorded, O-2 must be classified as **RECORDED delegated coordinator decision**, not direct owner approval.
+
+Presence of `migrations/0009_public_ids.sql` and source implementation does not establish that the migration has been applied to production D1 or that the corresponding Worker revision is deployed. Do not apply or deploy it as part of this documentation audit.

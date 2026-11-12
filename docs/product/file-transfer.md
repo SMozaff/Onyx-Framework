@@ -8,10 +8,11 @@ Status: decisions recorded. Implementation not started. Open questions listed at
 2. **LAN transfer (in scope).** Direct transfer to other Onyx-equipped systems on the same local network.
 3. **Everything else is a stub.** Shown in the UI as **disabled** items with placeholder labels. This includes the BLE and Wi-Fi Direct P2P module (see below).
 
-## Route selection (inside a session)
+## Route selection (per file, within a session)
 
-- The user can switch between **LAN** and **Internet** at any time in the session. The switch is instant.
-- Every platform must offer the same routes: web UI, Android, and desktop.
+- **Before each file is sent, the user chooses the route: Local or Internet.** This is the 2026-11-07 owner decision; the per-file cadence was explicitly confirmed by the owner on 2026-11-10.
+- The user may choose a different route for the next file in the same session; route choice is not a one-time session setting.
+- Every platform in the approved active scope must expose the same route choice. Web UI remains postponed by the separate owner decision dated 2026-11-08; when resumed, its recorded scope is Internet-only.
 
 ## LAN behaviour
 
@@ -46,3 +47,12 @@ Status: decisions recorded. Implementation not started. Open questions listed at
 ## Open item
 
 - The "spiral organisation chart" is not in this repository, its git history, or the project documents I searched. Only the 2026-10-25 audit mentions it, and it flags it as unverified. Location of the existing doc needs owner input.
+
+
+## Migration record reference
+
+Consult the [Slint Migration Master Record](../migrations/slint/MASTER-MIGRATION-RECORD.md) for consolidated decision status, blockers and Gate 0b constraints. This product specification remains the detailed file-transfer behavior source.
+
+## Related networking evidence (not a file-transfer contract)
+
+The repository's [project architecture decisions](../DECISIONS.md) record sync/P2P infrastructure, Android Kotlin→JNI direction, relay-ticket capability gating and a content-hash download route. Those records do not establish the semantics or implementation of the Local file-transfer route. Keep this product specification and the Slint migration master as the authority for file-transfer scope; unresolved Local transport details remain explicit.

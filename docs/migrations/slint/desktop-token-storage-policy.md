@@ -29,3 +29,8 @@
 
 - Whether the Worker revokes the refresh token on logout. To be verified in Track A.
 - Relay-only fallback when LAN discovery fails: still open, owner decision (see P-01 evidence summary, section 5).
+
+
+## Migration record reference
+
+For current migration status, decision authority, blockers and gate state, consult the [Slint Migration Master Record](MASTER-MIGRATION-RECORD.md). This policy remains the detailed source for its token-storage scope; the master record does not change its delegated-decision attribution.

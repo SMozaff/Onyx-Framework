@@ -23,3 +23,8 @@ This directory contains the seven audit/draft/handover deliverables plus the fin
 - Candidate fixture examples exist in the separate local artifact package but are **not included in this repository PR**.
 
 Review the final report, dispatch reconciliation, and blockers before contract freeze. Route reconciliation is source-level only; no deployed Worker behavior is inferred.
+
+
+## Migration record reference
+
+Consult the [Slint Migration Master Record](../../../docs/migrations/slint/MASTER-MIGRATION-RECORD.md) before continuing B-01 work. The master record is the current navigation/status source; this directory remains the detailed Wave 0 evidence packet.
