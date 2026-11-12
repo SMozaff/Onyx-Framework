@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-24.04
     container: debian:trixie
     timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
     env:
       API_ORIGIN: ${{ inputs.api_origin }}
     steps:
@@ -122,6 +125,9 @@ jobs:
     runs-on: ubuntu-24.04
     container: debian:trixie
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
