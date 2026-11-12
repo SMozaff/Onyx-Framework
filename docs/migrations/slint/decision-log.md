@@ -377,3 +377,16 @@ Recorded from the log entries above. Each item is marked by what the log actuall
   - `.github/workflows/desktop-slint-test-build.yml`: manual only, separate from CI and release. Builds in `debian:trixie`, uploads an Actions artifact with `SHA256SUMS`, `BUILD-INFO.txt` and `INSTALL.md`. A second job installs the package in a clean Debian 13 container, launches it under Xvfb, stops it with SIGTERM, and uninstalls it.
 - **Not included:** Windows and macOS packages, production release, and any change to the Tauri default.
 - **Evidence status:** the release build and package build succeed locally on Ubuntu 24.04 (not Debian 13). The Debian 13 install, launch, exit and uninstall checks run only in the workflow's `verify` job and are not yet recorded.
+
+## Desktop Slint TEST BUILD: first passing run (issue #445, 2026-11-12)
+
+- **Run:** `desktop-slint-test-build.yml`, run 43194818545, on `main`. Build and clean Debian 13 verify both passed.
+- **Verified in CI (Debian 13 x86_64 container):** SHA-256 check, `apt install`, launch under Xvfb for 15 s, SIGTERM exit, `apt remove`, and confirmation that the package and binary are gone.
+- **Artifact:** `onyx-desktop-slint-TEST-BUILD-debian13-amd64-<sha>` in that run. Contains the `.deb`, `SHA256SUMS`, `BUILD-INFO.txt` (commit, API origin, toolchain) and `INSTALL.md`.
+- **API origin compiled in:** production Worker, as the owner chose. Signed-in use can read and sync production data.
+- **Findings from the failing runs, fixed:**
+  1. The Debian container's default shell is `dash`. Steps now run with bash.
+  2. The container rejected the workspace's git ownership. The build now reads `GITHUB_SHA`.
+  3. The app exits at startup without a Secret Service (D-Bus keyring). The app behavior is unchanged. The verify job now provides a D-Bus session and unlocked keyring, as CI does for tests. **Open question for the owner:** whether a machine without a keyring should refuse to start, as now, or run with a warning. This is a product decision. Current behavior is kept.
+- **Not covered by this evidence:** interactive sign-in, OS-keyring save and restore on a real desktop, Persian IME, screen readers, Windows and macOS (not in scope for this milestone).
+- **PRs:** #446 (workflow and code), #448, #449, #450 (CI fixes), all merged.
