@@ -138,7 +138,7 @@ jobs:
         run: |
           set -euo pipefail
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends ca-certificates xvfb xauth coreutils
+          apt-get install -y -qq --no-install-recommends ca-certificates xvfb xauth coreutils dbus-x11 gnome-keyring
 
       - name: Verify checksum
         working-directory: artifact
@@ -153,7 +153,8 @@ jobs:
           set -euo pipefail
           # The app keeps running until stopped. SIGTERM after 15 s counts as a clean run.
           set +e
-          xvfb-run -a sh -c 'timeout -s TERM 15 onyx-desktop-slint-test'
+          # The app needs a Secret Service (D-Bus + keyring) at startup. Provide one, as CI does for tests.
+          xvfb-run -a dbus-run-session -- sh -c 'eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets --daemonize)" && timeout -s TERM 15 onyx-desktop-slint-test'
           rc=$?
           set -e
           echo "exit code: $rc"
