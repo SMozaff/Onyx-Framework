@@ -63,10 +63,10 @@ jobs:
           set -euo pipefail
           version="$(cargo metadata --no-deps --format-version 1 --locked \
             | sed -n 's/.*"name":"desktop-slint","version":"\([^"]*\)".*/\1/p' | head -1)"
-          version="${version:-0.0.0}~test+$(git rev-parse --short=12 HEAD)"
+          version="${version:-0.0.0}~test+${GITHUB_SHA:0:12}"
           outdir="$RUNNER_TEMP/test-package"
           deb="$(scripts/build-desktop-slint-test-package.sh \
-            target/release/desktop-slint "$version" "$(git rev-parse HEAD)" "$API_ORIGIN" "$outdir")"
+            target/release/desktop-slint "$version" "$GITHUB_SHA" "$API_ORIGIN" "$outdir")"
           echo "deb=$deb" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -82,7 +82,7 @@ jobs:
           cat > BUILD-INFO.txt <<INFO
           ONYX Desktop Slint: TEST BUILD / NOT FOR PRODUCTION
           Version: $VERSION
-          Source commit: $(cd "$GITHUB_WORKSPACE" && git rev-parse HEAD)
+          Source commit: $GITHUB_SHA
           Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
           API origin (compiled in): $API_ORIGIN
           Target: Debian 13 (trixie), amd64
