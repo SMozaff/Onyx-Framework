@@ -19,6 +19,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .block_on(composition::SlintComposition::open())
         .map_err(|e| std::io::Error::other(format!("failed to initialize ONYX: {e}")))?;
     let ui = DesktopWindow::new()?;
+    if let Some(label) = option_env!("ONYX_TEST_BUILD_LABEL") {
+        ui.set_build_label(format!(" — {label}").into());
+    }
 
     let login_composition = Arc::clone(&composition);
     let login_handle = runtime.handle().clone();

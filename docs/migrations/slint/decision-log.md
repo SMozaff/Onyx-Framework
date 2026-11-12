@@ -365,3 +365,15 @@ Recorded from the log entries above. Each item is marked by what the log actuall
 | Gate 0b | Not passed. Blockers 1 to 14 open | Evidence per blocker and formal sign-off |
 
 **Correction:** the 2026-11-08 "ready-to-build" note said C-09 was not confirmed. That was wrong. The owner approved it on 2026-10-29. What is still missing is the committed provenance.
+
+## Desktop Slint TEST BUILD workflow (issue #445, 2026-11-11)
+
+- **Owner decision:** the test build targets the production Worker origin (`https://onyx-framework.soheil-mozaffari.workers.dev`), the same origin the current desktop-shell uses.
+- **Consequence recorded for the owner:** once signed in, the test build can sync and read production data through the same endpoints as the Tauri app. Production writes still require explicit owner approval per the governance rules.
+- **Changes:**
+  - `crates/bins/desktop-slint/src/composition.rs`: `ONYX_API_ORIGIN` can be set at build time. Unset builds keep the production default.
+  - `crates/bins/desktop-slint/ui/*.slint` and `main.rs`: the window title gets a `build-label` suffix from `ONYX_TEST_BUILD_LABEL`, so test builds show "TEST BUILD / NOT FOR PRODUCTION".
+  - `scripts/build-desktop-slint-test-package.sh`: builds `onyx-desktop-slint-test` .deb with runtime dependencies from `dpkg-shlibdeps` plus the libraries winit, Slint and the GL stack load at runtime (`dlopen`), which `dpkg-shlibdeps` cannot detect.
+  - `.github/workflows/desktop-slint-test-build.yml`: manual only, separate from CI and release. Builds in `debian:trixie`, uploads an Actions artifact with `SHA256SUMS`, `BUILD-INFO.txt` and `INSTALL.md`. A second job installs the package in a clean Debian 13 container, launches it under Xvfb, stops it with SIGTERM, and uninstalls it.
+- **Not included:** Windows and macOS packages, production release, and any change to the Tauri default.
+- **Evidence status:** the release build and package build succeed locally on Ubuntu 24.04 (not Debian 13). The Debian 13 install, launch, exit and uninstall checks run only in the workflow's `verify` job and are not yet recorded.
