@@ -181,14 +181,13 @@ async function hashPassword(password:string):Promise<string>{
   return String(await argon2id({password,salt,parallelism:1,iterations:3,memorySize:65536,hashLength:32,outputType:"encoded"}));
 }
 function clientType(payload:Json|null){return validClientType(payload);}
+// The reserved identity is the account ID and role, never a username. The All-Father username is configurable.
 function hasReservedAllFatherIdentity(user:Record<string,unknown>,role:string):boolean{
-  return String(user.id)==="__allfather__"||
-    (typeof user.username==="string"&&user.username.trim().toLowerCase()==="allfather")||
-    role==="ALL_FATHER";
+  return String(user.id)==="__allfather__"||role==="ALL_FATHER";
 }
 function isCanonicalAllFather(user:Record<string,unknown>,role:string):boolean{
   return String(user.id)==="__allfather__"&&
-    typeof user.username==="string"&&user.username.trim().toLowerCase()==="allfather"&&
+    typeof user.username==="string"&&user.username.trim().length>0&&
     String(user.organization_id)==="__allfather__"&&role==="ALL_FATHER"&&
     Boolean(user.is_admin)&&Number(user.is_active)===1;
 }
@@ -1566,7 +1565,7 @@ async function setUserPassword(request: Request, env: Env, session: Session, use
   const body = await request.json().catch(() => null) as Json | null;
   if (!body || Object.keys(body).length !== 1 || typeof body.password !== "string" || body.password.length < 12 || body.password.length > 1024) return json({ error: "WEAK_PASSWORD", message: "Password must contain at least 12 characters.", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
   const target = await env.DB.prepare("SELECT id,username FROM users WHERE id=? AND organization_id=? AND role='STAFF' LIMIT 1").bind(userId, session.organization_id).first<{id:string;username:string}>();
-  if (!target || userId === "__allfather__" || target.username.toLowerCase() === "allfather") return json({ error: target ? "RESERVED_IDENTITY" : "USER_NOT_FOUND", category: target ? "AUTHORITY" : "DOMAIN", retryability: "NON_RETRYABLE" }, target ? 403 : 404);
+  if (!target || userId === "__allfather__") return json({ error: target ? "RESERVED_IDENTITY" : "USER_NOT_FOUND", category: target ? "AUTHORITY" : "DOMAIN", retryability: "NON_RETRYABLE" }, target ? 403 : 404);
   try {
     const hash = await hashPassword(body.password), timestamp = Date.now(), operationId = uuid();
     const batch = await env.DB.batch([

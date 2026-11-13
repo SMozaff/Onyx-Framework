@@ -21,7 +21,7 @@
 
 ## Password provisioning and secret handling
 
-GitHub Actions secrets `ONYX_ALLFATHER_USERNAME` and `ONYX_ALLFATHER_PASSWORD` are workflow inputs, not Worker or D1 configuration. They do not automatically provision the deployed account.
+GitHub Actions secrets `ONYX_ALLFATHER_USERNAME` and `ONYX_ALLFATHER_PASSWORD`, optional `ONYX_ALLFATHER_EMAIL` are workflow inputs, not Worker or D1 configuration. The All-Father username and email live in the canonical D1 row and are written only by the provisioning run. They do not automatically provision the deployed account.
 
 The repeatable command `npm run provision:allfather-password` hashes the supplied password, verifies the existing canonical principal and active organization, writes only the hash, writes a non-sensitive audit event, and verifies the stored hash. It never creates the principal or grants its role.
 

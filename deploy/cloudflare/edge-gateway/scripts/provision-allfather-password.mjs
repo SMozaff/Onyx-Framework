@@ -19,7 +19,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const workerRoot = path.resolve(scriptDir, "..");
 const CANONICAL_ID = "__allfather__";
-const CANONICAL_USERNAME = "allfather";
+// The username and email come from ONYX_ALLFATHER_USERNAME / ONYX_ALLFATHER_EMAIL.
+// They are validated here and written to the canonical row. Nothing is hard-coded.
+const USERNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATABASE_NAME = "onyx-free-db";
 
 function wranglerEnvironment() {
@@ -29,20 +32,25 @@ function wranglerEnvironment() {
   return env;
 }
 
-export function isCanonicalUsername(value) {
-  return typeof value === "string" && value.trim().toLowerCase() === CANONICAL_USERNAME;
+export function isValidUsername(value) {
+  return typeof value === "string" && USERNAME_PATTERN.test(value);
+}
+
+export function isValidEmail(value) {
+  return typeof value === "string" && value.length <= 254 && EMAIL_PATTERN.test(value);
 }
 
 export function validateCanonicalPrincipal(row) {
   if (!row) return false;
   return row.id === CANONICAL_ID &&
-    isCanonicalUsername(row.username) &&
+    typeof row.username === "string" && row.username.length > 0 &&
     row.organization_id === CANONICAL_ID &&
     String(row.role) === "ALL_FATHER" &&
     Number(row.is_admin) === 1 &&
     Number(row.is_active) === 1 &&
     Number(row.organization_is_active) === 1 &&
-    Number(row.reserved_username_count) === 1;
+    Number(row.conflicting_username_count) === 0 &&
+    Number(row.conflicting_email_count ?? 0) === 0;
 }
 
 function quote(value) {
@@ -50,15 +58,18 @@ function quote(value) {
   return "'" + value.replace(/'/g, "''") + "'";
 }
 
-export function buildProvisionSql(passwordHash, environment, correlationId = randomUUID()) {
+export function buildProvisionSql(passwordHash, environment, correlationId = randomUUID(), username, email) {
   if (typeof passwordHash !== "string" || !passwordHash.startsWith("$argon2id$")) {
     throw new Error("an Argon2id PHC hash is required");
   }
   if (!["test", "production"].includes(environment)) throw new Error("unsupported environment");
+  if (!isValidUsername(username)) throw new Error("a valid username is required");
+  if (email !== undefined && !isValidEmail(email)) throw new Error("a valid email is required");
   const details = JSON.stringify({ method: "argon2id", source: "owner-controlled-password-provisioning", environment });
+  const emailSet = email === undefined ? "" : `, email=${quote(email)}`;
   return `UPDATE users
-SET password_hash=${quote(passwordHash)}, updated_at=unixepoch()
-WHERE id='__allfather__' AND username='allfather' COLLATE NOCASE
+SET password_hash=${quote(passwordHash)}, username=${quote(username)}${emailSet}, updated_at=unixepoch()
+WHERE id='__allfather__'
   AND organization_id='__allfather__' AND role='ALL_FATHER'
   AND is_admin=1 AND is_active=1
   AND EXISTS (SELECT 1 FROM organizations o WHERE o.id=users.organization_id AND o.is_active=1);
@@ -264,9 +275,15 @@ async function main(args = process.argv.slice(2)) {
 
   const username = process.env.ONYX_ALLFATHER_USERNAME ?? "";
   const password = process.env.ONYX_ALLFATHER_PASSWORD ?? "";
-  if (!isCanonicalUsername(username) || !password) {
-    throw new Error("ONYX_ALLFATHER_USERNAME must name the reserved account and ONYX_ALLFATHER_PASSWORD must be set");
+  const email = process.env.ONYX_ALLFATHER_EMAIL ?? "";
+  if (!isValidUsername(username) || !password) {
+    throw new Error("ONYX_ALLFATHER_USERNAME must be a valid username and ONYX_ALLFATHER_PASSWORD must be set");
   }
+  if (email !== "" && !isValidEmail(email)) {
+    throw new Error("ONYX_ALLFATHER_EMAIL must be a valid email address when set");
+  }
+  // An empty email secret keeps the email already stored on the canonical row.
+  const emailToWrite = email === "" ? undefined : email;
 
   let remote = false;
   let config = "wrangler.dev.toml";
@@ -289,12 +306,13 @@ async function main(args = process.argv.slice(2)) {
   try {
     const principalSql = `SELECT u.id,u.username,u.organization_id,u.is_active,u.is_admin,u.role,
       o.is_active AS organization_is_active,
-      (SELECT COUNT(*) FROM users WHERE LOWER(username)='allfather') AS reserved_username_count
+      (SELECT COUNT(*) FROM users WHERE LOWER(username)=LOWER(${quote(username)}) AND id!='__allfather__') AS conflicting_username_count,
+      ${emailToWrite === undefined ? "0" : `(SELECT COUNT(*) FROM users WHERE LOWER(email)=LOWER(${quote(emailToWrite)}) AND id!='__allfather__')`} AS conflicting_email_count
       FROM users u LEFT JOIN organizations o ON o.id=u.organization_id
       WHERE u.id='__allfather__';`;
-    const rows = await runD1(principalSql, { remote, config, stage: "canonical-principal check", expectedColumns: ["id", "username", "organization_id", "is_active", "is_admin", "role", "organization_is_active", "reserved_username_count"] });
+    const rows = await runD1(principalSql, { remote, config, stage: "canonical-principal check", expectedColumns: ["id", "username", "organization_id", "is_active", "is_admin", "role", "organization_is_active", "conflicting_username_count", "conflicting_email_count"] });
     if (rows.length !== 1 || !validateCanonicalPrincipal(rows[0])) {
-      throw new Error("canonical All-Father principal is missing, ambiguous, inactive, or incorrectly authorized");
+      throw new Error("canonical All-Father principal is missing, ambiguous, inactive, incorrectly authorized, or the requested username/email is already used by another account");
     }
 
     const hash = String(await argon2id({
@@ -306,16 +324,16 @@ async function main(args = process.argv.slice(2)) {
       hashLength: 32,
       outputType: "encoded",
     }));
-    await runD1(buildProvisionSql(hash, environment), { remote, config, stage: "password update and audit event" });
+    await runD1(buildProvisionSql(hash, environment, undefined, username, emailToWrite), { remote, config, stage: "password update and audit event" });
 
     const verified = await runD1(
-      "SELECT password_hash FROM users WHERE id='__allfather__' AND username='allfather' AND role='ALL_FATHER' AND is_admin=1 AND is_active=1;",
+      `SELECT password_hash FROM users WHERE id='__allfather__' AND username=${quote(username)} AND role='ALL_FATHER' AND is_admin=1 AND is_active=1;`,
       { remote, config, stage: "stored-hash verification", expectedColumns: ["password_hash"] },
     );
     if (verified.length !== 1 || !(await argon2Verify({ password, hash: String(verified[0].password_hash ?? "") }))) {
       throw new Error("stored All-Father credential hash could not be verified");
     }
-    console.log(`All-Father password provisioned and verified for the canonical principal in ${environment} D1.`);
+    console.log(`All-Father username, password and email provisioned and verified for the canonical principal in ${environment} D1.`);
   } finally {
     if (generatedProductionConfig && existsSync(generatedProductionConfig)) {
       rmSync(generatedProductionConfig, { force: true });
