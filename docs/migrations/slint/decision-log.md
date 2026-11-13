@@ -415,3 +415,12 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
   3. The app exits at startup without a Secret Service (D-Bus keyring). The app behavior is unchanged. The verify job now provides a D-Bus session and unlocked keyring, as CI does for tests. **Open question for the owner:** whether a machine without a keyring should refuse to start, as now, or run with a warning. This is a product decision. Current behavior is kept.
 - **Not covered by this evidence:** interactive sign-in, OS-keyring save and restore on a real desktop, Persian IME, screen readers, Windows and macOS (not in scope for this milestone).
 - **PRs:** #446 (workflow and code), #448, #449, #450 (CI fixes), all merged.
+
+## All-Father username and email now come from secrets (2026-11-13)
+
+- **Approved by owner:** Phase 1 (PR #452, merged) and Phase 2 (Worker deploy, plus the provisioning run that renames the account).
+- **Worker deploy:** the push-triggered deploy of `7536855` succeeded at 12:27 UTC, and a manual dispatch succeeded at 12:40 UTC.
+- **Provisioning:** run 43429364503 (production) succeeded. It set the username, email and password on the canonical row and verified the stored hash. The username is in the workflow's secret and is not recorded here.
+- **Earlier failed run:** run 43428241158 stopped before any write. The requested username or email already belonged to another account. Clearing `ONYX_ALLFATHER_EMAIL` and re-running fixed it.
+- **Reserved identity:** the Worker checks the account ID and ALL_FATHER role, not a username. An ordinary account that once used the old name gets no All-Father authority.
+- **Still to confirm by the owner:** sign-in with the new username works, and the old name is refused.
