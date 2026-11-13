@@ -57,9 +57,10 @@ async function main() {
   const username = process.env.ONYX_ALLFATHER_USERNAME ?? "";
   const password = process.env.ONYX_ALLFATHER_PASSWORD ?? "";
   const baseRaw = process.env.ONYX_AUTH_SMOKE_BASE_URL ?? "";
-  if (username.trim().toLowerCase() !== "allfather" || !password) {
-    fail("Set ONYX_ALLFATHER_USERNAME to the reserved username and provide ONYX_ALLFATHER_PASSWORD.");
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/.test(username) || !password) {
+    fail("Set ONYX_ALLFATHER_USERNAME to the All-Father username and provide ONYX_ALLFATHER_PASSWORD.");
   }
+  const expectedName = username.toLowerCase();
   let base;
   try { base = new URL(baseRaw); } catch { fail("ONYX_AUTH_SMOKE_BASE_URL must be a valid local Worker URL."); }
   if (!["127.0.0.1", "localhost", "::1"].includes(base.hostname) || !["http:", "https:"].includes(base.protocol)) {
@@ -92,13 +93,12 @@ VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.
     // only boolean diagnostics; never print credential or hash material.
     const lookup = localSql(`SELECT u.id,u.username,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.role
       FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1
-      WHERE (LOWER(u.username)=LOWER('allfather') OR LOWER(u.email)=LOWER('allfather'))
-        AND u.is_active=1 LIMIT 1;`);
+      WHERE u.id='__allfather__' AND u.is_active=1 LIMIT 1;`);
     const row = lookup[0];
     const diagnostics = {
       found: Boolean(row),
       canonicalId: row?.id === "__allfather__",
-      canonicalUsername: typeof row?.username === "string" && row.username.trim().toLowerCase() === "allfather",
+      canonicalUsername: typeof row?.username === "string" && row.username.trim().toLowerCase() === expectedName,
       canonicalOrganization: row?.organization_id === "__allfather__",
       canonicalRole: row?.role === "ALL_FATHER",
       active: Number(row?.is_active) === 1,
@@ -123,13 +123,13 @@ VALUES(${quote(userId)},${quote(staffUsername)},${quote(staffUsername+"@example.
     if (login.response.status !== 200) fail(`Valid All-Father credentials returned HTTP ${login.response.status}.`);
     const session = login.value;
     if (typeof session?.access_token !== "string" || typeof session?.refresh_token !== "string" ||
-        session?.user?.id !== "__allfather__" || session?.user?.username !== "allfather" ||
+        session?.user?.id !== "__allfather__" || String(session?.user?.username ?? "").toLowerCase() !== expectedName ||
         session?.user?.role !== "ALL_FATHER" || session?.user?.is_admin !== true ||
         session?.user?.organization_id !== "__allfather__") {
       fail("Login did not return the canonical All-Father principal and authority.");
     }
     const claims = decodeClaims(session.access_token);
-    if (!claims || claims.sub !== "__allfather__" || claims.username !== "allfather" ||
+    if (!claims || claims.sub !== "__allfather__" || String(claims.username ?? "").toLowerCase() !== expectedName ||
         claims.role !== "ALL_FATHER" || claims.is_admin !== true ||
         claims.organization_id !== "__allfather__" || claims.typ !== "access" ||
         !Number.isSafeInteger(claims.exp) || claims.exp <= Math.floor(Date.now() / 1000)) {

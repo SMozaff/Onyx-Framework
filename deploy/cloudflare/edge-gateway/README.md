@@ -16,7 +16,7 @@ The Admin Shell’s `getServerAddress()` points to the deployed Worker and its l
 
 ## All-Father password provisioning
 
-GitHub Actions secrets `ONYX_ALLFATHER_USERNAME` and `ONYX_ALLFATHER_PASSWORD` are supplied to the smoke workflow; they do not automatically provision the Worker or D1 account. The canonical principal is seeded by migrations with a deliberately unusable placeholder hash until an owner-controlled provisioning operation sets the password.
+GitHub Actions secrets `ONYX_ALLFATHER_USERNAME`, `ONYX_ALLFATHER_PASSWORD` and optional `ONYX_ALLFATHER_EMAIL` are read by the provisioning and smoke workflows. The canonical account's username and email are stored in its D1 row, not in the Worker or its configuration. Changing the username therefore needs only the provisioning run, not a Worker redeploy. The provisioning run rejects a username or email already used by another account. The canonical principal is seeded by migrations with a deliberately unusable placeholder hash until an owner-controlled provisioning operation sets the password.
 
 The repeatable command `npm run provision:allfather-password`:
 

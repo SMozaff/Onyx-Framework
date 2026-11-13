@@ -472,7 +472,14 @@ describe("Worker authorization and session security", () => {
       organization_id: ORG, password_hash: passwordHash,
       is_admin: 0, is_active: 1, class: "STAFF", role: "STAFF",
     });
-    expect((await login(impostor, { username: "allfather", password, client_type: "admin" })).status).toBe(401);
+    // An ordinary account may hold any name the canonical account does not hold. It must never gain All-Father authority.
+    const impostorLogin = await login(impostor, { username: "allfather", password, client_type: "admin" });
+    if (impostorLogin.status === 200) {
+      const impostorSession = await impostorLogin.json() as { user: { id: string; role: string; is_admin: boolean } };
+      expect(impostorSession.user).toMatchObject({ id: "ordinary-user", role: "STAFF", is_admin: false });
+    } else {
+      expect(impostorLogin.status).toBe(401);
+    }
 
     const ordinary = makeDb();
     ordinary.users.get("staff-1")!.password_hash = passwordHash;
