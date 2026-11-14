@@ -28,6 +28,7 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_sign_in_button(text(lang, "auth.signIn").into());
     s.set_signing_in_button(text(lang, "auth.signingIn").into());
     s.set_signed_in_label(text(lang, "auth.signedIn").into());
+    s.set_sign_out_button(text(lang, "auth.signOut").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -66,6 +67,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    let sign_out_session = session.clone();
     let weak = ui.as_weak();
     ui.on_sign_in(move |username, password| {
         let Some(ui) = weak.upgrade() else { return };
@@ -104,6 +106,20 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             });
         });
+    });
+
+    let weak = ui.as_weak();
+    let session = sign_out_session;
+    ui.on_sign_out(move || {
+        // Dropping the session clears the in-memory tokens.
+        if let Ok(mut slot) = session.lock() {
+            *slot = None;
+        }
+        if let Some(ui) = weak.upgrade() {
+            ui.set_signed_in(false);
+            ui.set_signed_in_as("".into());
+            ui.set_error_text("".into());
+        }
     });
 
     ui.run()

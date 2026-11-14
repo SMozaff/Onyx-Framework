@@ -24,6 +24,7 @@ export global Strings {
     in-out property <string> sign-in-button;
     in-out property <string> signing-in-button;
     in-out property <string> signed-in-label;
+    in-out property <string> sign-out-button;
 }
 
 export component AppWindow inherits Window {
@@ -41,6 +42,7 @@ export component AppWindow inherits Window {
 
     callback select-language(string);
     callback sign-in(string, string);
+    callback sign-out();
 
     VerticalLayout {
         padding: 16px;
@@ -123,6 +125,10 @@ export component AppWindow inherits Window {
                     color: Theme.text;
                     font-size: 18px;
                     font-weight: 600;
+                }
+                Button {
+                    text: Strings.sign-out-button;
+                    clicked => { root.sign-out(); }
                 }
             }
         }
