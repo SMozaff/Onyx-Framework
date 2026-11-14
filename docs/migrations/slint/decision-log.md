@@ -424,3 +424,10 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 - **Earlier failed run:** run 43428241158 stopped before any write. The requested username or email already belonged to another account. Clearing `ONYX_ALLFATHER_EMAIL` and re-running fixed it.
 - **Reserved identity:** the Worker checks the account ID and ALL_FATHER role, not a username. An ordinary account that once used the old name gets no All-Father authority.
 - **Still to confirm by the owner:** sign-in with the new username works, and the old name is refused.
+
+## All-Father cross-organization scope (2026-11-14)
+
+- **Decision (owner):** All-Father has cross-organization access. Below the organization-admin level, All-Father is read-only.
+- **Scope of write authority, unchanged:** organization create, rename, activate and deactivate, and org-Admin create and reactivate, through the existing `/api/allfather/*` routes.
+- **Not yet decided:** audit-trail requirements (reads logging, retention, storing old and new values), and the approval step before any Worker deploy.
+- **Status:** Worker read routes for cross-organization views are not built. No Worker change is deployed.
