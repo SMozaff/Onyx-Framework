@@ -3,11 +3,13 @@
 mod auth;
 mod i18n;
 mod i18n_catalog;
+mod orgs;
 mod users;
 
 use auth::{AdminSession, LoginError};
 use slint::{ModelRc, VecModel};
 use users::UsersError;
+use slint::Model;
 use i18n::{text, Lang};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -47,6 +49,11 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_save_button(text(lang, "common.save").into());
     s.set_activate_button(text(lang, "common.activate").into());
     s.set_deactivate_button(text(lang, "common.deactivate").into());
+    s.set_name_label(text(lang, "common.name").into());
+    s.set_create_org_button(text(lang, "common.createOrganization").into());
+    s.set_create_admin_button(text(lang, "common.createOrganizationAdmin").into());
+    s.set_organization_label(text(lang, "common.organizations").into());
+    s.set_admins_heading(text(lang, "common.organizationAdmins").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -99,6 +106,145 @@ fn run_user_write<F, Fut>(
                 Err(UsersError::Failed) => ui.set_users_error(text(lang, "status.failed").into()),
             }
         });
+    });
+}
+
+type SessionSlot = Arc<Mutex<Option<AdminSession>>>;
+
+fn show_error(ui: &AppWindow, lang: Lang, error: UsersError) {
+    match error {
+        UsersError::Forbidden => ui.set_users_error(text(lang, "auth.adminAccessRequired").into()),
+        UsersError::Failed => ui.set_users_error(text(lang, "status.failed").into()),
+    }
+}
+
+/// Runs one Organizations call on a worker thread. `done` runs on the UI thread
+/// with the result, so reads can fill the screen and writes can reload it.
+fn run_org_call<T, F, Fut, D>(
+    weak: slint::Weak<AppWindow>,
+    session: SessionSlot,
+    lang: Lang,
+    action: F,
+    done: D,
+) where
+    T: Send + 'static,
+    F: FnOnce(String) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, UsersError>>,
+    D: FnOnce(slint::Weak<AppWindow>, SessionSlot, Lang, Result<T, UsersError>) + Send + 'static,
+{
+    let token = match session
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|s| s.access_token().to_owned()))
+    {
+        Some(token) => token,
+        None => return,
+    };
+    if let Some(ui) = weak.upgrade() {
+        ui.set_users_loading(true);
+        ui.set_users_error("".into());
+    }
+    std::thread::spawn(move || {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| UsersError::Failed)
+            .and_then(|rt| rt.block_on(action(token)));
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_users_loading(false);
+            }
+            done(weak, session, lang, result);
+        });
+    });
+}
+
+/// Loads the organization list (All-Father only).
+fn load_orgs(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
+    run_org_call(
+        weak,
+        session,
+        lang,
+        |token| async move { orgs::list_orgs(&token).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(rows) => {
+                    let items: Vec<OrgItem> = rows
+                        .into_iter()
+                        .map(|row| OrgItem {
+                            id: row.id.into(),
+                            name: row.name.into(),
+                            active: row.is_active,
+                        })
+                        .collect();
+                    ui.set_orgs(ModelRc::new(VecModel::from(items)));
+                }
+                Err(error) => show_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Loads the Admins of one organization and marks it as selected.
+fn load_org_admins(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang, org_id: String) {
+    if let Some(ui) = weak.upgrade() {
+        let name = ui
+            .get_orgs()
+            .iter()
+            .find(|org| org.id.as_str() == org_id)
+            .map(|org| org.name.to_string())
+            .unwrap_or_default();
+        ui.set_selected_org_id(org_id.clone().into());
+        ui.set_selected_org_name(name.into());
+    }
+    let call_id = org_id.clone();
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move { orgs::list_admins(&token, &call_id).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(rows) => {
+                    let items: Vec<AdminItem> = rows
+                        .into_iter()
+                        .map(|row| AdminItem {
+                            id: row.id.into(),
+                            username: row.username.into(),
+                            active: row.is_active,
+                        })
+                        .collect();
+                    ui.set_org_admins(ModelRc::new(VecModel::from(items)));
+                }
+                Err(error) => show_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Runs an Organizations write, then reloads the organization list, or the
+/// selected organization's Admins when `admins_of` is set.
+fn org_write<F, Fut>(
+    weak: slint::Weak<AppWindow>,
+    session: SessionSlot,
+    lang: Lang,
+    action: F,
+    admins_of: Option<String>,
+) where
+    F: FnOnce(String) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<(), UsersError>>,
+{
+    run_org_call(weak, session, lang, action, move |weak, session, lang, result| {
+        let Some(ui) = weak.upgrade() else { return };
+        match result {
+            Ok(()) => match admins_of {
+                Some(org_id) => load_org_admins(weak.clone(), session, lang, org_id),
+                None => load_orgs(weak.clone(), session, lang),
+            },
+            Err(error) => show_error(&ui, lang, error),
+        }
     });
 }
 
@@ -227,6 +373,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_select_page(move |page| {
         if page == 0 {
             load_users(users_weak.clone(), page_session.clone(), page_lang.get());
+        } else if page == 3 {
+            load_orgs(users_weak.clone(), page_session.clone(), page_lang.get());
         }
     });
 
@@ -287,6 +435,54 @@ fn main() -> Result<(), slint::PlatformError> {
         run_user_write(weak_active.clone(), session_active.clone(), lang_active.get(), move |token| async move {
             users::set_active(&token, &user_id, active).await
         });
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_create_org(move |name| {
+        let name = name.trim().to_string();
+        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
+            orgs::create_org(&token, &name).await
+        }, None);
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_rename_org(move |org_id, name| {
+        let (org_id, name) = (org_id.to_string(), name.trim().to_string());
+        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
+            orgs::rename_org(&token, &org_id, &name).await
+        }, None);
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_toggle_org(move |org_id, active| {
+        let org_id = org_id.to_string();
+        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
+            orgs::set_org_active(&token, &org_id, active).await
+        }, None);
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_select_org(move |org_id| {
+        load_org_admins(weak.clone(), session.clone(), lang.get(), org_id.to_string());
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_create_org_admin(move |username, email, password| {
+        let Some(ui) = weak.upgrade() else { return };
+        let org_id = ui.get_selected_org_id().to_string();
+        let (username, email, password) = (username.to_string(), email.to_string(), password.to_string());
+        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
+            orgs::create_admin(&token, &org_id, &username, &email, &password).await
+        }, Some(ui.get_selected_org_id().to_string()));
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_toggle_admin(move |admin_id, active| {
+        let admin_id = admin_id.to_string();
+        let org_id = weak.upgrade().map(|ui| ui.get_selected_org_id().to_string());
+        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
+            orgs::set_admin_active(&token, &admin_id, active).await
+        }, org_id);
     });
 
     ui.run()

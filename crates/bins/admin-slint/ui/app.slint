@@ -10,6 +10,18 @@ export global Theme {
     out property <color> danger: dark ? #f97066 : #b42318;
 }
 
+export struct OrgItem {
+    id: string,
+    name: string,
+    active: bool,
+}
+
+export struct AdminItem {
+    id: string,
+    username: string,
+    active: bool,
+}
+
 export struct UserItem {
     id: string,
     username: string,
@@ -48,6 +60,11 @@ export global Strings {
     in-out property <string> save-button;
     in-out property <string> activate-button;
     in-out property <string> deactivate-button;
+    in-out property <string> name-label;
+    in-out property <string> create-org-button;
+    in-out property <string> create-admin-button;
+    in-out property <string> organization-label;
+    in-out property <string> admins-heading;
 }
 
 component NavButton inherits Rectangle {
@@ -87,6 +104,10 @@ export component AppWindow inherits Window {
     in-out property <[UserItem]> users: [];
     in-out property <string> users-error: "";
     in-out property <bool> users-loading: false;
+    in-out property <[OrgItem]> orgs: [];
+    in-out property <[AdminItem]> org-admins: [];
+    in-out property <string> selected-org-id: "";
+    in-out property <string> selected-org-name: "";
     in-out property <[string]> class-options: ["", "top_level_manager", "senior_manager", "team_leader", "supervisor", "staff"];
 
     callback select-language(string);
@@ -97,6 +118,12 @@ export component AppWindow inherits Window {
     callback set-class(string, string);
     callback set-parent(string, string);
     callback toggle-active(string, bool);
+    callback create-org(string);
+    callback rename-org(string, string);
+    callback toggle-org(string, bool);
+    callback select-org(string);
+    callback create-org-admin(string, string, string);
+    callback toggle-admin(string, bool);
 
     VerticalLayout {
         padding: 16px;
@@ -282,7 +309,71 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.page != 0: Text {
+                    if root.page == 3: VerticalLayout {
+                        spacing: 10px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            new-org-name := LineEdit { placeholder-text: Strings.name-label; }
+                            Button {
+                                text: Strings.create-org-button;
+                                clicked => { root.create-org(new-org-name.text); }
+                            }
+                        }
+                        for org in root.orgs: HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: org.name + " · " + (org.active ? Strings.status-active : Strings.status-inactive);
+                                color: Theme.text;
+                                width: 260px;
+                                vertical-alignment: center;
+                            }
+                            org-rename := LineEdit { text: org.name; }
+                            Button {
+                                text: Strings.save-button;
+                                clicked => { root.rename-org(org.id, org-rename.text); }
+                            }
+                            Button {
+                                text: org.active ? Strings.deactivate-button : Strings.activate-button;
+                                clicked => { root.toggle-org(org.id, !org.active); }
+                            }
+                            Button {
+                                text: Strings.admins-heading;
+                                clicked => { root.select-org(org.id); }
+                            }
+                        }
+                        if root.selected-org-id != "": VerticalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: Strings.admins-heading + " · " + root.selected-org-name;
+                                color: Theme.text;
+                                font-weight: 700;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                admin-username := LineEdit { placeholder-text: Strings.username-label; }
+                                admin-email := LineEdit { placeholder-text: Strings.email-label; }
+                                admin-password := LineEdit { placeholder-text: Strings.password-label; input-type: InputType.password; }
+                                Button {
+                                    text: Strings.create-admin-button;
+                                    clicked => { root.create-org-admin(admin-username.text, admin-email.text, admin-password.text); }
+                                }
+                            }
+                            for admin in root.org-admins: HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: admin.username + " · " + (admin.active ? Strings.status-active : Strings.status-inactive);
+                                    color: Theme.text;
+                                    width: 260px;
+                                    vertical-alignment: center;
+                                }
+                                Button {
+                                    text: admin.active ? Strings.deactivate-button : Strings.activate-button;
+                                    clicked => { root.toggle-admin(admin.id, !admin.active); }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 1 || root.page == 2: Text {
                         text: Strings.no-data;
                         color: Theme.text-dim;
                     }
