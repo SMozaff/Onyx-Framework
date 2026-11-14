@@ -1,4 +1,4 @@
-import { Button, LineEdit } from "std-widgets.slint";
+import { Button, LineEdit, ComboBox } from "std-widgets.slint";
 
 export global Theme {
     in-out property <bool> dark: false;
@@ -11,8 +11,10 @@ export global Theme {
 }
 
 export struct UserItem {
+    id: string,
     username: string,
-    detail: string,
+    class: string,
+    parent: string,
     active: bool,
 }
 
@@ -39,6 +41,13 @@ export global Strings {
     in-out property <string> status-active;
     in-out property <string> status-inactive;
     in-out property <string> loading;
+    in-out property <string> create-user-button;
+    in-out property <string> email-label;
+    in-out property <string> class-label;
+    in-out property <string> parent-label;
+    in-out property <string> save-button;
+    in-out property <string> activate-button;
+    in-out property <string> deactivate-button;
 }
 
 component NavButton inherits Rectangle {
@@ -78,11 +87,16 @@ export component AppWindow inherits Window {
     in-out property <[UserItem]> users: [];
     in-out property <string> users-error: "";
     in-out property <bool> users-loading: false;
+    in-out property <[string]> class-options: ["", "top_level_manager", "senior_manager", "team_leader", "supervisor", "staff"];
 
     callback select-language(string);
     callback sign-in(string, string);
     callback sign-out();
     callback select-page(int);
+    callback create-user(string, string, string, string);
+    callback set-class(string, string);
+    callback set-parent(string, string);
+    callback toggle-active(string, bool);
 
     VerticalLayout {
         padding: 16px;
@@ -229,10 +243,43 @@ export component AppWindow inherits Window {
                         wrap: word-wrap;
                     }
                     if root.page == 0: VerticalLayout {
-                        spacing: 8px;
-                        for item in root.users: Text {
-                            text: item.username + " · " + item.detail + " · " + (item.active ? Strings.status-active : Strings.status-inactive);
-                            color: Theme.text;
+                        spacing: 10px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            new-username := LineEdit { placeholder-text: Strings.username-label; }
+                            new-email := LineEdit { placeholder-text: Strings.email-label; }
+                            new-password := LineEdit { placeholder-text: Strings.password-label; input-type: InputType.password; }
+                            new-class := ComboBox { model: root.class-options; }
+                            Button {
+                                text: Strings.create-user-button;
+                                clicked => { root.create-user(new-username.text, new-email.text, new-password.text, new-class.current-value); }
+                            }
+                        }
+                        for item in root.users: HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: item.username + " · " + (item.active ? Strings.status-active : Strings.status-inactive);
+                                color: Theme.text;
+                                width: 240px;
+                                vertical-alignment: center;
+                            }
+                            ComboBox {
+                                model: root.class-options;
+                                current-value: item.class;
+                                selected(value) => { root.set-class(item.id, value); }
+                            }
+                            parent-entry := LineEdit {
+                                placeholder-text: Strings.parent-label;
+                                text: item.parent;
+                            }
+                            Button {
+                                text: Strings.save-button;
+                                clicked => { root.set-parent(item.id, parent-entry.text); }
+                            }
+                            Button {
+                                text: item.active ? Strings.deactivate-button : Strings.activate-button;
+                                clicked => { root.toggle-active(item.id, !item.active); }
+                            }
                         }
                     }
                     if root.page != 0: Text {

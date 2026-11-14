@@ -40,6 +40,13 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_status_active(text(lang, "status.active").into());
     s.set_status_inactive(text(lang, "common.inactive").into());
     s.set_loading(text(lang, "common.loading").into());
+    s.set_create_user_button(text(lang, "common.createUser").into());
+    s.set_email_label(text(lang, "settings.notificationsEmail").into());
+    s.set_class_label(text(lang, "common.class").into());
+    s.set_parent_label(text(lang, "common.parent").into());
+    s.set_save_button(text(lang, "common.save").into());
+    s.set_activate_button(text(lang, "common.activate").into());
+    s.set_deactivate_button(text(lang, "common.deactivate").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -51,6 +58,48 @@ fn error_text(lang: Lang, error: LoginError) -> &'static str {
         LoginError::Timeout | LoginError::Network => text(lang, "common.connectionLost"),
         LoginError::Server { .. } | LoginError::InvalidResponse => text(lang, "status.failed"),
     }
+}
+
+/// Runs one Users write on a worker thread, then reloads the list on success.
+fn run_user_write<F, Fut>(
+    weak: slint::Weak<AppWindow>,
+    session: Arc<Mutex<Option<AdminSession>>>,
+    lang: Lang,
+    action: F,
+) where
+    F: FnOnce(String) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<(), UsersError>>,
+{
+    let token = match session
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|s| s.access_token().to_owned()))
+    {
+        Some(token) => token,
+        None => return,
+    };
+    if let Some(ui) = weak.upgrade() {
+        ui.set_users_loading(true);
+        ui.set_users_error("".into());
+    }
+    std::thread::spawn(move || {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| UsersError::Failed)
+            .and_then(|rt| rt.block_on(action(token)));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_users_loading(false);
+            match result {
+                Ok(()) => load_users(weak.clone(), session, lang),
+                Err(UsersError::Forbidden) => {
+                    ui.set_users_error(text(lang, "auth.adminAccessRequired").into())
+                }
+                Err(UsersError::Failed) => ui.set_users_error(text(lang, "status.failed").into()),
+            }
+        });
+    });
 }
 
 /// Loads the Users list with the in-memory token. Runs off the UI thread.
@@ -81,11 +130,10 @@ fn load_users(weak: slint::Weak<AppWindow>, session: Arc<Mutex<Option<AdminSessi
                     let items: Vec<UserItem> = rows
                         .into_iter()
                         .map(|row| UserItem {
+                            id: row.id.into(),
                             username: row.username.into(),
-                            detail: row
-                                .class
-                                .unwrap_or_else(|| text(lang, "common.noData").to_owned())
-                                .into(),
+                            class: row.class.unwrap_or_default().into(),
+                            parent: row.parent_user_id.unwrap_or_default().into(),
                             active: row.is_active,
                         })
                         .collect();
@@ -129,6 +177,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let sign_out_session = session.clone();
     let page_session = session.clone();
     let page_lang = lang.clone();
+    let write_lang = lang.clone();
+    let write_session = session.clone();
     let weak = ui.as_weak();
     ui.on_sign_in(move |username, password| {
         let Some(ui) = weak.upgrade() else { return };
@@ -193,6 +243,50 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_signed_in_as("".into());
             ui.set_error_text("".into());
         }
+    });
+
+    let weak_create = ui.as_weak();
+    let session_create = write_session.clone();
+    let lang_create = write_lang.clone();
+    ui.on_create_user(move |username, email, password, class| {
+        let (username, email, password) = (username.to_string(), email.to_string(), password.to_string());
+        let class = class.to_string();
+        let class = if class.is_empty() { None } else { Some(class) };
+        run_user_write(weak_create.clone(), session_create.clone(), lang_create.get(), move |token| async move {
+            users::create_user(&token, &username, &email, &password, class.as_deref()).await
+        });
+    });
+
+    let weak_class = ui.as_weak();
+    let session_class = write_session.clone();
+    let lang_class = write_lang.clone();
+    ui.on_set_class(move |user_id, class| {
+        let (user_id, class) = (user_id.to_string(), class.to_string());
+        let class = if class.is_empty() { None } else { Some(class) };
+        run_user_write(weak_class.clone(), session_class.clone(), lang_class.get(), move |token| async move {
+            users::set_class(&token, &user_id, class.as_deref()).await
+        });
+    });
+
+    let weak_parent = ui.as_weak();
+    let session_parent = write_session.clone();
+    let lang_parent = write_lang.clone();
+    ui.on_set_parent(move |user_id, parent| {
+        let (user_id, parent) = (user_id.to_string(), parent.trim().to_string());
+        let parent = if parent.is_empty() { None } else { Some(parent) };
+        run_user_write(weak_parent.clone(), session_parent.clone(), lang_parent.get(), move |token| async move {
+            users::set_parent(&token, &user_id, parent.as_deref()).await
+        });
+    });
+
+    let weak_active = ui.as_weak();
+    let session_active = write_session.clone();
+    let lang_active = write_lang.clone();
+    ui.on_toggle_active(move |user_id, active| {
+        let user_id = user_id.to_string();
+        run_user_write(weak_active.clone(), session_active.clone(), lang_active.get(), move |token| async move {
+            users::set_active(&token, &user_id, active).await
+        });
     });
 
     ui.run()
