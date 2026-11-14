@@ -11,10 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Canonical ONYX API base. Must match the Tauri admin-shell and the web UI.
-const API_BASE: &str = match option_env!("ONYX_API_ORIGIN") {
-    Some(origin) => origin,
-    None => "https://onyx-framework.soheil-mozaffari.workers.dev",
-};
+const API_BASE: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 const KNOWN_ROLES: [&str; 3] = ["ALL_FATHER", "ORGANIZATION_ADMIN", "STAFF"];
 

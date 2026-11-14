@@ -27,7 +27,7 @@ export global Strings {
 }
 
 export component AppWindow inherits Window {
-    title: Strings.app-title + build-label;
+    title: Strings.app-title;
     preferred-width: 1280px;
     preferred-height: 800px;
     min-width: 960px;
@@ -38,7 +38,6 @@ export component AppWindow inherits Window {
     in-out property <bool> busy: false;
     in-out property <string> error-text: "";
     in-out property <string> signed-in-as: "";
-    in property <string> build-label: "";
 
     callback select-language(string);
     callback sign-in(string, string);

@@ -52,9 +52,6 @@ fn new_request_id() -> String {
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     apply_language(&ui, Lang::En);
-    if let Some(label) = option_env!("ONYX_TEST_BUILD_LABEL") {
-        ui.set_build_label(format!(" — {label}").into());
-    }
     let lang = Rc::new(Cell::new(Lang::En));
     // Memory-only session slot (Q-01): never written to disk or the keyring.
     let session: Arc<Mutex<Option<AdminSession>>> = Arc::new(Mutex::new(None));
