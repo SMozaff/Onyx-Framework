@@ -3,8 +3,11 @@
 mod auth;
 mod i18n;
 mod i18n_catalog;
+mod users;
 
 use auth::{AdminSession, LoginError};
+use slint::{ModelRc, VecModel};
+use users::UsersError;
 use i18n::{text, Lang};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -34,6 +37,9 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_nav_profiles(text(lang, "nav.profiles").into());
     s.set_nav_organizations(text(lang, "nav.organizations").into());
     s.set_no_data(text(lang, "common.noData").into());
+    s.set_status_active(text(lang, "status.active").into());
+    s.set_status_inactive(text(lang, "common.inactive").into());
+    s.set_loading(text(lang, "common.loading").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -45,6 +51,54 @@ fn error_text(lang: Lang, error: LoginError) -> &'static str {
         LoginError::Timeout | LoginError::Network => text(lang, "common.connectionLost"),
         LoginError::Server { .. } | LoginError::InvalidResponse => text(lang, "status.failed"),
     }
+}
+
+/// Loads the Users list with the in-memory token. Runs off the UI thread.
+fn load_users(weak: slint::Weak<AppWindow>, session: Arc<Mutex<Option<AdminSession>>>, lang: Lang) {
+    let token = match session
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|s| s.access_token().to_owned()))
+    {
+        Some(token) => token,
+        None => return,
+    };
+    if let Some(ui) = weak.upgrade() {
+        ui.set_users_loading(true);
+        ui.set_users_error("".into());
+    }
+    std::thread::spawn(move || {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| UsersError::Failed)
+            .and_then(|rt| rt.block_on(users::list_users(&token)));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_users_loading(false);
+            match result {
+                Ok(rows) => {
+                    let items: Vec<UserItem> = rows
+                        .into_iter()
+                        .map(|row| UserItem {
+                            username: row.username.into(),
+                            detail: row
+                                .class
+                                .unwrap_or_else(|| text(lang, "common.noData").to_owned())
+                                .into(),
+                            active: row.is_active,
+                        })
+                        .collect();
+                    ui.set_users(ModelRc::new(VecModel::from(items)));
+                    ui.set_users_error("".into());
+                }
+                Err(UsersError::Forbidden) => {
+                    ui.set_users_error(text(lang, "auth.adminAccessRequired").into())
+                }
+                Err(UsersError::Failed) => ui.set_users_error(text(lang, "status.failed").into()),
+            }
+        });
+    });
 }
 
 fn new_request_id() -> String {
@@ -73,6 +127,8 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let sign_out_session = session.clone();
+    let page_session = session.clone();
+    let page_lang = lang.clone();
     let weak = ui.as_weak();
     ui.on_sign_in(move |username, password| {
         let Some(ui) = weak.upgrade() else { return };
@@ -109,6 +165,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         if let Ok(mut slot) = session.lock() {
                             *slot = Some(new_session);
                         }
+                        load_users(ui.as_weak(), session.clone(), current_lang);
                     }
                     Err(error) => ui.set_error_text(error_text(current_lang, error).into()),
                 }
@@ -116,8 +173,15 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
-    let weak = ui.as_weak();
+    let users_weak = ui.as_weak();
+    ui.on_select_page(move |page| {
+        if page == 0 {
+            load_users(users_weak.clone(), page_session.clone(), page_lang.get());
+        }
+    });
+
     let session = sign_out_session;
+    let weak = ui.as_weak();
     ui.on_sign_out(move || {
         // Dropping the session clears the in-memory tokens.
         if let Ok(mut slot) = session.lock() {

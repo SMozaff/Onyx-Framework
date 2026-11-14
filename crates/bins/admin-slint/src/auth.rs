@@ -42,7 +42,7 @@ struct UserWire {
 /// A signed-in Admin session. Holds tokens in memory for the life of the
 /// process. Deliberately has no `Debug` or `Clone`, so tokens cannot end up
 /// in logs or copies.
-#[allow(dead_code)] // fields are read by later Phase 1 steps
+#[allow(dead_code)] // identity fields are kept for the pages that use them next
 pub struct AdminSession {
     pub user_id: String,
     pub username: String,
@@ -50,7 +50,15 @@ pub struct AdminSession {
     pub role: String,
     pub is_admin: bool,
     access_token: String,
+    #[allow(dead_code)] // kept for the token-refresh step
     refresh_token: String,
+}
+
+impl AdminSession {
+    /// Bearer token for authorized requests. Memory only.
+    pub fn access_token(&self) -> &str {
+        &self.access_token
+    }
 }
 
 /// Failure kinds for the UI. Never carries the response body or tokens.

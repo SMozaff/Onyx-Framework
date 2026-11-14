@@ -10,6 +10,12 @@ export global Theme {
     out property <color> danger: dark ? #f97066 : #b42318;
 }
 
+export struct UserItem {
+    username: string,
+    detail: string,
+    active: bool,
+}
+
 export global Strings {
     in-out property <string> app-title;
     in-out property <string> theme-light;
@@ -30,6 +36,9 @@ export global Strings {
     in-out property <string> nav-profiles;
     in-out property <string> nav-organizations;
     in-out property <string> no-data;
+    in-out property <string> status-active;
+    in-out property <string> status-inactive;
+    in-out property <string> loading;
 }
 
 component NavButton inherits Rectangle {
@@ -66,10 +75,14 @@ export component AppWindow inherits Window {
     in-out property <int> page: 0;
     in-out property <string> error-text: "";
     in-out property <string> signed-in-as: "";
+    in-out property <[UserItem]> users: [];
+    in-out property <string> users-error: "";
+    in-out property <bool> users-loading: false;
 
     callback select-language(string);
     callback sign-in(string, string);
     callback sign-out();
+    callback select-page(int);
 
     VerticalLayout {
         padding: 16px;
@@ -165,7 +178,7 @@ export component AppWindow inherits Window {
                     NavButton {
                         label: Strings.nav-users;
                         active: root.page == 0;
-                        clicked => { root.page = 0; }
+                        clicked => { root.page = 0; root.select-page(0); }
                     }
                     NavButton {
                         label: Strings.nav-settings;
@@ -206,7 +219,23 @@ export component AppWindow inherits Window {
                         font-size: 24px;
                         font-weight: 700;
                     }
-                    Text {
+                    if root.page == 0 && root.users-loading: Text {
+                        text: Strings.loading;
+                        color: Theme.text-dim;
+                    }
+                    if root.page == 0 && root.users-error != "": Text {
+                        text: root.users-error;
+                        color: Theme.danger;
+                        wrap: word-wrap;
+                    }
+                    if root.page == 0: VerticalLayout {
+                        spacing: 8px;
+                        for item in root.users: Text {
+                            text: item.username + " · " + item.detail + " · " + (item.active ? Strings.status-active : Strings.status-inactive);
+                            color: Theme.text;
+                        }
+                    }
+                    if root.page != 0: Text {
                         text: Strings.no-data;
                         color: Theme.text-dim;
                     }
