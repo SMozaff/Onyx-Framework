@@ -449,3 +449,28 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 
 - **Decision (owner):** deleting an audit record is itself recorded, with full details.
 - **Still open:** approval of the Worker change before deploy.
+
+## Session record: 2026-11-14 (decisions and changes)
+
+### Decisions (owner)
+- **All-Father scope:** cross-organization access. Below the organization-admin level, the view is read-only. Write rights stay with the existing organization and org-Admin routes.
+- **Audit trail:** logins, logouts, failed logins for known accounts, searches, exports and imports are recorded. Reads and views are not recorded. Records are kept forever. Only All-Father can read or delete them. A deletion is itself recorded, with a snapshot of the deleted row. Changes are recorded with before and after values.
+- **Staff login:** three fields: organization (ID or name), staff identifier (ID, username or email), password. The organization determines the server. The mapping lives in the Worker (`organizations.server_url`, NULL = this server) and is maintained by All-Father.
+- **Worker development:** approved. **Deploy:** not approved.
+- **Admin Slint:** feasibility build, not production. Phase 1 sign-in keeps tokens in memory only (Q-01). Test-build packaging for Admin was dropped at owner request.
+
+### Changes (by branch)
+- `feat/admin-slint-phase1`: Admin Slint sign-in, memory-only tokens, signed-in view, sign-out, navigation shell (Users, Settings, Profiles, Organizations for All-Father), Users list wired to `GET /api/admin/users`. Generated Slint catalog from `shared/i18n` via `scripts/sync-i18n.mjs`.
+- `feat/allfather-audit-worker`: audit writes for login, logout, failed login, search, profile export and import. All-Father routes: `GET /api/allfather/audit`, `DELETE /api/allfather/audit/:id`, `GET /api/allfather/users` (read-only, cross-organization).
+- `feat/staff-org-login`: migration `0011_organization_server_url.sql`. Login accepts an optional `organization`. `GET /api/organizations/lookup` (public). `PUT /api/allfather/organizations/:id/server` (All-Father, audited with before and after).
+
+### Verification
+- Worker: 260 tests pass, 1 todo. Admin Slint: 9 unit tests pass, clippy clean, app starts under a virtual display.
+
+### Open
+- Worker deploy approval.
+- Staff desktop app: third login field and per-server session (not started).
+- Before and after values for all other change routes (only the server-URL route has them).
+- Failed logins for unknown accounts are not recorded (no organization to attribute).
+- Route-level tests for the new audit and All-Father endpoints.
+- Admin Slint: page-by-page data wiring beyond Users; Gate 0b still blocks production modules.
