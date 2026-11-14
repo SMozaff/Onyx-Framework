@@ -436,3 +436,11 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 
 - **Decision (owner):** log exports and sensitive reads for now. Logging can be widened or narrowed later.
 - **Still open:** retention period, whether changes store old and new values or only field names, and approval of the Worker change before deploy.
+
+## Audit decisions, update (2026-11-14)
+
+- **Reads and views:** not logged.
+- **Searches:** logged, all of them.
+- **Retention:** kept forever. Only All-Father can remove audit records.
+- **Changes:** recorded with before and after values.
+- **Still open:** whether deleting an audit record is itself recorded, and approval of the Worker change before deploy.
