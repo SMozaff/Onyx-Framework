@@ -4,13 +4,13 @@ mod auth;
 mod i18n;
 mod i18n_catalog;
 mod orgs;
+mod profiles;
 mod settings;
 mod users;
 
 use auth::{AdminSession, LoginError};
-use slint::{ModelRc, VecModel};
+use slint::{Model, ModelRc, VecModel};
 use users::UsersError;
-use slint::Model;
 use i18n::{text, Lang};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -57,6 +57,17 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_admins_heading(text(lang, "common.organizationAdmins").into());
     s.set_mobile_heading(text(lang, "nav.settings").into());
     s.set_mobile_save_button(text(lang, "common.save").into());
+    s.set_profiles_heading(text(lang, "nav.profiles").into());
+    s.set_save_profile_button(text(lang, "common.save").into());
+    s.set_export_csv_button(text(lang, "common.exportCsv").into());
+    s.set_export_json_button(text(lang, "common.exportJson").into());
+    s.set_owner_label(text(lang, "common.userIdUuid").into());
+    s.set_full_name_label(text(lang, "common.fullName").into());
+    s.set_job_title_label(text(lang, "common.jobTitle").into());
+    s.set_contact_email_label(text(lang, "common.contactEmail").into());
+    s.set_contact_phone_label(text(lang, "common.contactPhone").into());
+    s.set_department_label(text(lang, "common.department").into());
+    s.set_team_label(text(lang, "common.teamMemberships").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -279,6 +290,46 @@ fn apply_mobile_access(ui: &AppWindow, policy: &settings::MobileAccess) {
     ui.set_mobile_status(policy.enforcement_status.clone().into());
 }
 
+/// Loads the staff profile list.
+fn load_profiles(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
+    run_org_call(
+        weak,
+        session,
+        lang,
+        |token| async move { profiles::list_profiles(&token).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(rows) => {
+                    let items: Vec<ProfileItem> = rows
+                        .into_iter()
+                        .map(|row| ProfileItem {
+                            owner: row.owner_id.into(),
+                            name: row.full_name.into(),
+                            title: row.job_title.unwrap_or_default().into(),
+                            department: row.department.unwrap_or_default().into(),
+                            class: row.class_label.unwrap_or_default().into(),
+                            email: row.contact_email.unwrap_or_default().into(),
+                            phone: row.contact_phone.unwrap_or_default().into(),
+                            parent: row.parent_display_name.unwrap_or_default().into(),
+                            teams: row.team_memberships.join("; ").into(),
+                            photo: row.photo_blob_key.unwrap_or_default().into(),
+                        })
+                        .collect();
+                    ui.set_profiles(ModelRc::new(VecModel::from(items)));
+                }
+                Err(error) => show_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Turns an optional form field into `None` when blank.
+fn opt(value: slint::SharedString) -> Option<String> {
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
+
 /// Loads the Users list with the in-memory token. Runs off the UI thread.
 fn load_users(weak: slint::Weak<AppWindow>, session: Arc<Mutex<Option<AdminSession>>>, lang: Lang) {
     let token = match session
@@ -406,6 +457,8 @@ fn main() -> Result<(), slint::PlatformError> {
             load_users(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 1 {
             load_mobile_access(users_weak.clone(), page_session.clone(), page_lang.get());
+        } else if page == 2 {
+            load_profiles(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 3 {
             load_orgs(users_weak.clone(), page_session.clone(), page_lang.get());
         }
@@ -544,6 +597,93 @@ fn main() -> Result<(), slint::PlatformError> {
                 match result {
                     Ok(policy) => apply_mobile_access(&ui, &policy),
                     Err(error) => show_error(&ui, lang, error),
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_save_profile(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let team_memberships: Vec<String> = ui
+            .get_form_teams()
+            .split(';')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let form = profiles::ProfileForm {
+            owner_id: ui.get_form_owner().trim().to_string(),
+            full_name: ui.get_form_name().trim().to_string(),
+            job_title: opt(ui.get_form_title()),
+            contact_email: opt(ui.get_form_email()),
+            contact_phone: opt(ui.get_form_phone()),
+            department: opt(ui.get_form_department()),
+            photo_blob_key: opt(ui.get_form_photo()),
+            class_label: opt(ui.get_form_class()),
+            parent_display_name: opt(ui.get_form_parent()),
+            team_memberships,
+        };
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { profiles::save_profile(&token, &form).await },
+            move |weak, session, lang, result| match result {
+                Ok(()) => load_profiles(weak, session, lang),
+                Err(error) => {
+                    if let Some(ui) = weak.upgrade() {
+                        show_error(&ui, lang, error);
+                    }
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_import_profiles(move || {
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move {
+                let picked = tokio::task::spawn_blocking(profiles::pick_import_file)
+                    .await
+                    .map_err(|_| UsersError::Failed)?;
+                match picked {
+                    Some((bytes, content_type)) => {
+                        profiles::import_bytes(&token, bytes, content_type).await
+                    }
+                    None => Ok(()),
+                }
+            },
+            move |weak, session, lang, result| match result {
+                Ok(()) => load_profiles(weak, session, lang),
+                Err(error) => {
+                    if let Some(ui) = weak.upgrade() {
+                        show_error(&ui, lang, error);
+                    }
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_export_profiles(move |format| {
+        let format = format.to_string();
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move {
+                let bytes = profiles::export_bytes(&token, &format).await?;
+                tokio::task::spawn_blocking(move || profiles::save_export_file(&bytes, &format))
+                    .await
+                    .map_err(|_| UsersError::Failed)?
+                    .map(|_| ())
+            },
+            move |weak, _session, lang, result| {
+                if let (Some(ui), Err(error)) = (weak.upgrade(), result) {
+                    show_error(&ui, lang, error);
                 }
             },
         );
