@@ -431,3 +431,8 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 - **Scope of write authority, unchanged:** organization create, rename, activate and deactivate, and org-Admin create and reactivate, through the existing `/api/allfather/*` routes.
 - **Not yet decided:** audit-trail requirements (reads logging, retention, storing old and new values), and the approval step before any Worker deploy.
 - **Status:** Worker read routes for cross-organization views are not built. No Worker change is deployed.
+
+## Audit scope for reads (2026-11-14)
+
+- **Decision (owner):** log exports and sensitive reads for now. Logging can be widened or narrowed later.
+- **Still open:** retention period, whether changes store old and new values or only field names, and approval of the Worker change before deploy.
