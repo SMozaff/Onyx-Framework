@@ -444,3 +444,8 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 - **Retention:** kept forever. Only All-Father can remove audit records.
 - **Changes:** recorded with before and after values.
 - **Still open:** whether deleting an audit record is itself recorded, and approval of the Worker change before deploy.
+
+## Audit deletion (2026-11-14)
+
+- **Decision (owner):** deleting an audit record is itself recorded, with full details.
+- **Still open:** approval of the Worker change before deploy.
