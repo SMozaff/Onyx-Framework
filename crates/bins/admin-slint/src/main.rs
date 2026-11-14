@@ -29,6 +29,11 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_signing_in_button(text(lang, "auth.signingIn").into());
     s.set_signed_in_label(text(lang, "auth.signedIn").into());
     s.set_sign_out_button(text(lang, "auth.signOut").into());
+    s.set_nav_users(text(lang, "nav.users").into());
+    s.set_nav_settings(text(lang, "nav.settings").into());
+    s.set_nav_profiles(text(lang, "nav.profiles").into());
+    s.set_nav_organizations(text(lang, "nav.organizations").into());
+    s.set_no_data(text(lang, "common.noData").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -97,6 +102,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 match result {
                     Ok(new_session) => {
                         ui.set_signed_in_as(new_session.username.clone().into());
+                        // Client-side UX only: the Worker remains the authorization boundary.
+                        ui.set_is_all_father(new_session.role == "ALL_FATHER");
+                        ui.set_page(0);
                         ui.set_signed_in(true);
                         if let Ok(mut slot) = session.lock() {
                             *slot = Some(new_session);
@@ -117,6 +125,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         if let Some(ui) = weak.upgrade() {
             ui.set_signed_in(false);
+            ui.set_is_all_father(false);
             ui.set_signed_in_as("".into());
             ui.set_error_text("".into());
         }

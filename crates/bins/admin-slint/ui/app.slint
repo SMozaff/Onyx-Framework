@@ -25,6 +25,31 @@ export global Strings {
     in-out property <string> signing-in-button;
     in-out property <string> signed-in-label;
     in-out property <string> sign-out-button;
+    in-out property <string> nav-users;
+    in-out property <string> nav-settings;
+    in-out property <string> nav-profiles;
+    in-out property <string> nav-organizations;
+    in-out property <string> no-data;
+}
+
+component NavButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    height: 40px;
+    border-radius: 6px;
+    background: root.active ? Theme.accent : transparent;
+    Text {
+        text: root.label;
+        color: root.active ? white : Theme.text;
+        vertical-alignment: center;
+        horizontal-alignment: left;
+        x: 12px;
+        width: parent.width - 24px;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
 }
 
 export component AppWindow inherits Window {
@@ -37,6 +62,8 @@ export component AppWindow inherits Window {
 
     in-out property <bool> signed-in: false;
     in-out property <bool> busy: false;
+    in-out property <bool> is-all-father: false;
+    in-out property <int> page: 0;
     in-out property <string> error-text: "";
     in-out property <string> signed-in-as: "";
 
@@ -65,11 +92,10 @@ export component AppWindow inherits Window {
             }
         }
 
-        Rectangle {
+        if !root.signed-in: Rectangle {
             background: Theme.surface;
             border-radius: 8px;
-
-            if !root.signed-in: VerticalLayout {
+            VerticalLayout {
                 padding: 24px;
                 spacing: 10px;
                 alignment: start;
@@ -117,18 +143,73 @@ export component AppWindow inherits Window {
                     clicked => { root.sign-in(username.text, password.text); }
                 }
             }
+        }
 
-            if root.signed-in: VerticalLayout {
-                padding: 24px;
-                Text {
-                    text: Strings.signed-in-label + " " + root.signed-in-as;
-                    color: Theme.text;
-                    font-size: 18px;
-                    font-weight: 600;
+        if root.signed-in: HorizontalLayout {
+            spacing: 12px;
+
+            Rectangle {
+                width: 220px;
+                background: Theme.surface;
+                border-radius: 8px;
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 6px;
+                    alignment: start;
+                    Text {
+                        text: Strings.signed-in-label + " " + root.signed-in-as;
+                        color: Theme.text-dim;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    NavButton {
+                        label: Strings.nav-users;
+                        active: root.page == 0;
+                        clicked => { root.page = 0; }
+                    }
+                    NavButton {
+                        label: Strings.nav-settings;
+                        active: root.page == 1;
+                        clicked => { root.page = 1; }
+                    }
+                    NavButton {
+                        label: Strings.nav-profiles;
+                        active: root.page == 2;
+                        clicked => { root.page = 2; }
+                    }
+                    if root.is-all-father: NavButton {
+                        label: Strings.nav-organizations;
+                        active: root.page == 3;
+                        clicked => { root.page = 3; }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    Button {
+                        text: Strings.sign-out-button;
+                        clicked => { root.sign-out(); }
+                    }
                 }
-                Button {
-                    text: Strings.sign-out-button;
-                    clicked => { root.sign-out(); }
+            }
+
+            Rectangle {
+                background: Theme.surface;
+                border-radius: 8px;
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 12px;
+                    alignment: start;
+                    Text {
+                        text: root.page == 0 ? Strings.nav-users
+                            : root.page == 1 ? Strings.nav-settings
+                            : root.page == 2 ? Strings.nav-profiles
+                            : Strings.nav-organizations;
+                        color: Theme.text;
+                        font-size: 24px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: Strings.no-data;
+                        color: Theme.text-dim;
+                    }
                 }
             }
         }
