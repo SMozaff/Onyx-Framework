@@ -227,7 +227,9 @@ describe("POST /api/auth/login (canonical All-Father)", () => {
     expect(user.id).toBe("__allfather__");
     expect(user.role).toBe("ALL_FATHER");
     expect(user.is_admin).toBe(true);
-    expect(db.writes()).toHaveLength(0);
+    // Login is audited (decision log, 2026-11-14): exactly one audit row, and no other write.
+    expect(db.writes()).toHaveLength(1);
+    expect(db.writes()[0].sql).toMatch(/^INSERT INTO audit_log/);
   });
 
   it("denies the canonical principal if the explicit role or admin flag is missing", async () => {

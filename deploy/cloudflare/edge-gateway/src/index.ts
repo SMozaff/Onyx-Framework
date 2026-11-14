@@ -64,6 +64,14 @@ function json(body: unknown, status = 200, origin?: string | null): Response {
 }
 function now() { return Math.floor(Date.now() / 1000); }
 function uuid() { return crypto.randomUUID(); }
+// Audit trail (decision log, 2026-11-14). One row per recorded event in the
+// append-only audit_log table. Before/after values go in details. Passwords,
+// tokens and password hashes are never passed to this function.
+async function recordAudit(env:Env,entry:{organization_id:string;user_id:string;action:string;details:Json}):Promise<void>{
+  await env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)")
+    .bind(entry.organization_id,entry.user_id,entry.action,uuid(),JSON.stringify(entry.details),now()).run();
+}
+function parseAuditDetails(value:unknown):unknown{try{return JSON.parse(String(value));}catch{return null;}}
 function b64u(value: Uint8Array | string): string {
   const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
   let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -225,13 +233,14 @@ async function authLogin(request:Request,env:Env):Promise<Response>{
     const user=await env.DB.prepare("SELECT u.id,u.username,u.email,u.onyx_id,u.must_change_password,u.organization_id,u.password_hash,u.is_admin,u.is_active,u.class,u.role FROM users u JOIN organizations o ON o.id=u.organization_id AND o.is_active=1 WHERE (u.onyx_id=LOWER(?) OR LOWER(u.username)=LOWER(?) OR LOWER(u.email)=LOWER(?)) AND u.is_active=1 LIMIT 1").bind(identifier,identifier,identifier).first<Record<string,unknown>>();
     stage="credential_verification";
     const role=user?roleForUser(user):"";
-    if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash))))return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+    if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash)))){if(user)await recordAudit(env,{organization_id:String(user.organization_id),user_id:String(user.id),action:"auth.login_failed",details:{reason:"credentials_or_account_state"}});return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
     const requestedClientType = clientType(body);
     if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
     // client_type is caller-controlled metadata and is never an authorization
     // input. Capability endpoints enforce the persisted class policy from D1;
     // this policy is server-side authorization, not device attestation.
     stage="session_creation";
+    await recordAudit(env,{organization_id:String(user.organization_id),user_id:String(user.id),action:"auth.login",details:{client_type:requestedClientType}});
     return json(await issuePair(env,user,requestedClientType));
   }catch(error){
     const sessionFailure=stage==="session_creation";
@@ -312,7 +321,46 @@ async function authLogout(request:Request,env:Env){
     await env.DB.prepare("INSERT OR IGNORE INTO token_revocations(token_hash,revoked_at) VALUES(?,?)")
       .bind(await sha256("session:"+sid),now()).run();
   }
+  const actor=bearerSession??refreshSession;
+  if(actor)await recordAudit(env,{organization_id:actor.organization_id,user_id:actor.sub,action:"auth.logout",details:{session_id:actor.sid}});
   return json({success:true});
+}
+
+// ALL-FATHER AUDIT AND CROSS-ORGANIZATION READ-ONLY VIEW (decision log, 2026-11-14).
+// Only All-Father may read or delete audit records. Searches of the audit log are
+// themselves recorded. Deleting a record is recorded with a snapshot of the deleted row.
+async function listAuditRecords(env:Env,session:Session,params:URLSearchParams){
+  requireRole(session,"ALL_FATHER");
+  const limit=Math.min(Math.max(Number(params.get("limit")??50)||50,1),200);
+  const beforeRaw=Number(params.get("before_id")??Number.MAX_SAFE_INTEGER);
+  const beforeId=Number.isSafeInteger(beforeRaw)?beforeRaw:Number.MAX_SAFE_INTEGER;
+  const organizationId=params.get("organization_id")??"";
+  await recordAudit(env,{organization_id:session.organization_id,user_id:session.sub,action:"audit.search",details:{organization_id:organizationId||null,before_id:beforeId,limit}});
+  const rows=await env.DB.prepare("SELECT id,organization_id,user_id,action,correlation_id,details,created_at FROM audit_log WHERE id<? AND (?='' OR organization_id=?) ORDER BY id DESC LIMIT ?")
+    .bind(beforeId,organizationId,organizationId,limit).all<Record<string,unknown>>();
+  return json((rows.results??[]).map((row)=>({...row,details:parseAuditDetails(row.details)})));
+}
+async function deleteAuditRecord(env:Env,session:Session,id:string){
+  requireRole(session,"ALL_FATHER");
+  const numericId=Number(id);
+  if(!Number.isSafeInteger(numericId)||numericId<=0)return json({error:"INVALID_AUDIT_ID",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const row=await env.DB.prepare("SELECT id,organization_id,user_id,action,correlation_id,details,created_at FROM audit_log WHERE id=? LIMIT 1").bind(numericId).first<Record<string,unknown>>();
+  if(!row)return json({error:"AUDIT_RECORD_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const results=await env.DB.batch([
+    env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)")
+      .bind(session.organization_id,session.sub,"audit.delete",uuid(),JSON.stringify({deleted_id:numericId,snapshot:{...row,details:parseAuditDetails(row.details)}}),now()),
+    env.DB.prepare("DELETE FROM audit_log WHERE id=?").bind(numericId),
+  ]);
+  if(Number(results[1]?.meta?.changes??0)!==1)throw new Error("AUDIT_DELETE_FAILED");
+  return json({success:true});
+}
+async function listAllUsersReadOnly(env:Env,session:Session,params:URLSearchParams){
+  requireRole(session,"ALL_FATHER");
+  const organizationId=params.get("organization_id")??"";
+  await recordAudit(env,{organization_id:session.organization_id,user_id:session.sub,action:"users.search",details:{organization_id:organizationId||null}});
+  const rows=await env.DB.prepare("SELECT id,username,organization_id,role,class,is_active FROM users WHERE (?='' OR organization_id=?) AND id<>'__allfather__' ORDER BY organization_id,username LIMIT 500")
+    .bind(organizationId,organizationId).all<Record<string,unknown>>();
+  return json(rows.results??[]);
 }
 
 async function signRelayTicket(env:Env,claims:RelayTicketClaims):Promise<string>{
@@ -838,6 +886,7 @@ async function queryRoute(request:Request,env:Env,session:Session){
   const aggregateType=OBSERVER_QUERIES[type];
   if(type!=="dashboard.summary"&&!aggregateType)return json({error:"UNKNOWN_QUERY",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
   if(!authorizeQuery(session.role,type))return json({error:"FORBIDDEN",category:"AUTHORITY",retryability:"NON_RETRYABLE"},403);
+  await recordAudit(env,{organization_id:session.organization_id,user_id:session.sub,action:"search.query",details:{query_id:envelope.query_id,query_type:type}});
   if(type==="dashboard.summary"){
     const ownOnly=session.role==="STAFF",ownSql=ownOnly?` AND ${staffOwnedPredicateSql()}`:"",ownArgs=ownOnly?staffOwnedBindings(session.sub):[];
     const rows=await env.DB.prepare(`SELECT aggregate_type,version,updated_at FROM aggregates WHERE organization_id=?${ownSql}`)
@@ -1886,6 +1935,8 @@ async function importProfiles(request: Request, env: Env, session: Session) {
   const contentType = (request.headers.get("content-type") || "text/csv").toLowerCase();
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.byteLength > 2_000_000) return json({ error: "IMPORT_TOO_LARGE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 413);
+  const importDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  await recordAudit(env,{organization_id:session.organization_id,user_id:session.sub,action:"profiles.import",details:{content_type:contentType,byte_length:bytes.byteLength,sha256:importDigest}});
   const isXlsx = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b;
   const isJson = !isXlsx && contentType.includes("json");
   let headers: string[] = [];
@@ -1989,6 +2040,7 @@ async function changeOwnPassword(request: Request, env: Env, session: Session) {
 async function exportProfiles(request: Request, env: Env, session: Session) {
   requireRole(session, "ORGANIZATION_ADMIN");
   const rows=await allProfileRows(env,session);
+  await recordAudit(env,{organization_id:session.organization_id,user_id:session.sub,action:"profiles.export",details:{rows_scanned:rows.length}});
   const profiles=rows.filter(row=>row.state).map(row=>({
     user_id:String(row.state.owner_id??""),
     full_name:String(row.state.full_name??""),
@@ -2181,6 +2233,9 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(/^\/api\/allfather\/organizations\/[^/]+$/.test(url.pathname)&&request.method==="PATCH")return await renameOrganization(request,env,session,decodeURIComponent(url.pathname.split("/").pop()!));
     if(/^\/api\/allfather\/organizations\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await setOrganizationActive(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!),false);
     if(/^\/api\/allfather\/organizations\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setOrganizationActive(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!),true);
+    if(url.pathname==="/api/allfather/audit"&&request.method==="GET")return await listAuditRecords(env,session,url.searchParams);
+    if(/^\/api\/allfather\/audit\/[^/]+$/.test(url.pathname)&&request.method==="DELETE")return await deleteAuditRecord(env,session,decodeURIComponent(url.pathname.split("/").pop()!));
+    if(url.pathname==="/api/allfather/users"&&request.method==="GET")return await listAllUsersReadOnly(env,session,url.searchParams);
     if(url.pathname==="/api/allfather/admins"&&request.method==="GET"){
       if([...url.searchParams.keys()].some(key=>key!=="organization_id"))return json({error:"INVALID_ADMIN_QUERY",category:"DOMAIN",retryability:"NON_RETRYABLE"},400,origin);
       const organizationId=url.searchParams.get("organization_id")?.trim()??"";
