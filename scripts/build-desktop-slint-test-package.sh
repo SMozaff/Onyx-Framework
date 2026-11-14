@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Builds an installable TEST BUILD .deb for the desktop-slint feasibility host.
+# Builds an installable TEST BUILD .deb for a Slint host (Staff or Admin).
 # Not a production release. Usage:
-#   build-desktop-slint-test-package.sh <binary> <version> <commit-sha> <api-origin> <outdir>
+#   build-desktop-slint-test-package.sh <binary> <version> <commit-sha> <api-origin> <outdir> [package] [display-name]
 set -euo pipefail
 
 binary="$1"; version="$2"; commit="$3"; api_origin="$4"; outdir="$5"
-pkg="onyx-desktop-slint-test"
+pkg="${6:-onyx-desktop-slint-test}"
+display="${7:-ONYX Desktop Slint (TEST BUILD)}"
 arch="$(dpkg --print-architecture)"
 [[ "$arch" == "amd64" ]] || { echo "::error::Expected amd64 build host, got $arch"; exit 1; }
 [[ -x "$binary" ]] || { echo "::error::Binary not found: $binary"; exit 1; }
@@ -21,7 +22,7 @@ install -m 0755 "$binary" "$root/usr/bin/$pkg"
 cat > "$root/usr/share/applications/$pkg.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=ONYX Desktop Slint (TEST BUILD)
+Name=$display
 Comment=TEST BUILD / NOT FOR PRODUCTION. Feasibility host.
 Exec=$pkg
 Terminal=false
@@ -29,7 +30,7 @@ Categories=Utility;
 DESKTOP
 
 cat > "$root/usr/share/doc/$pkg/BUILD-INFO.txt" <<INFO
-ONYX Desktop Slint: TEST BUILD / NOT FOR PRODUCTION
+$display: TEST BUILD / NOT FOR PRODUCTION
 Package: $pkg
 Version: $version
 Source commit: $commit
@@ -58,7 +59,7 @@ Installed-Size: $installed_size
 Depends: $depends
 Section: utils
 Priority: optional
-Description: ONYX Desktop Slint feasibility host (TEST BUILD / NOT FOR PRODUCTION)
+Description: $display (TEST BUILD / NOT FOR PRODUCTION)
  Test artifact for owner evaluation. Not a production release and not a
  replacement for the Tauri desktop application.
 CONTROL

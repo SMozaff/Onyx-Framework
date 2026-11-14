@@ -1,8 +1,8 @@
 # TEST BUILD / NOT FOR PRODUCTION.
-# Builds an installable Debian 13 x86_64 package of the desktop-slint feasibility host
-# and verifies install, launch, exit and uninstall in a clean Debian 13 container.
+# Builds installable Debian 13 x86_64 packages of both Slint hosts (Staff: desktop-slint,
+# Admin: admin-slint) and verifies install, launch, exit and uninstall in a clean Debian 13 container.
 # Manual only. Publishes an Actions artifact, never a GitHub release.
-name: Desktop Slint TEST BUILD (Debian 13)
+name: Slint TEST BUILD (Debian 13)
 
 on:
   workflow_dispatch:
@@ -18,13 +18,25 @@ permissions:
 
 jobs:
   build:
-    name: Build test package (Debian 13 x86_64)
+    name: Build ${{ matrix.product }} test package (Debian 13 x86_64)
     runs-on: ubuntu-24.04
     container: debian:trixie
     timeout-minutes: 90
     defaults:
       run:
         shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - product: staff
+            crate: desktop-slint
+            pkg: onyx-desktop-slint-test
+            display: "ONYX Desktop Slint (TEST BUILD)"
+          - product: admin
+            crate: admin-slint
+            pkg: onyx-admin-slint-test
+            display: "ONYX Admin Slint (TEST BUILD)"
     env:
       API_ORIGIN: ${{ inputs.api_origin }}
     steps:
@@ -55,18 +67,20 @@ jobs:
       - name: Build release binary (test label and API origin)
         env:
           ONYX_TEST_BUILD_LABEL: "TEST BUILD / NOT FOR PRODUCTION"
-        run: cargo build -p desktop-slint --release --locked
+          ONYX_API_ORIGIN: ${{ env.API_ORIGIN }}
+        run: cargo build -p ${{ matrix.crate }} --release --locked
 
       - name: Build test package
         id: pkg
         run: |
           set -euo pipefail
           version="$(cargo metadata --no-deps --format-version 1 --locked \
-            | sed -n 's/.*"name":"desktop-slint","version":"\([^"]*\)".*/\1/p' | head -1)"
+            | sed -n 's/.*"name":"${{ matrix.crate }}","version":"\([^"]*\)".*/\1/p' | head -1)"
           version="${version:-0.0.0}~test+${GITHUB_SHA:0:12}"
           outdir="$RUNNER_TEMP/test-package"
           deb="$(scripts/build-desktop-slint-test-package.sh \
-            target/release/desktop-slint "$version" "$GITHUB_SHA" "$API_ORIGIN" "$outdir")"
+            "target/release/${{ matrix.crate }}" "$version" "$GITHUB_SHA" "$API_ORIGIN" "$outdir" \
+            "${{ matrix.pkg }}" "${{ matrix.display }}")"
           echo "deb=$deb" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -80,7 +94,7 @@ jobs:
           cd "$dir"
           sha256sum "$(basename "$DEB")" > SHA256SUMS
           cat > BUILD-INFO.txt <<INFO
-          ONYX Desktop Slint: TEST BUILD / NOT FOR PRODUCTION
+          ${{ matrix.display }}: TEST BUILD / NOT FOR PRODUCTION
           Version: $VERSION
           Source commit: $GITHUB_SHA
           Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
@@ -88,25 +102,25 @@ jobs:
           Target: Debian 13 (trixie), amd64
           Toolchain: Rust 1.97.1
           INFO
-          cat > INSTALL.md <<'DOC'
-          # ONYX Desktop Slint: TEST BUILD / NOT FOR PRODUCTION
+          cat > INSTALL.md <<DOC
+          # ${{ matrix.display }}: TEST BUILD / NOT FOR PRODUCTION
 
-          Feasibility host only. Not a production release and not a replacement for the Tauri desktop app.
+          Feasibility host only. Not a production release and not a replacement for the Tauri apps.
 
           ## Verify the download
               sha256sum -c SHA256SUMS
 
           ## Install (Debian 13, amd64)
-              sudo apt install ./onyx-desktop-slint-test_*_amd64.deb
+              sudo apt install ./${{ matrix.pkg }}_*_amd64.deb
 
           ## Run
-              onyx-desktop-slint-test
-          Or start "ONYX Desktop Slint (TEST BUILD)" from the application menu.
+              ${{ matrix.pkg }}
+          Or start "${{ matrix.display }}" from the application menu.
 
           ## Uninstall
-              sudo apt remove onyx-desktop-slint-test
+              sudo apt remove ${{ matrix.pkg }}
 
-          The app stores its data in your home directory. Uninstalling the package does not delete it.
+          Uninstalling the package does not delete data in your home directory.
           DOC
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp "$DEB" SHA256SUMS BUILD-INFO.txt INSTALL.md "$GITHUB_WORKSPACE/out/"
@@ -114,13 +128,13 @@ jobs:
       - name: Upload test artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
-          name: onyx-desktop-slint-TEST-BUILD-debian13-amd64-${{ github.sha }}
+          name: onyx-${{ matrix.product }}-slint-TEST-BUILD-debian13-amd64-${{ github.sha }}
           path: out/
           if-no-files-found: error
           retention-days: 14
 
   verify:
-    name: Clean Debian 13 install, launch, exit, uninstall
+    name: ${{ matrix.product }} clean Debian 13 install, launch, exit, uninstall
     needs: build
     runs-on: ubuntu-24.04
     container: debian:trixie
@@ -128,10 +142,22 @@ jobs:
     defaults:
       run:
         shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - product: staff
+            crate: desktop-slint
+            pkg: onyx-desktop-slint-test
+            display: "ONYX Desktop Slint (TEST BUILD)"
+          - product: admin
+            crate: admin-slint
+            pkg: onyx-admin-slint-test
+            display: "ONYX Admin Slint (TEST BUILD)"
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: onyx-desktop-slint-TEST-BUILD-debian13-amd64-${{ github.sha }}
+          name: onyx-${{ matrix.product }}-slint-TEST-BUILD-debian13-amd64-${{ github.sha }}
           path: artifact
 
       - name: Install prerequisites for a headless display
@@ -146,7 +172,7 @@ jobs:
 
       - name: Install package
         working-directory: artifact
-        run: apt-get install -y -qq --no-install-recommends ./onyx-desktop-slint-test_*_amd64.deb
+        run: apt-get install -y -qq --no-install-recommends ./${{ matrix.pkg }}_*_amd64.deb
 
       - name: Launch and exit cleanly under a virtual display
         run: |
@@ -154,7 +180,7 @@ jobs:
           # The app keeps running until stopped. SIGTERM after 15 s counts as a clean run.
           set +e
           # The app needs a Secret Service (D-Bus + keyring) at startup. Provide one, as CI does for tests.
-          xvfb-run -a dbus-run-session -- sh -c 'eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets --daemonize)" && timeout -s TERM 15 onyx-desktop-slint-test'
+          xvfb-run -a dbus-run-session -- sh -c 'eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets --daemonize)" && timeout -s TERM 15 ${{ matrix.pkg }}'
           rc=$?
           set -e
           echo "exit code: $rc"
@@ -166,12 +192,12 @@ jobs:
       - name: Uninstall and confirm removal
         run: |
           set -euo pipefail
-          apt-get remove -y -qq onyx-desktop-slint-test
-          if dpkg -s onyx-desktop-slint-test >/dev/null 2>&1; then
+          apt-get remove -y -qq ${{ matrix.pkg }}
+          if dpkg -s ${{ matrix.pkg }} >/dev/null 2>&1; then
             echo "::error::Package still installed after remove."
             exit 1
           fi
-          if command -v onyx-desktop-slint-test >/dev/null; then
+          if command -v ${{ matrix.pkg }} >/dev/null; then
             echo "::error::Binary still on PATH after uninstall."
             exit 1
           fi

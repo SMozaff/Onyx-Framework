@@ -1,4 +1,4 @@
-import { Button } from "std-widgets.slint";
+import { Button, LineEdit } from "std-widgets.slint";
 
 export global Theme {
     in-out property <bool> dark: false;
@@ -7,24 +7,41 @@ export global Theme {
     out property <color> text: dark ? #e6edf5 : #102b4d;
     out property <color> text-dim: dark ? #9fb0c3 : #5d7088;
     out property <color> accent: #1f6098;
+    out property <color> danger: dark ? #f97066 : #b42318;
 }
 
 export global Strings {
-    in-out property <string> app-title: "ONYX Admin";
-    in-out property <string> light-mode: "Light mode";
-    in-out property <string> dark-mode: "Dark mode";
-    in-out property <string> phase0-notice: "";
+    in-out property <string> app-title;
+    in-out property <string> theme-light;
+    in-out property <string> theme-dark;
+    in-out property <string> english;
+    in-out property <string> farsi;
+    in-out property <string> admin-title;
+    in-out property <string> sign-in-heading;
+    in-out property <string> sign-in-description;
+    in-out property <string> username-label;
+    in-out property <string> password-label;
+    in-out property <string> sign-in-button;
+    in-out property <string> signing-in-button;
+    in-out property <string> signed-in-label;
 }
 
 export component AppWindow inherits Window {
-    title: Strings.app-title;
+    title: Strings.app-title + build-label;
     preferred-width: 1280px;
     preferred-height: 800px;
     min-width: 960px;
     min-height: 600px;
     background: Theme.background;
 
+    in-out property <bool> signed-in: false;
+    in-out property <bool> busy: false;
+    in-out property <string> error-text: "";
+    in-out property <string> signed-in-as: "";
+    in property <string> build-label: "";
+
     callback select-language(string);
+    callback sign-in(string, string);
 
     VerticalLayout {
         padding: 16px;
@@ -34,15 +51,15 @@ export component AppWindow inherits Window {
             spacing: 8px;
             alignment: end;
             Button {
-                text: "English";
+                text: Strings.english;
                 clicked => { root.select-language("en"); }
             }
             Button {
-                text: "فارسی";
+                text: Strings.farsi;
                 clicked => { root.select-language("fa"); }
             }
             Button {
-                text: Theme.dark ? Strings.light-mode : Strings.dark-mode;
+                text: Theme.dark ? Strings.theme-light : Strings.theme-dark;
                 clicked => { Theme.dark = !Theme.dark; }
             }
         }
@@ -50,19 +67,63 @@ export component AppWindow inherits Window {
         Rectangle {
             background: Theme.surface;
             border-radius: 8px;
-            VerticalLayout {
+
+            if !root.signed-in: VerticalLayout {
                 padding: 24px;
-                spacing: 8px;
+                spacing: 10px;
+                alignment: start;
+
                 Text {
-                    text: Strings.app-title;
+                    text: Strings.admin-title;
+                    color: Theme.accent;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: Strings.sign-in-heading;
                     color: Theme.text;
                     font-size: 24px;
                     font-weight: 700;
                 }
                 Text {
-                    text: Strings.phase0-notice;
+                    text: Strings.sign-in-description;
                     color: Theme.text-dim;
                     wrap: word-wrap;
+                }
+                if root.error-text != "": Text {
+                    text: root.error-text;
+                    color: Theme.danger;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: Strings.username-label;
+                    color: Theme.text;
+                }
+                username := LineEdit {
+                    enabled: !root.busy;
+                }
+                Text {
+                    text: Strings.password-label;
+                    color: Theme.text;
+                }
+                password := LineEdit {
+                    input-type: InputType.password;
+                    enabled: !root.busy;
+                }
+                Button {
+                    text: root.busy ? Strings.signing-in-button : Strings.sign-in-button;
+                    enabled: !root.busy;
+                    clicked => { root.sign-in(username.text, password.text); }
+                }
+            }
+
+            if root.signed-in: VerticalLayout {
+                padding: 24px;
+                Text {
+                    text: Strings.signed-in-label + " " + root.signed-in-as;
+                    color: Theme.text;
+                    font-size: 18px;
+                    font-weight: 600;
                 }
             }
         }
