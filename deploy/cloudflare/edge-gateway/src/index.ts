@@ -234,6 +234,15 @@ async function authLogin(request:Request,env:Env):Promise<Response>{
     stage="credential_verification";
     const role=user?roleForUser(user):"";
     if(!user||!user.is_active||!ONYX_ROLES.includes(role as typeof ONYX_ROLES[number])||(hasReservedAllFatherIdentity(user,role)&&!isCanonicalAllFather(user,role))||typeof user.password_hash!=="string"||!(await verifyPassword(password,String(user.password_hash)))){if(user)await recordAudit(env,{organization_id:String(user.organization_id),user_id:String(user.id),action:"auth.login_failed",details:{reason:"credentials_or_account_state"}});return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);}
+    if (typeof body.organization === "string" && body.organization.trim()) {
+      const wanted = body.organization.trim();
+      const orgMatch = await env.DB.prepare("SELECT id FROM organizations WHERE id=? AND (id=? OR name=? COLLATE NOCASE) LIMIT 1")
+        .bind(String(user.organization_id), wanted, wanted).first();
+      if (!orgMatch) {
+        await recordAudit(env,{organization_id:String(user.organization_id),user_id:String(user.id),action:"auth.login_failed",details:{reason:"organization_mismatch"}});
+        return json({error:"INVALID_CREDENTIALS",category:"AUTHORITY",retryability:"NON_RETRYABLE"},401);
+      }
+    }
     const requestedClientType = clientType(body);
     if (!requestedClientType) return json({error:"INVALID_CLIENT_TYPE",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
     // client_type is caller-controlled metadata and is never an authorization
@@ -353,6 +362,38 @@ async function deleteAuditRecord(env:Env,session:Session,id:string){
   ]);
   if(Number(results[1]?.meta?.changes??0)!==1)throw new Error("AUDIT_DELETE_FAILED");
   return json({success:true});
+}
+// Public lookup for the Staff login: which server an organization uses. Returns
+// only the organization ID, its name and the server URL (null = this server).
+async function lookupOrganizationServer(env:Env,identifier:string){
+  const wanted=identifier.trim();
+  if(!wanted)return json({error:"INVALID_ORGANIZATION",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+  const row=await env.DB.prepare("SELECT id,name,server_url FROM organizations WHERE is_active=1 AND id<>'__allfather__' AND (id=? OR name=? COLLATE NOCASE) LIMIT 1")
+    .bind(wanted,wanted).first<Record<string,unknown>>();
+  if(!row)return json({error:"ORGANIZATION_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  return json({organization_id:String(row.id),name:String(row.name),server_url:row.server_url==null?null:String(row.server_url)});
+}
+// All-Father sets an organization's server URL. Recorded with before and after values.
+async function setOrganizationServer(request:Request,env:Env,session:Session,organizationId:string){
+  requireRole(session,"ALL_FATHER");
+  const body=await request.json().catch(()=>null) as Json|null;
+  const raw=body&&typeof body.server_url==="string"?body.server_url.trim():null;
+  let serverUrl:string|null=null;
+  if(raw){
+    let parsed:URL|null=null;
+    try{parsed=new URL(raw);}catch{parsed=null;}
+    if(!parsed||parsed.protocol!=="https:"||parsed.pathname!=="/"||parsed.search||parsed.hash)return json({error:"INVALID_SERVER_URL",category:"DOMAIN",retryability:"NON_RETRYABLE"},400);
+    serverUrl=parsed.origin;
+  }
+  const before=await env.DB.prepare("SELECT id,name,server_url FROM organizations WHERE id=? LIMIT 1").bind(organizationId).first<Record<string,unknown>>();
+  if(!before)return json({error:"ORGANIZATION_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
+  const results=await env.DB.batch([
+    env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) VALUES(?,?,?,?,?,?)")
+      .bind(organizationId,session.sub,"organization.server_url.update",uuid(),JSON.stringify({organization_id:organizationId,before:{server_url:before.server_url==null?null:String(before.server_url)},after:{server_url:serverUrl}}),now()),
+    env.DB.prepare("UPDATE organizations SET server_url=?,updated_at=? WHERE id=?").bind(serverUrl,now(),organizationId),
+  ]);
+  if(Number(results[1]?.meta?.changes??0)!==1)throw new Error("ORGANIZATION_SERVER_UPDATE_FAILED");
+  return json({organization_id:organizationId,server_url:serverUrl});
 }
 async function listAllUsersReadOnly(env:Env,session:Session,params:URLSearchParams){
   requireRole(session,"ALL_FATHER");
@@ -2233,6 +2274,8 @@ async function dispatch(request:Request,env:Env):Promise<Response>{
     if(/^\/api\/allfather\/organizations\/[^/]+$/.test(url.pathname)&&request.method==="PATCH")return await renameOrganization(request,env,session,decodeURIComponent(url.pathname.split("/").pop()!));
     if(/^\/api\/allfather\/organizations\/[^/]+\/deactivate$/.test(url.pathname)&&request.method==="POST")return await setOrganizationActive(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!),false);
     if(/^\/api\/allfather\/organizations\/[^/]+\/activate$/.test(url.pathname)&&request.method==="POST")return await setOrganizationActive(env,session,decodeURIComponent(url.pathname.split("/").at(-2)!),true);
+    if(url.pathname==="/api/organizations/lookup"&&request.method==="GET")return await lookupOrganizationServer(env,url.searchParams.get("identifier")??"");
+    if(/^\/api\/allfather\/organizations\/[^/]+\/server$/.test(url.pathname)&&request.method==="PUT")return await setOrganizationServer(request,env,session,decodeURIComponent(url.pathname.split("/").at(-2)!));
     if(url.pathname==="/api/allfather/audit"&&request.method==="GET")return await listAuditRecords(env,session,url.searchParams);
     if(/^\/api\/allfather\/audit\/[^/]+$/.test(url.pathname)&&request.method==="DELETE")return await deleteAuditRecord(env,session,decodeURIComponent(url.pathname.split("/").pop()!));
     if(url.pathname==="/api/allfather/users"&&request.method==="GET")return await listAllUsersReadOnly(env,session,url.searchParams);

@@ -114,6 +114,7 @@ describe("migration sequence integrity", () => {
       "0008_outbox_ingest.sql",
       "0009_public_ids.sql",
       "0010_staff_accounts.sql",
+      "0011_organization_server_url.sql",
     ]);
   });
 });
