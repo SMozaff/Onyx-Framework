@@ -4,6 +4,7 @@ mod auth;
 mod i18n;
 mod i18n_catalog;
 mod orgs;
+mod settings;
 mod users;
 
 use auth::{AdminSession, LoginError};
@@ -54,6 +55,8 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_create_admin_button(text(lang, "common.createOrganizationAdmin").into());
     s.set_organization_label(text(lang, "common.organizations").into());
     s.set_admins_heading(text(lang, "common.organizationAdmins").into());
+    s.set_mobile_heading(text(lang, "nav.settings").into());
+    s.set_mobile_save_button(text(lang, "common.save").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -248,6 +251,34 @@ fn org_write<F, Fut>(
     });
 }
 
+/// Loads the mobile-access policy into the Settings page.
+fn load_mobile_access(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
+    run_org_call(
+        weak,
+        session,
+        lang,
+        |token| async move { settings::get_mobile_access(&token).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(policy) => apply_mobile_access(&ui, &policy),
+                Err(error) => show_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+fn apply_mobile_access(ui: &AppWindow, policy: &settings::MobileAccess) {
+    let has = |class: &str| policy.allowed_classes.iter().any(|c| c == class);
+    ui.set_mobile_top(has("top_level_manager"));
+    ui.set_mobile_senior(has("senior_manager"));
+    ui.set_mobile_team(has("team_leader"));
+    ui.set_mobile_supervisor(has("supervisor"));
+    ui.set_mobile_staff(has("staff"));
+    ui.set_mobile_version(policy.version as i32);
+    ui.set_mobile_status(policy.enforcement_status.clone().into());
+}
+
 /// Loads the Users list with the in-memory token. Runs off the UI thread.
 fn load_users(weak: slint::Weak<AppWindow>, session: Arc<Mutex<Option<AdminSession>>>, lang: Lang) {
     let token = match session
@@ -373,6 +404,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_select_page(move |page| {
         if page == 0 {
             load_users(users_weak.clone(), page_session.clone(), page_lang.get());
+        } else if page == 1 {
+            load_mobile_access(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 3 {
             load_orgs(users_weak.clone(), page_session.clone(), page_lang.get());
         }
@@ -483,6 +516,37 @@ fn main() -> Result<(), slint::PlatformError> {
         org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
             orgs::set_admin_active(&token, &admin_id, active).await
         }, org_id);
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_save_mobile_access(move |top, senior, team, supervisor, staff| {
+        let Some(ui) = weak.upgrade() else { return };
+        let version = i64::from(ui.get_mobile_version());
+        let mut classes = Vec::new();
+        for (on, class) in [
+            (top, "top_level_manager"),
+            (senior, "senior_manager"),
+            (team, "team_leader"),
+            (supervisor, "supervisor"),
+            (staff, "staff"),
+        ] {
+            if on {
+                classes.push(class.to_string());
+            }
+        }
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { settings::put_mobile_access(&token, &classes, version).await },
+            move |weak, _session, lang, result| {
+                let Some(ui) = weak.upgrade() else { return };
+                match result {
+                    Ok(policy) => apply_mobile_access(&ui, &policy),
+                    Err(error) => show_error(&ui, lang, error),
+                }
+            },
+        );
     });
 
     ui.run()

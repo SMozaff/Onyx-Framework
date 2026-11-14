@@ -1,4 +1,4 @@
-import { Button, LineEdit, ComboBox } from "std-widgets.slint";
+import { Button, LineEdit, ComboBox, CheckBox } from "std-widgets.slint";
 
 export global Theme {
     in-out property <bool> dark: false;
@@ -65,6 +65,8 @@ export global Strings {
     in-out property <string> create-admin-button;
     in-out property <string> organization-label;
     in-out property <string> admins-heading;
+    in-out property <string> mobile-heading;
+    in-out property <string> mobile-save-button;
 }
 
 component NavButton inherits Rectangle {
@@ -104,6 +106,13 @@ export component AppWindow inherits Window {
     in-out property <[UserItem]> users: [];
     in-out property <string> users-error: "";
     in-out property <bool> users-loading: false;
+    in-out property <bool> mobile-top: false;
+    in-out property <bool> mobile-senior: false;
+    in-out property <bool> mobile-team: false;
+    in-out property <bool> mobile-supervisor: false;
+    in-out property <bool> mobile-staff: false;
+    in-out property <int> mobile-version: 0;
+    in-out property <string> mobile-status: "";
     in-out property <[OrgItem]> orgs: [];
     in-out property <[AdminItem]> org-admins: [];
     in-out property <string> selected-org-id: "";
@@ -124,6 +133,7 @@ export component AppWindow inherits Window {
     callback select-org(string);
     callback create-org-admin(string, string, string);
     callback toggle-admin(string, bool);
+    callback save-mobile-access(bool, bool, bool, bool, bool);
 
     VerticalLayout {
         padding: 16px;
@@ -373,7 +383,31 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.page == 1 || root.page == 2: Text {
+                    if root.page == 1: VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: Strings.mobile-heading;
+                            color: Theme.text;
+                            font-size: 18px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.mobile-status;
+                            color: Theme.text-dim;
+                        }
+                        CheckBox { text: "top_level_manager"; checked: root.mobile-top; toggled => { root.mobile-top = self.checked; } }
+                        CheckBox { text: "senior_manager"; checked: root.mobile-senior; toggled => { root.mobile-senior = self.checked; } }
+                        CheckBox { text: "team_leader"; checked: root.mobile-team; toggled => { root.mobile-team = self.checked; } }
+                        CheckBox { text: "supervisor"; checked: root.mobile-supervisor; toggled => { root.mobile-supervisor = self.checked; } }
+                        CheckBox { text: "staff"; checked: root.mobile-staff; toggled => { root.mobile-staff = self.checked; } }
+                        Button {
+                            text: Strings.mobile-save-button;
+                            clicked => {
+                                root.save-mobile-access(root.mobile-top, root.mobile-senior, root.mobile-team, root.mobile-supervisor, root.mobile-staff);
+                            }
+                        }
+                    }
+                    if root.page == 2: Text {
                         text: Strings.no-data;
                         color: Theme.text-dim;
                     }
