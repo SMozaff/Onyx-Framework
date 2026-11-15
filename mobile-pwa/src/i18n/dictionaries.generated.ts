@@ -640,7 +640,7 @@ export const fa: Record<string, string> = {
   "auth.signedIn": "وارد شده",
   "auth.signingIn": "در حال ورود…",
   "auth.signingOut": "در حال خروج…",
-  "auth.staffIdentifier": "Staff ID, username or email",
+  "auth.staffIdentifier": "شناسه کارمند، نام کاربری یا ایمیل",
   "auth.staffOperations": "عملیات پرسنل",
   "auth.staffOperator": "اپراتور پرسنل",
   "auth.test": "آزمایش",

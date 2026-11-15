@@ -482,6 +482,9 @@ Owner-approved wording:
 - Policy evaluation labels: Evaluation result / نمایش نتیجه ارزیابی; Policy version / نسخه سیاست; Rule not found / قانون یافت نشد; No value defined / مقداری تعریف نشده است. The result is shown as the Worker returns it, with the evaluated policy version beside it. A missing rule or null value is never shown as false.
 - Concurrency error codes (stable identifiers, not translated): LIFECYCLE_EPOCH_REQUIRED (missing lifecycle epoch), AUTHORITY_EPOCH_REQUIRED (missing authority epoch), EPOCH_MISMATCH (record changed; refresh before continuing), VERSION_CONFLICT (object version conflict). The UI maps these codes to text; it does not infer causes from error text. The Worker must return these codes; that change is not yet implemented.
 
-Open (not decided): Farsi for "Apply legal hold" and "Staff ID, username or email" (proposed in review, awaiting owner confirmation); All-Father policy scope (proposed in review, awaiting owner confirmation).
+Owner-approved 2026-11-15:
+
+- Farsi: "Staff ID, username or email" = شناسه کارمند، نام کاربری یا ایمیل (applied to fa.json on this branch). "Apply legal hold" = اعمال دستور منع تغییر (to be applied on the legal-holds branch, where that key exists).
+- All-Father policy scope: All-Father can perform explicitly authorized global administration, and manage organizations and organization administrators through dedicated privileged endpoints. Ordinary staff and organization-admin operations stay under their normal authorization rules. All-Father must not bypass tenant isolation on generic queries or commands. Unknown and unauthorized actions stay denied. All privileged actions are auditable.
 
 Implementation requirement (already decided earlier): ONYX ID is the primary login identifier; username and email remain aliases; the Worker login must accept all three and enforce a password change when must_change_password is set.
