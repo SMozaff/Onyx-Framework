@@ -47,6 +47,7 @@ pub struct SessionSummary {
     pub organization_id: OrganizationId,
     pub username: String,
     pub is_admin: bool,
+    pub must_change_password: bool,
 }
 
 /// Result of a successful sign-in.
@@ -182,6 +183,7 @@ impl SessionAuthority {
 
         let result = api.login(username, password, organization).await?;
         let stored = StoredSession {
+            must_change_password: result.identity.must_change_password,
             server_address: server,
             refresh_token: result.pair.refresh_token.clone(),
             user_id: result.identity.user_id,
@@ -421,6 +423,7 @@ fn summary_of(stored: &StoredSession) -> SessionSummary {
         organization_id: stored.organization_id,
         username: stored.username.clone(),
         is_admin: stored.is_admin,
+        must_change_password: stored.must_change_password,
     }
 }
 
@@ -563,6 +566,7 @@ mod tests {
                 organization_id: OrganizationId::new_random(),
                 username: "generated-user".into(),
                 is_admin: false,
+                must_change_password: false,
             },
         })
     }
@@ -804,6 +808,7 @@ mod tests {
             organization_id: OrganizationId::new_random(),
             username: "generated-user".into(),
             is_admin: true,
+            must_change_password: false,
         };
         push_refresh(&api, Ok(pair(7, 3600)));
 
@@ -834,6 +839,7 @@ mod tests {
             organization_id: OrganizationId::new_random(),
             username: "generated-user".into(),
             is_admin: false,
+            must_change_password: false,
         };
         session::save(&(storage.clone() as Arc<dyn SecureStorage>), &stored)
             .await
@@ -858,6 +864,7 @@ mod tests {
             organization_id: OrganizationId::new_random(),
             username: "generated-user".into(),
             is_admin: false,
+            must_change_password: false,
         };
         session::save(&(storage.clone() as Arc<dyn SecureStorage>), &stored)
             .await
@@ -893,6 +900,7 @@ mod tests {
             organization_id: OrganizationId::new_random(),
             username: "generated-user".into(),
             is_admin: false,
+            must_change_password: false,
         };
         session::save(&(storage.clone() as Arc<dyn SecureStorage>), &stored)
             .await

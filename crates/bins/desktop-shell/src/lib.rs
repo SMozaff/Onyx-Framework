@@ -332,6 +332,7 @@ async fn delete_secret(
 struct SessionInfo {
     username: String,
     is_admin: bool,
+    must_change_password: bool,
     server_address: String,
     user_id: String,
     organization_id: String,
@@ -348,6 +349,7 @@ impl SessionInfo {
         Self {
             username: summary.username.clone(),
             is_admin: summary.is_admin,
+            must_change_password: summary.must_change_password,
             server_address: summary.server_address.clone(),
             user_id: summary.user_id.to_string(),
             organization_id: summary.organization_id.to_string(),
@@ -392,6 +394,51 @@ async fn resolve_organization_server(organization: &str) -> Result<String, Shell
     } else {
         Err(ShellError::Auth("The organization's server address is invalid.".to_string()))
     }
+}
+
+/// Changes the signed-in user's own password (required on first login).
+/// The server revokes every session for the account on success, so the
+/// frontend signs out right after this returns.
+#[tauri::command]
+async fn change_password(
+    authority: tauri::State<'_, Arc<SessionAuthority>>,
+    current_password: String,
+    new_password: String,
+) -> Result<(), ShellError> {
+    let summary = authority
+        .current_summary()
+        .await
+        .ok_or_else(|| ShellError::Auth("Sign in again to change your password.".to_string()))?;
+    let token = authority
+        .current_access_token()
+        .await
+        .ok_or_else(|| ShellError::Auth("Sign in again to change your password.".to_string()))?;
+    let response = reqwest::Client::new()
+        .post(format!("{}/api/auth/password", summary.server_address))
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "current_password": current_password,
+            "new_password": new_password,
+        }))
+        .send()
+        .await
+        .map_err(|_| ShellError::Auth("Could not reach the server.".to_string()))?;
+    if response.status().is_success() {
+        return Ok(());
+    }
+    let code = response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|body| body.get("error").and_then(|e| e.as_str().map(str::to_string)))
+        .unwrap_or_default();
+    let message = match code.as_str() {
+        "CURRENT_PASSWORD_INCORRECT" => "The current password is incorrect.",
+        "WEAK_PASSWORD" => "The new password must contain at least 12 characters.",
+        "PASSWORD_UNCHANGED" => "The new password must be different from the current one.",
+        _ => "The password could not be changed. Try again.",
+    };
+    Err(ShellError::Auth(message.to_string()))
 }
 
 /// Returns the currently persisted session, if any — lets the frontend
@@ -784,6 +831,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             execute_command,
+            change_password,
             execute_query,
             subscribe_events,
             get_sync_status,
@@ -826,6 +874,7 @@ mod lib_tests {
             organization_id: ObjectId([2; 16]),
             username: "staff".to_string(),
             is_admin: false,
+            must_change_password: false,
         };
         let info = SessionInfo::from_summary(&summary, ReplicaId([3; 16]), None);
         let json = serde_json::to_value(info).expect("SessionInfo must serialize");

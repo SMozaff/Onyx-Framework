@@ -10,6 +10,7 @@ import Messaging from "@/pages/Messaging";
 import Files from "@/pages/Files";
 import Notifications from "@/pages/Notifications";
 import Login from "@/pages/Login";
+import ChangePassword from "@/pages/ChangePassword";
 import Settings from "@/pages/Settings";
 import { SessionProvider, type SessionWire } from "@/hooks/useSession";
 import { toUserFacingError, type UserFacingError } from "@/utils/userFacingError";
@@ -69,6 +70,14 @@ export default function App() {
   if (session === null) {
     return <Login onAuthenticated={(authenticated) => {
       setSession(authenticated);
+    }} />;
+  }
+
+  if (session.mustChangePassword) {
+    // The server rejects every other request until the password is changed.
+    return <ChangePassword onChanged={async () => {
+      await invoke("logout");
+      setSession(null);
     }} />;
   }
 

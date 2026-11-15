@@ -41,6 +41,9 @@ pub struct StoredSession {
     pub organization_id: OrganizationId,
     pub username: String,
     pub is_admin: bool,
+    /// Set by the server for a first login or a reset; the app must change the password.
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 impl std::fmt::Debug for StoredSession {
@@ -52,6 +55,7 @@ impl std::fmt::Debug for StoredSession {
             .field("organization_id", &self.organization_id)
             .field("username", &self.username)
             .field("is_admin", &self.is_admin)
+            .field("must_change_password", &self.must_change_password)
             .finish()
     }
 }
@@ -94,6 +98,7 @@ pub struct LoginIdentity {
     pub organization_id: OrganizationId,
     pub username: String,
     pub is_admin: bool,
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +168,8 @@ struct LoginUserWire {
     username: String,
     organization_id: String,
     is_admin: bool,
+    #[serde(default)]
+    must_change_password: bool,
 }
 
 /// Real HTTP implementation of `SessionApi`.
@@ -255,6 +262,7 @@ impl SessionApi for HttpSessionApi {
                 organization_id,
                 username: body.user.username,
                 is_admin: body.user.is_admin,
+                must_change_password: body.user.must_change_password,
             },
         })
     }
@@ -377,6 +385,7 @@ mod tests {
             organization_id: OrganizationId::new_random(),
             username: "generated-user".to_string(),
             is_admin: true,
+            must_change_password: false,
         }
     }
 
