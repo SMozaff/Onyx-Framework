@@ -3,6 +3,7 @@
 mod auth;
 mod i18n;
 mod i18n_catalog;
+mod legal_hold;
 mod orgs;
 mod policy;
 mod profiles;
@@ -65,6 +66,14 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_retire_button(text(lang, "settings.retirePolicy").into());
     s.set_evaluate_button(text(lang, "common.evaluate").into());
     s.set_rule_key_placeholder(text(lang, "common.ruleKeyToEvaluate").into());
+    s.set_legal_holds_heading(text(lang, "common.legalHolds").into());
+    s.set_target_id_placeholder(text(lang, "common.targetIdUuid").into());
+    s.set_target_type_placeholder(text(lang, "common.targetTypeExample").into());
+    s.set_reason_placeholder(text(lang, "common.reason").into());
+    s.set_apply_legal_hold_button(text(lang, "settings.applyLegalHold").into());
+    s.set_view_hold_placeholder(text(lang, "common.viewHoldById").into());
+    s.set_view_button(text(lang, "common.view").into());
+    s.set_release_button(text(lang, "settings.release").into());
     s.set_profiles_heading(text(lang, "nav.profiles").into());
     s.set_save_profile_button(text(lang, "common.save").into());
     s.set_export_csv_button(text(lang, "common.exportCsv").into());
@@ -134,6 +143,7 @@ fn run_user_write<F, Fut>(
 
 type SessionSlot = Arc<Mutex<Option<AdminSession>>>;
 type SelectedPolicy = Arc<Mutex<Option<policy::PolicyRow>>>;
+type SelectedHold = Arc<Mutex<Option<legal_hold::HoldRow>>>;
 
 fn show_error(ui: &AppWindow, lang: Lang, error: UsersError) {
     match error {
@@ -387,13 +397,14 @@ fn policy_command(
     let Some(org) = org_id_of(&session) else { return };
     let Some(row) = selected.lock().ok().and_then(|slot| slot.clone()) else { return };
     let id = row.id.clone();
+    let concurrency = row.concurrency();
     let reload = selected.clone();
     run_org_call(
         weak,
         session,
         lang,
         move |token| async move {
-            policy::send_command(&token, &org, command, &row, payload)
+            policy::send_command(&token, &org, "policy", command, &concurrency, payload)
                 .await
                 .map(|output| output.to_string())
         },
@@ -406,6 +417,40 @@ fn policy_command(
                     load_policy_detail(weak, session, lang, id, reload);
                 }
                 Err(error) => show_policy_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+fn show_hold_error(ui: &AppWindow, lang: Lang, error: UsersError) {
+    let message = match error {
+        UsersError::Forbidden => text(lang, "auth.adminAccessRequired"),
+        UsersError::Failed => text(lang, "status.failed"),
+    };
+    ui.set_legal_hold_error(message.into());
+}
+
+/// Reads one hold into the Settings panel and keeps its concurrency values for release.
+fn load_hold_detail(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang, id: String, selected: SelectedHold) {
+    let Some(org) = org_id_of(&session) else { return };
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move { legal_hold::hold_detail(&token, &org, &id).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(Some(hold)) => {
+                    ui.set_legal_hold_selected_id(hold.concurrency.id.clone().into());
+                    ui.set_legal_hold_state(format!("Status: {}", hold.status).into());
+                    ui.set_legal_hold_can_release(hold.status == "Applied");
+                    if let Ok(mut slot) = selected.lock() {
+                        *slot = Some(hold);
+                    }
+                }
+                Ok(None) => ui.set_legal_hold_error(text(lang, "settings.noLegalHoldFound").into()),
+                Err(error) => show_hold_error(&ui, lang, error),
             }
         },
     );
@@ -718,14 +763,67 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
-    ui.on_publish_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "publish", serde_json::json!({})));
+    ui.on_publish_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.PublishPolicyVersion", serde_json::json!({})));
 
     let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
-    ui.on_retire_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "retire", serde_json::json!({})));
+    ui.on_retire_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.RetirePolicy", serde_json::json!({})));
 
     let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
     ui.on_evaluate_policy(move |key| {
-        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "evaluate", serde_json::json!({ "rule_key": key.to_string() }))
+        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.EvaluatePolicy", serde_json::json!({ "rule_key": key.to_string() }))
+    });
+
+    let selected_hold: SelectedHold = Arc::new(Mutex::new(None));
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_hold.clone());
+    ui.on_view_legal_hold(move |id| load_hold_detail(weak.clone(), session.clone(), lang.get(), id.to_string(), selected.clone()));
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_hold.clone());
+    ui.on_apply_legal_hold(move |target_id, target_type, reason| {
+        let (target_id, target_type, reason) = (target_id.trim().to_string(), target_type.trim().to_string(), reason.trim().to_string());
+        if target_id.is_empty() || target_type.is_empty() || reason.is_empty() {
+            return;
+        }
+        let key = new_request_id();
+        let selected = selected.clone();
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { legal_hold::apply(&token, &target_id, &target_type, &reason, &key).await },
+            move |weak, session, lang, result| {
+                let Some(ui) = weak.upgrade() else { return };
+                match result {
+                    Ok(hold_id) => {
+                        ui.set_legal_hold_target_input("".into());
+                        ui.set_legal_hold_reason_input("".into());
+                        ui.set_legal_hold_view_id(hold_id.clone().into());
+                        load_hold_detail(weak.clone(), session, lang, hold_id, selected);
+                    }
+                    Err(error) => show_hold_error(&ui, lang, error),
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_hold.clone());
+    ui.on_release_legal_hold(move || {
+        let Some(org) = org_id_of(&session) else { return };
+        let Some(hold) = selected.lock().ok().and_then(|slot| slot.clone()) else { return };
+        let id = hold.concurrency.id.clone();
+        let reload = selected.clone();
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { legal_hold::release(&token, &org, &hold, "Released by administrator").await },
+            move |weak, session, lang, result| {
+                let Some(ui) = weak.upgrade() else { return };
+                match result {
+                    Ok(()) => load_hold_detail(weak.clone(), session, lang, id, reload),
+                    Err(error) => show_hold_error(&ui, lang, error),
+                }
+            },
+        );
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
