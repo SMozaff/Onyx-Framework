@@ -474,3 +474,14 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 - Failed logins for unknown accounts are not recorded (no organization to attribute).
 - Route-level tests for the new audit and All-Father endpoints.
 - Admin Slint: page-by-page data wiring beyond Users; Gate 0b still blocks production modules.
+
+## Decisions recorded 2026-11-15
+
+Owner-approved wording:
+
+- Policy evaluation labels: Evaluation result / نمایش نتیجه ارزیابی; Policy version / نسخه سیاست; Rule not found / قانون یافت نشد; No value defined / مقداری تعریف نشده است. The result is shown as the Worker returns it, with the evaluated policy version beside it. A missing rule or null value is never shown as false.
+- Concurrency error codes (stable identifiers, not translated): LIFECYCLE_EPOCH_REQUIRED (missing lifecycle epoch), AUTHORITY_EPOCH_REQUIRED (missing authority epoch), EPOCH_MISMATCH (record changed; refresh before continuing), VERSION_CONFLICT (object version conflict). The UI maps these codes to text; it does not infer causes from error text. The Worker must return these codes; that change is not yet implemented.
+
+Open (not decided): Farsi for "Apply legal hold" and "Staff ID, username or email" (proposed in review, awaiting owner confirmation); All-Father policy scope (proposed in review, awaiting owner confirmation).
+
+Implementation requirement (already decided earlier): ONYX ID is the primary login identifier; username and email remain aliases; the Worker login must accept all three and enforce a password change when must_change_password is set.
