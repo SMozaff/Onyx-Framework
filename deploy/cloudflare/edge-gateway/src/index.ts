@@ -1171,8 +1171,17 @@ async function commandRoute(request:Request,env:Env,session:Session){
     return json({error:"RESOURCE_ALREADY_EXISTS",category:"DOMAIN",retryability:"NON_RETRYABLE"},409);
   if(policy.effect==="update"&&!existing)
     return json({error:"RESOURCE_NOT_FOUND",category:"DOMAIN",retryability:"NON_RETRYABLE"},404);
-  if(existing&&(expected!==Number(existing.version)||expectedLifecycle!==Number(existing.lifecycle_epoch)||expectedAuthority!==Number(existing.authority_epoch)))
-    return json({success:false,operation_id:envelope.operation_id,events:[],error:{code:"VERSION_CONFLICT",category:"CONCURRENCY",retryability:"RETRYABLE",safe_details:{expected,actual:existing.version},correlation_id:String(envelope.correlation_id??envelope.operation_id)}},409);
+  // Concurrency contract (owner-approved codes). Missing epochs are rejected
+  // rather than defaulted, and each failure has its own stable code.
+  const concurrencyError=(code:string,status:number,safe:Json)=>json({success:false,operation_id:envelope.operation_id,events:[],error:{code,category:"CONCURRENCY",retryability:status===400?"NON_RETRYABLE":"RETRYABLE",safe_details:safe,correlation_id:String(envelope.correlation_id??envelope.operation_id)}},status);
+  if(existing){
+    if(envelope.expected_lifecycle_epoch==null)return concurrencyError("LIFECYCLE_EPOCH_REQUIRED",400,{});
+    if(envelope.expected_authority_epoch==null)return concurrencyError("AUTHORITY_EPOCH_REQUIRED",400,{});
+    if(expectedLifecycle!==Number(existing.lifecycle_epoch)||expectedAuthority!==Number(existing.authority_epoch))
+      return concurrencyError("EPOCH_MISMATCH",409,{});
+    if(expected!==Number(existing.version))
+      return concurrencyError("VERSION_CONFLICT",409,{expected,actual:existing.version});
+  }
   const previousState=existing?safeJson(existing.state):null;
   let effectiveCommandPayload:Json=payload;
   if(envelope.command_type==="todo_list.EscalateTodoList"||envelope.command_type==="target_list.EscalateTargetList"){
