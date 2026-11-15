@@ -385,6 +385,36 @@ fn load_policy_detail(
     );
 }
 
+/// Formats an evaluation result for the Settings page. A missing rule and a rule
+/// without a value are shown differently; a missing `rule_found` (older Worker)
+/// falls back to the value alone. The value is shown as returned, never as false.
+fn format_evaluation(lang: Lang, response: &serde_json::Value) -> String {
+    let Some(evaluation) = response.pointer("/result/command_result") else {
+        return String::new();
+    };
+    let version = evaluation
+        .get("evaluated_version")
+        .and_then(serde_json::Value::as_i64)
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let shown = if evaluation.get("rule_found").and_then(serde_json::Value::as_bool) == Some(false) {
+        text(lang, "settings.ruleNotFound").to_string()
+    } else {
+        match evaluation.get("result") {
+            None | Some(serde_json::Value::Null) => text(lang, "settings.noValueDefined").to_string(),
+            Some(serde_json::Value::String(value)) => value.clone(),
+            Some(other) => other.to_string(),
+        }
+    };
+    format!(
+        "{}: {} · {}: {}",
+        text(lang, "settings.evaluationResult"),
+        shown,
+        text(lang, "settings.policyVersion"),
+        version
+    )
+}
+
 /// Sends one lifecycle command to the selected policy, then reloads the list and detail.
 fn policy_command(
     weak: slint::Weak<AppWindow>,
@@ -403,16 +433,17 @@ fn policy_command(
         weak,
         session,
         lang,
-        move |token| async move {
-            policy::send_command(&token, &org, "policy", command, &concurrency, payload)
-                .await
-                .map(|output| output.to_string())
-        },
+        move |token| async move { policy::send_command(&token, &org, "policy", command, &concurrency, payload).await },
         move |weak, session, lang, result| {
             let Some(ui) = weak.upgrade() else { return };
             match result {
-                Ok(output) => {
-                    ui.set_policy_status(output.chars().take(300).collect::<String>().into());
+                Ok(response) => {
+                    let status = if command == "policy.EvaluatePolicy" {
+                        format_evaluation(lang, &response)
+                    } else {
+                        String::new()
+                    };
+                    ui.set_policy_status(status.into());
                     load_policies(weak.clone(), session.clone(), lang);
                     load_policy_detail(weak, session, lang, id, reload);
                 }
