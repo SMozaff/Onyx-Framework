@@ -1313,7 +1313,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
   const authorityChangingActions=["AssignOwner","PublishPolicyVersion","RetirePolicy","approval.Approve","approval.Reject","ApplyLegalHold","ReleaseLegalHold","todo_list.VerifyTodoList","target_list.VerifyTargetList","todo_list.EscalateTodoList","target_list.EscalateTargetList","staff_loan.ApproveStaffLoan","staff_loan.EndStaffLoanEarly"];
   const nextAuthority=existing&&authorityChangingActions.includes(envelope.command_type)?expectedAuthority+1:expectedAuthority;
   const eventPayload:Json=envelope.command_type==="EvaluatePolicy"&&semantic.commandResult
-    ?{...effectiveCommandPayload,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
+    ?{...effectiveCommandPayload,rule_found:semantic.commandResult.rule_found,result:semantic.commandResult.result,evaluated_version:semantic.commandResult.evaluated_version}
     :effectiveCommandPayload;
   const event={event_id:uuid(),aggregate_id:targetId,aggregate_type:targetType,event_type:envelope.command_type,aggregate_version:nextVersion,organization_id:session.organization_id,payload:effectiveCommandPayload,occurred_at:new Date().toISOString(),actor:{user_id:session.sub,organization_id:session.organization_id}};
   const result={success:true,operation_id:envelope.operation_id,new_version:nextVersion,new_lifecycle_epoch:nextLifecycle,new_authority_epoch:nextAuthority,events:[{...event,payload:eventPayload}],result:{id:targetId,type:targetType,state:merged,...(semantic.commandResult?{command_result:semantic.commandResult}:{})}};
