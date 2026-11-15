@@ -1483,3 +1483,38 @@ describe("B1 client-call route contracts", () => {
     expect(db.writes).toHaveLength(0);
   });
 });
+
+describe("Worker command concurrency error codes", () => {
+  async function codeOf(response: Response) {
+    const body = await response.json() as { error?: { code?: string } };
+    return { status: response.status, code: body.error?.code };
+  }
+
+  it("rejects a missing lifecycle epoch with LIFECYCLE_EPOCH_REQUIRED", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const response = await postCommand("desktop", db, { expected_lifecycle_epoch: undefined });
+    expect(await codeOf(response)).toEqual({ status: 400, code: "LIFECYCLE_EPOCH_REQUIRED" });
+    expect(db.writes).toHaveLength(0);
+  });
+
+  it("rejects a missing authority epoch with AUTHORITY_EPOCH_REQUIRED", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const response = await postCommand("desktop", db, { expected_authority_epoch: undefined });
+    expect(await codeOf(response)).toEqual({ status: 400, code: "AUTHORITY_EPOCH_REQUIRED" });
+    expect(db.writes).toHaveLength(0);
+  });
+
+  it("reports an epoch that differs from the record as EPOCH_MISMATCH", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const response = await postCommand("desktop", db, { expected_lifecycle_epoch: 5 });
+    expect(await codeOf(response)).toEqual({ status: 409, code: "EPOCH_MISMATCH" });
+    expect(db.writes).toHaveLength(0);
+  });
+
+  it("reports a stale object version as VERSION_CONFLICT", async () => {
+    const db = makeDb("ORGANIZATION_ADMIN");
+    const response = await postCommand("desktop", db, { expected_version: 9 });
+    expect(await codeOf(response)).toEqual({ status: 409, code: "VERSION_CONFLICT" });
+    expect(db.writes).toHaveLength(0);
+  });
+});
