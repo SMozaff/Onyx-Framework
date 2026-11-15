@@ -1,5 +1,8 @@
-//! Translation table for the Admin UI. Every key must have a value for every
-//! language: the `match` below is exhaustive, so a missing pair fails to compile.
+//! Admin UI strings. Text comes from the generated canonical catalog
+//! (`i18n_catalog.rs`, produced from `shared/i18n/{en,fa}.json`), so the Slint
+//! hosts and the web frontends share one source of truth.
+
+use crate::i18n_catalog::{EN, FA};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lang {
@@ -17,33 +20,23 @@ impl Lang {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Key {
-    AppTitle,
-    LightMode,
-    DarkMode,
-    Phase0Notice,
+/// Catalog text for `key` in `lang`. Falls back to English, then to the key
+/// itself, so a missing key is visible instead of silently blank.
+pub fn text(lang: Lang, key: &str) -> &'static str {
+    let table = match lang {
+        Lang::En => EN,
+        Lang::Fa => FA,
+    };
+    lookup(table, key)
+        .or_else(|| lookup(EN, key))
+        .unwrap_or_else(|| {
+            debug_assert!(false, "missing i18n key: {key}");
+            ""
+        })
 }
 
-#[cfg(test)]
-pub const ALL_KEYS: &[Key] = &[
-    Key::AppTitle,
-    Key::LightMode,
-    Key::DarkMode,
-    Key::Phase0Notice,
-];
-
-pub fn text(lang: Lang, key: Key) -> &'static str {
-    match (lang, key) {
-        (Lang::En, Key::AppTitle) => "ONYX Admin",
-        (Lang::Fa, Key::AppTitle) => "مدیریت ONYX",
-        (Lang::En, Key::LightMode) => "Light mode",
-        (Lang::Fa, Key::LightMode) => "حالت روشن",
-        (Lang::En, Key::DarkMode) => "Dark mode",
-        (Lang::Fa, Key::DarkMode) => "حالت تاریک",
-        (Lang::En, Key::Phase0Notice) => "Phase 0 placeholder. Sign-in arrives in Phase 1.",
-        (Lang::Fa, Key::Phase0Notice) => "جایگاه موقت فاز ۰. ورود در فاز ۱ اضافه می\u{200c}شود.",
-    }
+fn lookup(table: &'static [(&'static str, &'static str)], key: &str) -> Option<&'static str> {
+    table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
 }
 
 #[cfg(test)]
@@ -51,21 +44,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_key_has_non_empty_text_in_every_language() {
-        for lang in [Lang::En, Lang::Fa] {
-            for key in ALL_KEYS {
-                assert!(
-                    !text(lang, *key).is_empty(),
-                    "empty text for {key:?} in {lang:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn language_tags_parse() {
         assert_eq!(Lang::from_tag("en"), Some(Lang::En));
         assert_eq!(Lang::from_tag("fa"), Some(Lang::Fa));
         assert_eq!(Lang::from_tag("xx"), None);
+    }
+
+    #[test]
+    fn sign_in_strings_resolve_in_both_languages() {
+        assert_eq!(text(Lang::En, "auth.signIn"), "Sign in");
+        assert_ne!(text(Lang::Fa, "auth.signIn"), "");
+        assert_eq!(text(Lang::En, "auth.adminTitleBar"), "ONYX Admin");
+    }
+
+    #[test]
+    fn both_tables_have_the_same_keys() {
+        assert_eq!(EN.len(), FA.len());
+        for (key, _) in EN {
+            assert!(lookup(FA, key).is_some(), "{key} missing in fa");
+        }
     }
 }

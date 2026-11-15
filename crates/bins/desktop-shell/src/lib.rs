@@ -332,6 +332,7 @@ async fn delete_secret(
 struct SessionInfo {
     username: String,
     is_admin: bool,
+    must_change_password: bool,
     server_address: String,
     user_id: String,
     organization_id: String,
@@ -348,6 +349,7 @@ impl SessionInfo {
         Self {
             username: summary.username.clone(),
             is_admin: summary.is_admin,
+            must_change_password: summary.must_change_password,
             server_address: summary.server_address.clone(),
             user_id: summary.user_id.to_string(),
             organization_id: summary.organization_id.to_string(),
@@ -355,6 +357,88 @@ impl SessionInfo {
             persistence_notice,
         }
     }
+}
+
+/// Asks the cloud registry which server serves an organization. A null
+/// `server_url` means the cloud server itself. Only http(s) addresses are accepted.
+async fn resolve_organization_server(organization: &str) -> Result<String, ShellError> {
+    let identifier = organization.trim();
+    if identifier.is_empty() {
+        return Err(ShellError::Auth("Enter the organization ID or name.".to_string()));
+    }
+    let response = reqwest::Client::new()
+        .get(format!("{CLOUD_API_BASE}/api/organizations/lookup"))
+        .query(&[("identifier", identifier)])
+        .send()
+        .await
+        .map_err(|_| ShellError::Auth("Could not reach the server.".to_string()))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(ShellError::Auth("Organization not found.".to_string()));
+    }
+    if !response.status().is_success() {
+        return Err(ShellError::Auth("Could not look up the organization.".to_string()));
+    }
+    #[derive(serde::Deserialize)]
+    struct Lookup {
+        server_url: Option<String>,
+    }
+    let body: Lookup = response
+        .json()
+        .await
+        .map_err(|_| ShellError::Auth("Could not read the organization record.".to_string()))?;
+    let Some(url) = body.server_url.map(|u| u.trim_end_matches('/').to_string()).filter(|u| !u.is_empty()) else {
+        return Ok(CLOUD_API_BASE.to_string());
+    };
+    if url.starts_with("https://") || url.starts_with("http://") {
+        Ok(url)
+    } else {
+        Err(ShellError::Auth("The organization's server address is invalid.".to_string()))
+    }
+}
+
+/// Changes the signed-in user's own password (required on first login).
+/// The server revokes every session for the account on success, so the
+/// frontend signs out right after this returns.
+#[tauri::command]
+async fn change_password(
+    authority: tauri::State<'_, Arc<SessionAuthority>>,
+    current_password: String,
+    new_password: String,
+) -> Result<(), ShellError> {
+    let summary = authority
+        .current_summary()
+        .await
+        .ok_or_else(|| ShellError::Auth("Sign in again to change your password.".to_string()))?;
+    let token = authority
+        .current_access_token()
+        .await
+        .ok_or_else(|| ShellError::Auth("Sign in again to change your password.".to_string()))?;
+    let response = reqwest::Client::new()
+        .post(format!("{}/api/auth/password", summary.server_address))
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "current_password": current_password,
+            "new_password": new_password,
+        }))
+        .send()
+        .await
+        .map_err(|_| ShellError::Auth("Could not reach the server.".to_string()))?;
+    if response.status().is_success() {
+        return Ok(());
+    }
+    let code = response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|body| body.get("error").and_then(|e| e.as_str().map(str::to_string)))
+        .unwrap_or_default();
+    let message = match code.as_str() {
+        "CURRENT_PASSWORD_INCORRECT" => "The current password is incorrect.",
+        "WEAK_PASSWORD" => "The new password must contain at least 12 characters.",
+        "PASSWORD_UNCHANGED" => "The new password must be different from the current one.",
+        _ => "The password could not be changed. Try again.",
+    };
+    Err(ShellError::Auth(message.to_string()))
 }
 
 /// Returns the currently persisted session, if any — lets the frontend
@@ -401,6 +485,7 @@ async fn get_current_session(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoginRequest {
+    organization: String,
     username: String,
     password: String,
 }
@@ -414,8 +499,15 @@ async fn login(
     hierarchy_cache: tauri::State<'_, client_composition::hierarchy_cache::HierarchyCache>,
     credentials: LoginRequest,
 ) -> Result<SessionInfo, ShellError> {
-    let LoginRequest { username, password } = credentials;
-    let outcome = authority.sign_in(&username, &password).await?;
+    let LoginRequest {
+        organization,
+        username,
+        password,
+    } = credentials;
+    let server = resolve_organization_server(&organization).await?;
+    let outcome = authority
+        .sign_in_at(&server, Some(organization.trim()), &username, &password)
+        .await?;
 
     let new_state = build_app_state(
         &app,
@@ -430,7 +522,7 @@ async fn login(
     // setup(): a transient failure here must not lock the person out of
     // logging in. Logged, not propagated.
     if let Some(access_token) = authority.current_access_token().await {
-        if let Err(e) = hierarchy_cache.refresh(CLOUD_API_BASE, &access_token).await {
+        if let Err(e) = hierarchy_cache.refresh(&outcome.summary.server_address, &access_token).await {
             tracing::warn!(error = %e, "failed to refresh approval-authority cache after login");
         }
     }
@@ -691,10 +783,9 @@ pub fn run() {
                 // Restore exchanges it for a new access token, and the
                 // rotated refresh token is written back. Any failure leaves
                 // the person on the login screen. None of them is fatal.
-                let api = Arc::new(session::HttpSessionApi::new(CLOUD_API_BASE)?);
-                let authority = desktop_session::session_authority::SessionAuthority::new(
+                let authority = desktop_session::session_authority::SessionAuthority::with_api_factory(
                     CLOUD_API_BASE,
-                    api,
+                    desktop_session::session_authority::http_api_factory(),
                     storage.clone(),
                 );
                 app_handle_for_state.manage(Arc::clone(&authority));
@@ -722,11 +813,11 @@ pub fn run() {
                 // Populate the approval-authority cache for a restored session.
                 // Best-effort: a stale or offline cache degrades to "cannot
                 // approve until reachable", and this must not block startup.
-                if restored.is_some() {
+                if let Some(summary) = restored.as_ref() {
                     if let Some(access_token) = authority.current_access_token().await {
                         let cache = app_handle_for_state
                             .state::<client_composition::hierarchy_cache::HierarchyCache>();
-                        if let Err(e) = cache.refresh(CLOUD_API_BASE, &access_token).await {
+                        if let Err(e) = cache.refresh(&summary.server_address, &access_token).await {
                             tracing::warn!(error = %e, "failed to refresh approval-authority cache on startup");
                         }
                     }
@@ -740,6 +831,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             execute_command,
+            change_password,
             execute_query,
             subscribe_events,
             get_sync_status,
@@ -782,6 +874,7 @@ mod lib_tests {
             organization_id: ObjectId([2; 16]),
             username: "staff".to_string(),
             is_admin: false,
+            must_change_password: false,
         };
         let info = SessionInfo::from_summary(&summary, ReplicaId([3; 16]), None);
         let json = serde_json::to_value(info).expect("SessionInfo must serialize");

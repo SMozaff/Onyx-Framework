@@ -383,6 +383,8 @@ export function validateCommandSemantics(
         nextStatus: status,
         commandResult: {
           rule_key: ruleKey,
+          // rule_found distinguishes a missing rule from a rule with no value.
+          rule_found: Boolean(matchingRule),
           result: matchingRule && Object.prototype.hasOwnProperty.call(matchingRule, "value") ? matchingRule.value : null,
           evaluated_version: published.version_number,
         },

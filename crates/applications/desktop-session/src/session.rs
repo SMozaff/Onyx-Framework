@@ -41,6 +41,9 @@ pub struct StoredSession {
     pub organization_id: OrganizationId,
     pub username: String,
     pub is_admin: bool,
+    /// Set by the server for a first login or a reset; the app must change the password.
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 impl std::fmt::Debug for StoredSession {
@@ -52,6 +55,7 @@ impl std::fmt::Debug for StoredSession {
             .field("organization_id", &self.organization_id)
             .field("username", &self.username)
             .field("is_admin", &self.is_admin)
+            .field("must_change_password", &self.must_change_password)
             .finish()
     }
 }
@@ -94,6 +98,7 @@ pub struct LoginIdentity {
     pub organization_id: OrganizationId,
     pub username: String,
     pub is_admin: bool,
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +125,12 @@ pub enum RefreshError {
 /// text.
 #[async_trait]
 pub trait SessionApi: Send + Sync {
-    async fn login(&self, username: &str, password: &str) -> Result<LoginResult, SessionError>;
+    async fn login(
+        &self,
+        username: &str,
+        password: &str,
+        organization: Option<&str>,
+    ) -> Result<LoginResult, SessionError>;
     async fn refresh(&self, refresh_token: &str) -> Result<IssuedPair, RefreshError>;
     /// Best-effort server-side revocation. Local state is already cleared.
     async fn revoke(&self, access_token: &str, refresh_token: &str) -> Result<(), SessionError>;
@@ -132,6 +142,9 @@ struct LoginRequest<'a> {
     username: &'a str,
     password: &'a str,
     client_type: &'a str,
+    /// Organization ID or name. The server checks it against the account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organization: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -155,6 +168,8 @@ struct LoginUserWire {
     username: String,
     organization_id: String,
     is_admin: bool,
+    #[serde(default)]
+    must_change_password: bool,
 }
 
 /// Real HTTP implementation of `SessionApi`.
@@ -190,7 +205,12 @@ fn non_empty(value: &str) -> bool {
 
 #[async_trait]
 impl SessionApi for HttpSessionApi {
-    async fn login(&self, username: &str, password: &str) -> Result<LoginResult, SessionError> {
+    async fn login(
+        &self,
+        username: &str,
+        password: &str,
+        organization: Option<&str>,
+    ) -> Result<LoginResult, SessionError> {
         let response = self
             .client
             .post(self.url("/api/auth/login"))
@@ -198,6 +218,7 @@ impl SessionApi for HttpSessionApi {
                 username,
                 password,
                 client_type: "desktop",
+                organization,
             })
             .send()
             .await
@@ -241,6 +262,7 @@ impl SessionApi for HttpSessionApi {
                 organization_id,
                 username: body.user.username,
                 is_admin: body.user.is_admin,
+                must_change_password: body.user.must_change_password,
             },
         })
     }
@@ -363,6 +385,7 @@ mod tests {
             organization_id: OrganizationId::new_random(),
             username: "generated-user".to_string(),
             is_admin: true,
+            must_change_password: false,
         }
     }
 
@@ -567,7 +590,7 @@ mod http_contract_tests {
         let origin = serve(mock_with(200, 200, 200)).await;
         let api = HttpSessionApi::new(&origin).unwrap();
         let result = api
-            .login("generated-user", "generated-password")
+            .login("generated-user", "generated-password", None)
             .await
             .unwrap();
         assert_eq!(result.pair.expires_in, 3600);
@@ -580,7 +603,7 @@ mod http_contract_tests {
         let origin = serve(mock_with(401, 200, 200)).await;
         let api = HttpSessionApi::new(&origin).unwrap();
         assert!(matches!(
-            api.login("generated-user", "wrong").await,
+            api.login("generated-user", "wrong", None).await,
             Err(SessionError::InvalidCredentials)
         ));
     }

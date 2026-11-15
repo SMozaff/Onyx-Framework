@@ -8,6 +8,7 @@ import type { Id16 } from "@/types/onyx";
 export interface SessionWire {
   username: string;
   isAdmin: boolean;
+  mustChangePassword: boolean;
   serverAddress: string;
   userId: string;
   organizationId: string;

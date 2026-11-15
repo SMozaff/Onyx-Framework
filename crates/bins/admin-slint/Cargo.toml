@@ -14,3 +14,7 @@ slint-build = "1.18"
 
 [dependencies]
 slint = "1.18"
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

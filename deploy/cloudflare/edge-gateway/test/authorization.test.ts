@@ -153,7 +153,7 @@ describe("policy evaluation and violation semantics", () => {
       .toEqual({
         allowed: true,
         nextStatus: "Active",
-        commandResult: { rule_key: "task.result.required", result: true, evaluated_version: 3 },
+        commandResult: { rule_key: "task.result.required", rule_found: true, result: true, evaluated_version: 3 },
       });
   });
 
@@ -162,7 +162,7 @@ describe("policy evaluation and violation semantics", () => {
       .toEqual({
         allowed: true,
         nextStatus: "Active",
-        commandResult: { rule_key: "unknown.rule", result: null, evaluated_version: 3 },
+        commandResult: { rule_key: "unknown.rule", rule_found: false, result: null, evaluated_version: 3 },
       });
   });
 

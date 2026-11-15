@@ -424,3 +424,67 @@ O-1 through O-6 were decided by the coordinator under the owner's standing “de
 - **Earlier failed run:** run 43428241158 stopped before any write. The requested username or email already belonged to another account. Clearing `ONYX_ALLFATHER_EMAIL` and re-running fixed it.
 - **Reserved identity:** the Worker checks the account ID and ALL_FATHER role, not a username. An ordinary account that once used the old name gets no All-Father authority.
 - **Still to confirm by the owner:** sign-in with the new username works, and the old name is refused.
+
+## All-Father cross-organization scope (2026-11-14)
+
+- **Decision (owner):** All-Father has cross-organization access. Below the organization-admin level, All-Father is read-only.
+- **Scope of write authority, unchanged:** organization create, rename, activate and deactivate, and org-Admin create and reactivate, through the existing `/api/allfather/*` routes.
+- **Not yet decided:** audit-trail requirements (reads logging, retention, storing old and new values), and the approval step before any Worker deploy.
+- **Status:** Worker read routes for cross-organization views are not built. No Worker change is deployed.
+
+## Audit scope for reads (2026-11-14)
+
+- **Decision (owner):** log exports and sensitive reads for now. Logging can be widened or narrowed later.
+- **Still open:** retention period, whether changes store old and new values or only field names, and approval of the Worker change before deploy.
+
+## Audit decisions, update (2026-11-14)
+
+- **Reads and views:** not logged.
+- **Searches:** logged, all of them.
+- **Retention:** kept forever. Only All-Father can remove audit records.
+- **Changes:** recorded with before and after values.
+- **Still open:** whether deleting an audit record is itself recorded, and approval of the Worker change before deploy.
+
+## Audit deletion (2026-11-14)
+
+- **Decision (owner):** deleting an audit record is itself recorded, with full details.
+- **Still open:** approval of the Worker change before deploy.
+
+## Session record: 2026-11-14 (decisions and changes)
+
+### Decisions (owner)
+- **All-Father scope:** cross-organization access. Below the organization-admin level, the view is read-only. Write rights stay with the existing organization and org-Admin routes.
+- **Audit trail:** logins, logouts, failed logins for known accounts, searches, exports and imports are recorded. Reads and views are not recorded. Records are kept forever. Only All-Father can read or delete them. A deletion is itself recorded, with a snapshot of the deleted row. Changes are recorded with before and after values.
+- **Staff login:** three fields: organization (ID or name), staff identifier (ID, username or email), password. The organization determines the server. The mapping lives in the Worker (`organizations.server_url`, NULL = this server) and is maintained by All-Father.
+- **Worker development:** approved. **Deploy:** not approved.
+- **Admin Slint:** feasibility build, not production. Phase 1 sign-in keeps tokens in memory only (Q-01). Test-build packaging for Admin was dropped at owner request.
+
+### Changes (by branch)
+- `feat/admin-slint-phase1`: Admin Slint sign-in, memory-only tokens, signed-in view, sign-out, navigation shell (Users, Settings, Profiles, Organizations for All-Father), Users list wired to `GET /api/admin/users`. Generated Slint catalog from `shared/i18n` via `scripts/sync-i18n.mjs`.
+- `feat/allfather-audit-worker`: audit writes for login, logout, failed login, search, profile export and import. All-Father routes: `GET /api/allfather/audit`, `DELETE /api/allfather/audit/:id`, `GET /api/allfather/users` (read-only, cross-organization).
+- `feat/staff-org-login`: migration `0011_organization_server_url.sql`. Login accepts an optional `organization`. `GET /api/organizations/lookup` (public). `PUT /api/allfather/organizations/:id/server` (All-Father, audited with before and after).
+
+### Verification
+- Worker: 260 tests pass, 1 todo. Admin Slint: 9 unit tests pass, clippy clean, app starts under a virtual display.
+
+### Open
+- Worker deploy approval.
+- Staff desktop app: third login field and per-server session (not started).
+- Before and after values for all other change routes (only the server-URL route has them).
+- Failed logins for unknown accounts are not recorded (no organization to attribute).
+- Route-level tests for the new audit and All-Father endpoints.
+- Admin Slint: page-by-page data wiring beyond Users; Gate 0b still blocks production modules.
+
+## Decisions recorded 2026-11-15
+
+Owner-approved wording:
+
+- Policy evaluation labels: Evaluation result / نمایش نتیجه ارزیابی; Policy version / نسخه سیاست; Rule not found / قانون یافت نشد; No value defined / مقداری تعریف نشده است. The result is shown as the Worker returns it, with the evaluated policy version beside it. A missing rule or null value is never shown as false.
+- Concurrency error codes (stable identifiers, not translated): LIFECYCLE_EPOCH_REQUIRED (missing lifecycle epoch), AUTHORITY_EPOCH_REQUIRED (missing authority epoch), EPOCH_MISMATCH (record changed; refresh before continuing), VERSION_CONFLICT (object version conflict). The UI maps these codes to text; it does not infer causes from error text. The Worker must return these codes; that change is not yet implemented.
+
+Owner-approved 2026-11-15:
+
+- Farsi: "Staff ID, username or email" = شناسه کارمند، نام کاربری یا ایمیل (applied to fa.json on this branch). "Apply legal hold" = اعمال دستور منع تغییر (to be applied on the legal-holds branch, where that key exists).
+- All-Father policy scope: All-Father can perform explicitly authorized global administration, and manage organizations and organization administrators through dedicated privileged endpoints. Ordinary staff and organization-admin operations stay under their normal authorization rules. All-Father must not bypass tenant isolation on generic queries or commands. Unknown and unauthorized actions stay denied. All privileged actions are auditable.
+
+Implementation requirement (already decided earlier): ONYX ID is the primary login identifier; username and email remain aliases; the Worker login must accept all three and enforce a password change when must_change_password is set.
