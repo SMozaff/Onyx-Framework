@@ -15,6 +15,7 @@ export default function Login({
   onAuthenticated: (session: SessionWire) => void;
 }) {
   const { t } = useI18n();
+  const [organization, setOrganization] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +30,7 @@ export default function Login({
     setLoading(true);
     try {
       const session = await invoke<SessionWire>("login", {
-        credentials: { username, password },
+        credentials: { organization, username, password },
       });
       onAuthenticated(session);
       navigate("/", { replace: true });
@@ -76,7 +77,12 @@ export default function Login({
           <div className="mt-4"><LanguageSwitcher /></div>
 
           <div className="mt-6">
-            <label htmlFor="username" className="block text-xs font-bold text-onyx-text">{t("auth.username")}</label>
+            <label htmlFor="organization" className="block text-xs font-bold text-onyx-text">{t("common.organization")}</label>
+            <input id="organization" value={organization} onChange={(event) => setOrganization(event.target.value)} autoComplete="organization" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none" />
+          </div>
+
+          <div className="mt-4">
+            <label htmlFor="username" className="block text-xs font-bold text-onyx-text">{t("auth.staffIdentifier")}</label>
             <input id="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required className="mt-1.5 w-full rounded-lg border border-onyx-border bg-white px-3 py-2.5 text-sm text-onyx-text shadow-sm placeholder:text-slate-400 focus:border-onyx-accent focus:outline-none" />
           </div>
 

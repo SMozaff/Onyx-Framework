@@ -357,6 +357,43 @@ impl SessionInfo {
     }
 }
 
+/// Asks the cloud registry which server serves an organization. A null
+/// `server_url` means the cloud server itself. Only http(s) addresses are accepted.
+async fn resolve_organization_server(organization: &str) -> Result<String, ShellError> {
+    let identifier = organization.trim();
+    if identifier.is_empty() {
+        return Err(ShellError::Auth("Enter the organization ID or name.".to_string()));
+    }
+    let response = reqwest::Client::new()
+        .get(format!("{CLOUD_API_BASE}/api/organizations/lookup"))
+        .query(&[("identifier", identifier)])
+        .send()
+        .await
+        .map_err(|_| ShellError::Auth("Could not reach the server.".to_string()))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(ShellError::Auth("Organization not found.".to_string()));
+    }
+    if !response.status().is_success() {
+        return Err(ShellError::Auth("Could not look up the organization.".to_string()));
+    }
+    #[derive(serde::Deserialize)]
+    struct Lookup {
+        server_url: Option<String>,
+    }
+    let body: Lookup = response
+        .json()
+        .await
+        .map_err(|_| ShellError::Auth("Could not read the organization record.".to_string()))?;
+    let Some(url) = body.server_url.map(|u| u.trim_end_matches('/').to_string()).filter(|u| !u.is_empty()) else {
+        return Ok(CLOUD_API_BASE.to_string());
+    };
+    if url.starts_with("https://") || url.starts_with("http://") {
+        Ok(url)
+    } else {
+        Err(ShellError::Auth("The organization's server address is invalid.".to_string()))
+    }
+}
+
 /// Returns the currently persisted session, if any — lets the frontend
 /// decide on launch whether to show the login screen or go straight to
 /// the main app. `None` is the normal, expected state on a fresh
@@ -401,6 +438,7 @@ async fn get_current_session(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoginRequest {
+    organization: String,
     username: String,
     password: String,
 }
@@ -414,8 +452,15 @@ async fn login(
     hierarchy_cache: tauri::State<'_, client_composition::hierarchy_cache::HierarchyCache>,
     credentials: LoginRequest,
 ) -> Result<SessionInfo, ShellError> {
-    let LoginRequest { username, password } = credentials;
-    let outcome = authority.sign_in(&username, &password).await?;
+    let LoginRequest {
+        organization,
+        username,
+        password,
+    } = credentials;
+    let server = resolve_organization_server(&organization).await?;
+    let outcome = authority
+        .sign_in_at(&server, Some(organization.trim()), &username, &password)
+        .await?;
 
     let new_state = build_app_state(
         &app,
@@ -430,7 +475,7 @@ async fn login(
     // setup(): a transient failure here must not lock the person out of
     // logging in. Logged, not propagated.
     if let Some(access_token) = authority.current_access_token().await {
-        if let Err(e) = hierarchy_cache.refresh(CLOUD_API_BASE, &access_token).await {
+        if let Err(e) = hierarchy_cache.refresh(&outcome.summary.server_address, &access_token).await {
             tracing::warn!(error = %e, "failed to refresh approval-authority cache after login");
         }
     }
@@ -691,10 +736,9 @@ pub fn run() {
                 // Restore exchanges it for a new access token, and the
                 // rotated refresh token is written back. Any failure leaves
                 // the person on the login screen. None of them is fatal.
-                let api = Arc::new(session::HttpSessionApi::new(CLOUD_API_BASE)?);
-                let authority = desktop_session::session_authority::SessionAuthority::new(
+                let authority = desktop_session::session_authority::SessionAuthority::with_api_factory(
                     CLOUD_API_BASE,
-                    api,
+                    desktop_session::session_authority::http_api_factory(),
                     storage.clone(),
                 );
                 app_handle_for_state.manage(Arc::clone(&authority));
@@ -722,11 +766,11 @@ pub fn run() {
                 // Populate the approval-authority cache for a restored session.
                 // Best-effort: a stale or offline cache degrades to "cannot
                 // approve until reachable", and this must not block startup.
-                if restored.is_some() {
+                if let Some(summary) = restored.as_ref() {
                     if let Some(access_token) = authority.current_access_token().await {
                         let cache = app_handle_for_state
                             .state::<client_composition::hierarchy_cache::HierarchyCache>();
-                        if let Err(e) = cache.refresh(CLOUD_API_BASE, &access_token).await {
+                        if let Err(e) = cache.refresh(&summary.server_address, &access_token).await {
                             tracing::warn!(error = %e, "failed to refresh approval-authority cache on startup");
                         }
                     }

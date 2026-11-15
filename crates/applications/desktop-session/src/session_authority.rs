@@ -77,10 +77,24 @@ struct AuthState {
     logging_out: bool,
 }
 
-/// The single authoritative session owner for the desktop shell.
+/// Builds the API client for one server address.
+pub type ApiFactory =
+    Arc<dyn Fn(&str) -> Result<Arc<dyn SessionApi>, SessionError> + Send + Sync>;
+
+/// Production factory: a real HTTP client for whichever server is asked for.
+pub fn http_api_factory() -> ApiFactory {
+    Arc::new(|server: &str| {
+        let api: Arc<dyn SessionApi> = Arc::new(session::HttpSessionApi::new(server)?);
+        Ok(api)
+    })
+}
+
+/// The single authoritative session owner for the desktop shell. Each session
+/// records the server that issued it; sign-in and refresh use that server.
 pub struct SessionAuthority {
+    /// Default server for sign-in without an organization.
     server_address: String,
-    api: Arc<dyn SessionApi>,
+    api_for: ApiFactory,
     storage: Arc<dyn SecureStorage>,
     state: RwLock<AuthState>,
     /// Serializes login, refresh, restore and logout. Only one rotation runs
@@ -100,14 +114,23 @@ impl std::fmt::Debug for SessionAuthority {
 }
 
 impl SessionAuthority {
+    /// Single-server authority: every call uses `api`.
     pub fn new(
         server_address: impl Into<String>,
         api: Arc<dyn SessionApi>,
         storage: Arc<dyn SecureStorage>,
     ) -> Arc<Self> {
+        Self::with_api_factory(server_address, Arc::new(move |_server: &str| Ok(Arc::clone(&api))), storage)
+    }
+
+    pub fn with_api_factory(
+        server_address: impl Into<String>,
+        api_for: ApiFactory,
+        storage: Arc<dyn SecureStorage>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             server_address: server_address.into().trim_end_matches('/').to_string(),
-            api,
+            api_for,
             storage,
             state: RwLock::new(AuthState::default()),
             refresh_gate: Mutex::new(()),
@@ -121,12 +144,27 @@ impl SessionAuthority {
         Arc::clone(&self.connection_cancellation)
     }
 
-    /// Signs in with the server and installs the new pair.
+    /// Signs in with the default server.
     pub async fn sign_in(
         &self,
         username: &str,
         password: &str,
     ) -> Result<SignInOutcome, SessionError> {
+        let server = self.server_address.clone();
+        self.sign_in_at(&server, None, username, password).await
+    }
+
+    /// Signs in with `server` (the one that serves the organization) and installs
+    /// the new pair. The session is recorded against that server.
+    pub async fn sign_in_at(
+        &self,
+        server: &str,
+        organization: Option<&str>,
+        username: &str,
+        password: &str,
+    ) -> Result<SignInOutcome, SessionError> {
+        let server = server.trim_end_matches('/').to_string();
+        let api = (self.api_for)(&server)?;
         let _gate = self.refresh_gate.lock().await;
 
         // Drop any previous session before the network call, so reads fail
@@ -142,9 +180,9 @@ impl SessionAuthority {
         }
         self.cancel_connection_attempts().await;
 
-        let result = self.api.login(username, password).await?;
+        let result = api.login(username, password, organization).await?;
         let stored = StoredSession {
-            server_address: self.server_address.clone(),
+            server_address: server,
             refresh_token: result.pair.refresh_token.clone(),
             user_id: result.identity.user_id,
             organization_id: result.identity.organization_id,
@@ -190,14 +228,15 @@ impl SessionAuthority {
     pub async fn restore(&self, stored: StoredSession) -> Option<SessionSummary> {
         let _gate = self.refresh_gate.lock().await;
 
-        // Never reuse credentials issued by another endpoint.
-        if stored.server_address != self.server_address {
-            tracing::warn!("stored session belongs to another server; sign-in required");
-            self.delete_keyring_record().await;
-            return None;
-        }
-
-        match self.api.refresh(&stored.refresh_token).await {
+        // Resume against the server that issued the saved session.
+        let api = match (self.api_for)(&stored.server_address) {
+            Ok(api) => api,
+            Err(error) => {
+                tracing::warn!(error = %error, "saved session's server is unavailable; sign-in required");
+                return None;
+            }
+        };
+        match api.refresh(&stored.refresh_token).await {
             Ok(pair) => {
                 let rotated = StoredSession {
                     refresh_token: pair.refresh_token.clone(),
@@ -275,7 +314,9 @@ impl SessionAuthority {
             live.stored.refresh_token.clone()
         };
 
-        match self.api.refresh(&presented_refresh).await {
+        let server = self.state.read().await.live.as_ref()?.stored.server_address.clone();
+        let api = (self.api_for)(&server).ok()?;
+        match api.refresh(&presented_refresh).await {
             Ok(pair) => {
                 let token = pair.access_token.clone();
                 let rotated_record = {
@@ -346,11 +387,11 @@ impl SessionAuthority {
     }
 
     async fn revoke_best_effort(&self, live: &LiveSession) {
-        if let Err(error) = self
-            .api
-            .revoke(&live.access_token, &live.stored.refresh_token)
-            .await
-        {
+        let result = match (self.api_for)(&live.stored.server_address) {
+            Ok(api) => api.revoke(&live.access_token, &live.stored.refresh_token).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
             tracing::warn!(error = %error, "server-side session revocation failed");
         }
     }
@@ -481,7 +522,7 @@ mod tests {
 
     #[async_trait]
     impl SessionApi for FakeApi {
-        async fn login(&self, _u: &str, _p: &str) -> Result<LoginResult, SessionError> {
+        async fn login(&self, _u: &str, _p: &str, _o: Option<&str>) -> Result<LoginResult, SessionError> {
             self.login_queue
                 .lock()
                 .unwrap()
@@ -832,10 +873,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restore_never_reuses_a_record_from_another_server() {
-        let (authority, api, storage) = fixture();
+    async fn restore_resumes_against_the_server_that_issued_the_session() {
+        let api = Arc::new(FakeApi::default());
+        let storage = Arc::new(FakeStorage::default());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (seen_w, api_w) = (Arc::clone(&seen), Arc::clone(&api));
+        let authority = SessionAuthority::with_api_factory(
+            ORIGIN,
+            Arc::new(move |server: &str| {
+                seen_w.lock().unwrap().push(server.to_string());
+                Ok(Arc::clone(&api_w) as Arc<dyn SessionApi>)
+            }),
+            storage.clone(),
+        );
         let stored = StoredSession {
-            server_address: "https://retired.example.invalid".into(),
+            server_address: "https://org.example.invalid".into(),
             refresh_token: "generated-refresh-old".into(),
             user_id: ObjectId::new_random(),
             organization_id: OrganizationId::new_random(),
@@ -845,10 +897,30 @@ mod tests {
         session::save(&(storage.clone() as Arc<dyn SecureStorage>), &stored)
             .await
             .unwrap();
+        push_refresh(&api, Ok(pair(1, 3600)));
 
-        assert!(authority.restore(stored).await.is_none());
-        assert!(api.refresh_calls.lock().unwrap().is_empty());
-        assert!(storage.raw().is_none());
+        let summary = authority.restore(stored).await.expect("restored");
+        assert_eq!(summary.server_address, "https://org.example.invalid");
+        assert_eq!(seen.lock().unwrap().as_slice(), ["https://org.example.invalid"]);
+    }
+
+    #[tokio::test]
+    async fn sign_in_records_the_server_that_served_the_organization() {
+        let api = Arc::new(FakeApi::default());
+        let storage = Arc::new(FakeStorage::default());
+        let api_w = Arc::clone(&api);
+        let authority = SessionAuthority::with_api_factory(
+            ORIGIN,
+            Arc::new(move |_server: &str| Ok(Arc::clone(&api_w) as Arc<dyn SessionApi>)),
+            storage.clone(),
+        );
+        push_login(&api, login_ok(3600, 1));
+
+        let outcome = authority
+            .sign_in_at("https://org.example.invalid/", Some("Acme"), "generated-user", "generated-password")
+            .await
+            .expect("signed in");
+        assert_eq!(outcome.summary.server_address, "https://org.example.invalid");
     }
 
     #[tokio::test]

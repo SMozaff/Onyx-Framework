@@ -120,7 +120,12 @@ pub enum RefreshError {
 /// text.
 #[async_trait]
 pub trait SessionApi: Send + Sync {
-    async fn login(&self, username: &str, password: &str) -> Result<LoginResult, SessionError>;
+    async fn login(
+        &self,
+        username: &str,
+        password: &str,
+        organization: Option<&str>,
+    ) -> Result<LoginResult, SessionError>;
     async fn refresh(&self, refresh_token: &str) -> Result<IssuedPair, RefreshError>;
     /// Best-effort server-side revocation. Local state is already cleared.
     async fn revoke(&self, access_token: &str, refresh_token: &str) -> Result<(), SessionError>;
@@ -132,6 +137,9 @@ struct LoginRequest<'a> {
     username: &'a str,
     password: &'a str,
     client_type: &'a str,
+    /// Organization ID or name. The server checks it against the account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organization: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -190,7 +198,12 @@ fn non_empty(value: &str) -> bool {
 
 #[async_trait]
 impl SessionApi for HttpSessionApi {
-    async fn login(&self, username: &str, password: &str) -> Result<LoginResult, SessionError> {
+    async fn login(
+        &self,
+        username: &str,
+        password: &str,
+        organization: Option<&str>,
+    ) -> Result<LoginResult, SessionError> {
         let response = self
             .client
             .post(self.url("/api/auth/login"))
@@ -198,6 +211,7 @@ impl SessionApi for HttpSessionApi {
                 username,
                 password,
                 client_type: "desktop",
+                organization,
             })
             .send()
             .await
@@ -567,7 +581,7 @@ mod http_contract_tests {
         let origin = serve(mock_with(200, 200, 200)).await;
         let api = HttpSessionApi::new(&origin).unwrap();
         let result = api
-            .login("generated-user", "generated-password")
+            .login("generated-user", "generated-password", None)
             .await
             .unwrap();
         assert_eq!(result.pair.expires_in, 3600);
@@ -580,7 +594,7 @@ mod http_contract_tests {
         let origin = serve(mock_with(401, 200, 200)).await;
         let api = HttpSessionApi::new(&origin).unwrap();
         assert!(matches!(
-            api.login("generated-user", "wrong").await,
+            api.login("generated-user", "wrong", None).await,
             Err(SessionError::InvalidCredentials)
         ));
     }
