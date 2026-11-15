@@ -66,6 +66,11 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_retire_button(text(lang, "settings.retirePolicy").into());
     s.set_evaluate_button(text(lang, "common.evaluate").into());
     s.set_rule_key_placeholder(text(lang, "common.ruleKeyToEvaluate").into());
+    s.set_rule_value_placeholder(text(lang, "common.inputValue").into());
+    s.set_rule_type_label(text(lang, "common.ruleType").into());
+    s.set_add_rule_button(text(lang, "settings.addRule").into());
+    s.set_create_version_button(text(lang, "settings.createVersion").into());
+    s.set_rules_pending_label(text(lang, "settings.rulesPending").into());
     s.set_legal_holds_heading(text(lang, "common.legalHolds").into());
     s.set_target_id_placeholder(text(lang, "common.targetIdUuid").into());
     s.set_target_type_placeholder(text(lang, "common.targetTypeExample").into());
@@ -144,6 +149,7 @@ fn run_user_write<F, Fut>(
 type SessionSlot = Arc<Mutex<Option<AdminSession>>>;
 type SelectedPolicy = Arc<Mutex<Option<policy::PolicyRow>>>;
 type SelectedHold = Arc<Mutex<Option<legal_hold::HoldRow>>>;
+type PendingRules = Arc<Mutex<Vec<serde_json::Value>>>;
 
 fn show_error(ui: &AppWindow, lang: Lang, error: UsersError) {
     match error {
@@ -423,9 +429,11 @@ fn policy_command(
     selected: SelectedPolicy,
     command: &'static str,
     payload: serde_json::Value,
+    pending: PendingRules,
 ) {
     let Some(org) = org_id_of(&session) else { return };
     let Some(row) = selected.lock().ok().and_then(|slot| slot.clone()) else { return };
+    let pending_done = pending.clone();
     let id = row.id.clone();
     let concurrency = row.concurrency();
     let reload = selected.clone();
@@ -438,6 +446,12 @@ fn policy_command(
             let Some(ui) = weak.upgrade() else { return };
             match result {
                 Ok(response) => {
+                    if command == "policy.CreatePolicyVersion" {
+                        if let Ok(mut rules) = pending_done.lock() {
+                            rules.clear();
+                        }
+                        ui.set_rules_pending(0);
+                    }
                     let status = if command == "policy.EvaluatePolicy" {
                         format_evaluation(lang, &response)
                     } else {
@@ -770,6 +784,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let selected_policy: SelectedPolicy = Arc::new(Mutex::new(None));
+    let pending_rules: PendingRules = Arc::new(Mutex::new(Vec::new()));
     let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
     ui.on_select_policy(move |id| load_policy_detail(weak.clone(), session.clone(), lang.get(), id.to_string(), selected.clone()));
 
@@ -793,15 +808,42 @@ fn main() -> Result<(), slint::PlatformError> {
         );
     });
 
-    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
-    ui.on_publish_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.PublishPolicyVersion", serde_json::json!({})));
+    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
+    ui.on_publish_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.PublishPolicyVersion", serde_json::json!({}), pending.clone()));
 
-    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
-    ui.on_retire_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.RetirePolicy", serde_json::json!({})));
+    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
+    ui.on_retire_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.RetirePolicy", serde_json::json!({}), pending.clone()));
 
-    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    let (weak, pending) = (ui.as_weak(), pending_rules.clone());
+    ui.on_add_policy_rule(move |rule_type, key, value| {
+        let key = key.trim().to_string();
+        if key.is_empty() {
+            return;
+        }
+        let Some(ui) = weak.upgrade() else { return };
+        let Ok(mut rules) = pending.lock() else { return };
+        rules.push(serde_json::json!({
+            "rule_type": rule_type.to_string(),
+            "key": key,
+            "value": policy::parse_rule_value(value.trim()),
+        }));
+        ui.set_rules_pending(rules.len() as i32);
+        ui.set_rule_key_input("".into());
+        ui.set_rule_value_input("".into());
+    });
+
+    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
+    ui.on_create_policy_version(move || {
+        let rules = pending.lock().map(|rules| rules.clone()).unwrap_or_default();
+        if rules.is_empty() {
+            return;
+        }
+        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.CreatePolicyVersion", serde_json::json!({ "rules": rules }), pending.clone());
+    });
+
+    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
     ui.on_evaluate_policy(move |key| {
-        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.EvaluatePolicy", serde_json::json!({ "rule_key": key.to_string() }))
+        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.EvaluatePolicy", serde_json::json!({ "rule_key": key.to_string() }), pending.clone())
     });
 
     let selected_hold: SelectedHold = Arc::new(Mutex::new(None));

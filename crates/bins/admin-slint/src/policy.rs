@@ -177,3 +177,16 @@ pub async fn send_command(
     check(response.status())?;
     response.json().await.map_err(|_| UsersError::Failed)
 }
+
+/// Turns an entered rule value into JSON: true/false, a number, or text.
+pub fn parse_rule_value(raw: &str) -> Value {
+    match raw {
+        "true" => Value::Bool(true),
+        "false" => Value::Bool(false),
+        _ => raw
+            .parse::<i64>()
+            .map(Value::from)
+            .or_else(|_| raw.parse::<f64>().map(Value::from))
+            .unwrap_or_else(|_| Value::String(raw.to_string())),
+    }
+}
