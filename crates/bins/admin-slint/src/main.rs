@@ -68,6 +68,7 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_contact_phone_label(text(lang, "common.contactPhone").into());
     s.set_department_label(text(lang, "common.department").into());
     s.set_team_label(text(lang, "common.teamMemberships").into());
+    s.set_import_from_excel(text(lang, "common.importFromExcel").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -649,15 +650,30 @@ fn main() -> Result<(), slint::PlatformError> {
                 let picked = tokio::task::spawn_blocking(profiles::pick_import_file)
                     .await
                     .map_err(|_| UsersError::Failed)?;
-                match picked {
-                    Some((bytes, content_type)) => {
-                        profiles::import_bytes(&token, bytes, content_type).await
-                    }
-                    None => Ok(()),
-                }
+                let Some((bytes, content_type)) = picked else {
+                    return Ok(None);
+                };
+                let report = profiles::import_bytes(&token, bytes, content_type).await?;
+                // The report holds one-time passwords. It is saved only where the user chooses.
+                let summary = format!(
+                    "{} / {} / {}",
+                    report.total, report.created, report.failed
+                );
+                let saved = tokio::task::spawn_blocking(move || {
+                    profiles::save_file(&report.bytes, "onyx-creation-report.xlsx")
+                })
+                .await
+                .map_err(|_| UsersError::Failed)??;
+                Ok(saved.then_some(summary))
             },
             move |weak, session, lang, result| match result {
-                Ok(()) => load_profiles(weak, session, lang),
+                Ok(Some(summary)) => {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_import_status(summary.into());
+                    }
+                    load_profiles(weak, session, lang)
+                }
+                Ok(None) => {}
                 Err(error) => {
                     if let Some(ui) = weak.upgrade() {
                         show_error(&ui, lang, error);
@@ -676,7 +692,8 @@ fn main() -> Result<(), slint::PlatformError> {
             lang.get(),
             move |token| async move {
                 let bytes = profiles::export_bytes(&token, &format).await?;
-                tokio::task::spawn_blocking(move || profiles::save_export_file(&bytes, &format))
+                let file_name = format!("profiles.{format}");
+                tokio::task::spawn_blocking(move || profiles::save_file(&bytes, &file_name))
                     .await
                     .map_err(|_| UsersError::Failed)?
                     .map(|_| ())

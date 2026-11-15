@@ -173,6 +173,7 @@
   "common.grantAdministratorAccess": "Grant administrator access",
   "common.id16Placeholder": "[12,34,...]",
   "common.identityManagement": "IDENTITY MANAGEMENT",
+  "common.importFromExcel": "Import from Excel",
   "common.importing": "Importing…",
   "common.inactive": "Inactive",
   "common.inputValue": "value",

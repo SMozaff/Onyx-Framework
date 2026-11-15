@@ -93,6 +93,7 @@ export global Strings {
     in-out property <string> department-label;
     in-out property <string> team-label;
     in-out property <string> photo-label;
+    in-out property <string> import-from-excel;
 }
 
 component NavButton inherits Rectangle {
@@ -150,6 +151,7 @@ export component AppWindow inherits Window {
     in-out property <string> form-parent: "";
     in-out property <string> form-teams: "";
     in-out property <string> form-photo: "";
+    in-out property <string> import-status: "";
     in-out property <[OrgItem]> orgs: [];
     in-out property <[AdminItem]> org-admins: [];
     in-out property <string> selected-org-id: "";
@@ -460,9 +462,14 @@ export component AppWindow inherits Window {
                                 clicked => { root.export-profiles("json"); }
                             }
                             Button {
-                                text: "Import";
+                                text: Strings.import-from-excel;
                                 clicked => { root.import-profiles(); }
                             }
+                        }
+                        if root.import-status != "": Text {
+                            text: root.import-status;
+                            color: Theme.text;
+                            wrap: word-wrap;
                         }
                         Text {
                             text: Strings.profiles-heading;
