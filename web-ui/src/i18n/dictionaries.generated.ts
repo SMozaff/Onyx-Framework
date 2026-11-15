@@ -1079,7 +1079,7 @@ export const fa: Record<string, string> = {
   "files.userIdPlaceholder": "شناسه کاربر [12,34,...]",
   "files.versionSummary": "نسخه {version} · {size} بایت",
   "files.versions": "نسخه‌ها",
-  "settings.applyLegalHold": "Apply legal hold",
+  "settings.applyLegalHold": "اعمال دستور منع تغییر",
   "settings.checking": "در حال بررسی…",
   "settings.cloudRelay": "نقطه پایانی رله ابری",
   "settings.cloudRelaySaved": "نقطه پایانی رله ابری ذخیره شد. برای اعمال، برنامه را مجدداً راه‌اندازی کنید.",

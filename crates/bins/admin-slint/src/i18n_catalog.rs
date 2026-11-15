@@ -1024,7 +1024,7 @@ pub static FA: &[(&str, &str)] = &[
     ("reports.readOnlyAccess", "دسترسی فقط‌خواندنی به پروژکشن‌های گزارش منتشرشده و ارجاعات پیوست‌ها."),
     ("reports.summary", "خلاصه"),
     ("reports.title", "گزارش‌ها"),
-    ("settings.applyLegalHold", "Apply legal hold"),
+    ("settings.applyLegalHold", "اعمال دستور منع تغییر"),
     ("settings.checking", "در حال بررسی…"),
     ("settings.cloudRelay", "نقطه پایانی رله ابری"),
     ("settings.cloudRelaySaved", "نقطه پایانی رله ابری ذخیره شد. برای اعمال، برنامه را مجدداً راه‌اندازی کنید."),
