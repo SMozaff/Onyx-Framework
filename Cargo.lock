@@ -150,6 +150,8 @@ dependencies = [
 name = "admin-slint"
 version = "1.0.0"
 dependencies = [
+ "base64 0.21.7",
+ "chrono",
  "reqwest",
  "rfd",
  "serde",
@@ -157,6 +159,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

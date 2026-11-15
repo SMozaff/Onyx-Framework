@@ -4,6 +4,7 @@ mod auth;
 mod i18n;
 mod i18n_catalog;
 mod orgs;
+mod policy;
 mod profiles;
 mod settings;
 mod users;
@@ -57,6 +58,13 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_admins_heading(text(lang, "common.organizationAdmins").into());
     s.set_mobile_heading(text(lang, "nav.settings").into());
     s.set_mobile_save_button(text(lang, "common.save").into());
+    s.set_policy_heading(text(lang, "common.policySettings").into());
+    s.set_create_policy_button(text(lang, "common.createPolicy").into());
+    s.set_policy_name_placeholder(text(lang, "common.policyNameExample").into());
+    s.set_publish_button(text(lang, "settings.publishDraft").into());
+    s.set_retire_button(text(lang, "settings.retirePolicy").into());
+    s.set_evaluate_button(text(lang, "common.evaluate").into());
+    s.set_rule_key_placeholder(text(lang, "common.ruleKeyToEvaluate").into());
     s.set_profiles_heading(text(lang, "nav.profiles").into());
     s.set_save_profile_button(text(lang, "common.save").into());
     s.set_export_csv_button(text(lang, "common.exportCsv").into());
@@ -125,6 +133,7 @@ fn run_user_write<F, Fut>(
 }
 
 type SessionSlot = Arc<Mutex<Option<AdminSession>>>;
+type SelectedPolicy = Arc<Mutex<Option<policy::PolicyRow>>>;
 
 fn show_error(ui: &AppWindow, lang: Lang, error: UsersError) {
     match error {
@@ -289,6 +298,117 @@ fn apply_mobile_access(ui: &AppWindow, policy: &settings::MobileAccess) {
     ui.set_mobile_staff(has("staff"));
     ui.set_mobile_version(policy.version as i32);
     ui.set_mobile_status(policy.enforcement_status.clone().into());
+}
+
+/// Organization of the signed-in admin; policy calls are scoped to it.
+fn org_id_of(session: &SessionSlot) -> Option<String> {
+    session.lock().ok()?.as_ref().map(|s| s.organization_id.clone())
+}
+
+fn show_policy_error(ui: &AppWindow, lang: Lang, error: UsersError) {
+    let message = match error {
+        UsersError::Forbidden => text(lang, "auth.adminAccessRequired"),
+        UsersError::Failed => text(lang, "status.failed"),
+    };
+    ui.set_policy_error(message.into());
+}
+
+/// Loads the policy list for the Settings page.
+fn load_policies(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
+    let Some(org) = org_id_of(&session) else { return };
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move { policy::list_policies(&token, &org).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(rows) => {
+                    let items: Vec<PolicyItem> = rows
+                        .iter()
+                        .map(|row| PolicyItem {
+                            id: row.id.clone().into(),
+                            name: row.name.clone().into(),
+                            status: row.status.clone().into(),
+                            version: row.version as i32,
+                        })
+                        .collect();
+                    ui.set_policies(ModelRc::new(VecModel::from(items)));
+                }
+                Err(error) => show_policy_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Reads one policy into the detail panel and keeps its concurrency values for the next command.
+fn load_policy_detail(
+    weak: slint::Weak<AppWindow>,
+    session: SessionSlot,
+    lang: Lang,
+    id: String,
+    selected: SelectedPolicy,
+) {
+    let Some(org) = org_id_of(&session) else { return };
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move { policy::policy_detail(&token, &org, &id).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(Some(row)) => {
+                    ui.set_selected_policy_id(row.id.clone().into());
+                    ui.set_selected_policy_name(row.name.clone().into());
+                    ui.set_selected_policy_status(row.status.clone().into());
+                    ui.set_selected_policy_version(row.version as i32);
+                    if let Ok(mut slot) = selected.lock() {
+                        *slot = Some(row);
+                    }
+                }
+                Ok(None) => ui.set_policy_error(text(lang, "common.noPolicyFound").into()),
+                Err(error) => show_policy_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Sends one lifecycle command to the selected policy, then reloads the list and detail.
+fn policy_command(
+    weak: slint::Weak<AppWindow>,
+    session: SessionSlot,
+    lang: Lang,
+    selected: SelectedPolicy,
+    command: &'static str,
+    payload: serde_json::Value,
+) {
+    let Some(org) = org_id_of(&session) else { return };
+    let Some(row) = selected.lock().ok().and_then(|slot| slot.clone()) else { return };
+    let id = row.id.clone();
+    let reload = selected.clone();
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move {
+            policy::send_command(&token, &org, command, &row, payload)
+                .await
+                .map(|output| output.to_string())
+        },
+        move |weak, session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(output) => {
+                    ui.set_policy_status(output.chars().take(300).collect::<String>().into());
+                    load_policies(weak.clone(), session.clone(), lang);
+                    load_policy_detail(weak, session, lang, id, reload);
+                }
+                Err(error) => show_policy_error(&ui, lang, error),
+            }
+        },
+    );
 }
 
 /// Loads the staff profile list.
@@ -458,6 +578,7 @@ fn main() -> Result<(), slint::PlatformError> {
             load_users(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 1 {
             load_mobile_access(users_weak.clone(), page_session.clone(), page_lang.get());
+            load_policies(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 2 {
             load_profiles(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 3 {
@@ -570,6 +691,41 @@ fn main() -> Result<(), slint::PlatformError> {
         org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
             orgs::set_admin_active(&token, &admin_id, active).await
         }, org_id);
+    });
+
+    let selected_policy: SelectedPolicy = Arc::new(Mutex::new(None));
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_select_policy(move |id| load_policy_detail(weak.clone(), session.clone(), lang.get(), id.to_string(), selected.clone()));
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_create_policy(move |name| {
+        let name = name.to_string();
+        let key = new_request_id();
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { policy::create_policy(&token, &name, &key).await.map(|_| ()) },
+            move |weak, session, lang, result| match result {
+                Ok(()) => load_policies(weak, session, lang),
+                Err(error) => {
+                    if let Some(ui) = weak.upgrade() {
+                        show_policy_error(&ui, lang, error);
+                    }
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_publish_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "publish", serde_json::json!({})));
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_retire_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "retire", serde_json::json!({})));
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_evaluate_policy(move |key| {
+        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "evaluate", serde_json::json!({ "rule_key": key.to_string() }))
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
