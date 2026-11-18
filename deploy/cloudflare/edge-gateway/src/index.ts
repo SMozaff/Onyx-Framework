@@ -861,7 +861,7 @@ async function deactivateUser(request:Request,env:Env,session:Session,userId:str
   // last-admin predicates to the write itself. Update, audit, and watermark
   // are one D1 transaction so no stale session survives a successful delete.
   const timestamp=Date.now();
-  const details=JSON.stringify({target:userId,username:target.username,role});
+  const details=JSON.stringify({target:userId,username:target.username,role,before:{is_active:1},after:{is_active:0}});
   const update=session.role==="ORGANIZATION_ADMIN"
     ? env.DB.prepare("UPDATE users SET is_active=0,updated_at=? WHERE id=? AND organization_id=? AND role='STAFF' AND is_active=1")
         .bind(timestamp,userId,session.organization_id)
@@ -1324,7 +1324,7 @@ async function commandRoute(request:Request,env:Env,session:Session){
     : env.DB.prepare("UPDATE aggregates SET aggregate_type=?,version=?,lifecycle_epoch=?,authority_epoch=?,state=?,updated_at=? WHERE id=? AND organization_id=? AND aggregate_type=? AND version=? AND lifecycle_epoch=? AND authority_epoch=?").bind(targetType,nextVersion,nextLifecycle,nextAuthority,JSON.stringify(merged),Date.now(),targetId,session.organization_id,targetType,expected,expectedLifecycle,expectedAuthority);
   const eventStatement=env.DB.prepare("INSERT INTO domain_events(event_id,aggregate_id,aggregate_version,event_type,payload,occurred_at,vector_clock,operation_id,correlation_id,actor,organization_id) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE changes()=1").bind(event.event_id,targetId,nextVersion,envelope.command_type,JSON.stringify(eventPayload),Date.now(),"{}",envelope.operation_id,String(envelope.correlation_id??envelope.operation_id),JSON.stringify(event.actor),session.organization_id);
   const idemStatement=env.DB.prepare("INSERT INTO idempotency(operation_id,result,created_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(envelope.operation_id,JSON.stringify(result),Date.now(),event.event_id,session.organization_id);
-  const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(session.organization_id,session.sub,envelope.command_type,String(envelope.correlation_id??envelope.operation_id),JSON.stringify({target:targetId}),Date.now(),event.event_id,session.organization_id);
+  const auditStatement=env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM domain_events WHERE event_id=? AND organization_id=?)").bind(session.organization_id,session.sub,envelope.command_type,String(envelope.correlation_id??envelope.operation_id),JSON.stringify({target:targetId,before:previous??null,after:merged}),Date.now(),event.event_id,session.organization_id);
   const notificationStatements:D1PreparedStatement[]=[];
   const notificationRecipients=new Set<string>();
   let notificationTitle:string|null=null;
@@ -1607,14 +1607,18 @@ async function assignUserClass(request: Request, env: Env, session: Session, use
   const timestamp = Date.now();
   const operationId = uuid();
   try {
-    const update = env.DB.prepare("UPDATE users SET class=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1")
-      .bind(value, timestamp, userId, session.organization_id);
+    const before = await env.DB.prepare("SELECT class FROM users WHERE id=? AND organization_id=? AND is_active=1 LIMIT 1")
+      .bind(userId, session.organization_id).first<{ class: string | null }>();
+    if (!before) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    // The write is conditional on the value just read, so the audit's before value is exact.
+    const update = env.DB.prepare("UPDATE users SET class=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1 AND class IS ?")
+      .bind(value, timestamp, userId, session.organization_id, before.class);
     const audit = env.DB.prepare(
       "INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1"
     ).bind(session.organization_id, session.sub, "user.class.update", operationId,
-      JSON.stringify({ target: userId, class: value }), timestamp);
+      JSON.stringify({ target: userId, before: { class: before.class }, after: { class: value } }), timestamp);
     const batch = await env.DB.batch([update, audit]);
-    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_CHANGED", category: "CONCURRENCY", retryability: "RETRYABLE" }, 409);
     if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_CLASS_AUDIT_FAILED");
     return json({ success: true, class: value });
   } catch {
@@ -1637,7 +1641,8 @@ async function setUserActive(env: Env, session: Session, userId: string, active:
     ).bind(active ? 1 : 0, timestamp, userId, session.organization_id, active ? 0 : 1);
     const audit = env.DB.prepare(
       "INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1"
-    ).bind(session.organization_id, session.sub, active ? "user.activate" : "user.deactivate", operationId, JSON.stringify({ target: userId }), timestamp);
+    ).bind(session.organization_id, session.sub, active ? "user.activate" : "user.deactivate", operationId,
+      JSON.stringify({ target: userId, before: { is_active: active ? 0 : 1 }, after: { is_active: active ? 1 : 0 } }), timestamp);
     const statements = [update, audit];
     if (!active) {
       statements.push(env.DB.prepare(
@@ -1704,8 +1709,9 @@ async function setUserParent(request: Request, env: Env, session: Session, userI
   if (!body || Object.keys(body).length !== 1 || !Object.prototype.hasOwnProperty.call(body, "parent_user_id") || (body.parent_user_id !== null && typeof body.parent_user_id !== "string")) return json({ error: "INVALID_PARENT", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
   const parentId = typeof body.parent_user_id === "string" ? body.parent_user_id.trim() : null;
   if (parentId === userId) return json({ error: "PARENT_CYCLE", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
-  const target = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__' LIMIT 1").bind(userId, session.organization_id).first();
+  const target = await env.DB.prepare("SELECT id,parent_user_id FROM users WHERE id=? AND organization_id=? AND role='STAFF' AND id<>'__allfather__' LIMIT 1").bind(userId, session.organization_id).first<{ id: string; parent_user_id: string | null }>();
   if (!target) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+  const beforeParent = target.parent_user_id ?? null;
   if (parentId) {
     const parent = await env.DB.prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND is_active=1 AND id<>'__allfather__' LIMIT 1").bind(parentId, session.organization_id).first();
     if (!parent) return json({ error: "PARENT_USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 400);
@@ -1715,10 +1721,10 @@ async function setUserParent(request: Request, env: Env, session: Session, userI
   const timestamp = Date.now(), operationId = uuid();
   try {
     const batch = await env.DB.batch([
-      env.DB.prepare("UPDATE users SET parent_user_id=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1").bind(parentId, timestamp, userId, session.organization_id),
-      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.parent.update", operationId, JSON.stringify({ target: userId, parent_user_id: parentId }), timestamp),
+      env.DB.prepare("UPDATE users SET parent_user_id=?,updated_at=? WHERE id=? AND organization_id=? AND is_active=1 AND parent_user_id IS ?").bind(parentId, timestamp, userId, session.organization_id, beforeParent),
+      env.DB.prepare("INSERT INTO audit_log(organization_id,user_id,action,correlation_id,details,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(session.organization_id, session.sub, "user.parent.update", operationId, JSON.stringify({ target: userId, before: { parent_user_id: beforeParent }, after: { parent_user_id: parentId } }), timestamp),
     ]);
-    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_NOT_FOUND", category: "DOMAIN", retryability: "NON_RETRYABLE" }, 404);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) return json({ error: "USER_CHANGED", category: "CONCURRENCY", retryability: "RETRYABLE" }, 409);
     if (Number(batch[1]?.meta?.changes ?? 0) !== 1) throw new Error("USER_PARENT_AUDIT_FAILED");
     return json({ success: true, parent_user_id: parentId });
   } catch {

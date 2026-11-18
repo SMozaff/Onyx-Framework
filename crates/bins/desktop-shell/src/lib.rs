@@ -364,7 +364,9 @@ impl SessionInfo {
 async fn resolve_organization_server(organization: &str) -> Result<String, ShellError> {
     let identifier = organization.trim();
     if identifier.is_empty() {
-        return Err(ShellError::Auth("Enter the organization ID or name.".to_string()));
+        return Err(ShellError::Auth(
+            "Enter the organization ID or name.".to_string(),
+        ));
     }
     let response = reqwest::Client::new()
         .get(format!("{CLOUD_API_BASE}/api/organizations/lookup"))
@@ -376,7 +378,9 @@ async fn resolve_organization_server(organization: &str) -> Result<String, Shell
         return Err(ShellError::Auth("Organization not found.".to_string()));
     }
     if !response.status().is_success() {
-        return Err(ShellError::Auth("Could not look up the organization.".to_string()));
+        return Err(ShellError::Auth(
+            "Could not look up the organization.".to_string(),
+        ));
     }
     #[derive(serde::Deserialize)]
     struct Lookup {
@@ -386,13 +390,19 @@ async fn resolve_organization_server(organization: &str) -> Result<String, Shell
         .json()
         .await
         .map_err(|_| ShellError::Auth("Could not read the organization record.".to_string()))?;
-    let Some(url) = body.server_url.map(|u| u.trim_end_matches('/').to_string()).filter(|u| !u.is_empty()) else {
+    let Some(url) = body
+        .server_url
+        .map(|u| u.trim_end_matches('/').to_string())
+        .filter(|u| !u.is_empty())
+    else {
         return Ok(CLOUD_API_BASE.to_string());
     };
     if url.starts_with("https://") || url.starts_with("http://") {
         Ok(url)
     } else {
-        Err(ShellError::Auth("The organization's server address is invalid.".to_string()))
+        Err(ShellError::Auth(
+            "The organization's server address is invalid.".to_string(),
+        ))
     }
 }
 
@@ -430,7 +440,10 @@ async fn change_password(
         .json::<serde_json::Value>()
         .await
         .ok()
-        .and_then(|body| body.get("error").and_then(|e| e.as_str().map(str::to_string)))
+        .and_then(|body| {
+            body.get("error")
+                .and_then(|e| e.as_str().map(str::to_string))
+        })
         .unwrap_or_default();
     let message = match code.as_str() {
         "CURRENT_PASSWORD_INCORRECT" => "The current password is incorrect.",
@@ -522,7 +535,10 @@ async fn login(
     // setup(): a transient failure here must not lock the person out of
     // logging in. Logged, not propagated.
     if let Some(access_token) = authority.current_access_token().await {
-        if let Err(e) = hierarchy_cache.refresh(&outcome.summary.server_address, &access_token).await {
+        if let Err(e) = hierarchy_cache
+            .refresh(&outcome.summary.server_address, &access_token)
+            .await
+        {
             tracing::warn!(error = %e, "failed to refresh approval-authority cache after login");
         }
     }

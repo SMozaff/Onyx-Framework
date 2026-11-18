@@ -62,6 +62,7 @@ function fromWire(wire: SessionWire): DesktopSession {
   return {
     username: wire.username,
     isAdmin: wire.isAdmin,
+    mustChangePassword: wire.mustChangePassword,
     serverAddress: wire.serverAddress,
     userId: uuidToId16(wire.userId),
     organizationId: uuidToId16(wire.organizationId),

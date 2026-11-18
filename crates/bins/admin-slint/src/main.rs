@@ -6,13 +6,13 @@ mod i18n_catalog;
 mod users;
 
 use auth::{AdminSession, LoginError};
-use slint::{ModelRc, VecModel};
-use users::UsersError;
 use i18n::{text, Lang};
+use slint::{ModelRc, VecModel};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use users::UsersError;
 
 slint::include_modules!();
 
