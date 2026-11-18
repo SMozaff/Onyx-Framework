@@ -79,8 +79,7 @@ struct AuthState {
 }
 
 /// Builds the API client for one server address.
-pub type ApiFactory =
-    Arc<dyn Fn(&str) -> Result<Arc<dyn SessionApi>, SessionError> + Send + Sync>;
+pub type ApiFactory = Arc<dyn Fn(&str) -> Result<Arc<dyn SessionApi>, SessionError> + Send + Sync>;
 
 /// Production factory: a real HTTP client for whichever server is asked for.
 pub fn http_api_factory() -> ApiFactory {
@@ -121,7 +120,11 @@ impl SessionAuthority {
         api: Arc<dyn SessionApi>,
         storage: Arc<dyn SecureStorage>,
     ) -> Arc<Self> {
-        Self::with_api_factory(server_address, Arc::new(move |_server: &str| Ok(Arc::clone(&api))), storage)
+        Self::with_api_factory(
+            server_address,
+            Arc::new(move |_server: &str| Ok(Arc::clone(&api))),
+            storage,
+        )
     }
 
     pub fn with_api_factory(
@@ -316,7 +319,15 @@ impl SessionAuthority {
             live.stored.refresh_token.clone()
         };
 
-        let server = self.state.read().await.live.as_ref()?.stored.server_address.clone();
+        let server = self
+            .state
+            .read()
+            .await
+            .live
+            .as_ref()?
+            .stored
+            .server_address
+            .clone();
         let api = (self.api_for)(&server).ok()?;
         match api.refresh(&presented_refresh).await {
             Ok(pair) => {
@@ -390,7 +401,10 @@ impl SessionAuthority {
 
     async fn revoke_best_effort(&self, live: &LiveSession) {
         let result = match (self.api_for)(&live.stored.server_address) {
-            Ok(api) => api.revoke(&live.access_token, &live.stored.refresh_token).await,
+            Ok(api) => {
+                api.revoke(&live.access_token, &live.stored.refresh_token)
+                    .await
+            }
             Err(error) => Err(error),
         };
         if let Err(error) = result {
@@ -525,7 +539,12 @@ mod tests {
 
     #[async_trait]
     impl SessionApi for FakeApi {
-        async fn login(&self, _u: &str, _p: &str, _o: Option<&str>) -> Result<LoginResult, SessionError> {
+        async fn login(
+            &self,
+            _u: &str,
+            _p: &str,
+            _o: Option<&str>,
+        ) -> Result<LoginResult, SessionError> {
             self.login_queue
                 .lock()
                 .unwrap()
@@ -909,7 +928,10 @@ mod tests {
 
         let summary = authority.restore(stored).await.expect("restored");
         assert_eq!(summary.server_address, "https://org.example.invalid");
-        assert_eq!(seen.lock().unwrap().as_slice(), ["https://org.example.invalid"]);
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            ["https://org.example.invalid"]
+        );
     }
 
     #[tokio::test]
@@ -925,10 +947,18 @@ mod tests {
         push_login(&api, login_ok(3600, 1));
 
         let outcome = authority
-            .sign_in_at("https://org.example.invalid/", Some("Acme"), "generated-user", "generated-password")
+            .sign_in_at(
+                "https://org.example.invalid/",
+                Some("Acme"),
+                "generated-user",
+                "generated-password",
+            )
             .await
             .expect("signed in");
-        assert_eq!(outcome.summary.server_address, "https://org.example.invalid");
+        assert_eq!(
+            outcome.summary.server_address,
+            "https://org.example.invalid"
+        );
     }
 
     #[tokio::test]
