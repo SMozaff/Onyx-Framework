@@ -279,6 +279,7 @@ mod lifecycle_tests {
             organization_id: OrganizationId::new_random(),
             username: "tester".to_string(),
             is_admin: false,
+            must_change_password: false,
         };
         session::save(&storage, &stored).await.expect("save record");
 
