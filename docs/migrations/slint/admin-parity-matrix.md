@@ -142,6 +142,25 @@ Slint page 3.
 - **R-28:** Latin-digit helper (Q-16/U-05) must be applied to every ID display in the Slint Admin
   and shared with the Desktop host; not yet applied to the screens compared here.
 
+## R-26 — Users screen search / sort / paging (determination, 2026-11-23)
+
+- **Tauri source:** `crates/bins/admin-shell/ui/src/pages/Users.tsx` fetches `GET /api/admin/users`
+  once on mount (`useEffect`) and renders `users.map(...)` in a plain table. The forensic register
+  lists exactly eight Users controls (AD-I-005 … AD-I-012); none is a search input, sort header or
+  paging control.
+- **Slint source:** `crates/bins/admin-slint/src/main.rs::load_users` fetches the same route on
+  sign-in/navigation and `ui/app.slint` renders `for item in root.users`. Same behavior: no
+  search, sort or paging.
+- **Plan constraint (brief B-07):** "Paging, sorting or search may be added only if the current
+  source/contract confirms them or the owner approves them as explicit enhancements; they are not
+  presumed parity requirements."
+- **Spike U-01 status:** sortable/paged table prototypes pass on Linux under Xvfb; all Windows
+  rows are `pending-manual`, Persian IME composition is untested, mixed-direction behavior is
+  `partial` and OQ-3 (punctuation/alignment) is open. `docs/migrations/slint/spike-results.md`.
+- **Determination:** there is no parity gap to close — the two surfaces are aligned. Adding
+  search/sort/paging would be an unapproved enhancement and depends on U-01 Windows/IME/bidi
+  evidence. Status: `blocked (reason)` — owner approval plus U-01 manual evidence required.
+
 ## Acceptance
 
 - Every registered admin control (AD-I-001 … AD-I-061) is mapped onto the Slint host with a

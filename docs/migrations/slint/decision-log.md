@@ -511,6 +511,21 @@ baseline and the Slint admin host, with per-control status `present` / `fixed` /
 - R-25 follow-up fixes (client-side disable / busy bindings) and R-28 (Latin-digit helper sharing)
   remain open; R-26 enhancements stay owner-approvable. Gate 0b evidence package (R-60) still pending.
 
+## R-25 fixes and R-26 determination (2026-11-23)
+
+### Changes
+- R-25: implemented all feasible client-side validation / busy bindings in `admin-slint`:
+  create-user gating, policy create/publish/retire/create-version/evaluate gating,
+  legal-hold apply/release gating, organization create/rename/toggle/admin gating.
+- R-26: recorded a source-level determination in `docs/migrations/slint/admin-parity-matrix.md`.
+  Neither the Tauri nor the Slint Users screen has search/sort/paging; brief B-07 makes these
+  owner-approvable enhancements, not parity requirements, and spike U-01 lacks Windows/IME/bidi
+  evidence. Status `blocked (reason)`; no code added.
+
+### Verification
+- GitHub Actions is the verification path for the R-25 code change (per owner instruction); no
+  local build/test run is claimed for this commit. The R-26 determination is source evidence only.
+
 
 ## Admin Slint completion A implemented (2026-11-23)
 
