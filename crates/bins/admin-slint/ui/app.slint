@@ -94,6 +94,19 @@ export global Strings {
     in-out property <string> retire-button;
     in-out property <string> evaluate-button;
     in-out property <string> rule-key-placeholder;
+    in-out property <string> rule-type-label;
+    in-out property <string> add-rule-button;
+    in-out property <string> create-version-button;
+    in-out property <string> rules-pending-label;
+    in-out property <string> rule-value-placeholder;
+    in-out property <string> legal-holds-heading;
+    in-out property <string> target-id-placeholder;
+    in-out property <string> target-type-placeholder;
+    in-out property <string> reason-placeholder;
+    in-out property <string> apply-legal-hold-button;
+    in-out property <string> view-hold-placeholder;
+    in-out property <string> view-button;
+    in-out property <string> release-button;
     in-out property <string> profiles-heading;
     in-out property <string> save-profile-button;
     in-out property <string> import-button;
@@ -161,9 +174,21 @@ export component AppWindow inherits Window {
     in-out property <string> policy-name-input: "";
     in-out property <string> policy-rule-key: "";
     in-out property <string> selected-policy-id: "";
+    in-out property <string> rule-type-input: "FeatureToggle";
+    in-out property <string> rule-key-input: "";
+    in-out property <string> rule-value-input: "";
+    in-out property <int> rules-pending: 0;
     in-out property <string> selected-policy-name: "";
     in-out property <string> selected-policy-status: "";
     in-out property <int> selected-policy-version: 0;
+    in-out property <string> legal-hold-error: "";
+    in-out property <string> legal-hold-target-input: "";
+    in-out property <string> legal-hold-type-input: "";
+    in-out property <string> legal-hold-reason-input: "";
+    in-out property <string> legal-hold-view-id: "";
+    in-out property <string> legal-hold-selected-id: "";
+    in-out property <string> legal-hold-state: "";
+    in-out property <bool> legal-hold-can-release: false;
     in-out property <string> form-owner: "";
     in-out property <string> form-name: "";
     in-out property <string> form-title: "";
@@ -201,6 +226,11 @@ export component AppWindow inherits Window {
     callback publish-policy();
     callback retire-policy();
     callback evaluate-policy(string);
+    callback add-policy-rule(string, string, string);
+    callback create-policy-version();
+    callback apply-legal-hold(string, string, string);
+    callback view-legal-hold(string);
+    callback release-legal-hold();
     callback save-profile();
     callback import-profiles();
     callback export-profiles(string);
@@ -523,6 +553,43 @@ export component AppWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: 8px;
+                                Text {
+                                    text: Strings.rule-type-label;
+                                    color: Theme.text;
+                                    vertical-alignment: center;
+                                }
+                                ComboBox {
+                                    model: ["FeatureToggle", "Threshold", "Authorization", "Retention"];
+                                    current-value <=> root.rule-type-input;
+                                }
+                                LineEdit {
+                                    placeholder-text: Strings.rule-key-placeholder;
+                                    text <=> root.rule-key-input;
+                                }
+                                LineEdit {
+                                    placeholder-text: Strings.rule-value-placeholder;
+                                    text <=> root.rule-value-input;
+                                }
+                                Button {
+                                    text: Strings.add-rule-button;
+                                    clicked => { root.add-policy-rule(root.rule-type-input, root.rule-key-input, root.rule-value-input); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: Strings.rules-pending-label + ": " + root.rules-pending;
+                                    color: Theme.text-dim;
+                                    vertical-alignment: center;
+                                }
+                                Button {
+                                    text: Strings.create-version-button;
+                                    enabled: root.rules-pending > 0;
+                                    clicked => { root.create-policy-version(); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
                                 LineEdit {
                                     placeholder-text: Strings.rule-key-placeholder;
                                     text <=> root.policy-rule-key;
@@ -536,6 +603,59 @@ export component AppWindow inherits Window {
                                 text: root.policy-status;
                                 color: Theme.text-dim;
                                 wrap: word-wrap;
+                            }
+                        }
+                    }
+                    if root.page == 1: VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: Strings.legal-holds-heading;
+                            color: Theme.text;
+                            font-size: 18px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.legal-hold-error;
+                            color: Theme.text-dim;
+                        }
+                        LineEdit {
+                            placeholder-text: Strings.target-id-placeholder;
+                            text <=> root.legal-hold-target-input;
+                        }
+                        LineEdit {
+                            placeholder-text: Strings.target-type-placeholder;
+                            text <=> root.legal-hold-type-input;
+                        }
+                        LineEdit {
+                            placeholder-text: Strings.reason-placeholder;
+                            text <=> root.legal-hold-reason-input;
+                        }
+                        Button {
+                            text: Strings.apply-legal-hold-button;
+                            clicked => {
+                                root.apply-legal-hold(root.legal-hold-target-input, root.legal-hold-type-input, root.legal-hold-reason-input);
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            LineEdit {
+                                placeholder-text: Strings.view-hold-placeholder;
+                                text <=> root.legal-hold-view-id;
+                            }
+                            Button {
+                                text: Strings.view-button;
+                                clicked => { root.view-legal-hold(root.legal-hold-view-id); }
+                            }
+                        }
+                        if root.legal-hold-selected-id != "": VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: root.legal-hold-state;
+                                color: Theme.text;
+                            }
+                            if root.legal-hold-can-release: Button {
+                                text: Strings.release-button;
+                                clicked => { root.release-legal-hold(); }
                             }
                         }
                     }

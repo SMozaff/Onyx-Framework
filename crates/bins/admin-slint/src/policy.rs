@@ -9,13 +9,34 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-const API_BASE: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
+pub(crate) const API_BASE: &str = "https://onyx-framework.soheil-mozaffari.workers.dev";
 
 #[derive(Clone)]
 pub struct PolicyRow {
     pub id: String,
     pub name: String,
     pub status: String,
+    pub version: i64,
+    pub lifecycle_epoch: i64,
+    pub authority_epoch: i64,
+}
+
+impl PolicyRow {
+    /// The concurrency values a command needs, taken from the projection.
+    pub fn concurrency(&self) -> Concurrency {
+        Concurrency {
+            id: self.id.clone(),
+            version: self.version,
+            lifecycle_epoch: self.lifecycle_epoch,
+            authority_epoch: self.authority_epoch,
+        }
+    }
+}
+
+/// Target id and the three concurrency values a lifecycle command must carry.
+#[derive(Clone)]
+pub struct Concurrency {
+    pub id: String,
     pub version: i64,
     pub lifecycle_epoch: i64,
     pub authority_epoch: i64,
@@ -31,14 +52,14 @@ struct CreatedPolicy {
     policy_id: String,
 }
 
-fn client() -> Result<reqwest::Client, UsersError> {
+pub(crate) fn client() -> Result<reqwest::Client, UsersError> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|_| UsersError::Failed)
 }
 
-fn check(status: reqwest::StatusCode) -> Result<(), UsersError> {
+pub(crate) fn check(status: reqwest::StatusCode) -> Result<(), UsersError> {
     if status == reqwest::StatusCode::FORBIDDEN {
         Err(UsersError::Forbidden)
     } else if status.is_success() {
@@ -48,7 +69,7 @@ fn check(status: reqwest::StatusCode) -> Result<(), UsersError> {
     }
 }
 
-fn int(row: &Value, key: &str) -> Option<i64> {
+pub(crate) fn int(row: &Value, key: &str) -> Option<i64> {
     row.get(key).and_then(Value::as_i64)
 }
 
@@ -80,7 +101,7 @@ fn envelope(query_type: &str, organization_id: &str, filters: Value) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(body.to_string())
 }
 
-async fn query(token: &str, organization_id: &str, query_type: &str, filters: Value) -> Result<Vec<Value>, UsersError> {
+pub(crate) async fn query(token: &str, organization_id: &str, query_type: &str, filters: Value) -> Result<Vec<Value>, UsersError> {
     let response = client()?
         .get(format!("{API_BASE}/api/query"))
         .query(&[("envelope", envelope(query_type, organization_id, filters))])
@@ -120,24 +141,26 @@ pub async fn create_policy(token: &str, name: &str, idempotency_key: &str) -> Re
     Ok(created.policy_id)
 }
 
-/// Sends one policy command with the concurrency values from the projection.
-/// Returns the Worker's JSON result (used to show evaluation output).
+/// Sends one lifecycle command. Names follow the Worker: `target_type` is "policy" or
+/// "legal_hold"; `command_type` is e.g. "policy.PublishPolicyVersion" or "ReleaseLegalHold".
+/// Returns the Worker's JSON result.
 pub async fn send_command(
     token: &str,
     organization_id: &str,
-    command: &str,
-    policy: &PolicyRow,
+    target_type: &str,
+    command_type: &str,
+    target: &Concurrency,
     payload: Value,
 ) -> Result<Value, UsersError> {
     let envelope = json!({
         "command_id": uuid::Uuid::new_v4().to_string(),
         "operation_id": uuid::Uuid::new_v4().to_string(),
-        "command_type": format!("policy.{command}"),
+        "command_type": command_type,
         "schema_version": "1.0",
-        "target": { "id": policy.id, "type": "policy", "organization_id": organization_id },
-        "expected_version": policy.version,
-        "expected_lifecycle_epoch": policy.lifecycle_epoch,
-        "expected_authority_epoch": policy.authority_epoch,
+        "target": { "id": target.id, "type": target_type, "organization_id": organization_id },
+        "expected_version": target.version,
+        "expected_lifecycle_epoch": target.lifecycle_epoch,
+        "expected_authority_epoch": target.authority_epoch,
         "issued_at": chrono::Utc::now().to_rfc3339(),
         "vector_clock": { "entries": {} },
         "correlation_id": uuid::Uuid::new_v4().to_string(),
@@ -155,3 +178,15 @@ pub async fn send_command(
     response.json().await.map_err(|_| UsersError::Failed)
 }
 
+/// Turns an entered rule value into JSON: true/false, a number, or text.
+pub fn parse_rule_value(raw: &str) -> Value {
+    match raw {
+        "true" => Value::Bool(true),
+        "false" => Value::Bool(false),
+        _ => raw
+            .parse::<i64>()
+            .map(Value::from)
+            .or_else(|_| raw.parse::<f64>().map(Value::from))
+            .unwrap_or_else(|_| Value::String(raw.to_string())),
+    }
+}
