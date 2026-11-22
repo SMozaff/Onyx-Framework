@@ -562,3 +562,29 @@ Work items R-20 to R-23 from `ONYX_Remaining_Work_Technical_Source.md` were impl
 
 ### Open
 - Persian review (D-01) for the new / English-placeholder labels; owner wording for the four concurrency messages (D-03); release-reason semantics (D-16); live click-through of every Admin Slint screen against a deployed Worker (R-30, blocked by R-10).
+
+## S9 — Gate 0b evidence package assembled (2026-11-23)
+
+### Artifacts (all PROPOSED — no approval implied)
+
+`docs/migrations/slint/gate-0b/` now holds: C-01 route-by-route reconciliation (pin `d330451`,
+Worker handler lines and five freeze gaps); C-03 typed error map (including the four stable
+concurrency codes and their Slint text keys); C-09 fixture provenance (candidate schema, validator
+gap); Q-14 preference schema (fields/defaults/fallback, BLOCKED by D-05); R-17 canonical org-admin
+DTO options; the R-29 list of **23** FA keys whose values equal EN; and the R-62 BOUND-plan path
+proposal.
+
+### Master reconciliation
+
+A dated amendment was appended to `MASTER-MIGRATION-RECORD.md` covering work since 2026-11-10
+(branch merges, Worker login/registry/audit/concurrency work, S5/S6/S9). The audit date and all
+blocker statuses in §5 are untouched. **No blocker was closed**: G0B-07 remains IN PROGRESS
+(shared helper now used, but mixed RTL/LTR and Windows evidence missing); G0B-03/G0B-10/G0B-11/
+G0B-12 remain open/pending because the drafts are not frozen or approved; G0B-01/06/09/13/14,
+DEP-01 and all other entries are unchanged.
+
+### Verification boundary
+
+This stage is documentation plus the earlier S5/S6 code work. Verification of code is via GitHub
+Actions (admin-slint workflow) per the owner's instruction; no local build/test result is claimed
+here. No deploy, D1 migration, production data access or credential use occurred.

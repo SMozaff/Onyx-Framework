@@ -377,3 +377,42 @@ No files are deleted, renamed or retired by this audit. Historical reports remai
 ---
 
 **Authority reminder:** This master record consolidates and points to evidence. It does not create approval, implementation, verification, merge, deployment or cutover authority that the underlying records do not provide.
+
+---
+
+## Dated amendment — 2026-11-23 (post-2026-11-10 reconciliation, S5/S6/S9)
+
+This is an **amendment**, not a rewrite. The audit date (2026-11-10) and all blocker statuses above
+remain as recorded; nothing here closes a blocker or freezes a contract.
+
+### Work carried into the record since the 2026-11-10 audit
+
+- Admin Slint branch stack (`feat/admin-users-writes` → `feat/admin-legal-holds`) merged into `main`;
+  policy/rule editor, legal holds, Excel import, Profiles, Organizations and Settings pages exist in
+  `crates/bins/admin-slint/`. Feasibility scope only — Gate 0b still blocks production modules.
+- Worker work from 2026-11-14/15/22: staff/three-field login, organization server registry and
+  lookup, forced password change, audit trail, All-Father read/delete routes, `rule_found` and the
+  four stable concurrency codes. Decisions for these dates live in `decision-log.md` (§2026-11-15).
+  The Worker has not been deployed by this work; deployed revision remains unverified.
+- S5 (2026-11-23): R-20…R-23 implemented in `admin-slint` — code-based concurrency error mapping,
+  structured evaluation display, per-policy pending rules with removal, legal-hold apply key
+  retention and release-reason input.
+- S6 (2026-11-23): `docs/migrations/slint/admin-parity-matrix.md` written (AD-01…AD-07,
+  AD-I-001…AD-I-061); R-25 validation/busy bindings implemented; R-26 determination recorded
+  (no Users search/sort/paging parity gap; enhancement blocked); R-28 applied the shared Latin-digit
+  helper to the Admin Slint read-only hold-ID display.
+- S9 (2026-11-23): `docs/migrations/slint/gate-0b/` holds PROPOSED drafts for C-01, C-03, C-09,
+  Q-14 and R-17 plus the R-29 identical-value list and R-62 path proposal.
+
+### Effect on blockers (no closures)
+
+- **G0B-07 (Q-16/U-05):** Admin Slint now delegates to the shared `client-composition` helper and
+  keeps canonical IDs separate from display values. Mixed RTL/LTR and Windows evidence is still
+  missing, so the blocker remains `IN PROGRESS / 2026-11-10`.
+- **G0B-03 / G0B-10 / G0B-11 / G0B-12:** the S9 drafts are `PROPOSED`, not frozen or approved;
+  their blockers remain unchanged.
+- **G0B-01, G0B-06, G0B-09, G0B-13, G0B-14, DEP-01 and the other §5 entries:** unchanged; no new
+  approval, live-run or CI evidence is claimed here.
+- **Verification boundary:** per the owner's standing instruction, code from S5/S6 is verified by
+  GitHub Actions (admin-slint workflow), not by local builds or tests. CI results must be read from
+  the relevant PR head before merge.

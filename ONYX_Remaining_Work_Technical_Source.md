@@ -104,7 +104,7 @@ Status values: `TODO`, `BLOCKED` (needs an owner decision or external action), `
 | R-14 | Staff profile save (`PUT /api/admin/profiles`) has no before/after audit values; user creation records only created state | TODO | Audit details include `before`/`after` for profile saves. | S3 |
 | R-15 | Validate `server_url` in `setOrganizationServer` (scheme `https`/`http` only; no credentials in URL) | VERIFY FIRST | Read the handler; add validation and test if absent. The desktop already accepts only `http(s)://` on its side. | S3 |
 | R-16 | Retention/deletion policy for plaintext one-time-password creation reports (STAFF-REPORT-OPEN-01) | BLOCKED | Owner decision D-04. | — |
-| R-17 | Organization-admin create DTO mismatch (G0B-12): Worker response vs UI-expected fields | TODO | Source-level comparison; canonical DTO proposal for owner. | S9 |
+| R-17 | Organization-admin create DTO mismatch (G0B-12): Worker response vs UI-expected fields | DONE-UNVERIFIED | Source-level comparison; canonical DTO proposal for owner. `2026-11-23`: PROPOSED options recorded in `docs/migrations/slint/gate-0b/R-17-org-admin-dto.PROPOSED.md`; owner decision pending. | S9 |
 
 ### 3.3 Admin Slint (feasibility build; all `DONE-UNVERIFIED` unless stated)
 
@@ -119,7 +119,7 @@ Status values: `TODO`, `BLOCKED` (needs an owner decision or external action), `
 | R-26 | Users screen: search, sorting, paging (plan Phase 3) — presence unknown. Table widget limits are open spike U-01. | DONE-UNVERIFIED | As R-25. `2026-11-23`: audited — neither Tauri nor Slint source confirms search/sort/paging in Users, so no parity gap exists; enhancement blocked by owner approval and U-01 Windows/IME/bidi evidence. Determination in `docs/migrations/slint/admin-parity-matrix.md`. | S6 |
 | R-27 | Q-14 theme/language persistence: approved in direction; schema (fields, defaults, fallback) missing; current behavior unverified | BLOCKED | Needs schema artifact (D-05). | S9 |
 | R-28 | Q-16/U-05 Latin-digit helper (8 tests exist) used on every screen and shared with Desktop | DONE-UNVERIFIED | Apply helper to every ID display in Admin Slint; share crate/module for Desktop. `2026-11-23`: implemented — `admin-slint` delegates to the shared `client-composition` helper (as does `desktop-slint`) and applies it to the read-only hold-ID display; editable ID inputs stay canonical (display-only rule). | S6 |
-| R-29 | Farsi placeholders: up to 10 labels may be English in `fa.json`: `auth.changePasswordTitle`, `auth.changePasswordBody`, `auth.currentPassword`, `auth.newPassword`, `auth.changePasswordSubmit`, `auth.changingPassword`, `common.ruleType`, `settings.addRule`, `settings.createVersion`, `settings.rulesPending` | VERIFY FIRST | List every `fa.json` value identical to its English value; get Persian review (D-01); update. | S9 |
+| R-29 | Farsi placeholders: up to 10 labels may be English in `fa.json` | DONE-UNVERIFIED | List every `fa.json` value identical to its English value; get Persian review (D-01); update. `2026-11-23`: **23** identical keys listed in `docs/migrations/slint/gate-0b/R-29-fa-english-values.md` (10 predicted plus 13 more); Persian review pending. | S9 |
 | R-30 | Live click-through of every Admin Slint screen against a deployed Worker | BLOCKED by R-10 | Evidence per screen. | S4/S6 |
 
 ### 3.4 Desktop
@@ -143,8 +143,8 @@ Status values: `TODO`, `BLOCKED` (needs an owner decision or external action), `
 |---|---|---|---|
 | R-60 | Gate 0b blockers G0B-01…G0B-14 (see `MASTER-MIGRATION-RECORD.md` §5): signed Contract Freeze v1; C-01 re-pin to exact source baseline; Q-01/keyring evidence; Q-05 round-trip; Q-14 schema; Q-16 rollout; U-04 parity; Slint spikes U-01/U-02/U-03/U-10/U-12 evidence; C-03 mapping; C-09 fixture provenance; C-12 DTO; license-policy disposition (G0B-13); CI evidence (G0B-14) | BLOCKED (mostly owner/human evidence) | S8, S9 |
 | R-61 | Pending spike questions OQ-1…OQ-5: live OS motion-setting updates; Windows reduced-motion fallback; Persian placeholder alignment; focus-ring style; who performs manual device tests and when | BLOCKED (D-10) | S8 |
-| R-62 | Missing governing BOUND plan: decision log cites `common/ONYX_Slint_Migration_BOUND_Plan_Execution_Ready.md` (404). A revised plan exists in the Onyx project: `ONYX_Slint_Migration_BOUND_Plan_Revised.md` | TODO + owner approval | S9 |
-| R-63 | Master record and decision log not updated for work since 2026-11-10: policies, legal holds, rule editor, Excel import, 3-field login, forced password change, audit trail, concurrency codes, `rule_found`, merge/Dependabot events. Several decisions from 2026-11-14/15/22 exist only in the log. | TODO | S9 |
+| R-62 | Missing governing BOUND plan: decision log cites `common/ONYX_Slint_Migration_BOUND_Plan_Execution_Ready.md` (404). A revised plan exists in the Onyx project: `ONYX_Slint_Migration_BOUND_Plan_Revised.md`. `2026-11-23`: PROPOSED placement in `docs/migrations/slint/gate-0b/R-62-bound-plan-path.PROPOSED.md`; file not placed, citation unchanged. | BLOCKED + owner approval | S9 |
+| R-63 | Master record and decision log not updated for work since 2026-11-10. `2026-11-23`: dated amendment appended to `MASTER-MIGRATION-RECORD.md`; decision log already carries 11/14/15/22/23 entries. No blocker closed. | DONE-UNVERIFIED | S9 |
 | R-64 | Keep the Onyx project docs in sync after merges (project doc `claude/admin-slint-migration-plan.md` is dated 2026-10-26 and stale) | TODO | S9 |
 
 ### 3.6 Plan phases not started
