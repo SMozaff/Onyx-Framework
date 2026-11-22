@@ -488,3 +488,26 @@ Owner-approved 2026-11-15:
 - All-Father policy scope: All-Father can perform explicitly authorized global administration, and manage organizations and organization administrators through dedicated privileged endpoints. Ordinary staff and organization-admin operations stay under their normal authorization rules. All-Father must not bypass tenant isolation on generic queries or commands. Unknown and unauthorized actions stay denied. All privileged actions are auditable.
 
 Implementation requirement (already decided earlier): ONYX ID is the primary login identifier; username and email remain aliases; the Worker login must accept all three and enforce a password change when must_change_password is set.
+
+## Admin Slint completion A implemented (2026-11-23)
+
+Work items R-20 to R-23 from `ONYX_Remaining_Work_Technical_Source.md` were implemented on the Admin Slint host (`crates/bins/admin-slint`).
+
+### Changes
+- `UsersError::Conflict(ConcurrencyCode)`: the Worker's error body is now inspected and mapped by its stable code. `error.code` is used for the command envelope; the plain `error` string is accepted for the other shapes. New `ConcurrencyCode` variants follow the owner decisions of 2026-11-15 (D-03). Policy and legal-hold failures now show the text of the mapped code (new `settings.concurrency*` keys); generic calls keep the existing `status.failed`.
+- Policy detail: a missing row and a row without concurrency values are now distinct (`PolicyDetail::{Found, NotFound, MissingConcurrency}`). A projection without epochs no longer reads as "not found", and a stale selection is dropped instead of receiving commands.
+- Evaluation: `policy::evaluation_view` builds a one-line summary (value plus evaluated version) and, for object/array results, a pretty-printed detail. Missing rule / no value are never shown as false. The Settings page gained a show/hide detail toggle.
+- Pending rules: drafts are cleared when the selected policy changes, render in a pending list with a per-rule remove callback, and `parse_rule_value` / `rule_value_text` are unit tested.
+- Legal holds: added the `legal_hold.list` query view, legal-hold apply now keeps its Idempotency-Key across retries of one action until success (changed inputs are a new action), and the release-reason input gates the release.
+
+### New catalog keys
+- `settings.concurrencyLifecycleEpochRequired`, `settings.concurrencyAuthorityEpochRequired`, `settings.concurrencyEpochMismatch`, `settings.concurrencyVersionConflict` (English proposals from D-03; owner wording pending approval).
+- `settings.removeRule`, `common.showDetails`, `common.hideDetails`.
+
+### Verification
+- `cargo +1.97.1 fmt -p admin-slint -- --check`: clean.
+- `cargo +1.97.1 clippy -p admin-slint --all-targets -- -D warnings`: clean.
+- `cargo +1.97.1 test -p admin-slint`: 23 tests pass (was 9). New tests cover rule values, error-code parsing, concurrency mapping, evaluation view, hold parsing and apply retry keys.
+
+### Open
+- Persian review (D-01) for the new / English-placeholder labels; owner wording for the four concurrency messages (D-03); release-reason semantics (D-16); live click-through of every Admin Slint screen against a deployed Worker (R-30, blocked by R-10).

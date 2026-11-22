@@ -15,10 +15,22 @@ pub struct UserRow {
     pub is_active: bool,
 }
 
+/// Stable Worker concurrency identifiers (owner decision 2026-11-15). The UI maps
+/// these identifiers to text; it never infers a cause from the error text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConcurrencyCode {
+    LifecycleEpochRequired,
+    AuthorityEpochRequired,
+    EpochMismatch,
+    VersionConflict,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsersError {
     Forbidden,
     Failed,
+    /// The Worker rejected a command because a concurrency value was missing or stale.
+    Conflict(ConcurrencyCode),
 }
 
 #[derive(Serialize)]
@@ -80,14 +92,23 @@ pub async fn create_user(
     let response = client()?
         .post(format!("{API_BASE}/api/admin/users"))
         .bearer_auth(access_token)
-        .json(&CreateUserBody { username, email, password, class })
+        .json(&CreateUserBody {
+            username,
+            email,
+            password,
+            class,
+        })
         .send()
         .await
         .map_err(|_| UsersError::Failed)?;
     map_status(response.status())
 }
 
-pub async fn set_class(access_token: &str, user_id: &str, class: Option<&str>) -> Result<(), UsersError> {
+pub async fn set_class(
+    access_token: &str,
+    user_id: &str,
+    class: Option<&str>,
+) -> Result<(), UsersError> {
     let response = client()?
         .post(format!("{API_BASE}/api/admin/users/{user_id}/class"))
         .bearer_auth(access_token)
@@ -98,11 +119,17 @@ pub async fn set_class(access_token: &str, user_id: &str, class: Option<&str>) -
     map_status(response.status())
 }
 
-pub async fn set_parent(access_token: &str, user_id: &str, parent_id: Option<&str>) -> Result<(), UsersError> {
+pub async fn set_parent(
+    access_token: &str,
+    user_id: &str,
+    parent_id: Option<&str>,
+) -> Result<(), UsersError> {
     let response = client()?
         .post(format!("{API_BASE}/api/admin/users/{user_id}/parent"))
         .bearer_auth(access_token)
-        .json(&ParentBody { parent_user_id: parent_id })
+        .json(&ParentBody {
+            parent_user_id: parent_id,
+        })
         .send()
         .await
         .map_err(|_| UsersError::Failed)?;

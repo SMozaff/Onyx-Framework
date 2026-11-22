@@ -11,13 +11,13 @@ mod settings;
 mod users;
 
 use auth::{AdminSession, LoginError};
-use slint::{Model, ModelRc, VecModel};
 use i18n::{text, Lang};
+use slint::{Model, ModelRc, VecModel};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use users::UsersError;
+use users::{ConcurrencyCode, UsersError};
 
 slint::include_modules!();
 
@@ -91,6 +91,9 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_department_label(text(lang, "common.department").into());
     s.set_team_label(text(lang, "common.teamMemberships").into());
     s.set_import_from_excel(text(lang, "common.importFromExcel").into());
+    s.set_show_details(text(lang, "common.showDetails").into());
+    s.set_hide_details(text(lang, "common.hideDetails").into());
+    s.set_remove_rule(text(lang, "settings.removeRule").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -137,10 +140,7 @@ fn run_user_write<F, Fut>(
             ui.set_users_loading(false);
             match result {
                 Ok(()) => load_users(weak.clone(), session, lang),
-                Err(UsersError::Forbidden) => {
-                    ui.set_users_error(text(lang, "auth.adminAccessRequired").into())
-                }
-                Err(UsersError::Failed) => ui.set_users_error(text(lang, "status.failed").into()),
+                Err(error) => show_error(&ui, lang, error),
             }
         });
     });
@@ -150,12 +150,34 @@ type SessionSlot = Arc<Mutex<Option<AdminSession>>>;
 type SelectedPolicy = Arc<Mutex<Option<policy::PolicyRow>>>;
 type SelectedHold = Arc<Mutex<Option<legal_hold::HoldRow>>>;
 type PendingRules = Arc<Mutex<Vec<serde_json::Value>>>;
+type PendingApply = Arc<Mutex<Option<legal_hold::ApplyRequest>>>;
+
+/// Text for the four owner-approved concurrency identifiers. The code is mapped
+/// by its stable identifier; message text is never inspected.
+fn concurrency_text(lang: Lang, code: ConcurrencyCode) -> &'static str {
+    match code {
+        ConcurrencyCode::LifecycleEpochRequired => {
+            text(lang, "settings.concurrencyLifecycleEpochRequired")
+        }
+        ConcurrencyCode::AuthorityEpochRequired => {
+            text(lang, "settings.concurrencyAuthorityEpochRequired")
+        }
+        ConcurrencyCode::EpochMismatch => text(lang, "settings.concurrencyEpochMismatch"),
+        ConcurrencyCode::VersionConflict => text(lang, "settings.concurrencyVersionConflict"),
+    }
+}
+
+/// Shared failure text.
+fn error_message(lang: Lang, error: UsersError) -> &'static str {
+    match error {
+        UsersError::Forbidden => text(lang, "auth.adminAccessRequired"),
+        UsersError::Failed => text(lang, "status.failed"),
+        UsersError::Conflict(code) => concurrency_text(lang, code),
+    }
+}
 
 fn show_error(ui: &AppWindow, lang: Lang, error: UsersError) {
-    match error {
-        UsersError::Forbidden => ui.set_users_error(text(lang, "auth.adminAccessRequired").into()),
-        UsersError::Failed => ui.set_users_error(text(lang, "status.failed").into()),
-    }
+    ui.set_users_error(error_message(lang, error).into());
 }
 
 /// Runs one Organizations call on a worker thread. `done` runs on the UI thread
@@ -276,16 +298,22 @@ fn org_write<F, Fut>(
     F: FnOnce(String) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<(), UsersError>>,
 {
-    run_org_call(weak, session, lang, action, move |weak, session, lang, result| {
-        let Some(ui) = weak.upgrade() else { return };
-        match result {
-            Ok(()) => match admins_of {
-                Some(org_id) => load_org_admins(weak.clone(), session, lang, org_id),
-                None => load_orgs(weak.clone(), session, lang),
-            },
-            Err(error) => show_error(&ui, lang, error),
-        }
-    });
+    run_org_call(
+        weak,
+        session,
+        lang,
+        action,
+        move |weak, session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(()) => match admins_of {
+                    Some(org_id) => load_org_admins(weak.clone(), session, lang, org_id),
+                    None => load_orgs(weak.clone(), session, lang),
+                },
+                Err(error) => show_error(&ui, lang, error),
+            }
+        },
+    );
 }
 
 /// Loads the mobile-access policy into the Settings page.
@@ -318,20 +346,22 @@ fn apply_mobile_access(ui: &AppWindow, policy: &settings::MobileAccess) {
 
 /// Organization of the signed-in admin; policy calls are scoped to it.
 fn org_id_of(session: &SessionSlot) -> Option<String> {
-    session.lock().ok()?.as_ref().map(|s| s.organization_id.clone())
+    session
+        .lock()
+        .ok()?
+        .as_ref()
+        .map(|s| s.organization_id.clone())
 }
 
 fn show_policy_error(ui: &AppWindow, lang: Lang, error: UsersError) {
-    let message = match error {
-        UsersError::Forbidden => text(lang, "auth.adminAccessRequired"),
-        UsersError::Failed => text(lang, "status.failed"),
-    };
-    ui.set_policy_error(message.into());
+    ui.set_policy_error(error_message(lang, error).into());
 }
 
 /// Loads the policy list for the Settings page.
 fn load_policies(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
-    let Some(org) = org_id_of(&session) else { return };
+    let Some(org) = org_id_of(&session) else {
+        return;
+    };
     run_org_call(
         weak,
         session,
@@ -366,7 +396,9 @@ fn load_policy_detail(
     id: String,
     selected: SelectedPolicy,
 ) {
-    let Some(org) = org_id_of(&session) else { return };
+    let Some(org) = org_id_of(&session) else {
+        return;
+    };
     run_org_call(
         weak,
         session,
@@ -375,7 +407,7 @@ fn load_policy_detail(
         move |weak, _session, lang, result| {
             let Some(ui) = weak.upgrade() else { return };
             match result {
-                Ok(Some(row)) => {
+                Ok(policy::PolicyDetail::Found(row)) => {
                     ui.set_selected_policy_id(row.id.clone().into());
                     ui.set_selected_policy_name(row.name.clone().into());
                     ui.set_selected_policy_status(row.status.clone().into());
@@ -384,41 +416,54 @@ fn load_policy_detail(
                         *slot = Some(row);
                     }
                 }
-                Ok(None) => ui.set_policy_error(text(lang, "common.noPolicyFound").into()),
+                Ok(policy::PolicyDetail::NotFound) => {
+                    // Drop the old selection so no command can target a stale policy.
+                    if let Ok(mut slot) = selected.lock() {
+                        *slot = None;
+                    }
+                    ui.set_selected_policy_id("".into());
+                    ui.set_policy_error(text(lang, "common.noPolicyFound").into());
+                }
+                Ok(policy::PolicyDetail::MissingConcurrency) => {
+                    if let Ok(mut slot) = selected.lock() {
+                        *slot = None;
+                    }
+                    ui.set_selected_policy_id("".into());
+                    ui.set_policy_error(
+                        text(lang, "settings.policyMissingConcurrencyEpochs").into(),
+                    );
+                }
                 Err(error) => show_policy_error(&ui, lang, error),
             }
         },
     );
 }
 
-/// Formats an evaluation result for the Settings page. A missing rule and a rule
-/// without a value are shown differently; a missing `rule_found` (older Worker)
-/// falls back to the value alone. The value is shown as returned, never as false.
-fn format_evaluation(lang: Lang, response: &serde_json::Value) -> String {
-    let Some(evaluation) = response.pointer("/result/command_result") else {
-        return String::new();
-    };
-    let version = evaluation
-        .get("evaluated_version")
-        .and_then(serde_json::Value::as_i64)
-        .map(|v| v.to_string())
+/// Rebuilds the pending-rule list shown on the Settings page.
+fn refresh_pending_rules(ui: &AppWindow, pending: &PendingRules) {
+    let rules = pending
+        .lock()
+        .map(|rules| rules.clone())
         .unwrap_or_default();
-    let shown = if evaluation.get("rule_found").and_then(serde_json::Value::as_bool) == Some(false) {
-        text(lang, "settings.ruleNotFound").to_string()
-    } else {
-        match evaluation.get("result") {
-            None | Some(serde_json::Value::Null) => text(lang, "settings.noValueDefined").to_string(),
-            Some(serde_json::Value::String(value)) => value.clone(),
-            Some(other) => other.to_string(),
-        }
-    };
-    format!(
-        "{}: {} · {}: {}",
-        text(lang, "settings.evaluationResult"),
-        shown,
-        text(lang, "settings.policyVersion"),
-        version
-    )
+    let items: Vec<PendingRuleItem> = rules
+        .iter()
+        .map(|rule| PendingRuleItem {
+            rule_type: rule
+                .get("rule_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .into(),
+            key: rule
+                .get("key")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .into(),
+            value: policy::rule_value_text(rule.get("value").unwrap_or(&serde_json::Value::Null))
+                .into(),
+        })
+        .collect();
+    ui.set_rules_pending(items.len() as i32);
+    ui.set_pending_rules(ModelRc::new(VecModel::from(items)));
 }
 
 /// Sends one lifecycle command to the selected policy, then reloads the list and detail.
@@ -431,8 +476,12 @@ fn policy_command(
     payload: serde_json::Value,
     pending: PendingRules,
 ) {
-    let Some(org) = org_id_of(&session) else { return };
-    let Some(row) = selected.lock().ok().and_then(|slot| slot.clone()) else { return };
+    let Some(org) = org_id_of(&session) else {
+        return;
+    };
+    let Some(row) = selected.lock().ok().and_then(|slot| slot.clone()) else {
+        return;
+    };
     let pending_done = pending.clone();
     let id = row.id.clone();
     let concurrency = row.concurrency();
@@ -441,7 +490,9 @@ fn policy_command(
         weak,
         session,
         lang,
-        move |token| async move { policy::send_command(&token, &org, "policy", command, &concurrency, payload).await },
+        move |token| async move {
+            policy::send_command(&token, &org, "policy", command, &concurrency, payload).await
+        },
         move |weak, session, lang, result| {
             let Some(ui) = weak.upgrade() else { return };
             match result {
@@ -450,14 +501,26 @@ fn policy_command(
                         if let Ok(mut rules) = pending_done.lock() {
                             rules.clear();
                         }
-                        ui.set_rules_pending(0);
+                        refresh_pending_rules(&ui, &pending_done);
                     }
-                    let status = if command == "policy.EvaluatePolicy" {
-                        format_evaluation(lang, &response)
+                    if command == "policy.EvaluatePolicy" {
+                        match policy::evaluation_view(lang, &response) {
+                            Some(view) => {
+                                ui.set_policy_status(view.summary.into());
+                                ui.set_policy_evaluation_detail(view.detail.into());
+                                ui.set_policy_evaluation_detail_visible(false);
+                            }
+                            None => {
+                                ui.set_policy_status("".into());
+                                ui.set_policy_evaluation_detail("".into());
+                                ui.set_policy_evaluation_detail_visible(false);
+                            }
+                        }
                     } else {
-                        String::new()
-                    };
-                    ui.set_policy_status(status.into());
+                        ui.set_policy_status("".into());
+                        ui.set_policy_evaluation_detail("".into());
+                        ui.set_policy_evaluation_detail_visible(false);
+                    }
                     load_policies(weak.clone(), session.clone(), lang);
                     load_policy_detail(weak, session, lang, id, reload);
                 }
@@ -468,16 +531,20 @@ fn policy_command(
 }
 
 fn show_hold_error(ui: &AppWindow, lang: Lang, error: UsersError) {
-    let message = match error {
-        UsersError::Forbidden => text(lang, "auth.adminAccessRequired"),
-        UsersError::Failed => text(lang, "status.failed"),
-    };
-    ui.set_legal_hold_error(message.into());
+    ui.set_legal_hold_error(error_message(lang, error).into());
 }
 
 /// Reads one hold into the Settings panel and keeps its concurrency values for release.
-fn load_hold_detail(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang, id: String, selected: SelectedHold) {
-    let Some(org) = org_id_of(&session) else { return };
+fn load_hold_detail(
+    weak: slint::Weak<AppWindow>,
+    session: SessionSlot,
+    lang: Lang,
+    id: String,
+    selected: SelectedHold,
+) {
+    let Some(org) = org_id_of(&session) else {
+        return;
+    };
     run_org_call(
         weak,
         session,
@@ -486,15 +553,62 @@ fn load_hold_detail(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: La
         move |weak, _session, lang, result| {
             let Some(ui) = weak.upgrade() else { return };
             match result {
-                Ok(Some(hold)) => {
-                    ui.set_legal_hold_selected_id(hold.concurrency.id.clone().into());
+                Ok(legal_hold::HoldDetail::Found(hold)) => {
+                    ui.set_legal_hold_selected_id(hold.id().to_string().into());
                     ui.set_legal_hold_state(format!("Status: {}", hold.status).into());
                     ui.set_legal_hold_can_release(hold.status == "Applied");
                     if let Ok(mut slot) = selected.lock() {
                         *slot = Some(hold);
                     }
                 }
-                Ok(None) => ui.set_legal_hold_error(text(lang, "settings.noLegalHoldFound").into()),
+                Ok(legal_hold::HoldDetail::NotFound) => {
+                    // Drop the old selection so no release can target a stale hold.
+                    if let Ok(mut slot) = selected.lock() {
+                        *slot = None;
+                    }
+                    ui.set_legal_hold_selected_id("".into());
+                    ui.set_legal_hold_can_release(false);
+                    ui.set_legal_hold_error(text(lang, "settings.noLegalHoldFound").into());
+                }
+                Ok(legal_hold::HoldDetail::MissingConcurrency) => {
+                    if let Ok(mut slot) = selected.lock() {
+                        *slot = None;
+                    }
+                    ui.set_legal_hold_selected_id("".into());
+                    ui.set_legal_hold_can_release(false);
+                    ui.set_legal_hold_error(
+                        text(lang, "settings.legalHoldMissingConcurrencyEpochs").into(),
+                    );
+                }
+                Err(error) => show_hold_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Loads the legal-hold list for the Settings page.
+fn load_holds(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
+    let Some(org) = org_id_of(&session) else {
+        return;
+    };
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move { legal_hold::list_holds(&token, &org).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(rows) => {
+                    let items: Vec<HoldItem> = rows
+                        .into_iter()
+                        .map(|hold| HoldItem {
+                            id: hold.id.into(),
+                            status: hold.status.into(),
+                        })
+                        .collect();
+                    ui.set_legal_holds(ModelRc::new(VecModel::from(items)));
+                }
                 Err(error) => show_hold_error(&ui, lang, error),
             }
         },
@@ -538,7 +652,11 @@ fn load_profiles(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang)
 /// Turns an optional form field into `None` when blank.
 fn opt(value: slint::SharedString) -> Option<String> {
     let trimmed = value.trim().to_string();
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// Loads the Users list with the in-memory token. Runs off the UI thread.
@@ -579,10 +697,9 @@ fn load_users(weak: slint::Weak<AppWindow>, session: Arc<Mutex<Option<AdminSessi
                     ui.set_users(ModelRc::new(VecModel::from(items)));
                     ui.set_users_error("".into());
                 }
-                Err(UsersError::Forbidden) => {
-                    ui.set_users_error(text(lang, "auth.adminAccessRequired").into())
+                Err(error) => {
+                    ui.set_users_error(error_message(lang, error).into());
                 }
-                Err(UsersError::Failed) => ui.set_users_error(text(lang, "status.failed").into()),
             }
         });
     });
@@ -669,6 +786,7 @@ fn main() -> Result<(), slint::PlatformError> {
         } else if page == 1 {
             load_mobile_access(users_weak.clone(), page_session.clone(), page_lang.get());
             load_policies(users_weak.clone(), page_session.clone(), page_lang.get());
+            load_holds(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 2 {
             load_profiles(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 3 {
@@ -695,12 +813,21 @@ fn main() -> Result<(), slint::PlatformError> {
     let session_create = write_session.clone();
     let lang_create = write_lang.clone();
     ui.on_create_user(move |username, email, password, class| {
-        let (username, email, password) = (username.to_string(), email.to_string(), password.to_string());
+        let (username, email, password) = (
+            username.to_string(),
+            email.to_string(),
+            password.to_string(),
+        );
         let class = class.to_string();
         let class = if class.is_empty() { None } else { Some(class) };
-        run_user_write(weak_create.clone(), session_create.clone(), lang_create.get(), move |token| async move {
-            users::create_user(&token, &username, &email, &password, class.as_deref()).await
-        });
+        run_user_write(
+            weak_create.clone(),
+            session_create.clone(),
+            lang_create.get(),
+            move |token| async move {
+                users::create_user(&token, &username, &email, &password, class.as_deref()).await
+            },
+        );
     });
 
     let weak_class = ui.as_weak();
@@ -709,9 +836,12 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_class(move |user_id, class| {
         let (user_id, class) = (user_id.to_string(), class.to_string());
         let class = if class.is_empty() { None } else { Some(class) };
-        run_user_write(weak_class.clone(), session_class.clone(), lang_class.get(), move |token| async move {
-            users::set_class(&token, &user_id, class.as_deref()).await
-        });
+        run_user_write(
+            weak_class.clone(),
+            session_class.clone(),
+            lang_class.get(),
+            move |token| async move { users::set_class(&token, &user_id, class.as_deref()).await },
+        );
     });
 
     let weak_parent = ui.as_weak();
@@ -730,63 +860,124 @@ fn main() -> Result<(), slint::PlatformError> {
     let lang_active = write_lang.clone();
     ui.on_toggle_active(move |user_id, active| {
         let user_id = user_id.to_string();
-        run_user_write(weak_active.clone(), session_active.clone(), lang_active.get(), move |token| async move {
-            users::set_active(&token, &user_id, active).await
-        });
+        run_user_write(
+            weak_active.clone(),
+            session_active.clone(),
+            lang_active.get(),
+            move |token| async move { users::set_active(&token, &user_id, active).await },
+        );
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_create_org(move |name| {
         let name = name.trim().to_string();
-        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
-            orgs::create_org(&token, &name).await
-        }, None);
+        org_write(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { orgs::create_org(&token, &name).await },
+            None,
+        );
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_rename_org(move |org_id, name| {
         let (org_id, name) = (org_id.to_string(), name.trim().to_string());
-        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
-            orgs::rename_org(&token, &org_id, &name).await
-        }, None);
+        org_write(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { orgs::rename_org(&token, &org_id, &name).await },
+            None,
+        );
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_toggle_org(move |org_id, active| {
         let org_id = org_id.to_string();
-        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
-            orgs::set_org_active(&token, &org_id, active).await
-        }, None);
+        org_write(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { orgs::set_org_active(&token, &org_id, active).await },
+            None,
+        );
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_select_org(move |org_id| {
-        load_org_admins(weak.clone(), session.clone(), lang.get(), org_id.to_string());
+        load_org_admins(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            org_id.to_string(),
+        );
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_create_org_admin(move |username, email, password| {
         let Some(ui) = weak.upgrade() else { return };
         let org_id = ui.get_selected_org_id().to_string();
-        let (username, email, password) = (username.to_string(), email.to_string(), password.to_string());
-        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
-            orgs::create_admin(&token, &org_id, &username, &email, &password).await
-        }, Some(ui.get_selected_org_id().to_string()));
+        let (username, email, password) = (
+            username.to_string(),
+            email.to_string(),
+            password.to_string(),
+        );
+        org_write(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move {
+                orgs::create_admin(&token, &org_id, &username, &email, &password).await
+            },
+            Some(ui.get_selected_org_id().to_string()),
+        );
     });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_toggle_admin(move |admin_id, active| {
         let admin_id = admin_id.to_string();
-        let org_id = weak.upgrade().map(|ui| ui.get_selected_org_id().to_string());
-        org_write(weak.clone(), session.clone(), lang.get(), move |token| async move {
-            orgs::set_admin_active(&token, &admin_id, active).await
-        }, org_id);
+        let org_id = weak
+            .upgrade()
+            .map(|ui| ui.get_selected_org_id().to_string());
+        org_write(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { orgs::set_admin_active(&token, &admin_id, active).await },
+            org_id,
+        );
     });
 
     let selected_policy: SelectedPolicy = Arc::new(Mutex::new(None));
     let pending_rules: PendingRules = Arc::new(Mutex::new(Vec::new()));
-    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
-    ui.on_select_policy(move |id| load_policy_detail(weak.clone(), session.clone(), lang.get(), id.to_string(), selected.clone()));
+    let (weak, session, lang, selected, pending) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_policy.clone(),
+        pending_rules.clone(),
+    );
+    ui.on_select_policy(move |id| {
+        // Pending rules belong to the policy that was being edited. Switching
+        // policies starts a new draft instead of leaking rules across policies.
+        if let Ok(mut rules) = pending.lock() {
+            rules.clear();
+        }
+        if let Some(ui) = weak.upgrade() {
+            refresh_pending_rules(&ui, &pending);
+            ui.set_policy_status("".into());
+            ui.set_policy_evaluation_detail("".into());
+            ui.set_policy_evaluation_detail_visible(false);
+        }
+        load_policy_detail(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            id.to_string(),
+            selected.clone(),
+        );
+    });
 
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_create_policy(move |name| {
@@ -808,11 +999,43 @@ fn main() -> Result<(), slint::PlatformError> {
         );
     });
 
-    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
-    ui.on_publish_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.PublishPolicyVersion", serde_json::json!({}), pending.clone()));
+    let (weak, session, lang, selected, pending) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_policy.clone(),
+        pending_rules.clone(),
+    );
+    ui.on_publish_policy(move || {
+        policy_command(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            selected.clone(),
+            "policy.PublishPolicyVersion",
+            serde_json::json!({}),
+            pending.clone(),
+        )
+    });
 
-    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
-    ui.on_retire_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.RetirePolicy", serde_json::json!({}), pending.clone()));
+    let (weak, session, lang, selected, pending) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_policy.clone(),
+        pending_rules.clone(),
+    );
+    ui.on_retire_policy(move || {
+        policy_command(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            selected.clone(),
+            "policy.RetirePolicy",
+            serde_json::json!({}),
+            pending.clone(),
+        )
+    });
 
     let (weak, pending) = (ui.as_weak(), pending_rules.clone());
     ui.on_add_policy_rule(move |rule_type, key, value| {
@@ -821,56 +1044,172 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         }
         let Some(ui) = weak.upgrade() else { return };
-        let Ok(mut rules) = pending.lock() else { return };
-        rules.push(serde_json::json!({
-            "rule_type": rule_type.to_string(),
-            "key": key,
-            "value": policy::parse_rule_value(value.trim()),
-        }));
-        ui.set_rules_pending(rules.len() as i32);
+        {
+            let Ok(mut rules) = pending.lock() else {
+                return;
+            };
+            rules.push(serde_json::json!({
+                "rule_type": rule_type.to_string(),
+                "key": key,
+                "value": policy::parse_rule_value(value.trim()),
+            }));
+        }
+        refresh_pending_rules(&ui, &pending);
         ui.set_rule_key_input("".into());
         ui.set_rule_value_input("".into());
     });
 
-    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
+    let (weak, pending) = (ui.as_weak(), pending_rules.clone());
+    ui.on_remove_policy_rule(move |index| {
+        let Some(ui) = weak.upgrade() else { return };
+        if let Ok(mut rules) = pending.lock() {
+            let index = index as usize;
+            if index < rules.len() {
+                rules.remove(index);
+            }
+        }
+        refresh_pending_rules(&ui, &pending);
+    });
+
+    let weak = ui.as_weak();
+    ui.on_toggle_policy_evaluation_detail(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_policy_evaluation_detail_visible(!ui.get_policy_evaluation_detail_visible());
+        }
+    });
+
+    let (weak, session, lang, selected, pending) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_policy.clone(),
+        pending_rules.clone(),
+    );
     ui.on_create_policy_version(move || {
-        let rules = pending.lock().map(|rules| rules.clone()).unwrap_or_default();
+        let rules = pending
+            .lock()
+            .map(|rules| rules.clone())
+            .unwrap_or_default();
         if rules.is_empty() {
             return;
         }
-        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.CreatePolicyVersion", serde_json::json!({ "rules": rules }), pending.clone());
+        policy_command(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            selected.clone(),
+            "policy.CreatePolicyVersion",
+            serde_json::json!({ "rules": rules }),
+            pending.clone(),
+        );
     });
 
-    let (weak, session, lang, selected, pending) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone(), pending_rules.clone());
+    let (weak, session, lang, selected, pending) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_policy.clone(),
+        pending_rules.clone(),
+    );
     ui.on_evaluate_policy(move |key| {
-        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "policy.EvaluatePolicy", serde_json::json!({ "rule_key": key.to_string() }), pending.clone())
+        policy_command(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            selected.clone(),
+            "policy.EvaluatePolicy",
+            serde_json::json!({ "rule_key": key.to_string() }),
+            pending.clone(),
+        )
     });
 
     let selected_hold: SelectedHold = Arc::new(Mutex::new(None));
-    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_hold.clone());
-    ui.on_view_legal_hold(move |id| load_hold_detail(weak.clone(), session.clone(), lang.get(), id.to_string(), selected.clone()));
+    let pending_apply: PendingApply = Arc::new(Mutex::new(None));
+    let (weak, session, lang, selected) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_hold.clone(),
+    );
+    ui.on_view_legal_hold(move |id| {
+        load_hold_detail(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            id.to_string(),
+            selected.clone(),
+        );
+    });
 
-    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_hold.clone());
+    let (weak, session, lang, selected) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_hold.clone(),
+    );
+    ui.on_select_legal_hold(move |id| {
+        load_hold_detail(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            id.to_string(),
+            selected.clone(),
+        );
+    });
+
+    let (weak, session, lang, selected, pending_apply) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_hold.clone(),
+        pending_apply.clone(),
+    );
     ui.on_apply_legal_hold(move |target_id, target_type, reason| {
-        let (target_id, target_type, reason) = (target_id.trim().to_string(), target_type.trim().to_string(), reason.trim().to_string());
+        let (target_id, target_type, reason) = (
+            target_id.trim().to_string(),
+            target_type.trim().to_string(),
+            reason.trim().to_string(),
+        );
         if target_id.is_empty() || target_type.is_empty() || reason.is_empty() {
             return;
         }
-        let key = new_request_id();
+        // The key is kept across retries of this exact action and cleared only on
+        // success, so an uncertain failure cannot create a duplicate hold.
+        let request = {
+            let previous = pending_apply.lock().ok().and_then(|slot| slot.clone());
+            legal_hold::prepare_apply(
+                previous.as_ref(),
+                &target_id,
+                &target_type,
+                &reason,
+                new_request_id,
+            )
+        };
+        if let Ok(mut slot) = pending_apply.lock() {
+            *slot = Some(request.clone());
+        }
+        let key = request.idempotency_key.clone();
         let selected = selected.clone();
+        let pending_done = pending_apply.clone();
         run_org_call(
             weak.clone(),
             session.clone(),
             lang.get(),
-            move |token| async move { legal_hold::apply(&token, &target_id, &target_type, &reason, &key).await },
+            move |token| async move {
+                legal_hold::apply(&token, &target_id, &target_type, &reason, &key).await
+            },
             move |weak, session, lang, result| {
                 let Some(ui) = weak.upgrade() else { return };
                 match result {
                     Ok(hold_id) => {
+                        if let Ok(mut slot) = pending_done.lock() {
+                            *slot = None;
+                        }
                         ui.set_legal_hold_target_input("".into());
                         ui.set_legal_hold_reason_input("".into());
                         ui.set_legal_hold_view_id(hold_id.clone().into());
-                        load_hold_detail(weak.clone(), session, lang, hold_id, selected);
+                        load_hold_detail(weak.clone(), session.clone(), lang, hold_id, selected);
+                        load_holds(weak, session, lang);
                     }
                     Err(error) => show_hold_error(&ui, lang, error),
                 }
@@ -878,21 +1217,39 @@ fn main() -> Result<(), slint::PlatformError> {
         );
     });
 
-    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_hold.clone());
+    let (weak, session, lang, selected) = (
+        ui.as_weak(),
+        write_session.clone(),
+        write_lang.clone(),
+        selected_hold.clone(),
+    );
     ui.on_release_legal_hold(move || {
-        let Some(org) = org_id_of(&session) else { return };
-        let Some(hold) = selected.lock().ok().and_then(|slot| slot.clone()) else { return };
+        let Some(ui) = weak.upgrade() else { return };
+        let reason = ui.get_legal_hold_release_reason_input().trim().to_string();
+        if reason.is_empty() {
+            return;
+        }
+        let Some(org) = org_id_of(&session) else {
+            return;
+        };
+        let Some(hold) = selected.lock().ok().and_then(|slot| slot.clone()) else {
+            return;
+        };
         let id = hold.concurrency.id.clone();
         let reload = selected.clone();
         run_org_call(
             weak.clone(),
             session.clone(),
             lang.get(),
-            move |token| async move { legal_hold::release(&token, &org, &hold, "Released by administrator").await },
+            move |token| async move { legal_hold::release(&token, &org, &hold, &reason).await },
             move |weak, session, lang, result| {
                 let Some(ui) = weak.upgrade() else { return };
                 match result {
-                    Ok(()) => load_hold_detail(weak.clone(), session, lang, id, reload),
+                    Ok(()) => {
+                        ui.set_legal_hold_release_reason_input("".into());
+                        load_hold_detail(weak.clone(), session.clone(), lang, id, reload);
+                        load_holds(weak, session, lang);
+                    }
                     Err(error) => show_hold_error(&ui, lang, error),
                 }
             },
@@ -982,10 +1339,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 };
                 let report = profiles::import_bytes(&token, bytes, content_type).await?;
                 // The report holds one-time passwords. It is saved only where the user chooses.
-                let summary = format!(
-                    "{} / {} / {}",
-                    report.total, report.created, report.failed
-                );
+                let summary = format!("{} / {} / {}", report.total, report.created, report.failed);
                 let saved = tokio::task::spawn_blocking(move || {
                     profiles::save_file(&report.bytes, "onyx-creation-report.xlsx")
                 })
