@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.12.1",
+    "@tauri-apps/api": "2.12.5",
     "@tauri-apps/plugin-dialog": "2.8.1",
     "axios": "^1.21.1",
     "react": "^19.3.1",
