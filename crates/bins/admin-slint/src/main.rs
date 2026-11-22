@@ -3,6 +3,7 @@
 mod auth;
 mod i18n;
 mod i18n_catalog;
+mod id_display;
 mod legal_hold;
 mod orgs;
 mod policy;
@@ -606,6 +607,7 @@ fn load_holds(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
                         .into_iter()
                         .map(|hold| HoldItem {
                             id: hold.id.into(),
+                            display_id: id_display::display_id(&hold.id).into(),
                             status: hold.status.into(),
                         })
                         .collect();

@@ -161,6 +161,21 @@ Slint page 3.
   search/sort/paging would be an unapproved enhancement and depends on U-01 Windows/IME/bidi
   evidence. Status: `blocked (reason)` — owner approval plus U-01 manual evidence required.
 
+## R-28 — Latin-digit display formatting (implemented 2026-11-23)
+
+- **Shared helper:** `crates/applications/client-composition/src/id_display.rs::latin_digits`
+  (Q-16/U-05). `desktop-slint` already depends on `client-composition`; `admin-slint` now does too,
+  so both Slint hosts use one implementation.
+- **Admin boundary:** `crates/bins/admin-slint/src/id_display.rs::display_id` delegates to the
+  shared helper (four unit tests). The read-only legal-hold list row uses `HoldItem.display-id`
+  built from `display_id`; the canonical `HoldItem.id` is kept separately for the
+  `select-legal-hold` callback so a display-only value is never sent back to the Worker.
+- **Intentionally not normalized:** editable identifier inputs (`parent-entry`, `form-owner`,
+  `form-parent`, `form-teams`, `legal-hold-view-id`) — these can be written back to the Worker, and
+  the approved convention is display-only. The TypeScript helper with eight tests remains in the
+  Tauri admin UI; it is not consumable from Rust and was not modified.
+- **Status:** `fixed` for the Slint Admin read-only ID display; `present` for Desktop sharing.
+
 ## Acceptance
 
 - Every registered admin control (AD-I-001 … AD-I-061) is mapped onto the Slint host with a

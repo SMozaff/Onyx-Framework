@@ -526,6 +526,19 @@ baseline and the Slint admin host, with per-control status `present` / `fixed` /
 - GitHub Actions is the verification path for the R-25 code change (per owner instruction); no
   local build/test run is claimed for this commit. The R-26 determination is source evidence only.
 
+## R-28 — shared Latin-digit helper applied to Slint Admin (2026-11-23)
+
+- `admin-slint` now depends on `client-composition` and delegates through
+  `crates/bins/admin-slint/src/id_display.rs::display_id` to the shared
+  `client_composition::id_display::latin_digits` helper (four new unit tests).
+- The helper is applied to the read-only legal-hold ID display (`HoldItem.display-id`); the
+  canonical `HoldItem.id` remains separate for callbacks, preserving the display-only rule.
+- Editable ID inputs are deliberately left canonical because their values can be sent to the
+  Worker. `desktop-slint` already depends on `client-composition`, so both Slint hosts share the
+  implementation; no Desktop UI change was required (it renders no identifiers).
+- The TypeScript helper (8 tests) used by the Tauri admin UI is unchanged.
+- Verification: GitHub Actions (admin-slint workflow), per owner instruction.
+
 
 ## Admin Slint completion A implemented (2026-11-23)
 

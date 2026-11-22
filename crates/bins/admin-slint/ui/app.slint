@@ -52,6 +52,7 @@ export struct UserItem {
 
 export struct HoldItem {
     id: string,
+    display-id: string,
     status: string,
 }
 
@@ -713,7 +714,7 @@ export component AppWindow inherits Window {
                         for hold in root.legal-holds: HorizontalLayout {
                             spacing: 8px;
                             Text {
-                                text: hold.id + " · " + hold.status;
+                                text: hold.display-id + " · " + hold.status;
                                 color: Theme.text;
                                 vertical-alignment: center;
                                 wrap: word-wrap;
