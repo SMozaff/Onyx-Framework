@@ -26,7 +26,10 @@ mod tests {
     #[test]
     fn canonical_latin_ids_are_unchanged() {
         assert_eq!(display_id("st26sm0035"), "st26sm0035");
-        assert_eq!(display_id("3f2504e0-4f89-11d3-9a0c-0305e82c3301"), "3f2504e0-4f89-11d3-9a0c-0305e82c3301");
+        assert_eq!(
+            display_id("3f2504e0-4f89-11d3-9a0c-0305e82c3301"),
+            "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+        );
     }
 
     #[test]
