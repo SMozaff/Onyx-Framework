@@ -10,6 +10,26 @@ export global Theme {
     out property <color> danger: dark ? #f97066 : #b42318;
 }
 
+export struct ProfileItem {
+    owner: string,
+    name: string,
+    title: string,
+    department: string,
+    class: string,
+    email: string,
+    phone: string,
+    parent: string,
+    teams: string,
+    photo: string,
+}
+
+export struct PolicyItem {
+    id: string,
+    name: string,
+    status: string,
+    version: int,
+}
+
 export struct OrgItem {
     id: string,
     name: string,
@@ -67,6 +87,27 @@ export global Strings {
     in-out property <string> admins-heading;
     in-out property <string> mobile-heading;
     in-out property <string> mobile-save-button;
+    in-out property <string> policy-heading;
+    in-out property <string> create-policy-button;
+    in-out property <string> policy-name-placeholder;
+    in-out property <string> publish-button;
+    in-out property <string> retire-button;
+    in-out property <string> evaluate-button;
+    in-out property <string> rule-key-placeholder;
+    in-out property <string> profiles-heading;
+    in-out property <string> save-profile-button;
+    in-out property <string> import-button;
+    in-out property <string> export-csv-button;
+    in-out property <string> export-json-button;
+    in-out property <string> owner-label;
+    in-out property <string> full-name-label;
+    in-out property <string> job-title-label;
+    in-out property <string> contact-email-label;
+    in-out property <string> contact-phone-label;
+    in-out property <string> department-label;
+    in-out property <string> team-label;
+    in-out property <string> photo-label;
+    in-out property <string> import-from-excel;
 }
 
 component NavButton inherits Rectangle {
@@ -113,6 +154,27 @@ export component AppWindow inherits Window {
     in-out property <bool> mobile-staff: false;
     in-out property <int> mobile-version: 0;
     in-out property <string> mobile-status: "";
+    in-out property <[ProfileItem]> profiles: [];
+    in-out property <[PolicyItem]> policies: [];
+    in-out property <string> policy-error: "";
+    in-out property <string> policy-status: "";
+    in-out property <string> policy-name-input: "";
+    in-out property <string> policy-rule-key: "";
+    in-out property <string> selected-policy-id: "";
+    in-out property <string> selected-policy-name: "";
+    in-out property <string> selected-policy-status: "";
+    in-out property <int> selected-policy-version: 0;
+    in-out property <string> form-owner: "";
+    in-out property <string> form-name: "";
+    in-out property <string> form-title: "";
+    in-out property <string> form-email: "";
+    in-out property <string> form-phone: "";
+    in-out property <string> form-department: "";
+    in-out property <string> form-class: "";
+    in-out property <string> form-parent: "";
+    in-out property <string> form-teams: "";
+    in-out property <string> form-photo: "";
+    in-out property <string> import-status: "";
     in-out property <[OrgItem]> orgs: [];
     in-out property <[AdminItem]> org-admins: [];
     in-out property <string> selected-org-id: "";
@@ -134,6 +196,14 @@ export component AppWindow inherits Window {
     callback create-org-admin(string, string, string);
     callback toggle-admin(string, bool);
     callback save-mobile-access(bool, bool, bool, bool, bool);
+    callback create-policy(string);
+    callback select-policy(string);
+    callback publish-policy();
+    callback retire-policy();
+    callback evaluate-policy(string);
+    callback save-profile();
+    callback import-profiles();
+    callback export-profiles(string);
 
     VerticalLayout {
         padding: 16px;
@@ -407,9 +477,139 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.page == 2: Text {
-                        text: Strings.no-data;
-                        color: Theme.text-dim;
+                    if root.page == 1: VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: Strings.policy-heading;
+                            color: Theme.text;
+                            font-size: 18px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.policy-error;
+                            color: Theme.text-dim;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            LineEdit {
+                                placeholder-text: Strings.policy-name-placeholder;
+                                text <=> root.policy-name-input;
+                            }
+                            Button {
+                                text: Strings.create-policy-button;
+                                clicked => { root.create-policy(root.policy-name-input); }
+                            }
+                        }
+                        for policy in root.policies: Button {
+                            text: policy.name + " · " + policy.status + " · v" + policy.version;
+                            clicked => { root.select-policy(policy.id); }
+                        }
+                        if root.selected-policy-id != "": VerticalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: root.selected-policy-name + " · " + root.selected-policy-status + " · v" + root.selected-policy-version;
+                                color: Theme.text;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: Strings.publish-button;
+                                    clicked => { root.publish-policy(); }
+                                }
+                                Button {
+                                    text: Strings.retire-button;
+                                    clicked => { root.retire-policy(); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                LineEdit {
+                                    placeholder-text: Strings.rule-key-placeholder;
+                                    text <=> root.policy-rule-key;
+                                }
+                                Button {
+                                    text: Strings.evaluate-button;
+                                    clicked => { root.evaluate-policy(root.policy-rule-key); }
+                                }
+                            }
+                            Text {
+                                text: root.policy-status;
+                                color: Theme.text-dim;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                    if root.page == 2: VerticalLayout {
+                        spacing: 10px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button {
+                                text: Strings.export-csv-button;
+                                clicked => { root.export-profiles("csv"); }
+                            }
+                            Button {
+                                text: Strings.export-json-button;
+                                clicked => { root.export-profiles("json"); }
+                            }
+                            Button {
+                                text: Strings.import-from-excel;
+                                clicked => { root.import-profiles(); }
+                            }
+                        }
+                        if root.import-status != "": Text {
+                            text: root.import-status;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: Strings.profiles-heading;
+                            color: Theme.text;
+                            font-size: 18px;
+                            font-weight: 700;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            LineEdit { placeholder-text: Strings.owner-label; text <=> root.form-owner; }
+                            LineEdit { placeholder-text: Strings.full-name-label; text <=> root.form-name; }
+                            LineEdit { placeholder-text: Strings.job-title-label; text <=> root.form-title; }
+                            LineEdit { placeholder-text: Strings.department-label; text <=> root.form-department; }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            LineEdit { placeholder-text: Strings.contact-email-label; text <=> root.form-email; }
+                            LineEdit { placeholder-text: Strings.contact-phone-label; text <=> root.form-phone; }
+                            LineEdit { placeholder-text: Strings.team-label; text <=> root.form-teams; }
+                            LineEdit { placeholder-text: Strings.class-label; text <=> root.form-class; }
+                            LineEdit { placeholder-text: Strings.parent-label; text <=> root.form-parent; }
+                        }
+                        Button {
+                            text: Strings.save-profile-button;
+                            clicked => { root.save-profile(); }
+                        }
+                        for profile in root.profiles: HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: profile.name + " · " + profile.title + " · " + profile.department;
+                                color: Theme.text;
+                                width: 420px;
+                                vertical-alignment: center;
+                            }
+                            Button {
+                                text: Strings.save-button;
+                                clicked => {
+                                    root.form-owner = profile.owner;
+                                    root.form-name = profile.name;
+                                    root.form-title = profile.title;
+                                    root.form-department = profile.department;
+                                    root.form-class = profile.class;
+                                    root.form-email = profile.email;
+                                    root.form-phone = profile.phone;
+                                    root.form-parent = profile.parent;
+                                    root.form-teams = profile.teams;
+                                    root.form-photo = profile.photo;
+                                }
+                            }
+                        }
                     }
                 }
             }

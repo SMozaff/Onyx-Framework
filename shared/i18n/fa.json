@@ -180,6 +180,7 @@
   "common.grantAdministratorAccess": "اعطای دسترسی مدیریتی",
   "common.id16Placeholder": "[12,34,...]",
   "common.identityManagement": "مدیریت هویت",
+  "common.importFromExcel": "افزودن گروهی از اکسل",
   "common.importing": "در حال درون‌ریزی…",
   "common.inactive": "غیرفعال",
   "common.inputValue": "مقدار",

@@ -4,12 +4,14 @@ mod auth;
 mod i18n;
 mod i18n_catalog;
 mod orgs;
+mod policy;
+mod profiles;
 mod settings;
 mod users;
 
 use auth::{AdminSession, LoginError};
+use slint::{Model, ModelRc, VecModel};
 use i18n::{text, Lang};
-use slint::{ModelRc, VecModel};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -56,6 +58,25 @@ fn apply_language(ui: &AppWindow, lang: Lang) {
     s.set_admins_heading(text(lang, "common.organizationAdmins").into());
     s.set_mobile_heading(text(lang, "nav.settings").into());
     s.set_mobile_save_button(text(lang, "common.save").into());
+    s.set_policy_heading(text(lang, "common.policySettings").into());
+    s.set_create_policy_button(text(lang, "common.createPolicy").into());
+    s.set_policy_name_placeholder(text(lang, "common.policyNameExample").into());
+    s.set_publish_button(text(lang, "settings.publishDraft").into());
+    s.set_retire_button(text(lang, "settings.retirePolicy").into());
+    s.set_evaluate_button(text(lang, "common.evaluate").into());
+    s.set_rule_key_placeholder(text(lang, "common.ruleKeyToEvaluate").into());
+    s.set_profiles_heading(text(lang, "nav.profiles").into());
+    s.set_save_profile_button(text(lang, "common.save").into());
+    s.set_export_csv_button(text(lang, "common.exportCsv").into());
+    s.set_export_json_button(text(lang, "common.exportJson").into());
+    s.set_owner_label(text(lang, "common.userIdUuid").into());
+    s.set_full_name_label(text(lang, "common.fullName").into());
+    s.set_job_title_label(text(lang, "common.jobTitle").into());
+    s.set_contact_email_label(text(lang, "common.contactEmail").into());
+    s.set_contact_phone_label(text(lang, "common.contactPhone").into());
+    s.set_department_label(text(lang, "common.department").into());
+    s.set_team_label(text(lang, "common.teamMemberships").into());
+    s.set_import_from_excel(text(lang, "common.importFromExcel").into());
 }
 
 /// Maps a failure to catalog text. Network and server failures use existing
@@ -112,6 +133,7 @@ fn run_user_write<F, Fut>(
 }
 
 type SessionSlot = Arc<Mutex<Option<AdminSession>>>;
+type SelectedPolicy = Arc<Mutex<Option<policy::PolicyRow>>>;
 
 fn show_error(ui: &AppWindow, lang: Lang, error: UsersError) {
     match error {
@@ -278,6 +300,157 @@ fn apply_mobile_access(ui: &AppWindow, policy: &settings::MobileAccess) {
     ui.set_mobile_status(policy.enforcement_status.clone().into());
 }
 
+/// Organization of the signed-in admin; policy calls are scoped to it.
+fn org_id_of(session: &SessionSlot) -> Option<String> {
+    session.lock().ok()?.as_ref().map(|s| s.organization_id.clone())
+}
+
+fn show_policy_error(ui: &AppWindow, lang: Lang, error: UsersError) {
+    let message = match error {
+        UsersError::Forbidden => text(lang, "auth.adminAccessRequired"),
+        UsersError::Failed => text(lang, "status.failed"),
+    };
+    ui.set_policy_error(message.into());
+}
+
+/// Loads the policy list for the Settings page.
+fn load_policies(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
+    let Some(org) = org_id_of(&session) else { return };
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move { policy::list_policies(&token, &org).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(rows) => {
+                    let items: Vec<PolicyItem> = rows
+                        .iter()
+                        .map(|row| PolicyItem {
+                            id: row.id.clone().into(),
+                            name: row.name.clone().into(),
+                            status: row.status.clone().into(),
+                            version: row.version as i32,
+                        })
+                        .collect();
+                    ui.set_policies(ModelRc::new(VecModel::from(items)));
+                }
+                Err(error) => show_policy_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Reads one policy into the detail panel and keeps its concurrency values for the next command.
+fn load_policy_detail(
+    weak: slint::Weak<AppWindow>,
+    session: SessionSlot,
+    lang: Lang,
+    id: String,
+    selected: SelectedPolicy,
+) {
+    let Some(org) = org_id_of(&session) else { return };
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move { policy::policy_detail(&token, &org, &id).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(Some(row)) => {
+                    ui.set_selected_policy_id(row.id.clone().into());
+                    ui.set_selected_policy_name(row.name.clone().into());
+                    ui.set_selected_policy_status(row.status.clone().into());
+                    ui.set_selected_policy_version(row.version as i32);
+                    if let Ok(mut slot) = selected.lock() {
+                        *slot = Some(row);
+                    }
+                }
+                Ok(None) => ui.set_policy_error(text(lang, "common.noPolicyFound").into()),
+                Err(error) => show_policy_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Sends one lifecycle command to the selected policy, then reloads the list and detail.
+fn policy_command(
+    weak: slint::Weak<AppWindow>,
+    session: SessionSlot,
+    lang: Lang,
+    selected: SelectedPolicy,
+    command: &'static str,
+    payload: serde_json::Value,
+) {
+    let Some(org) = org_id_of(&session) else { return };
+    let Some(row) = selected.lock().ok().and_then(|slot| slot.clone()) else { return };
+    let id = row.id.clone();
+    let reload = selected.clone();
+    run_org_call(
+        weak,
+        session,
+        lang,
+        move |token| async move {
+            policy::send_command(&token, &org, command, &row, payload)
+                .await
+                .map(|output| output.to_string())
+        },
+        move |weak, session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(output) => {
+                    ui.set_policy_status(output.chars().take(300).collect::<String>().into());
+                    load_policies(weak.clone(), session.clone(), lang);
+                    load_policy_detail(weak, session, lang, id, reload);
+                }
+                Err(error) => show_policy_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Loads the staff profile list.
+fn load_profiles(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
+    run_org_call(
+        weak,
+        session,
+        lang,
+        |token| async move { profiles::list_profiles(&token).await },
+        move |weak, _session, lang, result| {
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(rows) => {
+                    let items: Vec<ProfileItem> = rows
+                        .into_iter()
+                        .map(|row| ProfileItem {
+                            owner: row.owner_id.into(),
+                            name: row.full_name.into(),
+                            title: row.job_title.unwrap_or_default().into(),
+                            department: row.department.unwrap_or_default().into(),
+                            class: row.class_label.unwrap_or_default().into(),
+                            email: row.contact_email.unwrap_or_default().into(),
+                            phone: row.contact_phone.unwrap_or_default().into(),
+                            parent: row.parent_display_name.unwrap_or_default().into(),
+                            teams: row.team_memberships.join("; ").into(),
+                            photo: row.photo_blob_key.unwrap_or_default().into(),
+                        })
+                        .collect();
+                    ui.set_profiles(ModelRc::new(VecModel::from(items)));
+                }
+                Err(error) => show_error(&ui, lang, error),
+            }
+        },
+    );
+}
+
+/// Turns an optional form field into `None` when blank.
+fn opt(value: slint::SharedString) -> Option<String> {
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
+
 /// Loads the Users list with the in-memory token. Runs off the UI thread.
 fn load_users(weak: slint::Weak<AppWindow>, session: Arc<Mutex<Option<AdminSession>>>, lang: Lang) {
     let token = match session
@@ -405,6 +578,9 @@ fn main() -> Result<(), slint::PlatformError> {
             load_users(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 1 {
             load_mobile_access(users_weak.clone(), page_session.clone(), page_lang.get());
+            load_policies(users_weak.clone(), page_session.clone(), page_lang.get());
+        } else if page == 2 {
+            load_profiles(users_weak.clone(), page_session.clone(), page_lang.get());
         } else if page == 3 {
             load_orgs(users_weak.clone(), page_session.clone(), page_lang.get());
         }
@@ -517,6 +693,41 @@ fn main() -> Result<(), slint::PlatformError> {
         }, org_id);
     });
 
+    let selected_policy: SelectedPolicy = Arc::new(Mutex::new(None));
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_select_policy(move |id| load_policy_detail(weak.clone(), session.clone(), lang.get(), id.to_string(), selected.clone()));
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_create_policy(move |name| {
+        let name = name.to_string();
+        let key = new_request_id();
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { policy::create_policy(&token, &name, &key).await.map(|_| ()) },
+            move |weak, session, lang, result| match result {
+                Ok(()) => load_policies(weak, session, lang),
+                Err(error) => {
+                    if let Some(ui) = weak.upgrade() {
+                        show_policy_error(&ui, lang, error);
+                    }
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_publish_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "publish", serde_json::json!({})));
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_retire_policy(move || policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "retire", serde_json::json!({})));
+
+    let (weak, session, lang, selected) = (ui.as_weak(), write_session.clone(), write_lang.clone(), selected_policy.clone());
+    ui.on_evaluate_policy(move |key| {
+        policy_command(weak.clone(), session.clone(), lang.get(), selected.clone(), "evaluate", serde_json::json!({ "rule_key": key.to_string() }))
+    });
+
     let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
     ui.on_save_mobile_access(move |top, senior, team, supervisor, staff| {
         let Some(ui) = weak.upgrade() else { return };
@@ -543,6 +754,109 @@ fn main() -> Result<(), slint::PlatformError> {
                 match result {
                     Ok(policy) => apply_mobile_access(&ui, &policy),
                     Err(error) => show_error(&ui, lang, error),
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_save_profile(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let team_memberships: Vec<String> = ui
+            .get_form_teams()
+            .split(';')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let form = profiles::ProfileForm {
+            owner_id: ui.get_form_owner().trim().to_string(),
+            full_name: ui.get_form_name().trim().to_string(),
+            job_title: opt(ui.get_form_title()),
+            contact_email: opt(ui.get_form_email()),
+            contact_phone: opt(ui.get_form_phone()),
+            department: opt(ui.get_form_department()),
+            photo_blob_key: opt(ui.get_form_photo()),
+            class_label: opt(ui.get_form_class()),
+            parent_display_name: opt(ui.get_form_parent()),
+            team_memberships,
+        };
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move { profiles::save_profile(&token, &form).await },
+            move |weak, session, lang, result| match result {
+                Ok(()) => load_profiles(weak, session, lang),
+                Err(error) => {
+                    if let Some(ui) = weak.upgrade() {
+                        show_error(&ui, lang, error);
+                    }
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_import_profiles(move || {
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move {
+                let picked = tokio::task::spawn_blocking(profiles::pick_import_file)
+                    .await
+                    .map_err(|_| UsersError::Failed)?;
+                let Some((bytes, content_type)) = picked else {
+                    return Ok(None);
+                };
+                let report = profiles::import_bytes(&token, bytes, content_type).await?;
+                // The report holds one-time passwords. It is saved only where the user chooses.
+                let summary = format!(
+                    "{} / {} / {}",
+                    report.total, report.created, report.failed
+                );
+                let saved = tokio::task::spawn_blocking(move || {
+                    profiles::save_file(&report.bytes, "onyx-creation-report.xlsx")
+                })
+                .await
+                .map_err(|_| UsersError::Failed)??;
+                Ok(saved.then_some(summary))
+            },
+            move |weak, session, lang, result| match result {
+                Ok(Some(summary)) => {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_import_status(summary.into());
+                    }
+                    load_profiles(weak, session, lang)
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    if let Some(ui) = weak.upgrade() {
+                        show_error(&ui, lang, error);
+                    }
+                }
+            },
+        );
+    });
+
+    let (weak, session, lang) = (ui.as_weak(), write_session.clone(), write_lang.clone());
+    ui.on_export_profiles(move |format| {
+        let format = format.to_string();
+        run_org_call(
+            weak.clone(),
+            session.clone(),
+            lang.get(),
+            move |token| async move {
+                let bytes = profiles::export_bytes(&token, &format).await?;
+                let file_name = format!("profiles.{format}");
+                tokio::task::spawn_blocking(move || profiles::save_file(&bytes, &file_name))
+                    .await
+                    .map_err(|_| UsersError::Failed)?
+                    .map(|_| ())
+            },
+            move |weak, _session, lang, result| {
+                if let (Some(ui), Err(error)) = (weak.upgrade(), result) {
+                    show_error(&ui, lang, error);
                 }
             },
         );
