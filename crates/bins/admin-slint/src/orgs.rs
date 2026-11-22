@@ -91,7 +91,9 @@ pub async fn rename_org(token: &str, org_id: &str, name: &str) -> Result<(), Use
 pub async fn set_org_active(token: &str, org_id: &str, active: bool) -> Result<(), UsersError> {
     let action = if active { "activate" } else { "deactivate" };
     let response = client()?
-        .post(format!("{API_BASE}/api/allfather/organizations/{org_id}/{action}"))
+        .post(format!(
+            "{API_BASE}/api/allfather/organizations/{org_id}/{action}"
+        ))
         .bearer_auth(token)
         .send()
         .await
@@ -121,7 +123,12 @@ pub async fn create_admin(
     let response = client()?
         .post(format!("{API_BASE}/api/allfather/admins"))
         .bearer_auth(token)
-        .json(&CreateAdminBody { organization_id: org_id, username, email, password })
+        .json(&CreateAdminBody {
+            organization_id: org_id,
+            username,
+            email,
+            password,
+        })
         .send()
         .await
         .map_err(transport)?;
@@ -131,7 +138,9 @@ pub async fn create_admin(
 /// Deactivates an org Admin (DELETE) or reactivates one (POST), as the Tauri Admin does.
 pub async fn set_admin_active(token: &str, admin_id: &str, active: bool) -> Result<(), UsersError> {
     let request = if active {
-        client()?.post(format!("{API_BASE}/api/allfather/admins/{admin_id}/reactivate"))
+        client()?.post(format!(
+            "{API_BASE}/api/allfather/admins/{admin_id}/reactivate"
+        ))
     } else {
         client()?.delete(format!("{API_BASE}/api/admin/users/{admin_id}"))
     };

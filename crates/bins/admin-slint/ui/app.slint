@@ -50,6 +50,17 @@ export struct UserItem {
     active: bool,
 }
 
+export struct HoldItem {
+    id: string,
+    status: string,
+}
+
+export struct PendingRuleItem {
+    rule-type: string,
+    key: string,
+    value: string,
+}
+
 export global Strings {
     in-out property <string> app-title;
     in-out property <string> theme-light;
@@ -121,6 +132,9 @@ export global Strings {
     in-out property <string> team-label;
     in-out property <string> photo-label;
     in-out property <string> import-from-excel;
+    in-out property <string> show-details;
+    in-out property <string> hide-details;
+    in-out property <string> remove-rule;
 }
 
 component NavButton inherits Rectangle {
@@ -181,10 +195,15 @@ export component AppWindow inherits Window {
     in-out property <string> selected-policy-name: "";
     in-out property <string> selected-policy-status: "";
     in-out property <int> selected-policy-version: 0;
+    in-out property <[PendingRuleItem]> pending-rules: [];
+    in-out property <string> policy-evaluation-detail: "";
+    in-out property <bool> policy-evaluation-detail-visible: false;
     in-out property <string> legal-hold-error: "";
+    in-out property <[HoldItem]> legal-holds: [];
     in-out property <string> legal-hold-target-input: "";
     in-out property <string> legal-hold-type-input: "";
     in-out property <string> legal-hold-reason-input: "";
+    in-out property <string> legal-hold-release-reason-input: "";
     in-out property <string> legal-hold-view-id: "";
     in-out property <string> legal-hold-selected-id: "";
     in-out property <string> legal-hold-state: "";
@@ -227,8 +246,11 @@ export component AppWindow inherits Window {
     callback retire-policy();
     callback evaluate-policy(string);
     callback add-policy-rule(string, string, string);
+    callback remove-policy-rule(int);
     callback create-policy-version();
+    callback toggle-policy-evaluation-detail();
     callback apply-legal-hold(string, string, string);
+    callback select-legal-hold(string);
     callback view-legal-hold(string);
     callback release-legal-hold();
     callback save-profile();
@@ -334,17 +356,17 @@ export component AppWindow inherits Window {
                     NavButton {
                         label: Strings.nav-settings;
                         active: root.page == 1;
-                        clicked => { root.page = 1; }
+                        clicked => { root.page = 1; root.select-page(1); }
                     }
                     NavButton {
                         label: Strings.nav-profiles;
                         active: root.page == 2;
-                        clicked => { root.page = 2; }
+                        clicked => { root.page = 2; root.select-page(2); }
                     }
                     if root.is-all-father: NavButton {
                         label: Strings.nav-organizations;
                         active: root.page == 3;
-                        clicked => { root.page = 3; }
+                        clicked => { root.page = 3; root.select-page(3); }
                     }
                     Rectangle { vertical-stretch: 1; }
                     Button {
@@ -588,6 +610,19 @@ export component AppWindow inherits Window {
                                     clicked => { root.create-policy-version(); }
                                 }
                             }
+                            for rule[index] in root.pending-rules: HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: rule.rule-type + " · " + rule.key + " = " + rule.value;
+                                    color: Theme.text;
+                                    vertical-alignment: center;
+                                    wrap: word-wrap;
+                                }
+                                Button {
+                                    text: Strings.remove-rule;
+                                    clicked => { root.remove-policy-rule(index); }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 LineEdit {
@@ -604,6 +639,19 @@ export component AppWindow inherits Window {
                                 color: Theme.text-dim;
                                 wrap: word-wrap;
                             }
+                            if root.policy-evaluation-detail != "": VerticalLayout {
+                                spacing: 4px;
+                                Button {
+                                    text: root.policy-evaluation-detail-visible ? Strings.hide-details : Strings.show-details;
+                                    clicked => { root.toggle-policy-evaluation-detail(); }
+                                }
+                                if root.policy-evaluation-detail-visible: Text {
+                                    text: root.policy-evaluation-detail;
+                                    color: Theme.text;
+                                    font-family: "monospace";
+                                    wrap: word-wrap;
+                                }
+                            }
                         }
                     }
                     if root.page == 1: VerticalLayout {
@@ -617,6 +665,19 @@ export component AppWindow inherits Window {
                         Text {
                             text: root.legal-hold-error;
                             color: Theme.text-dim;
+                        }
+                        for hold in root.legal-holds: HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: hold.id + " · " + hold.status;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                                wrap: word-wrap;
+                            }
+                            Button {
+                                text: Strings.view-button;
+                                clicked => { root.select-legal-hold(hold.id); }
+                            }
                         }
                         LineEdit {
                             placeholder-text: Strings.target-id-placeholder;
@@ -653,9 +714,17 @@ export component AppWindow inherits Window {
                                 text: root.legal-hold-state;
                                 color: Theme.text;
                             }
-                            if root.legal-hold-can-release: Button {
-                                text: Strings.release-button;
-                                clicked => { root.release-legal-hold(); }
+                            if root.legal-hold-can-release: VerticalLayout {
+                                spacing: 6px;
+                                LineEdit {
+                                    placeholder-text: Strings.reason-placeholder;
+                                    text <=> root.legal-hold-release-reason-input;
+                                }
+                                Button {
+                                    text: Strings.release-button;
+                                    enabled: root.legal-hold-release-reason-input != "";
+                                    clicked => { root.release-legal-hold(); }
+                                }
                             }
                         }
                     }

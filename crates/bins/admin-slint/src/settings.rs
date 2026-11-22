@@ -56,7 +56,10 @@ pub async fn put_mobile_access(
     let response = client()?
         .put(format!("{API_BASE}/api/admin/mobile-access"))
         .bearer_auth(token)
-        .json(&SaveBody { allowed_classes, expected_version })
+        .json(&SaveBody {
+            allowed_classes,
+            expected_version,
+        })
         .send()
         .await
         .map_err(|_| UsersError::Failed)?;

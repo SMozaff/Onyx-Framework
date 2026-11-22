@@ -87,7 +87,11 @@ pub struct ImportReport {
 
 /// Sends the raw file as the request body. The Worker detects .xlsx by content,
 /// and CSV or JSON by Content-Type. Every non-empty row creates an account.
-pub async fn import_bytes(token: &str, bytes: Vec<u8>, content_type: &str) -> Result<ImportReport, UsersError> {
+pub async fn import_bytes(
+    token: &str,
+    bytes: Vec<u8>,
+    content_type: &str,
+) -> Result<ImportReport, UsersError> {
     let response = client()?
         .post(format!("{API_BASE}/api/admin/profiles/import"))
         .bearer_auth(token)
@@ -115,7 +119,12 @@ pub async fn import_bytes(token: &str, bytes: Vec<u8>, content_type: &str) -> Re
         .await
         .map(|b| b.to_vec())
         .map_err(|_| UsersError::Failed)?;
-    Ok(ImportReport { bytes, total, created, failed })
+    Ok(ImportReport {
+        bytes,
+        total,
+        created,
+        failed,
+    })
 }
 
 pub async fn export_bytes(token: &str, format: &str) -> Result<Vec<u8>, UsersError> {
@@ -149,10 +158,7 @@ pub fn pick_import_file() -> Option<(Vec<u8>, &'static str)> {
 
 /// Opens a save dialog and writes the bytes. `Ok(false)` means cancelled.
 pub fn save_file(bytes: &[u8], file_name: &str) -> Result<bool, UsersError> {
-    let Some(path) = rfd::FileDialog::new()
-        .set_file_name(file_name)
-        .save_file()
-    else {
+    let Some(path) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
         return Ok(false);
     };
     std::fs::write(path, bytes).map_err(|_| UsersError::Failed)?;
