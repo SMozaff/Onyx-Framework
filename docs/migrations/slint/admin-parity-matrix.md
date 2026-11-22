@@ -56,7 +56,7 @@ Source: `admin-shell/ui/src/pages/Users.tsx` (registered controls AD-I-005 … A
 
 | Control (AD-I) | Tauri behavior | Slint behavior | Status |
 |---|---|---|---|
-| AD-I-005 Create user username | Input; required; create payload includes it. | LineEdit `new-username`; create sends trimmed values. | `present` (adapted; uniqueness/password strength server-enforced). |
+| AD-I-005 Create user username | Input; required; create payload includes it; button disabled when username/email blank or password empty. | LineEdit `new-username`; create sends trimmed values; no disable binding. | `present` (adapted; server enforces uniqueness/password strength) / `omitted (reason)` for the missing client-side disable binding (R-25 follow-up). |
 | AD-I-006 Create user email | Required, type email. | LineEdit `new-email`; create sends trimmed values. | `present` (adapted; server enforces). |
 | AD-I-007 Create user password | Required, type password; memory-only handling. | LineEdit `new-password`; create sends trimmed values; memory-only. | `present` (adapted; Q-01). |
 | AD-I-008 Create user class | Select incl. no-class option. | ComboBox over `class-options` incl. `""` (no class). | `present`. |
