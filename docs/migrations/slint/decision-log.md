@@ -489,6 +489,29 @@ Owner-approved 2026-11-15:
 
 Implementation requirement (already decided earlier): ONYX ID is the primary login identifier; username and email remain aliases; the Worker login must accept all three and enforce a password change when must_change_password is set.
 
+## Admin Slint parity matrix written (2026-11-23)
+
+Stage S6 work item R-24 delivered the control-by-control parity matrix:
+`docs/migrations/slint/admin-parity-matrix.md`, covering AD-01…AD-07 against the Tauri admin
+baseline and the Slint admin host, with per-control status `present` / `fixed` / `omitted` /
+`blocked`.
+
+### Changes
+- New deliverable: `docs/migrations/slint/admin-parity-matrix.md` (source-to-source audit of the
+  forensic interactive-element register AD-I-001 … AD-I-061 mapped onto the Slint host).
+- Fixes landed with the S5 completion branch that the audit confirmed and that close parity gaps:
+  Slint page navigation now calls `select-page` for Settings/Profiles/Organizations, structured
+  evaluation display, legal-hold list/retry/release reason, policy-create retry key retention.
+
+### Verification
+- Source-to-source only. No runtime parity claim is made without a deployed Worker and a GUI run
+  (R-30 / R-10), per the acceptance rules of the stage.
+
+### Open
+- R-25 follow-up fixes (client-side disable / busy bindings) and R-28 (Latin-digit helper sharing)
+  remain open; R-26 enhancements stay owner-approvable. Gate 0b evidence package (R-60) still pending.
+
+
 ## Admin Slint completion A implemented (2026-11-23)
 
 Work items R-20 to R-23 from `ONYX_Remaining_Work_Technical_Source.md` were implemented on the Admin Slint host (`crates/bins/admin-slint`).
