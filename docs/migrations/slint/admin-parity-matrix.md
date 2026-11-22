@@ -56,11 +56,11 @@ Source: `admin-shell/ui/src/pages/Users.tsx` (registered controls AD-I-005 … A
 
 | Control (AD-I) | Tauri behavior | Slint behavior | Status |
 |---|---|---|---|
-| AD-I-005 Create user username | Input; required; create payload includes it; button disabled when username/email blank or password empty. | LineEdit `new-username`; create sends trimmed values; no disable binding. | `present` (adapted; server enforces uniqueness/password strength) / `omitted (reason)` for the missing client-side disable binding (R-25 follow-up). |
+| AD-I-005 Create user username | Input; required; create payload includes it; button disabled when username/email blank or password empty. | LineEdit `new-username`; create sends trimmed values; create disabled until all required fields are filled (R-25). | `fixed` — client-side disable binding added in R-25 follow-up; server still enforces uniqueness/password strength. |
 | AD-I-006 Create user email | Required, type email. | LineEdit `new-email`; create sends trimmed values. | `present` (adapted; server enforces). |
-| AD-I-007 Create user password | Required, type password; memory-only handling. | LineEdit `new-password`; create sends trimmed values; memory-only. | `present` (adapted; Q-01). |
+| AD-I-007 Create user password | Required, type password; memory-only handling. | LineEdit `new-password`; create sends trimmed values; memory-only. | `present` (adapted; Q-01). Create submit disabled until username/email/password are non-empty (`fixed` in R-25 follow-up). |
 | AD-I-008 Create user class | Select incl. no-class option. | ComboBox over `class-options` incl. `""` (no class). | `present`. |
-| AD-I-009 Create user submit | Disabled while loading or when username/email blank or password empty; busy label. | Sends on click; no disable binding; busy label on sign-in only. | `present` (adapted; server enforces validation) / `omitted (reason)` for the missing client-side disable binding (R-25 follow-up). |
+| AD-I-009 Create user submit | Disabled while loading or when username/email blank or password empty; busy label. | Disabled until username/email/password are non-empty and no write is in flight (R-25). | `fixed` — create button disabled until all three fields are non-empty and no write is in flight. |
 | AD-I-010 Set user class | Per-row select; disabled while busy. | Per-row ComboBox; disabled while busy. | `present`. |
 | AD-I-011 Set user parent | Per-row select from other users; disabled while busy. | Per-row LineEdit + Save button; disabled while busy. | `adapted` — input mechanism differs (free text + explicit save vs select). Status: `present` (functionality parity). |
 | AD-I-012 Toggle user active | Per-row button; disabled while busy. | Per-row button; disabled while busy. | `present`. |
@@ -72,15 +72,15 @@ Source: `admin-shell/ui/src/pages/Settings.tsx` (registered controls AD-I-013 �
 
 | Control (AD-I) | Tauri behavior | Slint behavior | Status |
 |---|---|---|---|
-| AD-I-013 Mobile access class toggle | Checkbox per class; disabled while saving/loading/loadFailed. | CheckBox per class; save via `save-mobile-access`. | `present` (adapted). |
+| AD-I-013 Mobile access class toggle | Checkbox per class; disabled while saving/loading/loadFailed. | CheckBox per class; save via `save-mobile-access`; save disabled while a write is in flight (R-25). | `fixed`. |
 | AD-I-014 Policy lookup by id | Input + Open; loads policy by id. | Input + Evaluate (rule key) — no explicit open-by-id. | `omitted (reason)` — Slint implements evaluation-by-key instead of open-by-id. |
-| AD-I-015 Policy create | Disabled when name blank or loading; retries keep the create operation for the same name. | Sends create for non-empty trimmed name; **retries retain the action key** (S5 completion); no disable binding. | `present` (adapted; retry retention fixed). |
-| AD-I-016 Submit policy draft | Save draft disabled while loading; resets draft after submit; blank-key rules filtered. | Pending rules cleared after create version; create disabled when pending empty. | `present` (adapted). |
+| AD-I-015 Policy create | Disabled when name blank or loading; retries keep the create operation for the same name. | Disabled until name is non-empty and no policy command is busy; **retries retain the action key** (S5). | `fixed` — retry retention (S5) plus disabled-until-blank / busy binding (R-25 follow-up). |
+| AD-I-016 Submit policy draft | Save draft disabled while loading; resets draft after submit; blank-key rules filtered. | Pending rules cleared after create version; create disabled when pending empty or a policy command is busy (R-25). | `fixed`. |
 | AD-I-017–020 Draft rule editor | Per-rule type/key/value; add appends. | Pending-rule list with add/remove (S5); per-rule editor. | `present` (adapted; removal added). |
-| AD-I-021 Publish policy | Disabled while command loading. | Button enabled always; busy not bound to UI. | `omitted (reason)` — busy binding pending (R-25 follow-up). |
-| AD-I-022 Retire policy | Disabled while command loading. | Same as publish. | `omitted (reason)` — busy binding pending (R-25 follow-up). |
-| AD-I-023 Evaluate policy | Disabled while loading or no key; shows JSON result. | Result via summary + pretty detail (S5); evaluate button has no disable-until-key binding. | `present` (result display fixed) / `omitted (reason)` for disable-until-key. |
-| AD-I-024 Legal hold apply | Disabled unless target id/type/reason non-blank; busy; retry via preserved operation. | Apply guarded by early return; retry key retention (S5); release requires entered reason (S5). | `present` (adapted; disable binding pending). |
+| AD-I-021 Publish policy | Disabled while command loading. | Disabled while a policy command is in flight (R-25). | `fixed` — disabled while a policy command is in flight (R-25 follow-up). |
+| AD-I-022 Retire policy | Disabled while command loading. | Same as publish. | `fixed` — disabled while a policy command is in flight (R-25 follow-up). |
+| AD-I-023 Evaluate policy | Disabled while loading or no key; shows JSON result. | Result via summary + pretty detail (S5); evaluate disabled until a key is entered and no command is busy (R-25). | `fixed` — structured result (S5) plus disabled-until-key and busy binding (R-25 follow-up). |
+| AD-I-024 Legal hold apply | Disabled unless target id/type/reason non-blank; busy; retry via preserved operation. | Apply disabled until target/type/reason are non-empty and no write is in flight (R-25); retry key retention and release reason (S5). | `fixed` — apply disabled until target/type/reason are non-empty and no write is in flight (R-25 follow-up). |
 | AD-I-025 Release legal hold | Lookup by hold id; release disabled while loading; reason fixed. | Lookup by hold id; release requires entered reason; refresh after write (S5). | `present` (adapted; reason now owner-driven input). |
 
 ## AD-05 — Staff profiles
@@ -104,14 +104,14 @@ Slint page 3.
 | Control (AD-I) | Tauri behavior | Slint behavior | Status |
 |---|---|---|---|
 | AD-I-049 Refresh organizations | Button + load. | `load_orgs` on navigation (S5). | `present`. |
-| AD-I-050 Create org name | Required; maxLength 160; create disabled if blank/busy. | LineEdit + create; no blank/max checks. | `present` (adapted; server enforces length) / `omitted (reason)` for client-side checks (R-25 follow-up). |
-| AD-I-051 Create org | Disabled if busy/blank. | Sends create; no busy/blank binding. | `present` (adapted). |
+| AD-I-050 Create org name | Required; maxLength 160; create disabled if blank/busy. | Create disabled until name is non-empty and no write is in flight (R-25); server enforces max length. | `fixed` — create/rename disabled while blank/unchanged or busy; server still enforces the 160-character limit. |
+| AD-I-051 Create org | Disabled if busy/blank. | Create disabled until the name is non-empty and no write is in flight (R-25). | `fixed`. |
 | AD-I-052 Rename org | Max 160; disabled if busy or system org. | Sends rename; no checks. | `present` (adapted; server enforces length). |
-| AD-I-053 Rename org submit | Disabled if busy or unchanged/system. | Sends rename; no unchanged/system checks. | `omitted (reason)` for client-side checks (R-25 follow-up). |
-| AD-I-054 Activate/deactivate org | Disabled while busy/system constraints. | Sends toggle; no busy binding. | `omitted (reason)` pending busy binding (R-25 follow-up). |
+| AD-I-053 Rename org submit | Disabled if busy or unchanged/system. | Rename disabled when unchanged or while a write is in flight (R-25); system-org check remains server-side. | `fixed` — rename disabled when unchanged or busy (R-25 follow-up). |
+| AD-I-054 Activate/deactivate org | Disabled while busy/system constraints. | Disabled while a write is in flight (R-25). | `fixed` — org toggle disabled while a write is in flight (R-25 follow-up). |
 | AD-I-055 Manage org admins | Selects org, lists admins; create/toggle. | `select-org` loads admins (S5); create/toggle via org writes (S5). | `present` (adapted). |
-| AD-I-056 … AD-I-059 Org admin create | Username/email/password required; password min 8; disabled if busy/inactive org. | Sends create; no min-length/blank/inactive bindings; server enforces password rules. | `present` (adapted) / `omitted (reason)` for client-side checks (R-25 follow-up). |
-| AD-I-060 Toggle org admin status | Per-row toggle; disabled while busy. | Per-row toggle; reload after write (S5). | `present`. |
+| AD-I-056 … AD-I-059 Org admin create | Username/email/password required; password min 8; disabled if busy/inactive org. | Disabled until all fields are non-empty, the selected org is active and no write is in flight (R-25); server enforces password rules. | `fixed` — org-admin create disabled until all fields are non-empty, the selected org is active and no write is in flight; server still enforces the password minimum. |
+| AD-I-060 Toggle org admin status | Per-row toggle; disabled while busy. | Per-row toggle; reload after write (S5); disabled while a write is in flight (R-25). | `fixed`. |
 
 ## AD-07 — Admin access required
 
@@ -132,10 +132,11 @@ Slint page 3.
 - **R-24:** the matrix above is the control-by-control comparison; every registered control was
   examined. Remaining per-control deviations are recorded per table as `omitted (reason)` and are
   closed by follow-up fixes or recorded as owner decisions.
-- **R-25:** Phase 1/2 checklist audit vs implemented Slint — outstanding feasible fixes:
-  create-user disabled-until-valid, policy create disabled-until-blank, publish/retire busy
-  disabling, evaluate disable-until-key, legal-hold apply disable-until-valid, organization
-  create/rename/admin validation and busy bindings. All are UI-level and low risk.
+- **R-25:** Phase 1/2 checklist audit vs implemented Slint — all listed feasible fixes landed in
+  the R-25 follow-up commit: create-user disabled-until-valid, policy create disabled-until-blank,
+  publish/retire/evaluate/create-version busy and key gating, legal-hold apply/release gating,
+  organization create/rename/toggle/admin validation and busy bindings (including inactive-org
+  gating for admin creation). Runtime verification remains a CI/GUI action.
 - **R-26:** Users screen search/sort/paging — blocked on Slint Table-widget parity (spike U-01) or
   an owner-approved enhancement.
 - **R-28:** Latin-digit helper (Q-16/U-05) must be applied to every ID display in the Slint Admin

@@ -251,14 +251,12 @@ fn load_orgs(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
 /// Loads the Admins of one organization and marks it as selected.
 fn load_org_admins(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang, org_id: String) {
     if let Some(ui) = weak.upgrade() {
-        let name = ui
-            .get_orgs()
-            .iter()
-            .find(|org| org.id.as_str() == org_id)
-            .map(|org| org.name.to_string())
-            .unwrap_or_default();
+        let selected = ui.get_orgs().iter().find(|org| org.id.as_str() == org_id);
+        let name = selected.as_ref().map(|org| org.name.to_string()).unwrap_or_default();
+        let active = selected.as_ref().is_some_and(|org| org.active);
         ui.set_selected_org_id(org_id.clone().into());
         ui.set_selected_org_name(name.into());
+        ui.set_selected_org_active(active);
     }
     let call_id = org_id.clone();
     run_org_call(
@@ -486,6 +484,9 @@ fn policy_command(
     let id = row.id.clone();
     let concurrency = row.concurrency();
     let reload = selected.clone();
+    if let Some(ui) = weak.upgrade() {
+        ui.set_policy_command_busy(true);
+    }
     run_org_call(
         weak,
         session,
@@ -495,6 +496,7 @@ fn policy_command(
         },
         move |weak, session, lang, result| {
             let Some(ui) = weak.upgrade() else { return };
+            ui.set_policy_command_busy(false);
             match result {
                 Ok(response) => {
                     if command == "policy.CreatePolicyVersion" {

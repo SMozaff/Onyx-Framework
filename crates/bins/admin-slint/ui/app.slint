@@ -174,6 +174,9 @@ export component AppWindow inherits Window {
     in-out property <[UserItem]> users: [];
     in-out property <string> users-error: "";
     in-out property <bool> users-loading: false;
+    in-out property <string> create-user-username: "";
+    in-out property <string> create-user-email: "";
+    in-out property <string> create-user-password: "";
     in-out property <bool> mobile-top: false;
     in-out property <bool> mobile-senior: false;
     in-out property <bool> mobile-team: false;
@@ -186,6 +189,7 @@ export component AppWindow inherits Window {
     in-out property <string> policy-error: "";
     in-out property <string> policy-status: "";
     in-out property <string> policy-name-input: "";
+    in-out property <bool> policy-command-busy: false;
     in-out property <string> policy-rule-key: "";
     in-out property <string> selected-policy-id: "";
     in-out property <string> rule-type-input: "FeatureToggle";
@@ -223,6 +227,11 @@ export component AppWindow inherits Window {
     in-out property <[AdminItem]> org-admins: [];
     in-out property <string> selected-org-id: "";
     in-out property <string> selected-org-name: "";
+    in-out property <bool> selected-org-active: false;
+    in-out property <string> org-create-name: "";
+    in-out property <string> org-admin-username: "";
+    in-out property <string> org-admin-email: "";
+    in-out property <string> org-admin-password: "";
     in-out property <[string]> class-options: ["", "top_level_manager", "senior_manager", "team_leader", "supervisor", "staff"];
 
     callback select-language(string);
@@ -405,12 +414,23 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         HorizontalLayout {
                             spacing: 8px;
-                            new-username := LineEdit { placeholder-text: Strings.username-label; }
-                            new-email := LineEdit { placeholder-text: Strings.email-label; }
-                            new-password := LineEdit { placeholder-text: Strings.password-label; input-type: InputType.password; }
+                            new-username := LineEdit {
+                                placeholder-text: Strings.username-label;
+                                text <=> root.create-user-username;
+                            }
+                            new-email := LineEdit {
+                                placeholder-text: Strings.email-label;
+                                text <=> root.create-user-email;
+                            }
+                            new-password := LineEdit {
+                                placeholder-text: Strings.password-label;
+                                input-type: InputType.password;
+                                text <=> root.create-user-password;
+                            }
                             new-class := ComboBox { model: root.class-options; }
                             Button {
                                 text: Strings.create-user-button;
+                                enabled: root.create-user-username != "" && root.create-user-email != "" && root.create-user-password != "" && !root.users-loading;
                                 clicked => { root.create-user(new-username.text, new-email.text, new-password.text, new-class.current-value); }
                             }
                         }
@@ -445,9 +465,13 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         HorizontalLayout {
                             spacing: 8px;
-                            new-org-name := LineEdit { placeholder-text: Strings.name-label; }
+                            new-org-name := LineEdit {
+                                placeholder-text: Strings.name-label;
+                                text <=> root.org-create-name;
+                            }
                             Button {
                                 text: Strings.create-org-button;
+                                enabled: root.org-create-name != "" && !root.users-loading;
                                 clicked => { root.create-org(new-org-name.text); }
                             }
                         }
@@ -462,14 +486,17 @@ export component AppWindow inherits Window {
                             org-rename := LineEdit { text: org.name; }
                             Button {
                                 text: Strings.save-button;
+                                enabled: org-rename.text != org.name && !root.users-loading;
                                 clicked => { root.rename-org(org.id, org-rename.text); }
                             }
                             Button {
                                 text: org.active ? Strings.deactivate-button : Strings.activate-button;
+                                enabled: !root.users-loading;
                                 clicked => { root.toggle-org(org.id, !org.active); }
                             }
                             Button {
                                 text: Strings.admins-heading;
+                                enabled: !root.users-loading;
                                 clicked => { root.select-org(org.id); }
                             }
                         }
@@ -482,11 +509,22 @@ export component AppWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                admin-username := LineEdit { placeholder-text: Strings.username-label; }
-                                admin-email := LineEdit { placeholder-text: Strings.email-label; }
-                                admin-password := LineEdit { placeholder-text: Strings.password-label; input-type: InputType.password; }
+                                admin-username := LineEdit {
+                                    placeholder-text: Strings.username-label;
+                                    text <=> root.org-admin-username;
+                                }
+                                admin-email := LineEdit {
+                                    placeholder-text: Strings.email-label;
+                                    text <=> root.org-admin-email;
+                                }
+                                admin-password := LineEdit {
+                                    placeholder-text: Strings.password-label;
+                                    input-type: InputType.password;
+                                    text <=> root.org-admin-password;
+                                }
                                 Button {
                                     text: Strings.create-admin-button;
+                                    enabled: root.selected-org-active && root.org-admin-username != "" && root.org-admin-email != "" && root.org-admin-password != "" && !root.users-loading;
                                     clicked => { root.create-org-admin(admin-username.text, admin-email.text, admin-password.text); }
                                 }
                             }
@@ -500,6 +538,7 @@ export component AppWindow inherits Window {
                                 }
                                 Button {
                                     text: admin.active ? Strings.deactivate-button : Strings.activate-button;
+                                    enabled: !root.users-loading;
                                     clicked => { root.toggle-admin(admin.id, !admin.active); }
                                 }
                             }
@@ -524,6 +563,7 @@ export component AppWindow inherits Window {
                         CheckBox { text: "staff"; checked: root.mobile-staff; toggled => { root.mobile-staff = self.checked; } }
                         Button {
                             text: Strings.mobile-save-button;
+                            enabled: !root.users-loading;
                             clicked => {
                                 root.save-mobile-access(root.mobile-top, root.mobile-senior, root.mobile-team, root.mobile-supervisor, root.mobile-staff);
                             }
@@ -549,6 +589,7 @@ export component AppWindow inherits Window {
                             }
                             Button {
                                 text: Strings.create-policy-button;
+                                enabled: root.policy-name-input != "" && !root.policy-command-busy;
                                 clicked => { root.create-policy(root.policy-name-input); }
                             }
                         }
@@ -566,10 +607,12 @@ export component AppWindow inherits Window {
                                 spacing: 8px;
                                 Button {
                                     text: Strings.publish-button;
+                                    enabled: !root.policy-command-busy;
                                     clicked => { root.publish-policy(); }
                                 }
                                 Button {
                                     text: Strings.retire-button;
+                                    enabled: !root.policy-command-busy;
                                     clicked => { root.retire-policy(); }
                                 }
                             }
@@ -606,7 +649,7 @@ export component AppWindow inherits Window {
                                 }
                                 Button {
                                     text: Strings.create-version-button;
-                                    enabled: root.rules-pending > 0;
+                                    enabled: root.rules-pending > 0 && !root.policy-command-busy;
                                     clicked => { root.create-policy-version(); }
                                 }
                             }
@@ -631,6 +674,7 @@ export component AppWindow inherits Window {
                                 }
                                 Button {
                                     text: Strings.evaluate-button;
+                                    enabled: root.policy-rule-key != "" && !root.policy-command-busy;
                                     clicked => { root.evaluate-policy(root.policy-rule-key); }
                                 }
                             }
@@ -693,6 +737,7 @@ export component AppWindow inherits Window {
                         }
                         Button {
                             text: Strings.apply-legal-hold-button;
+                            enabled: root.legal-hold-target-input != "" && root.legal-hold-type-input != "" && root.legal-hold-reason-input != "" && !root.users-loading;
                             clicked => {
                                 root.apply-legal-hold(root.legal-hold-target-input, root.legal-hold-type-input, root.legal-hold-reason-input);
                             }
@@ -722,7 +767,7 @@ export component AppWindow inherits Window {
                                 }
                                 Button {
                                     text: Strings.release-button;
-                                    enabled: root.legal-hold-release-reason-input != "";
+                                    enabled: root.legal-hold-release-reason-input != "" && !root.users-loading;
                                     clicked => { root.release-legal-hold(); }
                                 }
                             }
