@@ -253,7 +253,10 @@ fn load_orgs(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
 fn load_org_admins(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang, org_id: String) {
     if let Some(ui) = weak.upgrade() {
         let selected = ui.get_orgs().iter().find(|org| org.id.as_str() == org_id);
-        let name = selected.as_ref().map(|org| org.name.to_string()).unwrap_or_default();
+        let name = selected
+            .as_ref()
+            .map(|org| org.name.to_string())
+            .unwrap_or_default();
         let active = selected.as_ref().is_some_and(|org| org.active);
         ui.set_selected_org_id(org_id.clone().into());
         ui.set_selected_org_name(name.into());
