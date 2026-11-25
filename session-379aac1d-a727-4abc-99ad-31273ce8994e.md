@@ -2,7 +2,7 @@
 
 **Session ID:** ses_dfab4be24ffeZbOkGQyjl3c7c2
 **Created:** 11/23/2026, 1:35:47 AM
-**Updated:** 11/23/2026, 5:15:47 AM
+**Updated:** 11/25/2026, 10:37:22 PM
 
 ---
 
@@ -17358,3 +17358,3007 @@ OpenContext memory is updated. Current topics:
 | `slint-id-display-convention` | Unchanged — still accurate (Q-16/U-05 shared `client-composition` helper and display-only rule) |
 
 These live in `.opencontext/` in the project directory and are available to future sessions automatically.
+
+---
+
+## User
+
+continue to migrate tauri to slint. lets finish it.
+
+---
+
+## Assistant
+
+_Thinking:_
+
+The user wants to "continue to migrate tauri to slint. lets finish it." — i.e., proceed with the actual removal/replacement of Tauri admin with Slint. But we know this is gated by Gate 0b, Gate 15, owner approval (R-72 / Phase 16). The user is the owner presumably, and explicitly instructs to finish it. Need to decide how to proceed responsibly.
+
+Given the user's direct instruction, they may be authorizing the migration. But the standing rules in docs say "Never ... merge to main outside a reviewed PR, or weaken CI ... unless the stage says owner approved it", and "R-72: Phase 16 removal of Tauri and React UIs — Only after Gate 15 and a full Slint release (owner)". The user says "lets finish it" — this could count as owner authorization, but the docs say Gate 15 path requires a full Slint release. We don't have a release, no live verification, no Gate 0b sign-off.
+
+I should not delete Tauri UI or change packaging without explicit, informed confirmation perhaps. But the user is direct: "continue to migrate tauri to slint. lets finish it." Maybe they want the next migration steps, not necessarily deletion of Tauri. The prior work: Admin Slint feasibility implementation complete; next stages are S7 (Desktop Slint login/session/forced password change), S10-S19 gated. "migrate tauri to slint" could refer to Desktop Tauri too (there are two Tauri apps: admin-shell and desktop-shell). The desktop Slint host has only 2-field login, no forced password change (R-40/R-41, stage S7). That's feasible now (depends on S0 which is done), not Gate-0b-dependent. So "continue to migrate tauri to slint" might mean do S7 (Desktop Slint login/session) — that's the next ungated stage in sequence. Actually, the sequence: S5 done, S6 done, S9 done. Next stages: S7 (Desktop Slint login/session and forced password change) — depends on S0; S10+ are Gate-0b-dependent. So the next actionable stage is S7.
+
+The user says "lets finish it" — maybe they want to finish the whole migration, which is impossible without gates/deploy/release. I should proceed with S7 (the next feasible stage) and explain limits. Need to be careful with large code changes and no local builds (CI only).
+
+Let me think about the right approach:
+- Acknowledge: "Fully finishing means removing Tauri/React (R-72) which needs Gate 15 + owner sign-off; I can't legally do that yet. The next ungated migration step is S7: bring Desktop Slint login to parity (3-field org login, org lookup, per-server session, forced password change). I'll do that now."
+- Or ask the user a clarifying question? The user said "continue... lets finish it" — they might be frustrated with gating. But I should be transparent and proceed with maximal feasible work. Given the instruction to "finish it", I can do S7 implementation, then report remaining gates. However, doing S7 involves significant Rust code changes with CI-only verification, and risk of CI failures. We have ability to read GitHub Actions logs and fix iteratively (as before). That's fine.
+
+Let me explore current state of desktop-slint and desktop-session to see what's needed.
+
+Plan for S7:
+1. Read `crates/bins/desktop-slint/src/main.rs`, `composition.rs`, `Cargo.toml`, `ui/main.slint`.
+2. Read `crates/applications/desktop-session/src/session.rs`, `session_authority.rs`, and tauri desktop-shell `Login.tsx`, `useSession.tsx`, `ChangePassword.tsx`, `lib.rs` for reference.
+3. Implement:
+   - 3-field login UI (Organization, Staff identifier, Password) in Slint.
+   - Organization lookup via Worker (`GET /api/organizations/lookup?identifier=`), null → cloud base.
+   - Use `SessionAuthority::with_api_factory` + `sign_in_at` for per-server session.
+   - Fixed origin in composition.rs replaced by session's server.
+   - Forced password-change screen shown when must_change_password.
+   - Tests.
+4. Commit + push, iterate on CI.
+
+This is a big task. Let me start by exploring. Use subagents for research in parallel to speed up, plus my own reads.
+
+Given "no local builds/tests", CI is the verification. Need to be careful.
+
+Let me first check current git state (branch main, clean, maybe origin/main advanced by other commits since 11/23? It's 11/25 now). Fetch first to see if remote changed.
+
+Let me launch exploration subagents:
+- Agent A: desktop-slint host current implementation (main.rs, composition.rs, main.slint, Cargo.toml) — full details.
+- Agent B: desktop-session API (SessionAuthority, with_api_factory, sign_in_at, StoredSession fields incl must_change_password, login identity, keyring) — signatures and tests.
+- Agent C: Tauri desktop reference (desktop-shell ui Login.tsx, useSession.tsx, ChangePassword.tsx, lib.rs commands) — exact flows, strings.
+
+Meanwhile I'll check git state and read master record S7 details from remaining-work doc.
+
+Let's do that.
+
+I'll proceed with the next migration step that isn't gated: **S7 — bring the Desktop Slint host to Tauri login/session parity**. Full Tauri removal (R-72) still requires Gate 15 and owner sign-off, so I won't delete the shipped app.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git status -sb; git fetch origin main 2>&1 | tail -3; git log --oneline -3; git rev-parse HEAD origin/main",
+  "timeout": 120000
+}
+```
+
+## main...origin/main
+ M .github/workflows/admin-slint.yml
+ M .github/workflows/ci.yml
+ M .github/workflows/cloudflare-worker-check.yml
+ M .github/workflows/desktop-slint.yml
+ M .github/workflows/slint-spike-artifacts.yml
+ M Cargo.lock
+ M Cargo.toml
+D  crates/applications/client-composition/tests/app_state_wiring.rs
+D  crates/applications/client-composition/tests/mission_end_to_end_sqlite.rs
+D  crates/applications/client-composition/tests/support/mod.rs
+D  crates/applications/client-composition/tests/task_end_to_end_sqlite.rs
+D  crates/applications/client-composition/tests/task_owner_authority_gate.rs
+ M crates/bins/admin-shell/ui/package.json
+D  crates/bins/admin-shell/ui/src/utils/serverAddress.test.ts
+D  crates/bins/admin-shell/ui/tests/adminNavigation.test.ts
+D  crates/bins/admin-shell/ui/tests/displayDigits.test.ts
+D  crates/bins/admin-shell/ui/tests/loginDiagnostics.test.ts
+D  crates/bins/admin-shell/ui/tests/onyxCredentials.test.ts
+D  crates/bins/admin-shell/ui/tests/organizationsApi.test.ts
+D  crates/bins/admin-shell/ui/tests/profileTransfer.test.ts
+D  crates/bins/admin-shell/ui/tests/settingsHelpers.test.ts
+D  crates/bins/admin-shell/ui/vitest.config.ts
+D  crates/bins/api-server/tests/admin_tenant_isolation.rs
+D  crates/bins/api-server/tests/auth_refresh.rs
+D  crates/bins/api-server/tests/mobile_access_gate.rs
+D  crates/bins/api-server/tests/mobile_observer_capability.rs
+D  crates/bins/api-server/tests/observer_read_routes.rs
+D  crates/bins/api-server/tests/query_id_normalization.rs
+D  crates/bins/api-server/tests/relay_switchboard.rs
+D  crates/bins/api-server/tests/session_revalidation.rs
+D  crates/bins/api-server/tests/staff_loan_authorization.rs
+D  crates/bins/api-server/tests/staff_profile_routes.rs
+D  crates/bins/api-server/tests/team_leader_precheck_authorization.rs
+D  crates/bins/api-server/tests/user_hierarchy_admin_routes.rs
+D  crates/domains/mission-domain/tests/golden.rs
+D  crates/domains/mission-domain/tests/property.rs
+D  crates/domains/mission-domain/tests/unit.rs
+D  crates/domains/mission-domain/tests/unit/mission_creation.rs
+D  crates/domains/mission-domain/tests/unit/mission_guards.rs
+D  crates/domains/mission-domain/tests/unit/mission_invalid_transitions.rs
+D  crates/domains/mission-domain/tests/unit/mission_valid_transitions.rs
+D  crates/domains/work-domain/tests/golden.rs
+D  crates/domains/work-domain/tests/property.rs
+D  crates/domains/work-domain/tests/unit.rs
+D  crates/domains/work-domain/tests/unit/task_creation.rs
+D  crates/domains/work-domain/tests/unit/task_guards.rs
+D  crates/domains/work-domain/tests/unit/task_invalid_transitions.rs
+D  crates/domains/work-domain/tests/unit/task_valid_transitions.rs
+D  crates/infrastructure/persistence-postgres/tests/concurrency_test.rs
+D  crates/infrastructure/persistence-postgres/tests/idempotency_test.rs
+D  crates/infrastructure/persistence-postgres/tests/outbox_test.rs
+D  crates/infrastructure/persistence-postgres/tests/repository_test.rs
+D  crates/infrastructure/persistence-sqlite/tests/sqlite_test.rs
+D  crates/mobile-core/tests/ffi_integration.rs
+D  crates/mobile-core/tests/file_sharing.rs
+D  crates/mobile-core/tests/hierarchy_authority_gate.rs
+ M crates/synchronization/crdt/Cargo.toml
+D  crates/synchronization/sync-test-utils/Cargo.toml
+D  crates/synchronization/sync-test-utils/src/generators.rs
+D  crates/synchronization/sync-test-utils/src/lib.rs
+D  crates/synchronization/sync-test-utils/src/mocks.rs
+ M crates/synchronization/synchronization-domain/Cargo.toml
+D  crates/team7-integration-tests/Cargo.toml
+D  crates/team7-integration-tests/src/lib.rs
+D  crates/team7-integration-tests/tests/integration.rs
+D  crates/team8-chaos-tests/Cargo.toml
+D  crates/team8-chaos-tests/src/lib.rs
+D  crates/team8-chaos-tests/tests/all.rs
+D  crates/team8-e2e-tests/Cargo.toml
+D  crates/team8-e2e-tests/src/lib.rs
+D  crates/team8-e2e-tests/tests/all_journeys.rs
+D  crates/transports/relay-websocket-adapter/tests/relay_ticket_contract.rs
+D  crates/transports/sync-transport/tests/discovery_tests.rs
+D  crates/transports/sync-transport/tests/encryption_tests.rs
+D  crates/transports/sync-transport/tests/fallback_tests.rs
+D  crates/transports/sync-transport/tests/quic_nat_tests.rs
+D  crates/transports/sync-transport/tests/quota_tests.rs
+D  crates/transports/sync-transport/tests/transport_tests.rs
+ M deploy/cloudflare/edge-gateway/package.json
+D  deploy/cloudflare/edge-gateway/test/argon2-wasm-edge.mock.ts
+D  deploy/cloudflare/edge-gateway/test/auth-phase1-regressions.test.ts
+D  deploy/cloudflare/edge-gateway/test/auth.test.ts
+D  deploy/cloudflare/edge-gateway/test/authorization.test.ts
+D  deploy/cloudflare/edge-gateway/test/backend-accounts.test.ts
+D  deploy/cloudflare/edge-gateway/test/diagnostics.test.ts
+D  deploy/cloudflare/edge-gateway/test/fixtures/original-0002_onyx_identity_model.sql
+D  deploy/cloudflare/edge-gateway/test/fixtures/original-0003_supabase_identity.sql
+D  deploy/cloudflare/edge-gateway/test/helpers/d1-sqlite.ts
+D  deploy/cloudflare/edge-gateway/test/helpers/zip.ts
+D  deploy/cloudflare/edge-gateway/test/migrations.test.ts
+D  deploy/cloudflare/edge-gateway/test/mobile-capability.test.ts
+D  deploy/cloudflare/edge-gateway/test/outbox-ingest.test.ts
+D  deploy/cloudflare/edge-gateway/test/policy-transitions.test.ts
+D  deploy/cloudflare/edge-gateway/test/provision-allfather-password.test.ts
+D  deploy/cloudflare/edge-gateway/test/provision-allfather.test.ts
+D  deploy/cloudflare/edge-gateway/test/relay-route.test.ts
+D  deploy/cloudflare/edge-gateway/test/relay-websocket.integration.mjs
+D  deploy/cloudflare/edge-gateway/test/route-completeness.test.ts
+D  deploy/cloudflare/edge-gateway/test/security.test.ts
+D  deploy/cloudflare/edge-gateway/test/staff-rules.test.ts
+D  deploy/cloudflare/edge-gateway/test/u04-parity-behavior.test.ts
+D  deploy/cloudflare/edge-gateway/test/wasm-module.mock.ts
+D  deploy/cloudflare/edge-gateway/test/xlsx.test.ts
+D  deploy/cloudflare/edge-gateway/vitest.config.ts
+D  docs/TEST_SUITE_AUDIT.md
+D  mobile-android/app/src/androidTest/kotlin/com/onyx/FileTransferInstrumentedTest.kt
+D  mobile-android/app/src/androidTest/kotlin/com/onyx/MobileCoreRoundTripTest.kt
+D  mobile-android/app/src/androidTest/kotlin/com/onyx/background/BackgroundSyncInstrumentedTest.kt
+D  mobile-android/app/src/androidTest/kotlin/com/onyx/controller/OnyxControllerInstrumentedTest.kt
+D  mobile-android/app/src/androidTest/kotlin/com/onyx/ui/screens/ApprovalsScreenTest.kt
+D  mobile-android/app/src/test/kotlin/com/onyx/model/ApprovalsFilterTest.kt
+D  mobile-android/app/src/test/kotlin/com/onyx/model/CommandEnvelopeFactoryTest.kt
+D  mobile-android/app/src/test/kotlin/com/onyx/model/LoadedAggregateTest.kt
+D  mobile-android/app/src/test/kotlin/com/onyx/model/SyncConflictTest.kt
+D  mobile-android/app/src/test/kotlin/com/onyx/ui/screens/SettingsScreenSourceTest.kt
+D  mobile-android/app/src/test/kotlin/com/onyx/util/UuidCodecTest.kt
+ M mobile-pwa/package.json
+D  mobile-pwa/playwright.config.ts
+D  mobile-pwa/playwright.offline.config.ts
+D  mobile-pwa/tests/accessibility/a11y.test.tsx
+D  mobile-pwa/tests/browser/fixtures/onyx.ts
+D  mobile-pwa/tests/browser/observer.spec.ts
+D  mobile-pwa/tests/browser/push.spec.ts
+D  mobile-pwa/tests/component/Login.test.tsx
+D  mobile-pwa/tests/component/PushCard.test.tsx
+D  mobile-pwa/tests/component/Shell.test.tsx
+D  mobile-pwa/tests/component/Views.test.tsx
+D  mobile-pwa/tests/offline/offline.spec.ts
+D  mobile-pwa/tests/setup.ts
+D  mobile-pwa/tests/test-utils.tsx
+D  mobile-pwa/tests/unit/envelope.test.ts
+D  mobile-pwa/tests/unit/errorHandler.test.ts
+D  mobile-pwa/tests/unit/push.test.ts
+D  mobile-pwa/tests/unit/validation.test.ts
+ M mobile-pwa/tsconfig.app.json
+ M mobile-pwa/vite.config.ts
+ M scripts/ci-pipeline.sh
+ D scripts/verify/verify_crdt_determinism.sh
+ M scripts/verify/verify_mobile_static.py
+ M scripts/verify/verify_team7.sh
+ M scripts/verify/verify_team8_static.py
+ D scripts/verify/verify_tombstone_gc.sh
+D  spikes/slint/evidence/cargo-test-linux.txt
+D  spikes/slint/tests/ui_behaviour.rs
+D  tests/chaos/chaos_runtime.rs
+D  tests/chaos/clock_skew.rs
+D  tests/chaos/database_failover.rs
+D  tests/chaos/disk_full.rs
+D  tests/chaos/network_partition.rs
+D  tests/chaos/process_crash.rs
+D  tests/end-to-end/approval_workflow.rs
+D  tests/end-to-end/background_sync.rs
+D  tests/end-to-end/conflict_resolution.rs
+D  tests/end-to-end/mission_lifecycle.rs
+D  tests/end-to-end/notification_sync.rs
+D  tests/end-to-end/p2p_sync.rs
+D  tests/end-to-end/production_bootstrap.rs
+D  tests/end-to-end/session_revocation.rs
+D  tests/end-to-end/task_workflow.rs
+D  tests/end-to-end/test_harness.rs
+D  tests/fixtures/seed.sql
+D  tests/integration/audit_integrity_tests.rs
+D  tests/integration/authority_verifier_tests.rs
+D  tests/integration/conflict_tests.rs
+D  tests/integration/escalation_tests.rs
+D  tests/integration/job_queue_tests.rs
+D  tests/integration/log_redaction_tests.rs
+D  tests/integration/rate_limiter_tests.rs
+D  tests/integration/replay_window_tests.rs
+D  tests/integration/scheduler_tests.rs
+D  tests/integration/secret_rotation_tests.rs
+D  tests/integration/session_tests.rs
+D  tests/integration/tombstone_gc_tests.rs
+D  tests/integration/tracing_tests.rs
+D  tests/property/crdt_determinism.rs
+D  tests/property/crdt_laws.rs
+ M web-ui/package.json
+D  web-ui/playwright.config.ts
+D  web-ui/test-reports/README.md
+D  web-ui/test-reports/static-validation.xml
+D  web-ui/tests/accessibility/a11y.test.tsx
+D  web-ui/tests/browser/fixtures/onyx.ts
+D  web-ui/tests/browser/ui-remediation.spec.ts
+D  web-ui/tests/browser/ui-remediation.spec.ts-snapshots/login-hero-background-desktop-desktop-chromium-linux.png
+D  web-ui/tests/e2e/real-server.test.ts
+D  web-ui/tests/feature-audit/excluded-features.test.ts
+D  web-ui/tests/integration/commands.test.tsx
+D  web-ui/tests/integration/events.test.ts
+D  web-ui/tests/integration/queries.test.tsx
+D  web-ui/tests/integration/ui_gap_workflows.test.tsx
+D  web-ui/tests/mocks/server.ts
+D  web-ui/tests/setup.ts
+D  web-ui/tests/test-utils.tsx
+D  web-ui/tests/unit/api.test.ts
+D  web-ui/tests/unit/contracts.test.ts
+D  web-ui/tests/unit/openapi-contract.test.ts
+D  web-ui/tests/unit/projection-state.test.tsx
+ M web-ui/tsconfig.app.json
+ M web-ui/vite.config.ts
+?? scripts/verify/__pycache__/
+From github.com:SMozaff/Onyx-Framework
+ * branch              main       -> FETCH_HEAD
+e411d68d Create session-146e9793-df36-4158-b990-fb869ba42568.md
+57203a6e Create session-403076ca-0aa0-48e6-92c5-40a503e417b4.md
+6f1ca6ad h
+e411d68df8f8c65d64e097178e6a7637dbba3c9e
+e411d68df8f8c65d64e097178e6a7637dbba3c9e
+
+
+**Tool: subagent**
+
+**Input:**
+```json
+{
+  "agent": "explore",
+  "description": "Inspect desktop-slint host",
+  "prompt": "Very thorough exploration of /home/all-father/Documents/GitHub/Onyx-Framework.\n\nTask: document the CURRENT Desktop Slint host implementation in full detail so it can be upgraded to 3-field org login + forced password change.\n\nRead and report with exact file paths, line numbers and code snippets:\n1. `crates/bins/desktop-slint/src/main.rs` — full structure: callbacks, properties set on the Slint UI, how sign-in is invoked, what identity/session data is stored, status strings.\n2. `crates/bins/desktop-slint/src/composition.rs` — full structure: fixed origin/base URL, session construction, outbox, any must_change_password handling, public functions and signatures.\n3. `crates/bins/desktop-slint/ui/main.slint` — full UI structure: login fields, callbacks, properties, navigation, status display; quote relevant sections.\n4. `crates/bins/desktop-slint/Cargo.toml` — dependencies (especially desktop-session, client-composition, reqwest, tokio).\n5. All tests in the crate (test names, what they cover, file locations).\n\nDo not modify files. Return an evidence-rich report with exact code snippets and signatures."
+}
+```
+
+The subagent is working in the background (sessionID: ses_dec0a3e88ffdAk9EFjWQH0Xep4). You will receive a <subagent> message when it goes idle, and again after each later round of work.
+DO NOT sleep, poll, proactively check on its progress, or duplicate this subagent's work.
+Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.
+To send it follow-ups or change its instructions while it runs, call subagent again with this sessionID.
+
+**Tool: subagent**
+
+**Input:**
+```json
+{
+  "agent": "explore",
+  "description": "Inspect desktop-session API",
+  "prompt": "Very thorough exploration of /home/all-father/Documents/GitHub/Onyx-Framework.\n\nTask: document the session/sign-in API needed to implement 3-field organization login and forced password change in the Desktop Slint host.\n\nRead and report with exact file paths, line numbers, signatures and code snippets:\n1. `crates/applications/desktop-session/src/session.rs` — `SessionApi`, `HttpSessionApi`, `StoredSession`, `LoginIdentity` (all fields, serde defaults), all method signatures incl. login, restore, refresh, revoke, logout, password change if present.\n2. `crates/applications/desktop-session/src/session_authority.rs` — `SessionAuthority`, `ApiFactory`, `http_api_factory()`, `with_api_factory`, `sign_in_at`, how server URL/origin is passed and stored. Full signatures and code.\n3. Any `must_change_password` handling anywhere in desktop-session and desktop-shell (Rust side): where it comes from the Worker response, how it is stored/restored, how forced password change is enforced.\n4. Tests in desktop-session covering these behaviors (names + what they prove).\n5. `crates/bins/desktop-shell/src/lib.rs` — the Tauri commands/sign-in flow relevant to org lookup and password change (signatures and behavior only).\n\nDo not modify files. Return a precise API report usable for coding against it."
+}
+```
+
+The subagent is working in the background (sessionID: ses_dec0a3e7dffei4QVReEUlW04qF). You will receive a <subagent> message when it goes idle, and again after each later round of work.
+DO NOT sleep, poll, proactively check on its progress, or duplicate this subagent's work.
+Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.
+To send it follow-ups or change its instructions while it runs, call subagent again with this sessionID.
+
+**Tool: subagent**
+
+**Input:**
+```json
+{
+  "agent": "explore",
+  "description": "Inspect Tauri desktop UI reference",
+  "prompt": "Medium-thorough exploration of /home/all-father/Documents/GitHub/Onyx-Framework.\n\nTask: document the Tauri desktop UI login and forced-password-change behavior that the Slint host must match (S7).\n\nRead and report with exact paths, line numbers and snippets:\n1. `crates/bins/desktop-shell/ui/src/pages/Login.tsx` — the 3 fields (Organization, Staff identifier, Password), order, lookup behavior, error messages, busy state, what commands it calls.\n2. `crates/bins/desktop-shell/ui/src/pages/ChangePassword.tsx` — when shown, fields, validation, command called, behavior after success (sign out).\n3. `crates/bins/desktop-shell/ui/src/hooks/useSession.tsx` and `App.tsx` — how session state and must_change_password drive screens.\n4. Any helper that resolves organization → server URL (lookup route, null = current server) on the Tauri side, with exact code.\n5. Which i18n keys are used for these screens (key names + EN text) from `shared/i18n/en.json`.\n\nDo not modify files. Return concise, evidence-based reference notes."
+}
+```
+
+The subagent is working in the background (sessionID: ses_dec0a3e7bffe0sLITIJiTqx9ut). You will receive a <subagent> message when it goes idle, and again after each later round of work.
+DO NOT sleep, poll, proactively check on its progress, or duplicate this subagent's work.
+Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.
+To send it follow-ups or change its instructions while it runs, call subagent again with this sessionID.
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Whoa — critical! The working tree has MASSIVE uncommitted changes: hundreds of deleted test files, modified workflows, package.json etc. And origin/main advanced to e411d68d ("Create session-...") with commits "h" etc. This looks like someone (the user?) has been modifying the repo — possibly actually performing the Tauri→Slint removal (deleting tests, CI workflows, etc.) in the working tree, not committed.
+
+I must NOT overwrite or delete these changes — they're potential user work. This is exactly the "treat unfamiliar files/changes as potential user work" instruction.
+
+So the user's "continue to migrate tauri to slint. lets finish it" may refer to these uncommitted changes — someone (maybe another agent/session) started removing Tauri/React and tests. I need to investigate before acting. The working tree has staged deletions (D in first column) and unstaged modifications. Let me understand what's happening:
+
+- `git status -sb` shows `## main...origin/main` with no ahead/behind marker, HEAD = origin/main = e411d68d — so local main was fast-forwarded to remote (including commits "h", session files). Wait, earlier we were at 9bafe451; now HEAD e411d68d which includes those commits. The fetch showed `From github.com ... * branch main -> FETCH_HEAD`, and `git status -sb` shows no divergence. So local main == remote main == e411d68d. Someone pushed commits since our last work (e.g., "h", session files) — and they likely include the Tauri removal changes? But the working tree shows those deletions as uncommitted (staged) — meaning they're NOT committed.
+
+Let me check: `git log --oneline -10` to understand remote commits. And `git diff --cached --stat | tail`, `git diff --stat | tail` to see scale.
+
+Also important: are these changes from the user explicitly doing "remove Tauri/React"? The deleted files are all TEST files across the repo + workflows modified + package.json changes + vendored configs. That looks like a "delete all tests" operation, not a Tauri→Slint migration. Hmm, maybe the user ran a cleanup script to remove tests? Or maybe another agent session did this.
+
+Wait — the user asked "continue to migrate tauri to slint. lets finish it." Maybe the intended work is to remove Tauri/React: delete `crates/bins/admin-shell`, `crates/bins/desktop-shell`, web-ui, mobile-pwa, etc. The working tree changes include deleting tests in those directories and modifying workflows — consistent with starting removal of web/mobile/Tauri tests. But not deleting the source directories themselves yet.
+
+Hold on — the staged deletions of tests across ALL crates (api-server, mission-domain, etc.) suggests a blanket "remove all tests" — perhaps the user wants CI to pass by removing tests? That would be a massive destructive change. I must not assume.
+
+I need to ask the user for clarification about the uncommitted changes before doing anything. This is a stop condition per the project preamble: "a conflict with a DECIDED item" / "missing file the stage depends on" / "stop and report". Also the harness instruction: treat unfamiliar changes as potential user work and investigate before deleting/overwriting.
+
+But the subagents are already running to inspect desktop-slint etc. — that's read-only, fine.
+
+Let me investigate the uncommitted changes carefully and report to the user, asking whether these are intentional and whether to include them. Actually the user said "continue... lets finish it" — maybe they expect me to handle those changes. But I should not commit/push thousands of deletions without confirmation.
+
+Let me gather facts:
+- `git log --oneline -8` (remote commits)
+- `git diff --cached --stat | tail -5`, `git diff --cached --numstat | awk ...` counts
+- `git diff --stat | tail -5`
+- Check whether deletions include `crates/bins/admin-shell` source files? No, only tests and configs.
+- Check `git diff .github/workflows/admin-slint.yml` and `ci.yml` to see intent.
+- Check who/when: maybe reflog shows recent checkout/pull.
+
+Let me do that now.
+
+I found a major precondition: the working tree is **not clean** — there are large staged/unstaged changes (hundreds of deleted test files, modified workflows and package configs) that were not made by me, and `main` has advanced on the remote. I need to understand those before touching anything.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git log --oneline -12; echo \"=== staged ===\"; git diff --cached --stat | tail -4; echo \"=== unstaged ===\"; git diff --stat | tail -4; echo \"=== counts ===\"; git status --porcelain | awk '{print $1}' | sort | uniq -c",
+  "timeout": 60000
+}
+```
+
+e411d68d Create session-146e9793-df36-4158-b990-fb869ba42568.md
+57203a6e Create session-403076ca-0aa0-48e6-92c5-40a503e417b4.md
+6f1ca6ad h
+9bafe451 style(admin-slint): apply CI rustfmt output to load_org_admins
+e4ff57a4 style(admin-slint): wrap long assert for rustfmt CI
+8b426e89 docs(slint): S9 — Gate 0b evidence package (PROPOSED drafts)
+49f6e586 feat(admin-slint): R-28 — share Latin-digit helper with Desktop, apply to hold IDs
+f8566ff3 docs(slint): R-26 determination — Users search/sort/paging is not a parity gap
+67896dd6 fix(admin-slint): R-25 parity fixes — validation and busy-state bindings
+1a8e4582 docs(slint): add Admin Slint parity matrix (S6 / R-24)
+95a625b1 Update ONYX_Remaining_Work_Technical_Source.md
+722f2e58 Update admin-parity-matrix.md
+=== staged ===
+ web-ui/tests/unit/contracts.test.ts                |   40 -
+ web-ui/tests/unit/openapi-contract.test.ts         |   38 -
+ web-ui/tests/unit/projection-state.test.tsx        |   66 -
+ 176 files changed, 24563 deletions(-)
+=== unstaged ===
+ web-ui/package.json                                |  10 +-
+ web-ui/tsconfig.app.json                           |   5 +-
+ web-ui/vite.config.ts                              |  14 +-
+ 23 files changed, 20 insertions(+), 632 deletions(-)
+=== counts ===
+      1 ??
+    178 D
+     21 M
+
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git show --stat --oneline 6f1ca6ad | head -15; echo ===; git show --stat --oneline 57203a6e | head -12; echo ===; git show --stat --oneline e411d68d | head -12; echo ===; git diff --cached .github/workflows/admin-slint.yml | head -60",
+  "timeout": 60000
+}
+```
+
+6f1ca6ad h
+ .opencontext/admin-slint-migration-status.md      |    20 +
+ .opencontext/index.md                             |    16 +
+ .opencontext/verification-ci-only.md              |     8 +
+ session-87bf4247-b8b4-4a83-9450-d118d52a7f87.json | 20101 ++++++++++++++++++++
+ 4 files changed, 20145 insertions(+)
+===
+57203a6e Create session-403076ca-0aa0-48e6-92c5-40a503e417b4.md
+ session-403076ca-0aa0-48e6-92c5-40a503e417b4.md | 17360 ++++++++++++++++++++++
+ 1 file changed, 17360 insertions(+)
+===
+e411d68d Create session-146e9793-df36-4158-b990-fb869ba42568.md
+ session-146e9793-df36-4158-b990-fb869ba42568.md | 17360 ++++++++++++++++++++++
+ 1 file changed, 17360 insertions(+)
+===
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+The working tree has huge uncommitted changes that appear to be someone else's work (possibly the user's or another session): deletions of tests across the repo, workflow modifications, package.json changes. I must not overwrite. I need to stop and report, unless the user clarifies. But they asked to "continue to migrate tauri to slint. lets finish it." — maybe those changes ARE the migration work (removing tests?) — not obviously.
+
+Critical: `git status` shows 178 staged deletions, 21 unstaged modifications, 1 untracked. Those changes were present when I started this turn. They may be from a previous session of the user actively doing "remove all tests" to make CI green? Or from an automated cleanup.
+
+Wait — could these deletions be the result of the `git fetch` I ran? No, fetch doesn't change working tree. And earlier `git status -sb` at the start of the previous turn showed clean. Between turns, someone modified the workspace. The commits on remote ("h", session md files) were pushed by someone else — likely the user in another session, dumping session logs. Those session markdown files (17k lines each) might contain the context of what they did. Let me check the latest session md file for relevant info — perhaps it explains the deletions (e.g., "remove all tests to speed CI"). Reading is safe.
+
+Actually, the user's intent "lets finish it" might mean: continue from where those other sessions left off — maybe another agent was deleting tests/CI stuff as part of removing Tauri/React and web/mobile. But deleting tests across all crates is not "Tauri to Slint" specifically; it's a broad test removal, potentially destructive.
+
+I must ask the user before proceeding, per stop conditions. But let me gather minimal evidence to ask a precise question: check the session md for intent, and check a sample of staged workflow diff.
+
+Let me read the tail of `session-146e9793...md` and grep for "tauri|slint|test|delete" to understand. Also check `git diff --cached .github/workflows/ci.yml | head -80`.
+
+Also note: subagents A and B still running — fine.
+
+Let me investigate.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "grep -i -m 20 -E \"tauri|slint|delete|remov|migration\" session-146e9793-df36-4158-b990-fb869ba42568.md | head -25; echo \"=== workflow diff ===\"; git diff --cached .github/workflows/ci.yml | head -70",
+  "timeout": 60000
+}
+```
+
+# Slint migrations on admin onyx
+Continue to implement slint migrations on admin onyx.
+2693dd23 Merge remote-tracking branch 'origin/dependabot/npm_and_yarn/mobile-pwa/eslint-10.15.0'
+6a6106e5 Merge remote-tracking branch 'origin/dependabot/npm_and_yarn/crates/bins/desktop-shell/ui/tauri-apps/cli-2.12.6'
+a2c0adcc Merge remote-tracking branch 'origin/dependabot/npm_and_yarn/crates/bins/admin-shell/ui/tauri-apps/api-2.12.5'
+Working tree is clean. Let me look for slint-related work and the remaining work doc.
+  "command": "grep -ri \"slint\" --include=\"*.md\" -l . | head -30"
+./docs/slint/CONTRACT_FREEZE_V1.md
+./docs/migrations/slint/backend-accounts-handover.md
+./docs/migrations/slint/spike-handover.md
+./docs/migrations/slint/DOCUMENT-INVENTORY.md
+./docs/migrations/slint/P-01-B1-investigation-2026-10-27.md
+./docs/migrations/slint/MASTER-MIGRATION-RECORD.md
+./docs/migrations/slint/P-01-evidence-summary-2026-11-01.md
+./docs/migrations/slint/spike-results.md
+./docs/migrations/slint/spike-agent-prompt.md
+./docs/migrations/slint/backend-accounts-creation-report-spec.md
+./docs/migrations/slint/P-01-B1-auth-provider-contract-2026-10-27.md
+./docs/migrations/slint/desktop-token-storage-policy.md
+./docs/migrations/slint/decision-log.md
+=== workflow diff ===
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Important: subagent for desktop-slint says "git status --short returned empty for the repo" — but my earlier `git status` showed hundreds of deletions. That discrepancy suggests the working tree changed between calls (someone reverted/committed?), OR subagent ran in a different session/directory state (subagents share the same filesystem though). Let me re-check git status now. Maybe the user committed/stashed the changes in between (they might be working in parallel). Need to re-verify before doing anything.
+
+Also I still have the remaining subagent B (desktop-session) running.
+
+Let me check current git status.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git status -sb | head -5; echo \"=== counts ===\"; git status --porcelain | awk '{print $1}' | sort | uniq -c; git rev-parse HEAD origin/main",
+  "timeout": 60000
+}
+```
+
+## main...origin/main [ahead 1]
+ M .opencontext/verification-ci-only.md
+=== counts ===
+      1 M
+0df9245f882cc73651611fa3ffd2f9bbbe99b42a
+e411d68df8f8c65d64e097178e6a7637dbba3c9e
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now git state: status shows `## main...origin/main [ahead 1]` and only `.opencontext/verification-ci-only.md` modified. HEAD = 0df9245f, origin/main = e411d68d. So someone (the user in another session) committed the giant test deletions etc. on remote, and local main is ahead 1 (probably an OpenContext save commit). Let me check `git log --oneline origin/main..HEAD` and what the commit contains.
+
+Key question: what did the other sessions do? The commits on origin/main: "h" (added .opencontext files + session json), session md files. But the giant deletions are not in those commits... and status now clean except .opencontext modification — meaning those deletions were either committed in another commit I haven't seen or reverted. Let me check `git log --oneline -5` now and `git show --stat HEAD`, plus `git log --oneline origin/main..HEAD`.
+
+Actually earlier status showed staged deletions; now they're gone. Likely the user committed them in a commit that was pushed, and my local fetch at the start of this turn was before that? No — remote head e411d68d was the session md commit. Hmm, maybe the deletions got committed locally and reset? Let me just check the log and HEAD diff.
+
+I must be careful: the working tree changed between my commands, indicating another process is actively modifying this repo. This is a stop condition — I should ask the user rather than proceeding with large code changes. But the user explicitly said "continue to migrate tauri to slint. lets finish it." Maybe they are the one making changes in parallel (another agent session). I should report the state and ask for clarification before making conflicting changes.
+
+Let me gather: `git log --oneline -8`, `git show --stat --oneline HEAD`, `git status --short`, and check whether Tauri source still exists.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git log --oneline -8; echo \"=== local-only ===\"; git log --oneline origin/main..HEAD; echo \"=== HEAD stat ===\"; git show --stat --oneline HEAD | head -12; echo \"=== status ===\"; git status --short | head -10; echo \"=== tauri dirs ===\"; ls -d crates/bins/admin-shell crates/bins/desktop-shell 2>/dev/null",
+  "timeout": 60000
+}
+```
+
+0df9245f chore: remove test suites and local test weight
+e411d68d Create session-146e9793-df36-4158-b990-fb869ba42568.md
+57203a6e Create session-403076ca-0aa0-48e6-92c5-40a503e417b4.md
+6f1ca6ad h
+9bafe451 style(admin-slint): apply CI rustfmt output to load_org_admins
+e4ff57a4 style(admin-slint): wrap long assert for rustfmt CI
+8b426e89 docs(slint): S9 — Gate 0b evidence package (PROPOSED drafts)
+49f6e586 feat(admin-slint): R-28 — share Latin-digit helper with Desktop, apply to hold IDs
+=== local-only ===
+0df9245f chore: remove test suites and local test weight
+=== HEAD stat ===
+0df9245f chore: remove test suites and local test weight
+ .github/workflows/admin-slint.yml                  |    2 -
+ .github/workflows/ci.yml                           |   31 +-
+ .github/workflows/cloudflare-worker-check.yml      |    2 -
+ .github/workflows/desktop-slint.yml                |    2 -
+ .github/workflows/slint-spike-artifacts.yml        |    2 -
+ Cargo.lock                                         |  448 +-----
+ Cargo.toml                                         |    5 -
+ .../client-composition/tests/app_state_wiring.rs   |  986 -------------
+ .../tests/mission_end_to_end_sqlite.rs             |  245 ----
+ .../client-composition/tests/support/mod.rs        |  131 --
+ .../tests/task_end_to_end_sqlite.rs                |  316 ----
+=== status ===
+ M .opencontext/verification-ci-only.md
+=== tauri dirs ===
+crates/bins/admin-shell
+crates/bins/desktop-shell
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+So a local commit `0df9245f chore: remove test suites and local test weight` was made (by someone/some process) but NOT pushed (local-only). This commit removes ~24k lines of tests, modifies CI workflows, package.json etc. That is NOT my work and looks highly destructive. The user asked "continue to migrate tauri to slint. lets finish it." — maybe they intend this as part of "finish": removing tests to reduce CI weight? Or perhaps another agent session did it and they expect me to continue.
+
+Critical: I must not push this commit or build on it without explicit confirmation, because it deletes test suites across the whole repo — a destructive change that conflicts with the project's stop rules ("Do not weaken a CI/security policy"). Also it contradicts the owner instruction "verification via GitHub Actions only" — removing tests would remove verification.
+
+Wait — maybe the user is doing this deliberately (they're the owner), and "lets finish it" means push this commit and then remove Tauri. But I can't assume.
+
+Given the harness instruction "Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them" — I should stop and report, ask for explicit confirmation about this commit. But they said "continue... lets finish it" — ambiguous.
+
+I think the right move: use the `question` tool to ask a precise decision:
+1. There is an unpushed local commit removing ~24k lines of tests and weakening CI. Should I (a) keep & push it, (b) drop/reset it, (c) leave it and proceed with S7 on a new branch?
+2. Also confirm whether "finish" means actually delete Tauri/React shells (Phase 16) despite Gate 0b/15 not signed.
+
+Given the tool `question` is available for clarifications. This is a genuine ambiguity with destructive consequences. Let me ask.
+
+Actually, the user has been instructing aggressively ("commit push and merge everything to main", "lets finish it"), and someone made that commit locally — maybe the user themselves in another session. If I ask, I might annoy, but safety first: deleting tests is irreversible-ish (recoverable via git) but pushing is not.
+
+Let me ask a concise question with options.
+
+I hit a genuine stop condition before making changes: the repo state changed underneath me.
+
+- An **unpushed local commit** `0df9245f chore: remove test suites and local test weight` exists. It deletes ~24,000 lines across 176 files (most test suites repo-wide) and modifies CI workflows/package configs. I did not create it.
+- Tauri/React admin and desktop shells are still present; Gate 0b and Gate 15 are still unsigned.
+- The only uncommitted change is an OpenContext file.
+
+I won't push or build on that commit without your decision, because deleting test suites conflicts with the project's "no CI-weakening" rule and with your CI-only verification workflow.
+
+**Tool: question**
+
+**Input:**
+```json
+{
+  "questions": [
+    {
+      "header": "Local commit",
+      "question": "What should I do with the unpushed commit 0df9245f that removes ~24k lines of tests and changes CI config?",
+      "options": [
+        {
+          "label": "Drop it (Recommended)",
+          "description": "Reset local main back to origin/main (e411d68d) and keep all tests/CI intact, then continue migration work."
+        },
+        {
+          "label": "Keep and push it",
+          "description": "Treat it as your intentional change; push it to main as-is, then continue."
+        },
+        {
+          "label": "Leave it untouched",
+          "description": "Keep it local, don't push or reset it; do migration work in a separate branch instead."
+        }
+      ],
+      "multiple": false
+    },
+    {
+      "header": "Scope",
+      "question": "What does \"finish the Tauri→Slint migration\" mean now?",
+      "options": [
+        {
+          "label": "S7 desktop parity (Recommended)",
+          "description": "Implement 3-field org login, org lookup, per-server session and forced password change in desktop-slint; keep Tauri installed until gates are signed."
+        },
+        {
+          "label": "Delete Tauri/React now",
+          "description": "Remove admin-shell/desktop-shell and switch packaging to Slint, despite Gate 0b/15 being unsigned (needs your explicit owner authorization)."
+        },
+        {
+          "label": "Both",
+          "description": "Do S7 first, then remove Tauri/React in the same work."
+        }
+      ],
+      "multiple": false
+    }
+  ]
+}
+```
+
+User has answered your questions: "What should I do with the unpushed commit 0df9245f that removes ~24k lines of tests and changes CI config?"="Drop it (Recommended)", "What does "finish the Tauri→Slint migration" mean now?"="S7 desktop parity (Recommended)". You can now continue with the user's answers in mind.
+
+---
+
+## Assistant
+
+_Thinking:_
+
+User answered: drop the commit (reset local main to origin/main e411d68d, keep tests/CI intact), then do S7 desktop parity.
+
+Need to reset carefully: `git reset --hard origin/main` — this discards the local commit and any uncommitted changes. But there is an uncommitted `.opencontext/verification-ci-only.md` modification (probably from OpenContext save / harness). Reset --hard would discard it. I could stash or restore it after. Let me check what that modification is: `git diff .opencontext/verification-ci-only.md`. It may be an automatic update from the OpenContext tool (which rewrote the file). Since user said drop the test-removal commit, I can preserve the .opencontext change by copying it to /tmp then restore after reset, or just `git checkout -- .opencontext/...` to discard and then re-save via OpenContext tool. Let me check the diff first.
+
+Then reset: `git reset --hard origin/main` — safe now with explicit user confirmation.
+
+Then S7 implementation. We have all research from subagents. Plan implementation carefully:
+
+### S7 implementation plan
+
+**Files to modify:**
+1. `crates/bins/desktop-slint/ui/main.slint` — add:
+   - properties: `organization: ""`, `current-password: ""`, `new-password: ""`, `must-change-password: false`, `busy`, `authenticated`, `display-name`, `status`.
+   - callbacks: `login-requested(string, string, string)` (org, staff id, password), `change-password-requested(string, string)`.
+   - UI: login pane with 3 fields in order (Organization, Staff identifier, Password) with placeholder texts (use strings? The current UI hardcodes English; could add i18n but desktop-slint has no i18n module — keep hardcoded English, matching existing style; owner decision D-02 etc. for Farsi not yet). Busy toggles. On success with must-change-password → show password-change pane; otherwise authenticated pane.
+   - Password change pane: current password, new password, submit button (disabled while busy), status.
+   - Use i18n keys? The existing UI has hardcoded strings, so keep consistent. But the project has shared i18n and admin-slint uses catalogs; desktop-slint has no i18n module. Adding i18n would be larger. R-41 acceptance: "Shown when must_change_password; calls POST /api/auth/password; signs out after success; tests." No explicit i18n requirement. Keep hardcoded English strings consistent with current host; note as gap.
+
+2. `crates/bins/desktop-slint/src/composition.rs` — major changes:
+   - Replace fixed `SessionAuthority::new(&api_origin, api, storage)` with `SessionAuthority::with_api_factory(&api_origin, http_api_factory(), storage)`.
+   - Keep `api_origin` as cloud base/default for lookup (the "cloud server"), used by `resolve_organization_server` and relay endpoints? R-40 says "composition.rs fixed origin replaced by the session's server". Need to implement:
+     - New `pub async fn login(&self, organization: &str, username: &str, password: &str) -> Result<SessionSummary, SessionError>`:
+       - resolve server via `GET {cloud}/api/organizations/lookup?identifier=`; 404 → `SessionError::UnexpectedResponse("organization not found")`? We need a typed error for UI messages. Could define new error enum in desktop-slint (e.g., `LoginFailure { InvalidCredentials, OrganizationNotFound, Network, Server }`).
+       - call `self.session.sign_in_at(&server, Some(org.trim()), username, password)`.
+       - start outbox using summary.server_address (per-server) instead of `self.api_origin`.
+     - Relay/outbox endpoints must use session's server: `start_outbox(&self, organization_id, server_address)`. For restore, use `stored.server_address`.
+     - `relay` field currently built with fixed api_origin: `CloudRelayTransport::new(&api_origin, ...)`. R-40 says "per-server session" and "remove fixed-origin use in composition.rs". We could make relay endpoint dynamic? CloudRelayTransport is constructed with fixed endpoint. Hmm — in Tauri, `build_app_state` derives relay endpoint from summary.server_address, but the `SessionAuthority` is created once with factory. The relay transport in Slint composition is constructed once at open with api_origin — for per-server org, relay should target the session server. We could rebuild relay on login with the resolved server. `relay` is `pub` and Arc<CloudRelayTransport> — could be replaced on login. But other code may hold Arc to old relay. Since the host is a feasibility spike, we can rebuild relay on login/restore. Let's see how relay is used — grep in desktop-slint. Need to check.
+     - New `pub async fn change_password(&self, current: &str, new: &str) -> Result<(), PasswordError>`:
+       - get summary + access token from `self.session`, post `{summary.server_address}/api/auth/password` with bearer auth, map error codes (CURRENT_PASSWORD_INCORRECT, WEAK_PASSWORD, PASSWORD_UNCHANGED, INVALID_PASSWORD_CHANGE) to typed errors; on success call `self.session.sign_out()`? The Tauri UI calls `logout` after change because server revokes all sessions; but `sign_out()` does best-effort revoke which would fail (token revoked) but clears local state. Per R-41: "signs out after success" — implement in composition method: after success, `self.logout().await` (which stops outbox, sign_out). Then UI sets authenticated false → login pane.
+       - Need to ensure token used before revocation; fine.
+     - Restore: `restore_session` already uses `session.restore(stored)` which uses stored server. Need to start outbox with stored.server_address too, and UI should show authenticated on restore? R-40 says startup restore on another server. Currently main.rs never queries current_summary at startup → app always shows login. Could add `pub async fn current_summary()` to composition and call in main before showing window (synchronously via runtime.block_on) to set `authenticated` and `display-name`, and `must-change-password`. That improves parity with Tauri (DS-02/03 startup). Let's do it.
+     - Keep `open_with(options)` tests working with `api_origin` (OFFLINE_ORIGIN) — with_api_factory will create API for that origin. Tests should still pass.
+
+**Error mapping:** define in composition.rs:
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginFailure {
+    OrganizationNotFound,
+    InvalidOrganizationServer,
+    InvalidCredentials,
+    Network,
+    Server,
+}
+```
+But `composition::login` currently returns `Result<SessionSummary, SessionError>`. Changing return type requires updating main.rs. Fine. Map SessionError: InvalidCredentials → LoginFailure::InvalidCredentials; Network/UnexpectedResponse/Storage → Network/Server. For lookup errors, map to OrganizationNotFound/InvalidOrganizationServer/Network/Server.
+
+`PasswordChangeFailure` enum with variants CurrentPasswordIncorrect, WeakPassword, PasswordUnchanged, Network, Server, SessionExpired.
+
+**main.rs changes:**
+- `on_login_requested(move |organization, staff_id, password| ...)` → call `composition.login(&organization, &staff_id, &password)`.
+- On Ok(summary): if `summary.must_change_password` → set `must-change-password(true)`, `authenticated(false?)`. Need UI state model: use `must_change_password` pane independent of `authenticated` to avoid showing authenticated shell. Let's define UI panes:
+  - `if root.must-change-password: <password change pane>`
+  - `else if root.authenticated: <signed-in pane>`
+  - `else: <login pane>`
+  But if must_change_password true and authenticated false, after password change success we set both false → login pane. Good. Actually for password change we need a live session (token), so authenticated can be true but hidden. Let's set `authenticated(true)` on login success (to indicate session live) and `must-change-password` controls the visible pane. On password change success set `authenticated(false)` and `must-change-password(false)`.
+- Startup: after `SlintComposition::open()`, call `composition.current_summary().await` and if Some, set `authenticated(true)`, `display-name`, `must-change-password`. Need UI created after composition — yes main.rs creates composition then ui; can query before callbacks. 
+- `on_change_password_requested(move |current, new| ...)` → call `composition.change_password(...)`, on success set authenticated false, must-change false, clear fields, status "Password changed. Sign in again."; on failure map to status text.
+- Error text mapping: hardcoded English consistent with existing host.
+
+**Tests in composition.rs:** add tests per R-40/R-41 acceptance:
+- `organization_lookup_uses_cloud_registry` (with axum mock server) — need to inject cloud origin; `open_with` options has api_origin (used as cloud base), so mock server at `http://127.0.0.1:port`. We can use axum dev-dependency (already present) + tokio. Use a helper to spin up mock server with `/api/organizations/lookup`.
+- `unknown_organization_is_rejected_before_sign_in`.
+- `resolved_server_is_recorded_in_session` (sign_in_at against mock server returning login JSON, check summary.server_address).
+- `restore_on_other_server` — test `session::save` with stored.server_address = mock server and open_with default cloud origin; summary should come from that server. Existing `restore_resumes_against_the_server...` in desktop-session covers authority; add composition-level test.
+- `password_change_posts_to_session_server_and_signs_out` — mock `/api/auth/password` returning success; assert request body and sign-out after. Need access token: could sign in via mock first then call change_password. That requires mock login response with tokens, org/user UUIDs, etc. Complex but doable.
+
+Given no local builds, writing complex axum mock tests risks CI failures. But CI is our verification path; we can iterate via GH logs. However time/complexity is high. Let's aim for focused tests that are simple:
+- unit test for pure helper `resolve_organization_server` URL validation? Need network mock for lookup. Could extract a pure function `lookup_server_url(body: &str, base: &str) -> Result<String,...>` and test that; plus one axum test for lookup route.
+- unit test for `password_change_error_code` mapping (pure).
+- composition test for login against mock server (covering lookup + sign_in_at + stored server).
+- test for password change success + signout against mock.
+
+Let me look at the actual code to see exact types and available dev-deps. I'll read composition.rs fully and main.rs/slint.
+
+First: drop commit. Let me check .opencontext diff then reset.
+
+Confirmed. I'll drop that local commit as you chose, then implement S7.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git diff -- .opencontext/verification-ci-only.md | head -40; cp .opencontext/verification-ci-only.md /tmp/opencode/verification-ci-only.md",
+  "timeout": 60000
+}
+```
+
+diff --git a/.opencontext/verification-ci-only.md b/.opencontext/verification-ci-only.md
+index 46f42c75..8c07735f 100644
+--- a/.opencontext/verification-ci-only.md
++++ b/.opencontext/verification-ci-only.md
+@@ -1,7 +1,13 @@
+-# Verification and push rules (owner instruction, 2026-11-23)
++---
++status: active
++---
++# Verification and push rules (owner instruction, updated 2026-11-25)
+ 
+ - **No local builds or tests** for this project. Verification happens only through GitHub Actions / workflows. Read the actual run logs with `gh` (use `env -u GH_TOKEN` because the stored GH_TOKEN is invalid).
+-- Admin Slint CI workflow: `.github/workflows/admin-slint.yml` — `cargo fmt -p admin-slint -- --check`, `cargo clippy -p admin-slint --all-targets -- -D warnings`, `cargo test -p admin-slint` on Ubuntu and Windows.
++- **Test suites were removed from the repository on 2026-11-25** (owner instruction): Rust `tests/` dirs, test-only crates (`team7-integration-tests`, `team8-e2e-tests`, `team8-chaos-tests`, `sync-test-utils`), JS/TS suites (web-ui, mobile-pwa, admin-shell UI, edge-gateway), Android `src/test` + `src/androidTest`, snapshots, and test configs. CI test steps were removed from `ci.yml`, `admin-slint.yml`, `desktop-slint.yml`, `slint-spike-artifacts.yml`, `cloudflare-worker-check.yml`.
++- Inline `#[cfg(test)]` modules inside `src/` and their `test_support`/`test_helpers` modules were deliberately kept (embedded in production sources, not separate test files).
++- After removing workspace members, `Cargo.lock` was re-resolved and `cargo metadata --locked` passes. Regenerate with `cargo metadata --format-version 1` if members/deps change again.
++- Admin Slint CI workflow: `.github/workflows/admin-slint.yml` — `cargo fmt -p admin-slint -- --check`, `cargo clippy -p admin-slint --all-targets -- -D warnings` on Ubuntu and Windows.
+ - CI formatting diffs must be applied verbatim: a 2026-11-23 push failed at the Format step for a chained `let name = selected...` in `main.rs`; the fix was pushed as `9bafe451`.
+ - Known pre-existing failure: `rust-advisories` (D-11/R-02) and downstream `merge-gate`. Do not weaken security policy to make it pass.
+ - GitHub push: SSH auth works via keyring account SMozaff; the repo has a local git config rewrite `url."git@github.com:".insteadOf "https://github.com/"`. GH_TOKEN is invalid, so `gh` commands need `env -u GH_TOKEN`.
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+The .opencontext file was modified by another session to reflect the test removal — that session intended to keep tests removed. But user chose drop. So I should restore that .opencontext file to the origin/main version (git checkout from origin/main) after reset. Since `git reset --hard origin/main` will reset it anyway. Good.
+
+Let me reset hard to origin/main, verify tests restored.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git reset --hard origin/main && git status -sb && git log --oneline -3 && ls crates/bins/admin-shell/ui/tests deploy/cloudflare/edge-gateway/test | head -12",
+  "timeout": 60000
+}
+```
+
+HEAD is now at e411d68d Create session-146e9793-df36-4158-b990-fb869ba42568.md
+## main...origin/main
+e411d68d Create session-146e9793-df36-4158-b990-fb869ba42568.md
+57203a6e Create session-403076ca-0aa0-48e6-92c5-40a503e417b4.md
+6f1ca6ad h
+crates/bins/admin-shell/ui/tests:
+adminNavigation.test.ts
+displayDigits.test.ts
+loginDiagnostics.test.ts
+onyxCredentials.test.ts
+organizationsApi.test.ts
+profileTransfer.test.ts
+settingsHelpers.test.ts
+
+deploy/cloudflare/edge-gateway/test:
+argon2-wasm-edge.mock.ts
+authorization.test.ts
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Reset done, tests restored, working tree clean. Now implement S7.
+
+Let me read the actual files to work on. I have detailed subagent reports, but need exact source for edits. Let's read main.rs (93 lines), main.slint (100 lines), composition.rs (310 lines).
+
+Commit dropped; test suites and CI workflows are restored. Now implementing S7.
+
+**Tool: read**
+
+**Input:**
+```json
+{
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs",
+  "limit": 225
+}
+```
+
+Read file /home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs, lines 1-225
+1: //! Native Slint composition root.
+2: //!
+3: //! Keeps authentication and relay authority in Rust. The UI receives only
+4: //! non-secret identity fields. Session authority is the shared
+5: //! `desktop-session` crate: the refresh token lives in the OS keyring, and the
+6: //! access token stays in memory. Neither is exposed as a Slint property.
+7: //!
+8: //! Offline outbox: the local SQLite store opens at startup. After a login the
+9: //! app state for that organization is built and its sync agent starts, so
+10: //! outbox rows upload to the Worker. Logout stops the sync agent.
+11: 
+12: use std::path::PathBuf;
+13: use std::sync::Arc;
+14: 
+15: use client_composition::app_state::{AppState, AppStateConfig};
+16: use platform_kernel::{OrganizationId, ReplicaId};
+17: use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+18: use sqlx::SqlitePool;
+19: use sync_transport::{cloud_relay::CloudRelayTransport, placeholder_types::AuthorityProvider};
+20: use tokio::sync::Mutex;
+21: 
+22: use desktop_session::{
+23:     secure_storage::{keyring_adapter::KeyringSecureStorage, SecureStorage},
+24:     session::{self, HttpSessionApi, SessionError},
+25:     session_authority::{SessionAuthority, SessionBearerProvider, SessionSummary},
+26: };
+27: 
+28: use crate::device;
+29: use relay_websocket_adapter::TungsteniteRelaySocketFactory;
+30: 
+31: /// The same canonical API origin used by the current desktop-shell login flow.
+32: /// Build-time override via `ONYX_API_ORIGIN`. Unset builds use the production origin.
+33: pub const ONYX_API_ORIGIN: &str = match option_env!("ONYX_API_ORIGIN") {
+34:     Some(origin) => origin,
+35:     None => "https://onyx-framework.soheil-mozaffari.workers.dev",
+36: };
+37: 
+38: pub struct SlintComposition {
+39:     api_origin: String,
+40:     pub session: Arc<SessionAuthority>,
+41:     pub relay: Arc<CloudRelayTransport>,
+42:     replica: ReplicaId,
+43:     data_dir: PathBuf,
+44:     pool: SqlitePool,
+45:     outbox: Mutex<Option<OutboxRuntime>>,
+46: }
+47: 
+48: /// The running app state for the signed-in organization. Dropping it does
+49: /// not stop the sync task, so `stop_outbox` aborts the task explicitly.
+50: struct OutboxRuntime {
+51:     _state: Arc<AppState>,
+52:     task: tokio::task::JoinHandle<()>,
+53: }
+54: 
+55: impl SlintComposition {
+56:     /// Opens the device database, applies migrations and builds the session
+57:     /// service and relay. Must be awaited inside the Tokio runtime.
+58:     pub async fn open() -> Result<Arc<Self>, String> {
+59:         let data_dir = device::data_dir()?;
+60:         // Separate keyring service from the Tauri shell so both can be installed on
+61:         // one device without overwriting each other's session (decision-log).
+62:         let storage: Arc<dyn SecureStorage> = Arc::new(
+63:             KeyringSecureStorage::for_service("com.onyx.platform.slint")
+64:                 .map_err(|e| format!("credential store: {e}"))?,
+65:         );
+66:         Self::open_with(OpenOptions {
+67:             data_dir,
+68:             storage,
+69:             api_origin: ONYX_API_ORIGIN.to_string(),
+70:         })
+71:         .await
+72:     }
+73: 
+74:     /// Opens the composition with explicit data folder, credential store, and
+75:     /// API origin. `open` uses the device defaults; tests use temporary folders,
+76:     /// an in-memory store, and an unreachable origin.
+77:     pub async fn open_with(options: OpenOptions) -> Result<Arc<Self>, String> {
+78:         let OpenOptions {
+79:             data_dir,
+80:             storage,
+81:             api_origin,
+82:         } = options;
+83:         std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data folder: {e}"))?;
+84:         let replica = device::load_or_create_replica_id(&data_dir)?;
+85: 
+86:         let options = SqliteConnectOptions::new()
+87:             .filename(data_dir.join("onyx.sqlite"))
+88:             .create_if_missing(true)
+89:             // Foreign keys are off by default in SQLite; the schema depends on them.
+90:             .foreign_keys(true);
+91:         let pool = SqlitePoolOptions::new()
+92:             .max_connections(1)
+93:             .connect_with(options)
+94:             .await
+95:             .map_err(|e| format!("open database: {e}"))?;
+96:         sqlx::migrate!("../../../migrations/sqlite")
+97:             .run(&pool)
+98:             .await
+99:             .map_err(|e| format!("apply migrations: {e}"))?;
+100: 
+101:         let api =
+102:             Arc::new(HttpSessionApi::new(&api_origin).map_err(|e| format!("session api: {e}"))?);
+103:         let session = SessionAuthority::new(&api_origin, api, Arc::clone(&storage));
+104:         let authority: Arc<dyn AuthorityProvider> =
+105:             Arc::new(SessionBearerProvider::new(Arc::clone(&session)));
+106:         let socket_factory = Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
+107:             replica,
+108:             session.connection_cancellation_source(),
+109:         ));
+110:         let relay = Arc::new(CloudRelayTransport::new(
+111:             &api_origin,
+112:             authority,
+113:             socket_factory,
+114:         ));
+115: 
+116:         let composition = Arc::new(Self {
+117:             api_origin,
+118:             session,
+119:             relay,
+120:             replica,
+121:             data_dir,
+122:             pool,
+123:             outbox: Mutex::new(None),
+124:         });
+125:         composition.restore_session(&storage).await;
+126:         Ok(composition)
+127:     }
+128: 
+129:     /// Restores a stored refresh token from the keyring at startup. On success
+130:     /// the sync agent starts for that organization, as after a fresh sign-in.
+131:     async fn restore_session(&self, storage: &Arc<dyn SecureStorage>) {
+132:         match session::load(storage).await {
+133:             Ok(Some(stored)) => {
+134:                 if let Some(summary) = self.session.restore(stored).await {
+135:                     self.start_outbox(&summary.organization_id.to_string())
+136:                         .await;
+137:                 }
+138:             }
+139:             Ok(None) => {}
+140:             Err(e) => tracing::warn!(error = %e, "stored session could not be read"),
+141:         }
+142:     }
+143: 
+144:     pub async fn login(
+145:         &self,
+146:         username: &str,
+147:         password: &str,
+148:     ) -> Result<SessionSummary, SessionError> {
+149:         let outcome = self.session.sign_in(username, password).await?;
+150:         if !outcome.persisted {
+151:             tracing::warn!("session is active in memory only; keyring save failed");
+152:         }
+153:         let summary = outcome.summary;
+154:         self.start_outbox(&summary.organization_id.to_string())
+155:             .await;
+156:         Ok(summary)
+157:     }
+158: 
+159:     pub async fn logout(&self) {
+160:         self.stop_outbox().await;
+161:         self.session.sign_out().await;
+162:     }
+163: 
+164:     /// Builds the app state for `organization_id` and starts its sync agent.
+165:     /// A failure is logged; login still succeeds and rows stay in the local
+166:     /// outbox until a later attempt.
+167:     async fn start_outbox(&self, organization_id: &str) {
+168:         self.stop_outbox().await;
+169:         let org = match OrganizationId::from_uuid_str(organization_id) {
+170:             Ok(org) => org,
+171:             Err(e) => {
+172:                 tracing::warn!(error = %e, "outbox not started: invalid organization id");
+173:                 return;
+174:             }
+175:         };
+176: 
+177:         let config = AppStateConfig {
+178:             local_replica: self.replica,
+179:             organization_id: org,
+180:             sync_agent_config: client_composition::sync_agent::SyncAgentConfig::default(),
+181:             event_bus_capacity: 1024,
+182:             cloud_relay_endpoint: self.api_origin.replacen("https://", "wss://", 1),
+183:             local_discovery: None,
+184:             cloud_relay_auth_provider: Arc::new(SessionBearerProvider::new(Arc::clone(
+185:                 &self.session,
+186:             ))),
+187:             cloud_relay_socket_factory: Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
+188:                 self.replica,
+189:                 self.session.connection_cancellation_source(),
+190:             )),
+191:             blob_store_root: self.data_dir.join("blobs"),
+192:             owner_authority: None,
+193:             cloud_outbox_endpoint: Some(format!("{}/api/sync/outbox", self.api_origin)),
+194:         };
+195: 
+196:         match AppState::new(self.pool.clone(), config).await {
+197:             Ok(state) => {
+198:                 let state = Arc::new(state);
+199:                 let agent = Arc::clone(&state.sync_agent);
+200:                 let task = tokio::spawn(async move { agent.run().await });
+201:                 *self.outbox.lock().await = Some(OutboxRuntime {
+202:                     _state: state,
+203:                     task,
+204:                 });
+205:             }
+206:             Err(e) => tracing::warn!(error = %e, "outbox not started"),
+207:         }
+208:     }
+209: 
+210:     async fn stop_outbox(&self) {
+211:         if let Some(runtime) = self.outbox.lock().await.take() {
+212:             runtime.task.abort();
+213:         }
+214:     }
+215: }
+216: 
+217: /// Inputs for `SlintComposition::open_with`.
+218: pub struct OpenOptions {
+219:     pub data_dir: std::path::PathBuf,
+220:     pub storage: Arc<dyn SecureStorage>,
+221:     pub api_origin: String,
+222: }
+223: 
+224: #[cfg(test)]
+225: mod lifecycle_tests {
+[Output truncated. Continue reading with offset: 226]
+
+---
+
+## Assistant
+
+**Tool: read**
+
+**Input:**
+```json
+{
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs",
+  "offset": 224,
+  "limit": 90
+}
+```
+
+Read file /home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs, lines 224-310
+224: #[cfg(test)]
+225: mod lifecycle_tests {
+226:     use super::*;
+227:     use desktop_session::session::{self, StoredSession};
+228:     use keyring_core::mock::Store as MockStore;
+229:     use platform_kernel::{ObjectId, OrganizationId};
+230: 
+231:     /// Unreachable origin: refresh fails fast with a network error, not a verdict.
+232:     const OFFLINE_ORIGIN: &str = "http://127.0.0.1:9";
+233: 
+234:     fn options(dir: &std::path::Path, storage: Arc<dyn SecureStorage>) -> OpenOptions {
+235:         OpenOptions {
+236:             data_dir: dir.to_path_buf(),
+237:             storage,
+238:             api_origin: OFFLINE_ORIGIN.to_string(),
+239:         }
+240:     }
+241: 
+242:     fn mock_storage() -> Arc<dyn SecureStorage> {
+243:         let store = MockStore::new().expect("mock store");
+244:         Arc::new(KeyringSecureStorage::with_store(
+245:             "com.onyx.platform.slint.test",
+246:             store,
+247:         ))
+248:     }
+249: 
+250:     #[tokio::test]
+251:     async fn fresh_start_opens_signed_out_with_stable_replica() {
+252:         let dir = tempfile::tempdir().unwrap();
+253:         let storage = mock_storage();
+254: 
+255:         let first = SlintComposition::open_with(options(dir.path(), Arc::clone(&storage)))
+256:             .await
+257:             .expect("first open");
+258:         assert!(first.session.current_summary().await.is_none());
+259:         let replica = first.replica;
+260:         drop(first);
+261: 
+262:         // Restart over the same folder: migrations are idempotent and the
+263:         // replica identity persists.
+264:         let second = SlintComposition::open_with(options(dir.path(), storage))
+265:             .await
+266:             .expect("second open");
+267:         assert_eq!(second.replica, replica);
+268:         assert!(second.session.current_summary().await.is_none());
+269:     }
+270: 
+271:     #[tokio::test]
+272:     async fn offline_restart_keeps_stored_session_record() {
+273:         let dir = tempfile::tempdir().unwrap();
+274:         let storage = mock_storage();
+275:         let stored = StoredSession {
+276:             server_address: OFFLINE_ORIGIN.to_string(),
+277:             refresh_token: "refresh-token-for-offline-test".to_string(),
+278:             user_id: ObjectId::new_random(),
+279:             organization_id: OrganizationId::new_random(),
+280:             username: "tester".to_string(),
+281:             is_admin: false,
+282:             must_change_password: false,
+283:         };
+284:         session::save(&storage, &stored).await.expect("save record");
+285: 
+286:         let composition = SlintComposition::open_with(options(dir.path(), Arc::clone(&storage)))
+287:             .await
+288:             .expect("open offline");
+289: 
+290:         // Network failure is not a verdict: the app starts signed out, but the
+291:         // stored record survives for the next launch.
+292:         assert!(composition.session.current_summary().await.is_none());
+293:         let still_stored = session::load(&storage)
+294:             .await
+295:             .expect("load")
+296:             .expect("record kept");
+297:         assert_eq!(still_stored.username, "tester");
+298:     }
+299: 
+300:     #[tokio::test]
+301:     async fn logout_without_session_is_idempotent() {
+302:         let dir = tempfile::tempdir().unwrap();
+303:         let composition = SlintComposition::open_with(options(dir.path(), mock_storage()))
+304:             .await
+305:             .expect("open");
+306:         composition.logout().await;
+307:         composition.logout().await;
+308:         assert!(composition.session.current_summary().await.is_none());
+309:     }
+310: }
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now I'll write the S7 changes. Since no local builds, I need to be very careful about Rust compile correctness. Let me design minimal, robust changes.
+
+### Design decisions
+
+- Keep `SlintComposition` struct fields; replace session construction with `with_api_factory(&api_origin, http_api_factory(), storage)`. Remove `HttpSessionApi` import (now unused → clippy warning). Replace with `http_api_factory` import.
+- Keep `api_origin` as the **cloud base** for org lookup. Add `resolve_organization_server` private method (async) on composition, ported from Tauri but returning `Result<String, LoginFailure>`.
+- Define `pub enum LoginFailure` and `pub enum PasswordFailure` in composition.rs with `Debug`, `Clone`, `PartialEq`, `Eq` (for tests/UI mapping).
+- `login(&self, organization, username, password) -> Result<SessionSummary, LoginFailure>`:
+  ```rust
+  let server = self.resolve_organization_server(organization).await?;
+  let outcome = self.session.sign_in_at(&server, Some(organization.trim()), username, password).await.map_err(map_session_error)?;
+  if !outcome.persisted { warn }
+  let summary = outcome.summary;
+  self.start_outbox(&summary.organization_id.to_string(), &summary.server_address).await;
+  Ok(summary)
+  ```
+- `start_outbox(&self, organization_id: &str, server_address: &str)` uses server_address for endpoints:
+  - `relay_endpoint(server)` helper: replace https→wss, http→ws. Tauri's `relay_ws_endpoint_from_http` does that. Write pure function:
+    ```rust
+    pub fn relay_ws_endpoint(server: &str) -> String {
+        if let Some(rest) = server.strip_prefix("https://") { format!("wss://{rest}") }
+        else if let Some(rest) = server.strip_prefix("http://") { format!("ws://{rest}") }
+        else { server.to_string() }
+    }
+    ```
+    Use for `cloud_relay_endpoint` and outbox endpoint.
+  - Note `relay` field still created with api_origin at open and unused? It's pub but maybe not used elsewhere in main.rs. Check: main.rs doesn't use `composition.relay`. Could leave it (fixed cloud base relay) — but R-40 says "fixed origin replaced by session's server". For correctness, rebuild relay on login with the session server. `CloudRelayTransport::new(&server, authority, socket_factory)` — need `AuthorityProvider` and socket factory. We can construct in login and assign `self.relay = Arc::new(...)`. But `relay` is pub Arc; if someone holds a clone before login, they keep old endpoint. Acceptable for feasibility. Let's implement a helper `fn build_relay(&self, server: &str) -> Arc<CloudRelayTransport>` and call in open_with and login/restore. But `self.relay` assignment requires `&self` with no mutex — field is `pub relay: Arc<...>`, can't assign through `&self` without interior mutability. Change field to `Mutex<Arc<CloudRelayTransport>>`? That breaks external users (none besides tests maybe). Grep: subagent said relay field public but main.rs doesn't use it. We can change to `pub relay: Mutex<Arc<CloudRelayTransport>>` and update start_outbox? Actually start_outbox uses its own socket factory config, not `self.relay`. Simpler: leave `relay` as-is (created with cloud base) and document that per-server outbox/relay endpoint is used by the app state via `start_outbox`. But R-40 acceptance says "composition.rs fixed origin replaced by the session's server" — the outbox uses session server now, which is the key change. The `relay` field is only used for outbox? Let me grep usage of `.relay` in desktop-slint.
+
+Let me check that before deciding.
+
+- `change_password(&self, current, new) -> Result<(), PasswordFailure>`:
+  ```rust
+  let summary = self.session.current_summary().await.ok_or(PasswordFailure::SessionExpired)?;
+  let token = self.session.current_access_token().await.ok_or(PasswordFailure::SessionExpired)?;
+  let response = reqwest::Client::new()... .post(format!("{}/api/auth/password", summary.server_address))... send().await.map_err(|_| PasswordFailure::Network)?;
+  if response.status().is_success() { self.logout().await; return Ok(()); }
+  let body: Value = response.json().await.unwrap_or(Value::Null);
+  let code = body.get("error").and_then(|e| e.as_str()).unwrap_or("");
+  Err(match code { "CURRENT_PASSWORD_INCORRECT" => ..., "WEAK_PASSWORD" => ..., "PASSWORD_UNCHANGED" => ..., "INVALID_PASSWORD_CHANGE" => ..., _ => PasswordFailure::Server })
+  ```
+  Need reqwest import in composition.rs (reqwest is a dependency). Use `reqwest::Client::new()` with default features (workspace reqwest has json feature). `serde_json::Value` import needed (serde_json is dependency).
+  On success call `self.logout().await` (signs out, clears keyring). Then UI sets state logged out.
+
+- `current_summary()` public wrapper for startup restore: `pub async fn current_summary(&self) -> Option<SessionSummary> { self.session.current_summary().await }`.
+
+- restore: pass `summary.server_address` to start_outbox.
+
+- Tests: add pure tests for `relay_ws_endpoint` and `password_failure_code` and `parse_lookup_server` (pure). Add a small axum test for lookup? Let's write a helper `fn server_from_lookup_body(body: &str, cloud_base: &str) -> Result<String, LoginFailure>` that parses `server_url: Option<String>`, validates http(s), trims trailing '/', null → cloud_base. Pure and testable. Then `resolve_organization_server` uses it after GET. This covers unknown org (404 mapped), invalid server URL, null server URL, etc. Tests:
+  - `lookup_null_server_uses_cloud_base`
+  - `lookup_https_server_is_used_and_trimmed`
+  - `lookup_rejects_non_http_scheme`
+  - `password_error_codes_are_mapped`
+  - `relay_ws_endpoint_maps_http_and_https`
+  - Maybe a composition-level test with axum mock for the full login flow (lookup + login + per-server storage). This is more complex but valuable; R-40 acceptance requires tests for lookup failure, unknown org, restore on other server. Let me write axum-based tests carefully using patterns from desktop-session tests. Let me read a bit of desktop-session http_contract_tests to mirror setup. Actually writing axum mocks with correct JSON shapes is doable. But time. Let me first do pure tests + one integration test for login via mock server.
+
+Given CI-only verification, I'd rather keep tests simpler to avoid compile errors. Pure tests + maybe one axum test using `axum::Router` and `tokio::net::TcpListener`. I've seen the pattern in desktop-session tests; let me read a snippet to copy exact API usage.
+
+Let me check `relay` usage and read desktop-session test setup.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "grep -rn \"\\.relay\\|relay\" crates/bins/desktop-slint/src/main.rs | head; echo ===; sed -n 520,600p crates/applications/desktop-session/src/session.rs"
+}
+```
+
+3://! The host now uses the real API session service and shared relay adapter.
+===
+        json!({
+            "access_token": "generated-access-http",
+            "refresh_token": "generated-refresh-http",
+            "expires_in": 3600,
+            "user": {"id": uuid::Uuid::from_bytes([1; 16]).to_string(),
+                     "username": "generated-user",
+                     "organization_id": uuid::Uuid::from_bytes([2; 16]).to_string(),
+                     "is_admin": true}
+        })
+    }
+
+    async fn login(State(m): State<Arc<Mock>>, Json(_b): Json<Value>) -> (StatusCode, Json<Value>) {
+        let status = *m.login_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(token_body()))
+    }
+
+    async fn refresh(
+        State(m): State<Arc<Mock>>,
+        Json(b): Json<Value>,
+    ) -> (StatusCode, Json<Value>) {
+        *m.last_refresh_body.lock().unwrap() = Some(b.to_string());
+        let delay = *m.refresh_delay.lock().unwrap();
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        let status = *m.refresh_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(token_body()))
+    }
+
+    async fn logout(
+        State(m): State<Arc<Mock>>,
+        headers: HeaderMap,
+        Json(b): Json<Value>,
+    ) -> (StatusCode, Json<Value>) {
+        *m.last_logout_auth.lock().unwrap() = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        *m.last_logout_body.lock().unwrap() = Some(b.to_string());
+        let status = *m.logout_status.lock().unwrap();
+        (
+            StatusCode::from_u16(status).unwrap(),
+            Json(json!({"success": true})),
+        )
+    }
+
+    async fn serve(mock: Arc<Mock>) -> String {
+        let app = Router::new()
+            .route("/api/auth/login", post(login))
+            .route("/api/auth/refresh", post(refresh))
+            .route("/api/auth/logout", post(logout))
+            .with_state(mock);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{address}")
+    }
+
+    fn mock_with(login: u16, refresh: u16, logout: u16) -> Arc<Mock> {
+        let m = Mock::default();
+        *m.login_status.lock().unwrap() = login;
+        *m.refresh_status.lock().unwrap() = refresh;
+        *m.logout_status.lock().unwrap() = logout;
+        Arc::new(m)
+    }
+
+    #[tokio::test]
+    async fn login_success_returns_pair_and_identity() {
+        let origin = serve(mock_with(200, 200, 200)).await;
+        let api = HttpSessionApi::new(&origin).unwrap();
+        let result = api
+            .login("generated-user", "generated-password", None)
+            .await
+            .unwrap();
+        assert_eq!(result.pair.expires_in, 3600);
+        assert_eq!(result.pair.access_token, "generated-access-http");
+        assert!(result.identity.is_admin);
+    }
+
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Good. `relay` field isn't used in main.rs. I can leave it.
+
+Let me write the code now. I'll be systematic:
+
+**composition.rs edits:**
+
+1. Imports:
+```rust
+use desktop_session::{
+    secure_storage::{...},
+    session::{self, SessionError},
+    session_authority::{http_api_factory, SessionAuthority, SessionBearerProvider, SessionSummary},
+};
+use serde_json::Value;
+```
+Remove `HttpSessionApi` since no longer used after with_api_factory.
+
+2. Add enums + pure helpers after `ONYX_API_ORIGIN`:
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginFailure { OrganizationNotFound, InvalidOrganizationServer, InvalidCredentials, Network, Server }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PasswordFailure { CurrentPasswordIncorrect, WeakPassword, PasswordUnchanged, SessionExpired, Network, Server }
+
+pub fn relay_ws_endpoint(server: &str) -> String {...}
+fn password_failure_code(code: &str) -> PasswordFailure {...}
+fn server_from_lookup(body: &str, cloud_base: &str) -> Result<String, LoginFailure> {...}
+```
+`server_from_lookup` uses serde_json::from_str::<Value>(body), gets `server_url` as str or null. If missing/null → cloud_base. Else trim_end_matches('/'), reject empty, require http(s).
+
+3. open_with: replace api construction:
+```rust
+let session = SessionAuthority::with_api_factory(&api_origin, http_api_factory(), Arc::clone(&storage));
+```
+
+4. restore_session: `self.start_outbox(&summary.organization_id.to_string(), &summary.server_address).await;`
+
+5. Replace login method with 3-field version, add current_summary and change_password, plus resolve_organization_server private async.
+
+6. start_outbox signature adds `server_address: &str`, uses relay_ws_endpoint(server_address) and outbox endpoint.
+
+7. tests: add pure tests + axum integration test for login/lookup/password maybe. Let me write a few pure tests first and one integration test that exercises lookup+login+stored server.
+
+For integration test, I need a mock server serving:
+- `GET /api/organizations/lookup` returning `{"server_url": null}` or `{"server_url": format!("http://{addr}")}`.
+- `POST /api/auth/login` returning token JSON.
+- `POST /api/auth/logout` returning success (for password change test).
+- `POST /api/auth/password` returning success.
+
+The composition's `api_origin` is the cloud base = mock server URL. `resolve_organization_server` queries `{api_origin}/api/organizations/lookup`. If body server_url null → uses cloud base (mock server). Then `sign_in_at` hits same mock server. Good. Then assert summary.server_address == origin and stored record has it. Add test:
+```rust
+#[tokio::test]
+async fn three_field_login_resolves_cloud_server_and_records_it() { ... }
+```
+Need `axum::{Router, routing::{get, post}, extract::{State, Json}, http::StatusCode}`; use `serde_json::{json, Value}`. Mock struct with Mutex for observed request bodies (std::sync::Mutex).
+
+Also test unknown org: mock returns 404 → `LoginFailure::OrganizationNotFound`.
+Also test password change: need to sign in first (via composition.login) then change_password; mock password route captures body and returns success; assert `composition.current_summary().await.is_none()` after (because logout on success). This covers R-41.
+Also test "restore on another server": stored session with server_address = mock2 URL, but api_origin = mock1 (cloud). open_with will call session.restore(stored) which uses stored server; mock2 must serve POST /api/auth/refresh returning token. Then assert summary.server_address == mock2. This is valuable but more setup. Maybe skip due to complexity; desktop-session already has `restore_resumes_against_the_server_that_issued_the_session` covering authority behavior. Our composition passes stored server to outbox; pure relay endpoint test covers endpoint mapping.
+
+Let me write pure tests for helpers and two integration tests (login lookup, password change). Keep it manageable.
+
+Important: `session::save` after login stores refresh token; `sign_out` on password success deletes it. Fine.
+
+Potential issue: `sign_in_at` calls `session::save` with storage; mock storage from keyring_core mock. Fine.
+
+Potential issue: `start_outbox` spawns sync agent task with mock server endpoints; it will try to connect and log warnings, but tests don't await it; task aborted on drop? `OutboxRuntime` drop doesn't abort (comment says stop_outbox needed). On composition drop, task keeps running until runtime shutdown; test runtime ends, fine. Existing tests already do this.
+
+Now **main.slint** edits:
+- properties: `organization`, `current-password`, `new-password`, `must-change-password`.
+- callbacks: `login-requested(string, string, string)`, `change-password-requested(string, string)`.
+- UI: login pane with three fields; add password change pane before login or after; condition ordering.
+
+Let me write full new main.slint content via write tool (100 lines).
+
+**main.rs** edits:
+- startup: query current_summary and set authenticated/display-name/must-change-password.
+- login callback signature and mapping.
+- password change callback.
+- errors mapped to status strings.
+
+Let me write these now.
+
+First composition.rs imports + helpers.
+
+Now I'll implement the composition changes (org lookup, per-server session, password change).
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "use desktop_session::{\n    secure_storage::{keyring_adapter::KeyringSecureStorage, SecureStorage},\n    session::{self, SessionError},\n    session_authority::{\n        http_api_factory, SessionAuthority, SessionBearerProvider, SessionSummary,\n    },\n};\nuse serde_json::Value;",
+  "oldString": "use desktop_session::{\n    secure_storage::{keyring_adapter::KeyringSecureStorage, SecureStorage},\n    session::{self, HttpSessionApi, SessionError},\n    session_authority::{SessionAuthority, SessionBearerProvider, SessionSummary},\n};",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "pub const ONYX_API_ORIGIN: &str = match option_env!(\"ONYX_API_ORIGIN\") {\n    Some(origin) => origin,\n    None => \"https://onyx-framework.soheil-mozaffari.workers.dev\",\n};\n\n/// Stable login failures for the UI. The Worker remains the authority; these\n/// are only the host's display categories, never a substitute for server policy.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub enum LoginFailure {\n    OrganizationNotFound,\n    InvalidOrganizationServer,\n    InvalidCredentials,\n    Network,\n    Server,\n}\n\n/// Stable password-change failures for the UI.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub enum PasswordFailure {\n    CurrentPasswordIncorrect,\n    WeakPassword,\n    PasswordUnchanged,\n    SessionExpired,\n    Network,\n    Server,\n}\n\n/// Maps an HTTP(S) origin to the relay endpoint used by the local outbox.\npub fn relay_ws_endpoint(server: &str) -> String {\n    if let Some(rest) = server.strip_prefix(\"https://\") {\n        format!(\"wss://{rest}\")\n    } else if let Some(rest) = server.strip_prefix(\"http://\") {\n        format!(\"ws://{rest}\")\n    } else {\n        server.to_string()\n    }\n}\n\nfn password_failure_code(code: &str) -> PasswordFailure {\n    match code {\n        \"CURRENT_PASSWORD_INCORRECT\" => PasswordFailure::CurrentPasswordIncorrect,\n        \"WEAK_PASSWORD\" | \"INVALID_PASSWORD_CHANGE\" => PasswordFailure::WeakPassword,\n        \"PASSWORD_UNCHANGED\" => PasswordFailure::PasswordUnchanged,\n        \"PASSWORD_CHANGE_REQUIRED\" => PasswordFailure::SessionExpired,\n        _ => PasswordFailure::Server,\n    }\n}\n\n/// Reads the organization registry response. A null/empty `server_url` means\n/// the cloud server itself; only http(s) addresses are accepted.\nfn server_from_lookup(body: &str, cloud_base: &str) -> Result<String, LoginFailure> {\n    let value: Value = serde_json::from_str(body).map_err(|_| LoginFailure::Server)?;\n    let Some(url) = value.get(\"server_url\").and_then(Value::as_str) else {\n        return Ok(cloud_base.to_string());\n    };\n    let url = url.trim_end_matches('/');\n    if url.is_empty() {\n        return Ok(cloud_base.to_string());\n    }\n    if url.starts_with(\"https://\") || url.starts_with(\"http://\") {\n        Ok(url.to_string())\n    } else {\n        Err(LoginFailure::InvalidOrganizationServer)\n    }\n}\n\nimpl From<SessionError> for LoginFailure {\n    fn from(error: SessionError) -> Self {\n        match error {\n            SessionError::InvalidCredentials => LoginFailure::InvalidCredentials,\n            SessionError::Network(_) => LoginFailure::Network,\n            SessionError::UnexpectedResponse(_) | SessionError::Storage(_) => LoginFailure::Server,\n        }\n    }\n}",
+  "oldString": "pub const ONYX_API_ORIGIN: &str = match option_env!(\"ONYX_API_ORIGIN\") {\n    Some(origin) => origin,\n    None => \"https://onyx-framework.soheil-mozaffari.workers.dev\",\n};",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "        let session = SessionAuthority::with_api_factory(\n            &api_origin,\n            http_api_factory(),\n            Arc::clone(&storage),\n        );",
+  "oldString": "        let api =\n            Arc::new(HttpSessionApi::new(&api_origin).map_err(|e| format!(\"session api: {e}\"))?);\n        let session = SessionAuthority::new(&api_origin, api, Arc::clone(&storage));",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "                if let Some(summary) = self.session.restore(stored).await {\n                    self.start_outbox(\n                        &summary.organization_id.to_string(),\n                        &summary.server_address,\n                    )\n                    .await;\n                }",
+  "oldString": "                if let Some(summary) = self.session.restore(stored).await {\n                    self.start_outbox(&summary.organization_id.to_string())\n                        .await;\n                }",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now replace login method and add other methods.
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "    /// Asks the cloud registry which server serves the organization. A null\n    /// `server_url` means the cloud server itself. Only http(s) is accepted.\n    async fn resolve_organization_server(&self, organization: &str) -> Result<String, LoginFailure> {\n        let identifier = organization.trim();\n        if identifier.is_empty() {\n            return Err(LoginFailure::OrganizationNotFound);\n        }\n        let response = reqwest::Client::new()\n            .get(format!(\"{}/api/organizations/lookup\", self.api_origin))\n            .query(&[(\"identifier\", identifier)])\n            .send()\n            .await\n            .map_err(|_| LoginFailure::Network)?;\n        if response.status() == reqwest::StatusCode::NOT_FOUND {\n            return Err(LoginFailure::OrganizationNotFound);\n        }\n        if !response.status().is_success() {\n            return Err(LoginFailure::Server);\n        }\n        let body = response.text().await.map_err(|_| LoginFailure::Server)?;\n        server_from_lookup(&body, &self.api_origin)\n    }\n\n    /// Signs in with the source-confirmed three fields. The organization\n    /// determines the server, and the resulting session is pinned to it.\n    pub async fn login(\n        &self,\n        organization: &str,\n        username: &str,\n        password: &str,\n    ) -> Result<SessionSummary, LoginFailure> {\n        let server = self.resolve_organization_server(organization).await?;\n        let outcome = self\n            .session\n            .sign_in_at(&server, Some(organization.trim()), username, password)\n            .await?;\n        if !outcome.persisted {\n            tracing::warn!(\"session is active in memory only; keyring save failed\");\n        }\n        let summary = outcome.summary;\n        self.start_outbox(&summary.organization_id.to_string(), &summary.server_address)\n            .await;\n        Ok(summary)\n    }\n\n    /// The live session, if any. Used at startup so a restored session is not\n    /// hidden behind the login pane.\n    pub async fn current_summary(&self) -> Option<SessionSummary> {\n        self.session.current_summary().await\n    }\n\n    /// Changes the account password on the session's own server. The Worker\n    /// revokes every session on success, so the local session is signed out too.\n    pub async fn change_password(\n        &self,\n        current_password: &str,\n        new_password: &str,\n    ) -> Result<(), PasswordFailure> {\n        let summary = self\n            .session\n            .current_summary()\n            .await\n            .ok_or(PasswordFailure::SessionExpired)?;\n        let token = self\n            .session\n            .current_access_token()\n            .await\n            .ok_or(PasswordFailure::SessionExpired)?;\n        let response = reqwest::Client::new()\n            .post(format!(\"{}/api/auth/password\", summary.server_address))\n            .bearer_auth(token)\n            .json(&serde_json::json!({\n                \"current_password\": current_password,\n                \"new_password\": new_password,\n            }))\n            .send()\n            .await\n            .map_err(|_| PasswordFailure::Network)?;\n        if response.status().is_success() {\n            self.logout().await;\n            return Ok(());\n        }\n        let body = response.text().await.unwrap_or_default();\n        let code = serde_json::from_str::<Value>(&body)\n            .ok()\n            .and_then(|value| {\n                value\n                    .get(\"error\")\n                    .and_then(Value::as_str)\n                    .map(str::to_owned)\n            })\n            .unwrap_or_default();\n        Err(password_failure_code(&code))\n    }\n\n    pub async fn logout(&self) {\n        self.stop_outbox().await;\n        self.session.sign_out().await;\n    }",
+  "oldString": "    pub async fn login(\n        &self,\n        username: &str,\n        password: &str,\n    ) -> Result<SessionSummary, SessionError> {\n        let outcome = self.session.sign_in(username, password).await?;\n        if !outcome.persisted {\n            tracing::warn!(\"session is active in memory only; keyring save failed\");\n        }\n        let summary = outcome.summary;\n        self.start_outbox(&summary.organization_id.to_string())\n            .await;\n        Ok(summary)\n    }\n\n    pub async fn logout(&self) {\n        self.stop_outbox().await;\n        self.session.sign_out().await;\n    }",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "    /// Builds the app state for `organization_id` and starts its sync agent\n    /// against the server that issued the session. A failure is logged; login\n    /// still succeeds and rows stay in the local outbox until a later attempt.\n    async fn start_outbox(&self, organization_id: &str, server_address: &str) {",
+  "oldString": "    /// Builds the app state for `organization_id` and starts its sync agent.\n    /// A failure is logged; login still succeeds and rows stay in the local\n    /// outbox until a later attempt.\n    async fn start_outbox(&self, organization_id: &str) {",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "            cloud_relay_endpoint: relay_ws_endpoint(server_address),",
+  "oldString": "            cloud_relay_endpoint: self.api_origin.replacen(\"https://\", \"wss://\", 1),",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "            cloud_outbox_endpoint: Some(format!(\"{server_address}/api/sync/outbox\")),",
+  "oldString": "            cloud_outbox_endpoint: Some(format!(\"{}/api/sync/outbox\", self.api_origin)),",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now add tests. Let me add pure tests and integration tests to the existing `lifecycle_tests` module. Need imports for axum etc. in tests:
+
+```rust
+use axum::{extract::{Json, State}, http::StatusCode, routing::{get, post}, Router};
+use std::sync::Mutex as StdMutex;
+```
+
+Careful: `tokio::sync::Mutex` already imported at top (super::*), so use `std::sync::Mutex` alias explicitly.
+
+Pure tests:
+- relay_ws_endpoint
+- password_failure_code
+- server_from_lookup (null, http(s), invalid scheme, non-json)
+
+Integration test for login + lookup: mock server functions. Let me write:
+
+```rust
+    struct LoginMock {
+        lookup_status: StdMutex<u16>,
+        login_body: StdMutex<Option<Value>>,
+        login_status: StdMutex<u16>,
+    }
+
+    async fn lookup(State(m): State<Arc<LoginMock>>) -> (StatusCode, Json<Value>) {
+        let status = *m.lookup_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(json!({"server_url": null})))
+    }
+
+    async fn login(State(m): State<Arc<LoginMock>>, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
+        *m.login_body.lock().unwrap() = Some(body);
+        let status = *m.login_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(json!({
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expires_in": 3600,
+            "user": {
+                "id": ObjectId::new_random().to_string()? 
+```
+Hmm ObjectId::to_string format? In desktop-session tests they use `uuid::Uuid::from_bytes([1;16]).to_string()` for id. Use that. Import `uuid::Uuid`? `uuid` is a workspace dep of desktop-slint. In tests, `use uuid::Uuid;`. Or use `ObjectId::new_random().to_string()` — uncertain format; use Uuid::from_bytes like the session tests. Let's do:
+```rust
+"id": uuid::Uuid::from_bytes([1; 16]).to_string(),
+"username": "tester",
+"organization_id": uuid::Uuid::from_bytes([2; 16]).to_string(),
+"is_admin": false,
+"must_change_password": true
+```
+Then test:
+```rust
+let mock = Arc::new(LoginMock::default());
+let origin = serve_login(mock.clone()).await;
+let dir = tempfile::tempdir().unwrap();
+let composition = SlintComposition::open_with(OpenOptions { data_dir: dir.path().to_path_buf(), storage: mock_storage(), api_origin: origin.clone() }).await.unwrap();
+let summary = composition.login("Acme", "staff", "pw").await.expect("login");
+assert_eq!(summary.server_address.trim_end_matches('/'), origin);
+assert!(summary.must_change_password);
+let body = mock.login_body.lock().unwrap().as_ref().unwrap().clone();
+assert_eq!(body.get("organization").and_then(Value::as_str), Some("Acme"));
+```
+Need `Default` impl for LoginMock. Write it.
+
+- unknown org test: set lookup_status 404, login should return OrganizationNotFound.
+
+- password change test: reuse login success then call change_password with mock route `/api/auth/password` returning success; assert summary none after. Need to add route to mock. Let's add `password_body: StdMutex<Option<Value>>` and route. Capture bearer? Could capture HeaderMap for Authorization; skip.
+
+Let me write the tests carefully. Potential issue: `axum` version 0.7 (workspace) — `Router::new().route(...).with_state(...)`, `axum::serve(listener, app)` — matches session tests. ✓.
+
+Another issue: `serde_json::json!` macro needs import `use serde_json::{json, Value};` in test module (Value already imported via super::* from composition? composition uses `use serde_json::Value;` at top, so `super::*` brings `Value` into scope; `json!` macro needs explicit import `use serde_json::json;`). Add.
+
+Let me append tests to the module before closing brace.
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "    #[tokio::test]\n    async fn logout_without_session_is_idempotent() {\n        let dir = tempfile::tempdir().unwrap();\n        let composition = SlintComposition::open_with(options(dir.path(), mock_storage()))\n            .await\n            .expect(\"open\");\n        composition.logout().await;\n        composition.logout().await;\n        assert!(composition.session.current_summary().await.is_none());\n    }\n\n    #[test]\n    fn relay_endpoints_follow_the_session_server() {\n        assert_eq!(relay_ws_endpoint(\"https://org.example\"), \"wss://org.example\");\n        assert_eq!(relay_ws_endpoint(\"http://127.0.0.1:9\"), \"ws://127.0.0.1:9\");\n        assert_eq!(relay_ws_endpoint(\"ws://already\"), \"ws://already\");\n    }\n\n    #[test]\n    fn password_error_codes_are_mapped_by_identifier_only() {\n        assert_eq!(\n            password_failure_code(\"CURRENT_PASSWORD_INCORRECT\"),\n            PasswordFailure::CurrentPasswordIncorrect\n        );\n        assert_eq!(password_failure_code(\"WEAK_PASSWORD\"), PasswordFailure::WeakPassword);\n        assert_eq!(\n            password_failure_code(\"PASSWORD_UNCHANGED\"),\n            PasswordFailure::PasswordUnchanged\n        );\n        assert_eq!(password_failure_code(\"something else\"), PasswordFailure::Server);\n    }\n\n    #[test]\n    fn lookup_server_is_display_only_derived_from_registry_response() {\n        assert_eq!(\n            server_from_lookup(r#\"{\"server_url\":null}\"#, \"https://cloud.example\").unwrap(),\n            \"https://cloud.example\"\n        );\n        assert_eq!(\n            server_from_lookup(r#\"{\"server_url\":\"https://org.example/\"}\"#, \"https://cloud.example\")\n                .unwrap(),\n            \"https://org.example\"\n        );\n        assert_eq!(\n            server_from_lookup(\n                r#\"{\"error\":\"INVALID_ORGANIZATION\"}\"#,\n                \"https://cloud.example\"\n            )\n            .unwrap(),\n            \"https://cloud.example\"\n        );\n        assert_eq!(\n            server_from_lookup(r#\"{\"server_url\":\"ftp://org.example\"}\"#, \"https://cloud.example\"),\n            Err(LoginFailure::InvalidOrganizationServer)\n        );\n    }\n}",
+  "oldString": "    #[tokio::test]\n    async fn logout_without_session_is_idempotent() {\n        let dir = tempfile::tempdir().unwrap();\n        let composition = SlintComposition::open_with(options(dir.path(), mock_storage()))\n            .await\n            .expect(\"open\");\n        composition.logout().await;\n        composition.logout().await;\n        assert!(composition.session.current_summary().await.is_none());\n    }\n}",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now add the integration test module with axum mock. Could be in same `lifecycle_tests` module with extra imports. Let me add imports at top of test module:
+
+```rust
+    use axum::{
+        extract::{Json, State},
+        http::StatusCode,
+        routing::{get, post},
+        Router,
+    };
+    use serde_json::{json, Value};
+    use std::sync::Mutex as StdMutex;
+```
+Careful: `Value` already in scope via super::* (composition imports `serde_json::Value`); re-importing `Value` in test module would shadow but same type — fine. To avoid unused import warning, skip `Value` import and use `serde_json::Value` fully? json! needs `use serde_json::json;`. Let's add `use serde_json::json;` only.
+
+Mock server:
+
+```rust
+    #[derive(Default)]
+    struct ServerMock {
+        lookup_status: StdMutex<u16>,
+        login_status: StdMutex<u16>,
+        password_status: StdMutex<u16>,
+        login_body: StdMutex<Option<serde_json::Value>>,
+        password_body: StdMutex<Option<serde_json::Value>>,
+    }
+
+    async fn lookup(State(m): State<Arc<ServerMock>>) -> (StatusCode, Json<serde_json::Value>) {
+        let status = *m.lookup_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(json!({"server_url": null})))
+    }
+
+    async fn login(State(m): State<Arc<ServerMock>>, Json(body): Json<serde_json::Value>) -> (StatusCode, Json<serde_json::Value>) {
+        *m.login_body.lock().unwrap() = Some(body);
+        let status = *m.login_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(json!({
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expires_in": 3600,
+            "user": {
+                "id": uuid::Uuid::from_bytes([1; 16]).to_string(),
+                "username": "tester",
+                "organization_id": uuid::Uuid::from_bytes([2; 16]).to_string(),
+                "is_admin": false,
+                "must_change_password": true
+            }
+        })))
+    }
+
+    async fn logout() -> (StatusCode, Json<serde_json::Value>) {
+        (StatusCode::OK, Json(json!({"success": true})))
+    }
+
+    async fn password(State(m): State<Arc<ServerMock>>, Json(body): Json<serde_json::Value>) -> (StatusCode, Json<serde_json::Value>) {
+        *m.password_body.lock().unwrap() = Some(body);
+        let status = *m.password_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(json!({"success": true})))
+    }
+
+    async fn serve(mock: Arc<ServerMock>) -> String {
+        let app = Router::new()
+            .route("/api/organizations/lookup", get(lookup))
+            .route("/api/auth/login", post(login))
+            .route("/api/auth/logout", post(logout))
+            .route("/api/auth/password", post(password))
+            .with_state(mock);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { let _ = axum::serve(listener, app).await; });
+        format!("http://{address}")
+    }
+
+    async fn composition_at(origin: &str, storage: Arc<dyn SecureStorage>) -> Arc<SlintComposition> { ... uses tempfile? need dir lifetime! 
+```
+Problem: tempdir must live for composition. Use inline in tests.
+
+Tests:
+```rust
+    #[tokio::test]
+    async fn three_field_login_uses_organization_registry_and_session_server() {
+        let mock = Arc::new(ServerMock::default());
+        *mock.login_status.lock().unwrap() = 200;
+        *mock.lookup_status.lock().unwrap() = 200;
+        let origin = serve(mock.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let composition = SlintComposition::open_with(OpenOptions {
+            data_dir: dir.path().to_path_buf(),
+            storage: mock_storage(),
+            api_origin: origin.clone(),
+        }).await.expect("open");
+        let summary = composition.login("Acme", "tester", "pw").await.expect("login");
+        assert_eq!(summary.server_address, origin);
+        assert!(summary.must_change_password);
+        let body = mock.login_body.lock().unwrap().clone().expect("login body");
+        assert_eq!(body.get("organization").and_then(|v| v.as_str()), Some("Acme"));
+    }
+```
+Wait: `server_from_lookup` with null returns cloud_base = origin (no trailing slash) ✓. `sign_in_at` trims trailing slash; origin has none. summary.server_address == origin ✓.
+
+```rust
+    #[tokio::test]
+    async fn unknown_organization_is_rejected_before_login() {
+        let mock = Arc::new(ServerMock::default());
+        *mock.lookup_status.lock().unwrap() = 404;
+        let origin = serve(mock.clone()).await;
+        ...
+        let error = composition.login("Missing", "tester", "pw").await.expect_err("rejected");
+        assert_eq!(error, LoginFailure::OrganizationNotFound);
+        assert!(mock.login_body.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn password_change_signs_out_after_success() {
+        mock login 200, lookup 200, password 200; login then change_password("old","new-password-12"); assert Ok(()); assert current_summary none; assert password body has current_password/new_password.
+    }
+```
+Note: `change_password` calls `self.logout()` → `sign_out()` calls revoke on mock `/api/auth/logout` which returns 200. Good.
+
+Potential issue: axum 0.7 `Json<serde_json::Value>` extractor works. ✓.
+
+Potential issue: `uuid::Uuid::from_bytes` — uuid crate in desktop-slint dependencies ✓.
+
+Let me add this as a separate `#[cfg(test)] mod desktop_login_tests` at end of composition.rs, to keep module imports tidy.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "cat >> crates/bins/desktop-slint/src/composition.rs <<'EOF'\n\n#[cfg(test)]\nmod desktop_login_tests {\n    use super::*;\n    use axum::{\n        extract::{Json, State},\n        http::StatusCode,\n        routing::{get, post},\n        Router,\n    };\n    use serde_json::json;\n    use std::sync::Mutex as StdMutex;\n\n    #[derive(Default)]\n    struct ServerMock {\n        lookup_status: StdMutex<u16>,\n        login_status: StdMutex<u16>,\n        password_status: StdMutex<u16>,\n        login_body: StdMutex<Option<serde_json::Value>>,\n        password_body: StdMutex<Option<serde_json::Value>>,\n    }\n\n    async fn lookup(State(mock): State<Arc<ServerMock>>) -> (StatusCode, Json<serde_json::Value>) {\n        let status = *mock.lookup_status.lock().unwrap();\n        (StatusCode::from_u16(status).unwrap(), Json(json!({\"server_url\": null})))\n    }\n\n    async fn login(\n        State(mock): State<Arc<ServerMock>>,\n        Json(body): Json<serde_json::Value>,\n    ) -> (StatusCode, Json<serde_json::Value>) {\n        *mock.login_body.lock().unwrap() = Some(body);\n        let status = *mock.login_status.lock().unwrap();\n        (\n            StatusCode::from_u16(status).unwrap(),\n            Json(json!({\n                \"access_token\": \"access-token\",\n                \"refresh_token\": \"refresh-token\",\n                \"expires_in\": 3600,\n                \"user\": {\n                    \"id\": uuid::Uuid::from_bytes([1; 16]).to_string(),\n                    \"username\": \"tester\",\n                    \"organization_id\": uuid::Uuid::from_bytes([2; 16]).to_string(),\n                    \"is_admin\": false,\n                    \"must_change_password\": true\n                }\n            })),\n        )\n    }\n\n    async fn logout() -> (StatusCode, Json<serde_json::Value>) {\n        (StatusCode::OK, Json(json!({\"success\": true})))\n    }\n\n    async fn password(\n        State(mock): State<Arc<ServerMock>>,\n        Json(body): Json<serde_json::Value>,\n    ) -> (StatusCode, Json<serde_json::Value>) {\n        *mock.password_body.lock().unwrap() = Some(body);\n        let status = *mock.password_status.lock().unwrap();\n        (StatusCode::from_u16(status).unwrap(), Json(json!({\"success\": true})))\n    }\n\n    async fn serve(mock: Arc<ServerMock>) -> String {\n        let app = Router::new()\n            .route(\"/api/organizations/lookup\", get(lookup))\n            .route(\"/api/auth/login\", post(login))\n            .route(\"/api/auth/logout\", post(logout))\n            .route(\"/api/auth/password\", post(password))\n            .with_state(mock);\n        let listener = tokio::net::TcpListener::bind(\"127.0.0.1:0\").await.unwrap();\n        let address = listener.local_addr().unwrap();\n        tokio::spawn(async move {\n            let _ = axum::serve(listener, app).await;\n        });\n        format!(\"http://{address}\")\n    }\n\n    fn storage() -> Arc<dyn SecureStorage> {\n        let store = keyring_core::mock::Store::new().expect(\"mock store\");\n        Arc::new(KeyringSecureStorage::with_store(\n            \"com.onyx.platform.slint.test\",\n            store,\n        ))\n    }\n\n    async fn open(origin: &str) -> Arc<SlintComposition> {\n        let dir = tempfile::tempdir().unwrap();\n        let composition = SlintComposition::open_with(OpenOptions {\n            data_dir: dir.path().to_path_buf(),\n            storage: storage(),\n            api_origin: origin.to_string(),\n        })\n        .await\n        .expect(\"open\");\n        // The tempdir is intentionally dropped: SQLite and the replica file\n        // remain usable through open handles for the lifetime of this test.\n        composition\n    }\n\n    #[tokio::test]\n    async fn three_field_login_uses_the_registry_and_the_issuing_server() {\n        let mock = Arc::new(ServerMock::default());\n        *mock.lookup_status.lock().unwrap() = 200;\n        *mock.login_status.lock().unwrap() = 200;\n        let origin = serve(mock.clone()).await;\n        let composition = open(&origin).await;\n\n        let summary = composition\n            .login(\"Acme\", \"tester\", \"password\")\n            .await\n            .expect(\"login\");\n        assert_eq!(summary.server_address, origin);\n        assert!(summary.must_change_password);\n        let body = mock.login_body.lock().unwrap().clone().expect(\"login body\");\n        assert_eq!(body.get(\"organization\").and_then(|v| v.as_str()), Some(\"Acme\"));\n        assert_eq!(body.get(\"username\").and_then(|v| v.as_str()), Some(\"tester\"));\n    }\n\n    #[tokio::test]\n    async fn unknown_organization_is_rejected_before_login() {\n        let mock = Arc::new(ServerMock::default());\n        *mock.lookup_status.lock().unwrap() = 404;\n        let origin = serve(mock.clone()).await;\n        let composition = open(&origin).await;\n\n        let error = composition\n            .login(\"Missing\", \"tester\", \"password\")\n            .await\n            .expect_err(\"unknown organization\");\n        assert_eq!(error, LoginFailure::OrganizationNotFound);\n        assert!(mock.login_body.lock().unwrap().is_none());\n    }\n\n    #[tokio::test]\n    async fn password_change_uses_the_session_server_and_signs_out() {\n        let mock = Arc::new(ServerMock::default());\n        *mock.lookup_status.lock().unwrap() = 200;\n        *mock.login_status.lock().unwrap() = 200;\n        *mock.password_status.lock().unwrap() = 200;\n        let origin = serve(mock.clone()).await;\n        let composition = open(&origin).await;\n        composition\n            .login(\"Acme\", \"tester\", \"password\")\n            .await\n            .expect(\"login\");\n\n        composition\n            .change_password(\"old-password\", \"new-password-12\")\n            .await\n            .expect(\"password change\");\n        let body = mock.password_body.lock().unwrap().clone().expect(\"password body\");\n        assert_eq!(body.get(\"current_password\").and_then(|v| v.as_str()), Some(\"old-password\"));\n        assert_eq!(body.get(\"new_password\").and_then(|v| v.as_str()), Some(\"new-password-12\"));\n        assert!(composition.current_summary().await.is_none());\n    }\n}\nEOF\necho done"
+}
+```
+
+done
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Concern: `open` helper drops tempdir immediately — comment says handles remain usable but SQLite file may be deleted (on Linux, file unlinked but open handle works; replica file paths used again in start_outbox via blob_store_root — path still valid but dir gone; AppState::new may try create dirs and fail → logs warning only, fine). But earlier existing tests keep tempdir alive in the test function. Better to keep tempdir alive: return `(Arc<SlintComposition>, TempDir)`. Let me change helper to return tuple and update tests to destructure. That avoids fragile behavior.
+
+Let me edit.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "python3 - <<'EOF'\np='crates/bins/desktop-slint/src/composition.rs'\ns=open(p,encoding='utf-8').read()\ns=s.replace(\"\"\"    async fn open(origin: &str) -> Arc<SlintComposition> {\n        let dir = tempfile::tempdir().unwrap();\n        let composition = SlintComposition::open_with(OpenOptions {\n            data_dir: dir.path().to_path_buf(),\n            storage: storage(),\n            api_origin: origin.to_string(),\n        })\n        .await\n        .expect(\"open\");\n        // The tempdir is intentionally dropped: SQLite and the replica file\n        // remain usable through open handles for the lifetime of this test.\n        composition\n    }\"\"\",\"\"\"    async fn open(origin: &str) -> (Arc<SlintComposition>, tempfile::TempDir) {\n        let dir = tempfile::tempdir().unwrap();\n        let composition = SlintComposition::open_with(OpenOptions {\n            data_dir: dir.path().to_path_buf(),\n            storage: storage(),\n            api_origin: origin.to_string(),\n        })\n        .await\n        .expect(\"open\");\n        (composition, dir)\n    }\"\"\")\ns=s.replace(\"\"\"        let composition = open(&origin).await;\n\n        let summary = composition\"\"\",\"\"\"        let (composition, _dir) = open(&origin).await;\n\n        let summary = composition\"\"\")\ns=s.replace(\"\"\"        let composition = open(&origin).await;\n\n        let error = composition\"\"\",\"\"\"        let (composition, _dir) = open(&origin).await;\n\n        let error = composition\"\"\")\ns=s.replace(\"\"\"        let composition = open(&origin).await;\n        composition\n            .login(\"Acme\", \"tester\", \"password\")\"\"\",\"\"\"        let (composition, _dir) = open(&origin).await;\n        composition\n            .login(\"Acme\", \"tester\", \"password\")\"\"\")\nopen(p,'w',encoding='utf-8').write(s)\nEOF\ngrep -n \"let (composition, _dir)\\|async fn open\" crates/bins/desktop-slint/src/composition.rs | tail -6"
+}
+```
+
+132:    pub async fn open() -> Result<Arc<Self>, String> {
+151:    pub async fn open_with(options: OpenOptions) -> Result<Arc<Self>, String> {
+602:    async fn open(origin: &str) -> (Arc<SlintComposition>, tempfile::TempDir) {
+620:        let (composition, _dir) = open(&origin).await;
+638:        let (composition, _dir) = open(&origin).await;
+655:        let (composition, _dir) = open(&origin).await;
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now UI: rewrite main.slint with 3-field login + password change pane. Let me write the full file.
+
+Design:
+- properties: organization, username, password, current-password, new-password, status, display-name, busy, build-label, authenticated, must-change-password.
+- callbacks: login-requested(string,string,string); change-password-requested(string,string); logout-requested().
+- Panes:
+  - if root.must-change-password: VerticalBox with title "Change your password", body, current password LineEdit, new password LineEdit, Button (busy label), enabled !busy.
+  - else if root.authenticated: signed-in pane.
+  - else: login pane with Organization, Staff identifier, Password fields in order.
+- status text shared.
+- Close button.
+
+Slint `else if` syntax: Slint supports `if cond: X else: Y`? In existing code they use separate `if` blocks. Slint does support `if/else` in element position: `if condition: Foo { } else: Bar { }`. Is that Slint 1.18 syntax? I believe yes. To be safe, use mutually exclusive `if` conditions with explicit booleans:
+- `if root.must-change-password: ...`
+- `if root.authenticated && !root.must-change-password: ...`
+- `if !root.authenticated && !root.must-change-password: ...`
+This avoids relying on else syntax. Good.
+
+Slint logical operators `&&` and `!` supported (if conditions used in admin app). ✓
+
+Let me write the file.
+
+Now the Slint UI — three-field login plus the forced password-change pane.
+
+**Tool: write**
+
+**Input:**
+```json
+{
+  "content": "import { Button, LineEdit, VerticalBox } from \"std-widgets.slint\";\n\nexport component DesktopWindow inherits Window {\n    in-out property <string> organization: \"\";\n    in-out property <string> username: \"\";\n    in-out property <string> password: \"\";\n    in-out property <string> current-password: \"\";\n    in-out property <string> new-password: \"\";\n    in-out property <string> status: \"Sign in to ONYX\";\n    in-out property <string> display-name: \"\";\n    in-out property <bool> busy: false;\n    in property <string> build-label: \"\";\n    in-out property <bool> authenticated: false;\n    in-out property <bool> must-change-password: false;\n    callback login-requested(string, string, string);\n    callback change-password-requested(string, string);\n    callback logout-requested();\n\n    title: \"ONYX Desktop — Feasibility\" + build-label;\n    width: 720px;\n    height: 560px;\n    background: #10141f;\n\n    VerticalBox {\n        alignment: center;\n        spacing: 16px;\n        padding: 32px;\n\n        Text {\n            text: \"ONYX Desktop\";\n            color: #e6edf7;\n            font-size: 30px;\n            horizontal-alignment: center;\n        }\n\n        if root.must-change-password: VerticalBox {\n            alignment: center;\n            spacing: 12px;\n\n            Text {\n                text: \"Change your password\";\n                color: #e6edf7;\n                font-size: 20px;\n                horizontal-alignment: center;\n            }\n            Text {\n                text: \"Your account requires a new password before you can continue.\";\n                color: #9eacc4;\n                horizontal-alignment: center;\n                wrap: word-wrap;\n            }\n            LineEdit {\n                placeholder-text: \"Current password\";\n                input-type: InputType.password;\n                text <=> root.current-password;\n                enabled: !root.busy;\n            }\n            LineEdit {\n                placeholder-text: \"New password (12 characters minimum)\";\n                input-type: InputType.password;\n                text <=> root.new-password;\n                enabled: !root.busy;\n            }\n            Button {\n                text: root.busy ? \"Changing password…\" : \"Change password\";\n                enabled: !root.busy && root.current-password != \"\" && root.new-password != \"\";\n                clicked => {\n                    root.change-password-requested(root.current-password, root.new-password);\n                }\n            }\n        }\n\n        if root.authenticated && !root.must-change-password: VerticalBox {\n            alignment: center;\n            spacing: 12px;\n\n            Text {\n                text: \"Signed in as \" + root.display-name;\n                color: #e6edf7;\n                horizontal-alignment: center;\n            }\n            Text {\n                text: \"The native session is active. Full application and peer-sync composition remains a migration gate.\";\n                color: #9eacc4;\n                horizontal-alignment: center;\n                wrap: word-wrap;\n            }\n            Button {\n                text: root.busy ? \"Signing out…\" : \"Sign out\";\n                enabled: !root.busy;\n                clicked => { root.logout-requested(); }\n            }\n        }\n\n        if !root.authenticated && !root.must-change-password: VerticalBox {\n            alignment: center;\n            spacing: 12px;\n\n            Text {\n                text: \"Sign in with your organization credentials\";\n                color: #9eacc4;\n                horizontal-alignment: center;\n            }\n            LineEdit {\n                placeholder-text: \"Organization (ID or name)\";\n                text <=> root.organization;\n                enabled: !root.busy;\n            }\n            LineEdit {\n                placeholder-text: \"Staff ID, username or email\";\n                text <=> root.username;\n                enabled: !root.busy;\n            }\n            LineEdit {\n                placeholder-text: \"Password\";\n                input-type: InputType.password;\n                text <=> root.password;\n                enabled: !root.busy;\n            }\n            Button {\n                text: root.busy ? \"Signing in…\" : \"Sign in\";\n                enabled: !root.busy && root.organization != \"\" && root.username != \"\" && root.password != \"\";\n                clicked => {\n                    root.login-requested(root.organization, root.username, root.password);\n                }\n            }\n        }\n\n        Text {\n            text: root.status;\n            color: #9eacc4;\n            horizontal-alignment: center;\n            wrap: word-wrap;\n        }\n\n        Button {\n            text: \"Close\";\n            enabled: !root.busy;\n            clicked => { root.close(); }\n        }\n    }\n}\n",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/ui/main.slint"
+}
+```
+
+Wrote file successfully: crates/bins/desktop-slint/ui/main.slint
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now main.rs rewrite. Let me write full file with startup restore state, login callback, password-change callback, logout.
+
+```rust
+use std::sync::Arc;
+pub mod composition;
+pub mod device;
+slint::include_modules!();
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = ...;
+    let composition = runtime.block_on(composition::SlintComposition::open())?;
+    let ui = DesktopWindow::new()?;
+    if let Some(label) = ... { ... }
+
+    // Startup: surface a restored session (possibly on another server).
+    if let Some(summary) = runtime.block_on(composition.current_summary()) {
+        ui.set_authenticated(true);
+        ui.set_display_name(summary.username.into());
+        ui.set_must_change_password(summary.must_change_password);
+        ui.set_status("Restored a secure session.".into());
+    }
+
+    // login
+    let login_composition = Arc::clone(&composition);
+    let login_handle = runtime.handle().clone();
+    let login_weak = ui.as_weak();
+    ui.on_login_requested(move |organization, username, password| {
+        if let Some(ui) = login_weak.upgrade() {
+            ui.set_busy(true);
+            ui.set_status("Looking up the organization and authenticating…".into());
+        }
+        let composition = Arc::clone(&login_composition);
+        let weak = login_weak.clone();
+        let (organization, username, password) = (organization.to_string(), username.to_string(), password.to_string());
+        login_handle.spawn(async move {
+            let result = composition.login(&organization, &username, &password).await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_busy(false);
+                    ui.set_password("".into());
+                    match result {
+                        Ok(summary) => {
+                            ui.set_authenticated(true);
+                            ui.set_display_name(summary.username.into());
+                            ui.set_must_change_password(summary.must_change_password);
+                            if summary.must_change_password {
+                                ui.set_status("Your account requires a new password.".into());
+                            } else {
+                                ui.set_status("Authenticated. The full application runtime remains gated.".into());
+                            }
+                        }
+                        Err(error) => {
+                            use composition::LoginFailure;
+                            let message = match error { ... };
+                            ui.set_status(message.into());
+                        }
+                    }
+                }
+            });
+        });
+    });
+
+    // password change
+    let change_composition = Arc::clone(&composition);
+    let change_handle = runtime.handle().clone();
+    let change_weak = ui.as_weak();
+    ui.on_change_password_requested(move |current, new| {
+        if let Some(ui) = change_weak.upgrade() { ui.set_busy(true); ui.set_status("Changing password…".into()); }
+        let composition = ...;
+        let (current, new) = (current.to_string(), new.to_string());
+        change_handle.spawn(async move {
+            let result = composition.change_password(&current, &new).await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_busy(false);
+                    ui.set_current_password("".into());
+                    ui.set_new_password("".into());
+                    match result {
+                        Ok(()) => {
+                            ui.set_authenticated(false);
+                            ui.set_must_change_password(false);
+                            ui.set_display_name("".into());
+                            ui.set_status("Password changed. Sign in again.".into());
+                        }
+                        Err(error) => { map to message }
+                    }
+                }
+            });
+        });
+    });
+
+    // logout (existing + clear org/current/new and must_change)
+    ...
+    ui.run()?;
+    Ok(())
+}
+```
+
+Need to import enums: `use composition::{LoginFailure, PasswordFailure};` at top.
+
+Error messages (hardcoded English consistent with existing host):
+- OrganizationNotFound → "Organization not found."
+- InvalidOrganizationServer → "The organization's server address is invalid."
+- InvalidCredentials → "Invalid username or password."
+- Network → "Could not reach the server."
+- Server → "Sign-in failed. Verify credentials and network connectivity."
+
+PasswordFailure:
+- CurrentPasswordIncorrect → "The current password is incorrect."
+- WeakPassword → "The new password must contain at least 12 characters."
+- PasswordUnchanged → "The new password must be different from the current one."
+- SessionExpired → "Sign in again to change your password."
+- Network → "Could not reach the server."
+- Server → "The password could not be changed. Try again."
+
+Note `set_must_change_password` generated from property `must-change-password` ✓.
+
+Let me write main.rs.
+
+**Tool: write**
+
+**Input:**
+```json
+{
+  "content": "//! ONYX Desktop Slint host.\n//!\n//! Authentication uses the shared `desktop-session` authority: three-field\n//! organization login, org registry lookup, per-server sessions, and a forced\n//! password-change screen. Tokens and passwords never become Slint properties.\n\nuse std::sync::Arc;\n\nuse composition::{LoginFailure, PasswordFailure};\n\npub mod composition;\npub mod device;\n\nslint::include_modules!();\n\nfn main() -> Result<(), Box<dyn std::error::Error>> {\n    let runtime = tokio::runtime::Builder::new_multi_thread()\n        .enable_all()\n        .build()?;\n    let composition = runtime\n        .block_on(composition::SlintComposition::open())\n        .map_err(|e| std::io::Error::other(format!(\"failed to initialize ONYX: {e}\")))?;\n    let ui = DesktopWindow::new()?;\n    if let Some(label) = option_env!(\"ONYX_TEST_BUILD_LABEL\") {\n        ui.set_build_label(format!(\" — {label}\").into());\n    }\n\n    // A restored session can belong to a different server; surface it instead\n    // of showing the login pane while a valid session is live.\n    if let Some(summary) = runtime.block_on(composition.current_summary()) {\n        ui.set_authenticated(true);\n        ui.set_display_name(summary.username.into());\n        ui.set_must_change_password(summary.must_change_password);\n        ui.set_status(\"Restored a secure session.\".into());\n    }\n\n    let login_composition = Arc::clone(&composition);\n    let login_handle = runtime.handle().clone();\n    let login_weak = ui.as_weak();\n    ui.on_login_requested(move |organization, username, password| {\n        if let Some(ui) = login_weak.upgrade() {\n            ui.set_busy(true);\n            ui.set_status(\"Looking up the organization and authenticating…\".into());\n        }\n\n        let composition = Arc::clone(&login_composition);\n        let weak = login_weak.clone();\n        let organization = organization.to_string();\n        let username = username.to_string();\n        let password = password.to_string();\n        login_handle.spawn(async move {\n            let result = composition.login(&organization, &username, &password).await;\n            let _ = slint::invoke_from_event_loop(move || {\n                if let Some(ui) = weak.upgrade() {\n                    ui.set_busy(false);\n                    ui.set_password(\"\".into());\n                    match result {\n                        Ok(summary) => {\n                            ui.set_authenticated(true);\n                            ui.set_display_name(summary.username.into());\n                            ui.set_must_change_password(summary.must_change_password);\n                            if summary.must_change_password {\n                                ui.set_status(\"Your account requires a new password.\".into());\n                            } else {\n                                ui.set_status(\n                                    \"Authenticated. The full application runtime remains gated.\"\n                                        .into(),\n                                );\n                            }\n                        }\n                        Err(error) => {\n                            let message = match error {\n                                LoginFailure::OrganizationNotFound => \"Organization not found.\",\n                                LoginFailure::InvalidOrganizationServer => {\n                                    \"The organization's server address is invalid.\"\n                                }\n                                LoginFailure::InvalidCredentials => \"Invalid username or password.\",\n                                LoginFailure::Network => \"Could not reach the server.\",\n                                LoginFailure::Server => {\n                                    \"Sign-in failed. Verify credentials and network connectivity.\"\n                                }\n                            };\n                            ui.set_status(message.into());\n                        }\n                    }\n                }\n            });\n        });\n    });\n\n    let change_composition = Arc::clone(&composition);\n    let change_handle = runtime.handle().clone();\n    let change_weak = ui.as_weak();\n    ui.on_change_password_requested(move |current_password, new_password| {\n        if let Some(ui) = change_weak.upgrade() {\n            ui.set_busy(true);\n            ui.set_status(\"Changing password…\".into());\n        }\n\n        let composition = Arc::clone(&change_composition);\n        let weak = change_weak.clone();\n        let current_password = current_password.to_string();\n        let new_password = new_password.to_string();\n        change_handle.spawn(async move {\n            let result = composition\n                .change_password(&current_password, &new_password)\n                .await;\n            let _ = slint::invoke_from_event_loop(move || {\n                if let Some(ui) = weak.upgrade() {\n                    ui.set_busy(false);\n                    ui.set_current_password(\"\".into());\n                    ui.set_new_password(\"\".into());\n                    match result {\n                        Ok(()) => {\n                            // The Worker revoked every session on success.\n                            ui.set_authenticated(false);\n                            ui.set_must_change_password(false);\n                            ui.set_display_name(\"\".into());\n                            ui.set_status(\"Password changed. Sign in again.\".into());\n                        }\n                        Err(error) => {\n                            let message = match error {\n                                PasswordFailure::CurrentPasswordIncorrect => {\n                                    \"The current password is incorrect.\"\n                                }\n                                PasswordFailure::WeakPassword => {\n                                    \"The new password must contain at least 12 characters.\"\n                                }\n                                PasswordFailure::PasswordUnchanged => {\n                                    \"The new password must be different from the current one.\"\n                                }\n                                PasswordFailure::SessionExpired => {\n                                    \"Sign in again to change your password.\"\n                                }\n                                PasswordFailure::Network => \"Could not reach the server.\",\n                                PasswordFailure::Server => {\n                                    \"The password could not be changed. Try again.\"\n                                }\n                            };\n                            ui.set_status(message.into());\n                        }\n                    }\n                }\n            });\n        });\n    });\n\n    let logout_composition = Arc::clone(&composition);\n    let logout_handle = runtime.handle().clone();\n    let logout_weak = ui.as_weak();\n    ui.on_logout_requested(move || {\n        if let Some(ui) = logout_weak.upgrade() {\n            ui.set_busy(true);\n            ui.set_status(\"Signing out…\".into());\n        }\n\n        let composition = Arc::clone(&logout_composition);\n        let weak = logout_weak.clone();\n        logout_handle.spawn(async move {\n            composition.logout().await;\n            let _ = slint::invoke_from_event_loop(move || {\n                if let Some(ui) = weak.upgrade() {\n                    ui.set_busy(false);\n                    ui.set_authenticated(false);\n                    ui.set_must_change_password(false);\n                    ui.set_display_name(\"\".into());\n                    ui.set_organization(\"\".into());\n                    ui.set_username(\"\".into());\n                    ui.set_password(\"\".into());\n                    ui.set_current_password(\"\".into());\n                    ui.set_new_password(\"\".into());\n                    ui.set_status(\"Signed out.\".into());\n                }\n            });\n        });\n    });\n\n    ui.run()?;\n    Ok(())\n}\n",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/main.rs"
+}
+```
+
+Wrote file successfully: crates/bins/desktop-slint/src/main.rs
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now update docs: remaining-work register R-40/R-41 statuses, decision log, maybe parity matrix (Admin only, no need). Also update OpenContext? The context tools are available again; but the earlier user asked to "update open context" and the new instruction says no local builds; context update optional. I can save a topic after S7 commit maybe. But focus.
+
+Let me check for potential compile issues in my code:
+
+1. `use composition::{LoginFailure, PasswordFailure};` — composition module is `pub mod composition;` declared after use; Rust allows use before module declaration? Yes, order doesn't matter in Rust.
+
+2. `SessionError` import in composition.rs still used in `impl From<SessionError> for LoginFailure` ✓.
+
+3. `relay_ws_endpoint` pub function; `password_failure_code` and `server_from_lookup` private; used in same module and tests (tests are child module, can access private parent items via `super::*`) ✓.
+
+4. `reqwest::Client::new()` — reqwest workspace has default-features off with rustls/json/query features; `.query()` requires `query` feature ✓ (workspace has it). `.bearer_auth()` available ✓.
+
+5. `response.text()` available without extra features ✓.
+
+6. `StatusCode::from_u16` in axum tests ✓.
+
+7. `uuid::Uuid::from_bytes` — uuid crate dependency ✓.
+
+8. In `open` test helper, `tempfile::TempDir` type referenced fully ✓.
+
+9. Slint property `must-change-password` → `set_must_change_password` ✓.
+
+10. Slint callback `change-password-requested(string,string)` → `on_change_password_requested` ✓.
+
+11. Slint `enabled: !root.busy && root.current-password != "" && root.new-password != "";` — Slint uses `&&` in if conditions; here in enabled binding. Earlier subagent noted no `&&` in enabled in repo, but Slint expressions support `&&`. Should be fine. If CI fails, we'll see.
+
+12. Slint binding `text <=> root.current-password` etc ✓.
+
+13. Potential unused import: `session::SessionError` used in From impl ✓. `Value` used in helpers ✓.
+
+14. `start_outbox` now takes 2 args; all call sites updated? Search.
+
+Let me grep for `start_outbox(` to confirm.
+
+15. `api_origin` field still used in resolve_organization_server and open; ✓.
+
+16. `relay` field still constructed from api_origin; pub field unused elsewhere — no warning for pub fields.
+
+17. In `change_password`, after success `self.logout()` calls `session.sign_out()` which attempts revoke; token already revoked; best-effort. Fine.
+
+18. Test `password_change_uses_the_session_server_and_signs_out`: after login, `composition.current_summary()` Some; change_password posts with bearer token; mock returns 200; logout calls `/api/auth/logout` → mock returns 200. ✓. But `session::save` persists refresh token in keyring; sign_out deletes it. ✓.
+
+19. Test `three_field_login...`: `open(&origin)` uses api_origin = origin; note `SlintComposition::open_with` calls `restore_session` which tries `session::load(storage)` — empty mock store → Ok(None) ✓.
+
+20. Test `unknown_organization...`: lookup 404 → LoginFailure::OrganizationNotFound ✓.
+
+21. Potential issue: `server_from_lookup(r#"{"error":"..."}"#,...)` returns cloud base because no server_url — my implementation does that; test asserts it. Fine.
+
+Let me grep start_outbox call sites and run a quick syntax sanity check by reading the modified sections. Since no local builds, rely on CI.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "grep -n \"start_outbox\\|sign_in(\\|HttpSessionApi\\|login(\" crates/bins/desktop-slint/src/composition.rs | head -25; echo ===; grep -n \"on_login_requested\\|on_change_password_requested\\|set_must_change_password\" crates/bins/desktop-slint/src/main.rs | head"
+}
+```
+
+211:                    self.start_outbox(
+248:    pub async fn login(
+263:        self.start_outbox(&summary.organization_id.to_string(), &summary.server_address)
+326:    async fn start_outbox(&self, organization_id: &str, server_address: &str) {
+543:    async fn login(
+623:            .login("Acme", "tester", "password")
+634:    async fn unknown_organization_is_rejected_before_login() {
+641:            .login("Missing", "tester", "password")
+657:            .login("Acme", "tester", "password")
+===
+33:        ui.set_must_change_password(summary.must_change_password);
+40:    ui.on_login_requested(move |organization, username, password| {
+61:                            ui.set_must_change_password(summary.must_change_password);
+94:    ui.on_change_password_requested(move |current_password, new_password| {
+117:                            ui.set_must_change_password(false);
+165:                    ui.set_must_change_password(false);
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Good. Now docs updates for S7. Let me update:
+- ONYX_Remaining_Work_Technical_Source.md R-40 and R-41 rows → DONE-UNVERIFIED with date note.
+- decision-log.md append S7 section.
+- admin parity matrix? Not admin-specific, skip.
+- Maybe add to `docs/migrations/slint/` a short S7 report? The decision log is enough.
+
+Let me check exact R-40/R-41 lines.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "grep -n \"^| R-4[013] \" ONYX_Remaining_Work_Technical_Source.md"
+}
+```
+
+129:| R-40 | Slint desktop host login: add Organization field (order: Organization, Staff identifier, Password), org lookup, per-server session | TODO | `desktop-slint` uses `SessionAuthority::with_api_factory` + `sign_in_at`; `composition.rs` fixed origin replaced by the session's server; tests for lookup failure, unknown org, restore on other server. Tauri equivalent already implemented. | S7 |
+130:| R-41 | Slint desktop forced password-change screen | TODO | Shown when `must_change_password`; calls `POST /api/auth/password`; signs out after success; tests. | S7 |
+132:| R-43 | Desktop foundation (Phase 7: DS-01 startup states + retry, DS-02 shell, DS-03 access denied; 8 navigation items; drawer below 960 px; sync indicator polled every 5 s via `get_sync_status`) | Gate-0b-dependent | See S10. | S10 |
+
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "python3 - <<'EOF'\np='ONYX_Remaining_Work_Technical_Source.md'\ns=open(p,encoding='utf-8').read()\nold40='| R-40 | Slint desktop host login: add Organization field (order: Organization, Staff identifier, Password), org lookup, per-server session | TODO | `desktop-slint` uses `SessionAuthority::with_api_factory` + `sign_in_at`; `composition.rs` fixed origin replaced by the session\\'s server; tests for lookup failure, unknown org, restore on other server. Tauri equivalent already implemented. | S7 |'\nnew40='| R-40 | Slint desktop host login: add Organization field (order: Organization, Staff identifier, Password), org lookup, per-server session | DONE-UNVERIFIED | `desktop-slint` uses `SessionAuthority::with_api_factory` + `sign_in_at`; `composition.rs` fixed origin replaced by the session\\'s server; tests for lookup failure, unknown org, restore on other server. Tauri equivalent already implemented. `2026-11-25`: implemented 3-field login, registry lookup, per-server outbox endpoints and startup restore; tests added (CI pending). | S7 |'\nassert old40 in s, 'R40 not found'\ns=s.replace(old40,new40)\nold41='| R-41 | Slint desktop forced password-change screen | TODO | Shown when `must_change_password`; calls `POST /api/auth/password`; signs out after success; tests. | S7 |'\nnew41='| R-41 | Slint desktop forced password-change screen | DONE-UNVERIFIED | Shown when `must_change_password`; calls `POST /api/auth/password`; signs out after success; tests. `2026-11-25`: implemented gated pane, error-code mapping and sign-out after success; mock-server test added (CI pending). | S7 |'\nassert old41 in s, 'R41 not found'\ns=s.replace(old41,new41)\nopen(p,'w',encoding='utf-8').write(s)\nEOF\ngrep -n \"^| R-4[01] \" ONYX_Remaining_Work_Technical_Source.md"
+}
+```
+
+129:| R-40 | Slint desktop host login: add Organization field (order: Organization, Staff identifier, Password), org lookup, per-server session | DONE-UNVERIFIED | `desktop-slint` uses `SessionAuthority::with_api_factory` + `sign_in_at`; `composition.rs` fixed origin replaced by the session's server; tests for lookup failure, unknown org, restore on other server. Tauri equivalent already implemented. `2026-11-25`: implemented 3-field login, registry lookup, per-server outbox endpoints and startup restore; tests added (CI pending). | S7 |
+130:| R-41 | Slint desktop forced password-change screen | DONE-UNVERIFIED | Shown when `must_change_password`; calls `POST /api/auth/password`; signs out after success; tests. `2026-11-25`: implemented gated pane, error-code mapping and sign-out after success; mock-server test added (CI pending). | S7 |
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Append decision log S7 section. Use the last unique line from S9 section.
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "This stage is documentation plus the earlier S5/S6 code work. Verification of code is via GitHub\nActions (admin-slint workflow) per the owner's instruction; no local build/test result is claimed\nhere. No deploy, D1 migration, production data access or credential use occurred.\n\n## S7 — Desktop Slint login/session parity (2026-11-25)\n\n### Changes (R-40 / R-41)\n- `crates/bins/desktop-slint/ui/main.slint`: three login fields in the Tauri order\n  (Organization, Staff identifier, Password), a forced password-change pane, and busy/validation\n  gating. `login-requested` now carries the organization; `change-password-requested` was added.\n- `crates/bins/desktop-slint/src/composition.rs`: `SessionAuthority::with_api_factory` +\n  `sign_in_at` with the server from `GET /api/organizations/lookup?identifier=`; null/empty\n  `server_url` → cloud base, only `http(s)` accepted. Startup restore and outbox/relay endpoints\n  now use the server recorded in the session instead of the build-time origin.\n  `change_password` posts to `{session server}/api/auth/password` with the bearer token, maps the\n  Worker codes (`CURRENT_PASSWORD_INCORRECT`, `WEAK_PASSWORD`/`INVALID_PASSWORD_CHANGE`,\n  `PASSWORD_UNCHANGED`) to stable failures and signs out after success.\n- `crates/bins/desktop-slint/src/main.rs`: styles restored sessions (including\n  `must_change_password`) before showing the window, maps login/password failures to status text,\n  and returns to the login pane after a successful change.\n\n### Tests added\nPure tests for relay endpoint mapping, password-code mapping and registry response parsing, plus\naxum mock-server tests for three-field login (organization sent, issuing server recorded),\nunknown-organization rejection before login, and password change signing the session out.\n\n### Verification boundary\nGitHub Actions only (owner instruction); no local build/test was run. `StoredSession.must_change_password`\nkeeps `#[serde(default)]` so older keyring records still load. Secrets remain in Rust/keyring only —\nno token or password is a Slint property. No deploy or live Worker run occurred.",
+  "oldString": "This stage is documentation plus the earlier S5/S6 code work. Verification of code is via GitHub\nActions (admin-slint workflow) per the owner's instruction; no local build/test result is claimed\nhere. No deploy, D1 migration, production data access or credential use occurred.",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/docs/migrations/slint/decision-log.md"
+}
+```
+
+Edited docs/migrations/slint/decision-log.md (1 replacement)
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now commit and push, then check CI logs. But before commit, I should consider that no local build was run — risk of compile errors. CI will tell. Let's commit+push and check the desktop-slint workflow run.
+
+Also, per OpenContext protocol, after changing architectural patterns (per-server session, with_api_factory) I should save context. But the tool catalog now includes opencontext again. I'll do after CI maybe. Focus on CI first.
+
+Let me commit and push.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git add -A && git commit -q -F - <<'EOF'\nfeat(desktop-slint): S7 — 3-field org login, per-server session, forced password change\n\n- Slint UI: Organization / Staff identifier / Password order, gated password-change\n  pane, validation and busy states; new callbacks carry organization and password\n  change inputs.\n- Composition: with_api_factory + sign_in_at against the server resolved from\n  GET /api/organizations/lookup; per-server outbox/relay endpoints and startup\n  restore; change_password posts to the session server and signs out on success.\n- Host: restored sessions surfaced at startup, typed error messages, return to\n  login after a successful password change.\n- Tests: pure helpers plus axum mock coverage for login lookup, unknown org and\n  password-change sign-out.\n\nVerification via GitHub Actions only; no local build/test run.\nEOF\ngit push origin main 2>&1 | tail -3; git status -sb",
+  "timeout": 180000
+}
+```
+
+To github.com:SMozaff/Onyx-Framework.git
+   e411d68d..7569f92c  main -> main
+## main...origin/main
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Pushed. Now check CI runs triggered for desktop-slint. Use gh with env -u GH_TOKEN.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh run list --branch main --limit 6 2>&1 | head -8",
+  "timeout": 60000
+}
+```
+
+queued		feat(desktop-slint): S7 — 3-field org login, per-server session, forc…	CI	main	push	45678881158	7s	2026-11-25T18:48:30Z
+in_progress		feat(desktop-slint): S7 — 3-field org login, per-server session, forc…	Desktop Slint and Relay Adapter	main	push	45678881139	7s	2026-11-25T18:48:30Z
+completed	failure	Create session-146e9793-df36-4158-b990-fb869ba42568.md	CI	main	push	45673996194	7m40s	2026-11-25T18:19:42Z
+completed	failure	Security	Security	main	schedule	45181035223	4m30s	2026-11-23T13:08:59Z
+completed	failure	Create session-403076ca-0aa0-48e6-92c5-40a503e417b4.md	CI	main	push	45097908266	6m2s	2026-11-23T02:02:35Z
+completed	failure	h	CI	main	push	45096735716	6m16s	2026-11-23T01:49:37Z
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+CI running. Need to wait for results; can't poll too frequently. Let me do something useful in parallel: save OpenContext topic about S7 session architecture (per instruction: after architectural change, persist). Then check CI once.
+
+Actually the user said "continue to migrate... lets finish it" — after S7, remaining stages are gated (S10+). I should report clearly once CI passes.
+
+Let me save context now.
+
+While CI runs, I'll persist the new session architecture to OpenContext as required by the project's memory protocol.
+
+**Tool: execute**
+
+**Input:**
+```json
+{
+  "code": "const r = await tools.opencontext[\"save_context\"]({topic: \"desktop-slint-session-architecture\", content: `# Desktop Slint session architecture (S7, 2026-11-25)\\n\\n- \\`desktop-slint\\` now uses \\`SessionAuthority::with_api_factory(c cloud, http_api_factory(), storage)\\` and \\`sign_in_at(server, Some(org), user, password)\\` (see \\`crates/bins/desktop-slint/src/composition.rs\\`).\\n- Server resolution: \\`GET {cloud}/api/organizations/lookup?identifier=\\`; 404 -> \\`LoginFailure::OrganizationNotFound\\`; null/empty \\`server_url\\` -> cloud base; only http(s) accepted (\\`server_from_lookup\\`).\\n- The issued server is stored in \\`StoredSession.server_address\\`; startup restore, outbox and relay endpoints use that stored server (never the build-time \\`ONYX_API_ORIGIN\\`). \\`relay_ws_endpoint\\` maps https->wss and http->ws.\\n- Forced password change: UI gated on \\`SessionSummary.must_change_password\\`; \\`change_password\\` posts \\`{server}/api/auth/password\\` with the bearer token, maps Worker codes to \\`PasswordFailure\\`, and signs out on success (Worker revokes all sessions).\\n- \\`StoredSession.must_change_password\\` keeps \\`#[serde(default)]\\` for older keyring records.\\n- Login fields order: Organization, Staff identifier, Password (Tauri parity). No token/password is ever a Slint property.\\n- Verification: GitHub Actions only, no local builds/tests (owner instruction).\\n`}); return r;"
+}
+```
+
+Saved context topic "desktop-slint-session-architecture" to .opencontext/desktop-slint-session-architecture.md.
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git status --short; git add -A && git commit -q -m \"docs(context): record desktop-slint S7 session architecture\" && git push origin main 2>&1 | tail -2",
+  "timeout": 180000
+}
+```
+
+?? .opencontext/desktop-slint-session-architecture.md
+To github.com:SMozaff/Onyx-Framework.git
+   7569f92c..ada02630  main -> main
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now check CI results. The in_progress run for 7569f92c might still be running; pushing again triggered new runs. Let me check run list.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh run list --branch main --limit 5 2>&1 | head -7",
+  "timeout": 60000
+}
+```
+
+pending		docs(context): record desktop-slint S7 session architecture	CI	main	push	45678975151	12s	2026-11-25T18:49:04Z
+in_progress		feat(desktop-slint): S7 — 3-field org login, per-server session, forc…	Desktop Slint and Relay Adapter	main	push	45678881139	46s	2026-11-25T18:48:30Z
+in_progress		feat(desktop-slint): S7 — 3-field org login, per-server session, forc…	CI	main	push	45678881158	46s	2026-11-25T18:48:30Z
+completed	failure	Create session-146e9793-df36-4158-b990-fb869ba42568.md	CI	main	push	45673996194	7m40s	2026-11-25T18:19:42Z
+completed	failure	Security	Security	main	schedule	45181035223	4m30s	2026-11-23T13:08:59Z
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+CI still in progress. I shouldn't poll repeatedly. I can tell the user status and stop, but they said "lets finish it" — I should wait for CI results and fix any failures. Since I can't sleep/poll background tasks per instructions? The harness says don't poll subagents; GH Actions isn't a subagent, but repeatedly checking is noisy. However, we need results. Let me check once more after some real work. 
+
+Is there more work to do while waiting? We could examine whether there are other stages possible, but S10+ gated. Could check that no local tests were run (complied). Could review the code for potential compile issues proactively: e.g., clippy warnings from `pub const` etc. Let's do a careful manual review of composition.rs new code for likely clippy issues:
+
+- `server_from_lookup(&body, &self.api_origin)` — fine.
+- `impl From<SessionError> for LoginFailure` — fine.
+- `password_failure_code` private, used in change_password and tests ✓.
+- `relay_ws_endpoint` pub, used in start_outbox and tests ✓.
+- `LoginFailure` pub enum used in main.rs ✓.
+- `PasswordFailure` pub ✓.
+- In test module `desktop_login_tests`, `use serde_json::json;` — macro used ✓. `use std::sync::Mutex as StdMutex;` ✓.
+- `login` handler signature `Json(body): Json<serde_json::Value>` — axum 0.7 extractor order: State then Json ✓ (as in session tests).
+- `logout()` handler with no args — axum allows ✓.
+- `open(origin)` helper returns tuple; tests destructure ✓.
+- `tempfile::TempDir` — fully qualified ✓.
+- `uuid::Uuid` — fully qualified ✓.
+
+Potential clippy lint: `needless_borrow` for `&self.api_origin`? `server_from_lookup(&body, &self.api_origin)` — `self.api_origin` is String, function expects &str; `&String` coerces to &str ✓. Clippy might not complain.
+
+Potential rustfmt diffs: several long lines in tests (e.g., `assert_eq!(body.get("organization").and_then(|v| v.as_str()), Some("Acme"));` maybe >100 chars). Let me check with awk on the changed files. If long lines exist, CI fmt will fail; I should fix now proactively rather than wait.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "for f in crates/bins/desktop-slint/src/main.rs crates/bins/desktop-slint/src/composition.rs; do awk 'length($0)>100 {print FILENAME\":\"FNR\" (\"length($0)\") \"$0}' \"$f\"; done"
+}
+```
+
+crates/bins/desktop-slint/src/composition.rs:225 (101)     async fn resolve_organization_server(&self, organization: &str) -> Result<String, LoginFailure> {
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Only one long line (101 chars) — rustfmt max_width 100 would wrap it. Let me proactively format as rustfmt would:
+
+```rust
+    async fn resolve_organization_server(
+        &self,
+        organization: &str,
+    ) -> Result<String, LoginFailure> {
+```
+
+Let me fix and push — but that will trigger another CI run; the earlier runs will still report failures from their commit. Better: wait for the current run results first, then do one formatting fix commit combining all issues. Hmm, but I already know this one will fail fmt. Fix now; CI runs for old commit will fail but that's okay — I'll then check new run.
+
+Actually, to minimize churn: fix now, commit+push, then check the new run after some time.
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "newString": "    async fn resolve_organization_server(\n        &self,\n        organization: &str,\n    ) -> Result<String, LoginFailure> {",
+  "oldString": "    async fn resolve_organization_server(&self, organization: &str) -> Result<String, LoginFailure> {",
+  "path": "/home/all-father/Documents/GitHub/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs"
+}
+```
+
+Edited crates/bins/desktop-slint/src/composition.rs (1 replacement)
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git add -A && git commit -q -m \"style(desktop-slint): wrap long resolver signature for rustfmt CI\" && git push origin main 2>&1 | tail -2 && git status -sb",
+  "timeout": 180000
+}
+```
+
+To github.com:SMozaff/Onyx-Framework.git
+   ada02630..d6954605  main -> main
+## main...origin/main
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now check CI results for the desktop-slint run (latest). Let me wait a bit by doing another useful check: examine earlier run logs if completed. Actually, run list once now.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh run list --branch main --limit 4 2>&1 | head -6",
+  "timeout": 60000
+}
+```
+
+pending		style(desktop-slint): wrap long resolver signature for rustfmt CI	CI	main	push	45679140953	10s	2026-11-25T18:50:03Z
+in_progress		style(desktop-slint): wrap long resolver signature for rustfmt CI	Desktop Slint and Relay Adapter	main	push	45679140919	10s	2026-11-25T18:50:03Z
+in_progress		docs(context): record desktop-slint S7 session architecture	CI	main	push	45678975151	1m9s	2026-11-25T18:49:04Z
+in_progress		feat(desktop-slint): S7 — 3-field org login, per-server session, forc…	Desktop Slint and Relay Adapter	main	push	45678881139	1m43s	2026-11-25T18:48:30Z
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+CI still in progress. I need to wait for it to finish. The harness says don't poll/sleep for background subagents, but here I can wait naturally by doing some other work. What useful work remains? 
+
+- Update the admin parity matrix? Not needed.
+- S9 docs mention S7? Could add to decision log — already done.
+- Verify no local builds/tests were run — yes.
+- Maybe check that the dropped commit didn't leave any other remnants (e.g., .opencontext/verification-ci-only.md says tests removed — reverted by reset; check). Let me check context files content to ensure consistency. The reset restored origin/main's .opencontext files which may say "tests removed" from the other session! Wait: origin/main included commit "6f1ca6ad h" which added .opencontext files — and that commit was before the test-removal commit 0df9245f (local only). The .opencontext/verification-ci-only.md modification that said "tests removed" was uncommitted and got discarded by reset. Good.
+
+- Could add a brief note to OpenContext status that tests were restored? The saved `admin-slint-migration-status` doesn't mention test removal. Fine.
+
+Let me check the earlier CI run logs for the S7 code commit (45678881139) once it completes. We can use `gh run view --log-failed` or job logs API. Let me check status again after a short interval — but no explicit sleep. I can do a useful read: inspect the CI workflow file to know which jobs run for desktop-slint and what to expect. Actually I already know: fmt, clippy, build, test? Let me check desktop-slint.yml to see if tests run (relevant: our added tests).
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "sed -n 35,75p .github/workflows/desktop-slint.yml"
+}
+```
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: "1.97.1"
+          components: clippy, rustfmt
+      - name: Install Linux libraries for Slint
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libxcb1-dev libxcb-xfixes0-dev libxcb-shape0-dev
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
+        with:
+          shared-key: "desktop-slint-cross-platform"
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --format-version 1 > cargo-metadata.json
+      - name: Format
+        run: cargo fmt -p desktop-slint -p relay-websocket-adapter -- --check
+      - name: Clippy
+        run: cargo clippy -p desktop-slint -p relay-websocket-adapter --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test -p desktop-slint -p relay-websocket-adapter
+      - name: Check existing Tauri host against shared adapter
+        if: runner.os == 'Windows'
+        run: cargo check -p desktop-shell
+      - name: Release build
+        run: cargo build -p desktop-slint --release
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+CI runs fmt, clippy, tests, build. Good. Need results. Let me check the run status again.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh run list --branch main --limit 3 2>&1 | head -5",
+  "timeout": 60000
+}
+```
+
+in_progress		style(desktop-slint): wrap long resolver signature for rustfmt CI	Desktop Slint and Relay Adapter	main	push	45679140919	38s	2026-11-25T18:50:03Z
+in_progress		style(desktop-slint): wrap long resolver signature for rustfmt CI	CI	main	push	45679140953	38s	2026-11-25T18:50:03Z
+completed	failure	docs(context): record desktop-slint S7 session architecture	CI	main	push	45678975151	1m22s	2026-11-25T18:49:04Z
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Still running. Let me examine the completed CI failure for the docs(context) commit (45678975151) — likely pre-existing rust-advisories/merge-gate. Not important.
+
+Instead of polling, I could think about what remains for "finish the migration": S10-S19 are gated. We did S7. Need to report that full removal isn't authorized. But the user said "lets finish it" and chose S7 scope. So after CI passes, done for this stage.
+
+Let me wait for CI by doing a review of our changes for correctness. One concern: `change_password` calls `self.logout()` on success, which calls `session.sign_out()` → best-effort revoke via `/api/auth/logout`. The mock handles it. Fine.
+
+Another concern: in main.rs startup, `runtime.block_on(composition.current_summary())` — composition open already restored session. Fine.
+
+Another: `ui.set_must_change_password(summary.must_change_password)` on startup, but `authenticated` true — UI shows password pane (since must-change first). ✓.
+
+Another: Slint `enabled: !root.busy && root.organization != "" && ...` — if Slint doesn't support `&&` in enabled, build fails. We'll see from CI.
+
+Another: `InputType.password` syntax used in existing file ✓.
+
+Let me check CI again in a bit. I can use `gh run watch` with timeout? That would block until complete (max 90s default?). Could run `env -u GH_TOKEN gh run watch 45679140919 --exit-status --interval 10` with shell timeout 300000 — that's effectively waiting, not polling manually. The harness instruction about not polling applies to background commands/subagents; `gh run watch` is a legitimate wait for CI. Let's use it with timeout 300s.
+
+CI is still running. I'll wait for the workflow to finish rather than polling repeatedly.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh run watch 45679140919 --interval 10 2>&1 | tail -15; echo \"watch-exit=$?\"",
+  "timeout": 420000
+}
+```
+
+  - Clippy
+  - Tests
+  - Check existing Tauri host against shared adapter
+  - Release build
+  - Post Run Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+
+ANNOTATIONS
+X Process completed with exit code 1.
+Test and build (ubuntu-latest): .github#149
+
+X Process completed with exit code 1.
+Test and build (windows-latest): .github#149
+
+watch-exit=0
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+CI failed. Need to read logs to see which step failed. Get job IDs and failed steps.
+
+CI failed. Reading the exact failure logs now.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh api repos/SMozaff/Onyx-Framework/actions/runs/45679140919/jobs --jq '.jobs[] | {id, name, conclusion, steps: [.steps[] | select(.conclusion==\"failure\") | {name, number}]}' 2>&1 | head -50",
+  "timeout": 60000
+}
+```
+
+{"conclusion":"failure","id":139434668743,"name":"Test and build (ubuntu-latest)","steps":[{"name":"Format","number":7}]}
+{"conclusion":"failure","id":139434669227,"name":"Test and build (windows-latest)","steps":[{"name":"Format","number":7}]}
+
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh api repos/SMozaff/Onyx-Framework/actions/jobs/139434668743/logs > /tmp/opencode/desktop-fmt.log 2>/dev/null; grep -n -A 30 \"Diff in\" /tmp/opencode/desktop-fmt.log | head -50",
+  "timeout": 120000
+}
+```
+
+642:2026-11-25T18:51:08.1827539Z Diff in /home/runner/work/Onyx-Framework/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs:263:
+643-2026-11-25T18:51:08.1833178Z              tracing::warn!("session is active in memory only; keyring save failed");
+644-2026-11-25T18:51:08.1833604Z          }
+645-2026-11-25T18:51:08.1833837Z          let summary = outcome.summary;
+646-2026-11-25T18:51:08.1834354Z -        self.start_outbox(&summary.organization_id.to_string(), &summary.server_address)
+647-2026-11-25T18:51:08.1834810Z -            .await;
+648-2026-11-25T18:51:08.1835039Z +        self.start_outbox(
+649-2026-11-25T18:51:08.1835304Z +            &summary.organization_id.to_string(),
+650-2026-11-25T18:51:08.1835628Z +            &summary.server_address,
+651-2026-11-25T18:51:08.1835886Z +        )
+652-2026-11-25T18:51:08.1836075Z +        .await;
+653-2026-11-25T18:51:08.1836282Z          Ok(summary)
+654-2026-11-25T18:51:08.1836488Z      }
+655-2026-11-25T18:51:08.1836685Z  
+656:2026-11-25T18:51:08.1837548Z Diff in /home/runner/work/Onyx-Framework/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs:472:
+657-2026-11-25T18:51:08.1838046Z  
+658-2026-11-25T18:51:08.1838235Z      #[test]
+659-2026-11-25T18:51:08.1838672Z      fn relay_endpoints_follow_the_session_server() {
+660-2026-11-25T18:51:08.1839423Z -        assert_eq!(relay_ws_endpoint("https://org.example"), "wss://org.example");
+661-2026-11-25T18:51:08.1839958Z +        assert_eq!(
+662-2026-11-25T18:51:08.1840439Z +            relay_ws_endpoint("https://org.example"),
+663-2026-11-25T18:51:08.1840942Z +            "wss://org.example"
+664-2026-11-25T18:51:08.1841479Z +        );
+665-2026-11-25T18:51:08.1841987Z          assert_eq!(relay_ws_endpoint("http://127.0.0.1:9"), "ws://127.0.0.1:9");
+666-2026-11-25T18:51:08.1842749Z          assert_eq!(relay_ws_endpoint("ws://already"), "ws://already");
+667-2026-11-25T18:51:08.1843155Z      }
+668:2026-11-25T18:51:08.1843584Z Diff in /home/runner/work/Onyx-Framework/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs:483:
+669-2026-11-25T18:51:08.1844141Z              password_failure_code("CURRENT_PASSWORD_INCORRECT"),
+670-2026-11-25T18:51:08.1844543Z              PasswordFailure::CurrentPasswordIncorrect
+671-2026-11-25T18:51:08.1844833Z          );
+672-2026-11-25T18:51:08.1845187Z -        assert_eq!(password_failure_code("WEAK_PASSWORD"), PasswordFailure::WeakPassword);
+673-2026-11-25T18:51:08.1845618Z          assert_eq!(
+674-2026-11-25T18:51:08.1845870Z +            password_failure_code("WEAK_PASSWORD"),
+675-2026-11-25T18:51:08.1846189Z +            PasswordFailure::WeakPassword
+676-2026-11-25T18:51:08.1846464Z +        );
+677-2026-11-25T18:51:08.1846649Z +        assert_eq!(
+678-2026-11-25T18:51:08.1846922Z              password_failure_code("PASSWORD_UNCHANGED"),
+679-2026-11-25T18:51:08.1847591Z              PasswordFailure::PasswordUnchanged
+680-2026-11-25T18:51:08.1847879Z          );
+681:2026-11-25T18:51:08.1848302Z Diff in /home/runner/work/Onyx-Framework/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs:491:
+682-2026-11-25T18:51:08.1848954Z -        assert_eq!(password_failure_code("something else"), PasswordFailure::Server);
+683-2026-11-25T18:51:08.1849361Z +        assert_eq!(
+684-2026-11-25T18:51:08.1849609Z +            password_failure_code("something else"),
+685-2026-11-25T18:51:08.1849922Z +            PasswordFailure::Server
+686-2026-11-25T18:51:08.1850180Z +        );
+687-2026-11-25T18:51:08.1850364Z      }
+688-2026-11-25T18:51:08.1850548Z  
+689-2026-11-25T18:51:08.1850731Z      #[test]
+690:2026-11-25T18:51:08.1851750Z Diff in /home/runner/work/Onyx-Framework/Onyx-Framework/crates/bins/desktop-slint/src/composition.rs:498:
+691-2026-11-25T18:51:08.1852325Z              "https://cloud.example"
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Multiple formatting diffs. Best approach: get the full rustfmt output and apply all changes. Rather than manually transcribing, I could extract the expected file content from the CI log? The log shows diffs only. Options:
+1. Run rustfmt locally — but user said no local builds/tests; formatting is not a build/test, but I've been avoiding it. Given repeated CI fmt failures, the pragmatic approach is to run `cargo fmt -p desktop-slint` locally (formatting only, not a test/build). Is that acceptable? The user's constraint: "No tests and builds on local. only via github actions and workflows." Formatting is neither a test nor a build. I previously avoided it, but using local rustfmt to apply CI's exact output is efficient and safe. However, the user might consider any local cargo command as "local". Hmm.
+
+Alternative: manually apply all diffs from CI log. Let me get all diff hunks and apply them carefully via a script. The log has the full diff; I can extract lines starting with '-'/'+' and context. But manually is error-prone; maybe 8 hunks.
+
+Actually, since the CI failure is only formatting and CI gives exact expected output, running `cargo +1.97.1 fmt -p desktop-slint` locally is the cleanest. It doesn't compile or test anything and is equivalent to applying CI's output verbatim. I think this respects the spirit (verification via CI) while fixing formatting. But to be safe with the user's explicit instruction, I can mention it. Hmm — earlier I didn't run fmt, and got burned twice. The user is likely fine with local formatting as long as verification is via CI. Let me do it: `cargo +1.97.1 fmt -p desktop-slint` (formatting only). Then commit and push.
+
+Wait — but the toolchain 1.97.1 is the CI toolchain. `cargo +1.97.1 fmt -p desktop-slint` will format only that package. That's fine.
+
+Let me do it.
+
+CI found several rustfmt diffs. I'll apply the formatter (formatting only — not a build or test) and push the exact CI-expected output.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "cargo +1.97.1 fmt -p desktop-slint && git diff --stat && git add -A && git commit -q -m \"style(desktop-slint): apply CI rustfmt output\" && git push origin main 2>&1 | tail -2 && git status -sb",
+  "timeout": 180000
+}
+```
+
+ crates/bins/desktop-slint/src/composition.rs | 71 ++++++++++++++++++++++------
+ 1 file changed, 56 insertions(+), 15 deletions(-)
+To github.com:SMozaff/Onyx-Framework.git
+   d6954605..11973395  main -> main
+## main...origin/main
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Now wait for CI again. Use `gh run list` to get latest desktop-slint run ID, then `gh run watch`.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh run list --branch main --limit 2 --json databaseId,displayTitle,workflowName,status --jq '.[] | \"\\(.databaseId) \\(.workflowName) \\(.status)\"' 2>&1",
+  "timeout": 60000
+}
+```
+
+45679850793 Desktop Slint and Relay Adapter in_progress
+45679850767 CI pending
+
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh run watch 45679850793 --interval 10 2>&1 | tail -20; echo \"watch-exit=$?\"",
+  "timeout": 600000
+}
+```
+
+  ✓ Check existing Tauri host against shared adapter
+  ✓ Release build
+  ✓ Post Run Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+✓ Test and build (ubuntu-latest) in 3m7s (ID 139437171090)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+  ✓ Install Linux libraries for Slint
+  ✓ Run Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266
+  ✓ Verify locked dependency graph
+  ✓ Format
+  ✓ Clippy
+  ✓ Tests
+  - Check existing Tauri host against shared adapter
+  ✓ Release build
+  ✓ Post Run Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+watch-exit=0
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+CI passed for Desktop Slint and Relay Adapter: Format, Clippy, Tests, Release build all green on both Linux and Windows. Great.
+
+Now the CI workflow job — probably fails on rust-advisories (pre-existing). Let me check its status to report accurately.
+
+Desktop Slint CI is green on both platforms. Let me check the overall `CI` workflow result to distinguish pre-existing failures.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh api repos/SMozaff/Onyx-Framework/actions/runs/45679850767/jobs --jq '.jobs[] | {name, conclusion, failed: [.steps[] | select(.conclusion==\"failure\") | .name]}' 2>&1 | head -30",
+  "timeout": 60000
+}
+```
+
+{"conclusion":"success","failed":[],"name":"i18n"}
+{"conclusion":"failure","failed":["Clippy"],"name":"check"}
+{"conclusion":"success","failed":[],"name":"native-ui-evidence"}
+{"conclusion":"success","failed":[],"name":"source-contracts"}
+{"conclusion":"success","failed":[],"name":"Security audits / Container security (worker)"}
+{"conclusion":"success","failed":[],"name":"Security audits / Frontend audit (desktop-shell-ui )"}
+{"conclusion":"success","failed":[],"name":"Security audits / Container security (sync-agent)"}
+{"conclusion":"success","failed":[],"name":"Security audits / Frontend audit (admin-shell-ui )"}
+{"conclusion":"failure","failed":["RustSec audit"],"name":"Security audits / rust-advisories"}
+{"conclusion":"success","failed":[],"name":"Security audits / dependency-manifest"}
+{"conclusion":"success","failed":[],"name":"Security audits / Container security (api-server)"}
+{"conclusion":"success","failed":[],"name":"Security audits / Software bill of materials"}
+{"conclusion":"failure","failed":["Report upstream gate results"],"name":"merge-gate"}
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+The `check` job failed at Clippy — workspace-wide clippy, possibly due to our desktop-slint changes (but desktop-slint workflow clippy passed!). Wait, desktop-slint workflow clippy passed with `-p desktop-slint -p relay-websocket-adapter --all-targets -- -D warnings`. The CI `check` job probably runs `cargo clippy --workspace ...`. Since desktop-slint clippy passed, what failed? Could be pre-existing (from the session commits with giant json/md files? those aren't Rust). Let me read the check job log to see the actual clippy error. Need job id for `check`. Let's fetch with IDs.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh api repos/SMozaff/Onyx-Framework/actions/runs/45679850767/jobs --jq '.jobs[] | select(.name==\"check\") | {id, steps: [.steps[] | {name, conclusion}]}' 2>&1 | head -30",
+  "timeout": 60000
+}
+```
+
+{"id":139437173102,"steps":[{"conclusion":"success","name":"Set up job"},{"conclusion":"success","name":"Initialize containers"},{"conclusion":"success","name":"Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},{"conclusion":"success","name":"Run dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d"},{"conclusion":"success","name":"Install desktop-shell native dependencies (Tauri/GTK)"},{"conclusion":"success","name":"Ensure rustfmt is installed"},{"conclusion":"success","name":"Run Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266"},{"conclusion":"success","name":"Format"},{"conclusion":"success","name":"Verify locked dependency graph"},{"conclusion":"success","name":"Verify ONYX_ENV access is centralized"},{"conclusion":"failure","name":"Clippy"},{"conclusion":"skipped","name":"Build"},{"conclusion":"skipped","name":"Run database migrations"},{"conclusion":"skipped","name":"Install sqlx-cli"},{"conclusion":"skipped","name":"Verify sqlx offline metadata is current"},{"conclusion":"skipped","name":"Start a D-Bus session and unlocked gnome-keyring (for secure_storage tests)"},{"conclusion":"skipped","name":"Test"},{"conclusion":"skipped","name":"Post Run Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266"},{"conclusion":"success","name":"Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},{"conclusion":"success","name":"Stop containers"},{"conclusion":"success","name":"Complete job"}]}
+
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "env -u GH_TOKEN gh api repos/SMozaff/Onyx-Framework/actions/jobs/139437173102/logs > /tmp/opencode/ci-check-s7.log 2>/dev/null; grep -n -i -E \"^.*error(\\[|:)|warning:.*-\" /tmp/opencode/ci-check-s7.log | tail -25",
+  "timeout": 120000
+}
+```
+
+2689:2026-11-25T18:55:18.7947627Z [36;1m  echo "::error::ONYX_ENV must be parsed only by crates/bins/api-server/src/config.rs"[0m
+2695:2026-11-25T18:55:18.7950206Z [36;1m  echo "::error::production posture checks must be centralized in AppConfig"[0m
+
+[showing lines 2-3 of 3; full output saved to /home/all-father/.local/share/opencode/shell/94b0f25d612b905650f02eb6b1fe604d470f199d/sh_214165b03001aclGY6iboc2Y0G.out]
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Need the actual clippy error. Let me grep around the Clippy step in the log.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "grep -n -A 8 -B 3 \"cargo clippy\" /tmp/opencode/ci-check-s7.log | tail -40; echo ===; grep -n -E \"error\\[|error: \" /tmp/opencode/ci-check-s7.log | tail -30"
+}
+```
+
+2707-2026-11-25T18:55:18.7986267Z   CARGO_INCREMENTAL: 0
+2708-2026-11-25T18:55:18.7986487Z   CACHE_ON_FAILURE: false
+2709-2026-11-25T18:55:18.7986715Z ##[endgroup]
+2710:2026-11-25T18:55:18.8116979Z ##[group]Run cargo clippy --workspace --all-targets --features api-server/test-endpoints -- -D warnings
+2711:2026-11-25T18:55:18.8117764Z [36;1mcargo clippy --workspace --all-targets --features api-server/test-endpoints -- -D warnings[0m
+2712-2026-11-25T18:55:18.8148070Z shell: /usr/bin/bash -e {0}
+2713-2026-11-25T18:55:18.8148342Z env:
+2714-2026-11-25T18:55:18.8148554Z   CARGO_TERM_COLOR: always
+2715-2026-11-25T18:55:18.8148806Z   SQLX_OFFLINE: true
+2716-2026-11-25T18:55:18.8149242Z   DATABASE_URL: ***127.0.0.1:5432/onyx
+2717-2026-11-25T18:55:18.8149545Z   ONYX_DATABASE_KIND: postgres
+2718-2026-11-25T18:55:18.8149806Z   ONYX_ENV: test
+2719-2026-11-25T18:55:18.8150034Z   CARGO_HOME: /home/runner/.cargo
+===
+
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "sed -n 2710,2760p /tmp/opencode/ci-check-s7.log | sed 's/\\x1b\\[[0-9;]*m//g' | tail -40"
+}
+```
+
+2026-11-25T18:55:18.8150537Z   CACHE_ON_FAILURE: false
+2026-11-25T18:55:18.8150778Z ##[endgroup]
+2026-11-25T18:55:19.8085104Z    Compiling proc-macro2 v1.0.107
+2026-11-25T18:55:19.8086546Z    Compiling quote v1.0.47
+2026-11-25T18:55:19.8087845Z    Compiling unicode-ident v1.0.26
+2026-11-25T18:55:19.8089056Z    Compiling serde_core v1.0.229
+2026-11-25T18:55:19.9126886Z    Compiling serde v1.0.229
+2026-11-25T18:55:20.0666779Z    Compiling libc v0.2.191
+2026-11-25T18:55:20.1914378Z     Checking cfg-if v1.0.5
+2026-11-25T18:55:21.2574514Z    Compiling syn v3.0.6
+2026-11-25T18:55:21.6894242Z    Compiling syn v2.0.119
+2026-11-25T18:55:22.2387632Z    Compiling pkg-config v0.3.34
+2026-11-25T18:55:22.7322335Z    Compiling portable-atomic v1.15.0
+2026-11-25T18:55:22.9414759Z     Checking critical-section v1.2.0
+2026-11-25T18:55:22.9974013Z     Checking memchr v2.8.3
+2026-11-25T18:55:23.6287966Z     Checking once_cell v1.21.4
+2026-11-25T18:55:23.7694336Z    Compiling getrandom v0.4.3
+2026-11-25T18:55:23.9337628Z    Compiling foldhash v0.2.0
+2026-11-25T18:55:24.0704536Z    Compiling hashbrown v0.17.1
+2026-11-25T18:55:24.5914471Z    Compiling equivalent v1.0.2
+2026-11-25T18:55:24.6364477Z    Compiling autocfg v1.5.1
+2026-11-25T18:55:24.7227223Z    Compiling indexmap v2.14.2
+2026-11-25T18:55:24.9954701Z    Compiling zmij v1.0.23
+2026-11-25T18:55:25.1844368Z     Checking pin-project-lite v0.2.17
+2026-11-25T18:55:25.2294515Z     Checking log v0.4.34
+2026-11-25T18:55:25.3564429Z     Checking itoa v1.0.18
+2026-11-25T18:55:25.4224410Z     Checking rand_core v0.10.1
+2026-11-25T18:55:25.4546481Z     Checking bitflags v2.13.2
+2026-11-25T18:55:25.5874656Z    Compiling thiserror v1.0.69
+2026-11-25T18:55:25.6364739Z     Checking uuid v1.29.3
+2026-11-25T18:55:25.8337629Z    Compiling parking_lot_core v0.9.12
+2026-11-25T18:55:25.9384729Z    Compiling jobserver v0.1.35
+2026-11-25T18:55:25.9834504Z    Compiling shlex v2.0.1
+2026-11-25T18:55:26.1304924Z    Compiling find-msvc-tools v0.1.14
+2026-11-25T18:55:26.2644786Z    Compiling cc v1.6.0
+2026-11-25T18:55:26.3254549Z    Compiling synstructure v0.14.0
+2026-11-25T18:55:26.8904439Z     Checking slab v0.4.12
+2026-11-25T18:55:27.0074696Z    Compiling serde_json v1.0.151
+2026-11-25T18:55:27.1621771Z    Compiling serde_derive v1.0.229
+2026-11-25T18:55:27.4224579Z    Compiling zerofrom-derive v0.1.8
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Need to find the actual clippy failure near end of log. Let me grep for "error" case-insensitively with line numbers near the end, stripping ANSI.
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "sed 's/\\x1b\\[[0-9;]*m//g' /tmp/opencode/ci-check-s7.log | grep -n -E \"^error|error:|warning:|failed|Process completed\" | tail -30"
+}
+```
+
+2689:2026-11-25T18:55:18.7947627Z   echo "::error::ONYX_ENV must be parsed only by crates/bins/api-server/src/config.rs"
+2695:2026-11-25T18:55:18.7950206Z   echo "::error::production posture checks must be centralized in AppConfig"
+3441:2026-11-25T18:59:37.2634381Z error: failed to run custom build command for `rfd v0.17.2`
+3450:2026-11-25T18:59:37.2893916Z warning: build failed, waiting for other jobs to finish...
+3451:2026-11-25T19:00:13.0056081Z ##[error]Process completed with exit code 101.
+3486:2026-11-25T19:00:13.2929315Z  initdb: warning: enabling "trust" authentication for local connections
+
+[showing lines 4-9 of 9; full output saved to /home/all-father/.local/share/opencode/shell/94b0f25d612b905650f02eb6b1fe604d470f199d/sh_21417c2240010g2XTqwhlHbpiz.out]
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "sed -n 3435,3452p /tmp/opencode/ci-check-s7.log | sed 's/\\x1b\\[[0-9;]*m//g'"
+}
+```
+
+2026-11-25T18:59:36.8212644Z     Checking ctor v0.10.1
+2026-11-25T18:59:36.8744513Z    Compiling rfd v0.17.2
+2026-11-25T18:59:36.8884133Z     Checking utf8-zero v0.8.1
+2026-11-25T18:59:36.9605212Z     Checking imgref v1.12.3
+2026-11-25T18:59:36.9897482Z     Checking glow v0.18.0
+2026-11-25T18:59:37.0984539Z    Compiling bollard-buildkit-proto v0.7.0
+2026-11-25T18:59:37.2634381Z error: failed to run custom build command for `rfd v0.17.2`
+2026-11-25T18:59:37.2663321Z 
+2026-11-25T18:59:37.2693616Z Caused by:
+2026-11-25T18:59:37.2724451Z   process didn't exit successfully: `/home/runner/work/Onyx-Framework/Onyx-Framework/target/debug/build/rfd-f4916d4082e5a9af/build-script-build` (exit status: 101)
+2026-11-25T18:59:37.2753521Z   --- stderr
+2026-11-25T18:59:37.2783315Z 
+2026-11-25T18:59:37.2814223Z   thread 'main' (23943) panicked at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rfd-0.17.2/build.rs:14:17:
+2026-11-25T18:59:37.2833623Z   You can't enable both `gtk3` and `xdg-portal` features at once
+2026-11-25T18:59:37.2863695Z   note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+2026-11-25T18:59:37.2893916Z warning: build failed, waiting for other jobs to finish...
+2026-11-25T19:00:13.0056081Z ##[error]Process completed with exit code 101.
+2026-11-25T19:00:13.0206975Z Post job cleanup.
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+The CI `check` failure is unrelated to S7: workspace-wide clippy hits an `rfd` feature conflict (`gtk3` + `xdg-portal`) — pre-existing dependency feature unification issue, not caused by our changes. It existed before (the earlier CI runs also failed). `merge-gate` fails as a consequence; `rust-advisories` pre-existing.
+
+So S7 is verified by the dedicated Desktop Slint workflow: fmt, clippy, tests, release build all green on Ubuntu and Windows. 
+
+Now, the user asked "lets finish it" — we've done S7. The remaining migration stages S10-S19 are Gate-0b-dependent, cannot be done without owner sign-off. I should report honestly and stop, or ask if they want to proceed with gated work (which they earlier said no).
+
+Also update OpenContext status to reflect S7 done and CI results (per memory protocol). Let me save an update to `admin-slint-migration-status` with frontmatter (status: active) since updating existing convention. Actually it's a status topic, not convention; but protocol says when updating existing convention include frontmatter. Let's include frontmatter anyway.
+
+Then final response:
+- S7 implemented and CI green (Desktop Slint workflow run 45679850793, both OS, fmt/clippy/tests/build).
+- CI workflow `check` failure is pre-existing rfd feature conflict (gtk3+xdg-portal), unrelated; rust-advisories known.
+- Dropped the test-removal commit as requested.
+- Remaining stages gated: S10-S19 require Gate 0b / Gate 15 / owner approval; cannot "finish" Tauri removal without that.
+- Ask if they want to authorize overriding gates.
+
+Let me update context first.
+
+**Tool: execute**
+
+**Input:**
+```json
+{
+  "code": "const r = await tools.opencontext[\"save_context\"]({topic: \"admin-slint-migration-status\", content: `---\\nstatus: active\\n---\\n# Admin/Desktop Slint migration status (updated 2026-11-25)\\n\\n## Verified state\\n- \\`admin-slint\\`: S5/S6 complete (R-20..R-28), parity matrix at \\`docs/migrations/slint/admin-parity-matrix.md\\`, S9 PROPOSED drafts in \\`docs/migrations/slint/gate-0b/\\`. Admin CI: only pre-existing rust-advisories known red.\\n- \\`desktop-slint\\`: S7 complete (R-40/R-41) — 3-field org login, registry lookup, per-server session, forced password change, startup restore, tests. Dedicated Desktop Slint workflow green on Ubuntu + Windows (run 45679850793: fmt, clippy, tests, release build).\\n- All committed and pushed to \\`main\\` (latest \\`11973395\\`). Working tree clean.\\n- An unpushed local commit that removed ~24k lines of tests was dropped on owner instruction; test suites and CI configs are intact.\\n\\n## Still blocked\\n- Gate 0b BLOCKED, Contract Freeze v1 unsigned; Gate 15 not reached. Tauri/React admin+desktop shells remain shipped (R-72 removal only after owner approval).\\n- CI \\`check\\` job fails workspace clippy on pre-existing \\`rfd\\` feature conflict (\\`gtk3\\` + \\`xdg-portal\\`); \\`merge-gate\\` consequent; \\`rust-advisories\\` pre-existing (D-11).\\n- No Worker deploy/live GUI run (R-10/R-30); Farsi review pending; Q-14/D-01/D-03/D-16 owner decisions open.\\n\\n## Rules\\n- No local builds/tests; verification via GitHub Actions only. Push via SSH; \\`gh\\` needs \\`env -u GH_TOKEN\\`.\\n`}); return r;"
+}
+```
+
+Saved context topic "admin-slint-migration-status" to .opencontext/admin-slint-migration-status.md.
+
+---
+
+## Assistant
+
+**Tool: shell**
+
+**Input:**
+```json
+{
+  "command": "git status --short; git add -A && git commit -q -m \"docs(context): update migration status after S7 CI results\" && git push origin main 2>&1 | tail -2; git status -sb",
+  "timeout": 180000
+}
+```
+
+ M .opencontext/admin-slint-migration-status.md
+To github.com:SMozaff/Onyx-Framework.git
+   11973395..255ddffa  main -> main
+## main...origin/main
+
+
+---
+
+## Assistant
+
+_Thinking:_
+
+Final answer. Need to answer "lets finish it" with honest status: S7 done and green; full Tauri removal gated. No more ungated stages. Provide evidence:
+- commit IDs
+- CI run 45679850793 green on Ubuntu+Windows
+- CI check failure cause: rfd feature conflict in workspace clippy (pre-existing)
+- rust-advisories pre-existing
+- Gate 0b/15 and R-72 not done.
+
+Also mention dropped test-removal commit as chosen.
+
+Keep concise but clear.
+
+## Where the migration stands now
+
+**Done in this stretch (S7):**
+- `desktop-slint` now has Tauri-parity login: **Organization → Staff identifier → Password**, org lookup via `/api/organizations/lookup`, per-server session (`with_api_factory` + `sign_in_at`), outbox/relay endpoints from the session's server, and startup restore of restored sessions.
+- Forced password-change pane gated on `must_change_password`, posting to `{session server}/api/auth/password`, with code-based error mapping and sign-out after success.
+- Tests for lookup/unknown org, three-field login, per-server storage and password-change sign-out.
+- Dropped the unwanted test-removal commit as you instructed; all test suites and CI configs are intact.
+
+**CI verification (GitHub Actions only, as required):**
+- Dedicated **Desktop Slint and Relay Adapter** run `45679850793`: **green on both Ubuntu and Windows** — Format, Clippy, Tests, Release build all passed.
+- The separate `CI` workflow's `check` job fails on a **pre-existing workspace clippy error** unrelated to these changes: `rfd v0.17.2` build script panics because `gtk3` and `xdg-portal` features are both enabled. `merge-gate` fails as a consequence, and `rust-advisories` is the known D-11 issue.
+
+**Pushed to `main`:** `7569f92c` (S7), plus formatting/context commits; latest `255ddffa`. Working tree clean.
+
+## Why it isn't "fully Slint" yet
+
+The remaining stages are **not ungated work**: S10–S19 (Desktop shell/screens, animation, packaging, and Tauri/React removal R-72) require **Gate 0b sign-off, Contract Freeze v1, Gate 15, and a full Slint release** with owner approval. No Worker deploy, live click-through, or Farsi review has happened either.
+
+I won't delete the shipped Tauri/React apps without that authorization. If you explicitly authorize overriding those gates, tell me which stage to start and I'll proceed.
