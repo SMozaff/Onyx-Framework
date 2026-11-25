@@ -222,7 +222,10 @@ impl SlintComposition {
 
     /// Asks the cloud registry which server serves the organization. A null
     /// `server_url` means the cloud server itself. Only http(s) is accepted.
-    async fn resolve_organization_server(&self, organization: &str) -> Result<String, LoginFailure> {
+    async fn resolve_organization_server(
+        &self,
+        organization: &str,
+    ) -> Result<String, LoginFailure> {
         let identifier = organization.trim();
         if identifier.is_empty() {
             return Err(LoginFailure::OrganizationNotFound);
