@@ -126,8 +126,8 @@ Status values: `TODO`, `BLOCKED` (needs an owner decision or external action), `
 
 | ID | Item | Status | Acceptance | Stage |
 |---|---|---|---|---|
-| R-40 | Slint desktop host login: add Organization field (order: Organization, Staff identifier, Password), org lookup, per-server session | TODO | `desktop-slint` uses `SessionAuthority::with_api_factory` + `sign_in_at`; `composition.rs` fixed origin replaced by the session's server; tests for lookup failure, unknown org, restore on other server. Tauri equivalent already implemented. | S7 |
-| R-41 | Slint desktop forced password-change screen | TODO | Shown when `must_change_password`; calls `POST /api/auth/password`; signs out after success; tests. | S7 |
+| R-40 | Slint desktop host login: add Organization field (order: Organization, Staff identifier, Password), org lookup, per-server session | DONE-UNVERIFIED | `desktop-slint` uses `SessionAuthority::with_api_factory` + `sign_in_at`; `composition.rs` fixed origin replaced by the session's server; tests for lookup failure, unknown org, restore on other server. Tauri equivalent already implemented. `2026-11-25`: implemented 3-field login, registry lookup, per-server outbox endpoints and startup restore; tests added (CI pending). | S7 |
+| R-41 | Slint desktop forced password-change screen | DONE-UNVERIFIED | Shown when `must_change_password`; calls `POST /api/auth/password`; signs out after success; tests. `2026-11-25`: implemented gated pane, error-code mapping and sign-out after success; mock-server test added (CI pending). | S7 |
 | R-42 | Tauri desktop: ChangePassword and 3-field login never run as a GUI; no "password changed, sign in again" notice; no voluntary change-password entry | DONE-UNVERIFIED | Manual run on a deployed Worker; fix gaps. | S4/S7 |
 | R-43 | Desktop foundation (Phase 7: DS-01 startup states + retry, DS-02 shell, DS-03 access denied; 8 navigation items; drawer below 960 px; sync indicator polled every 5 s via `get_sync_status`) | Gate-0b-dependent | See S10. | S10 |
 | R-44 | Desktop screens DS-04 Dashboard, DS-11 Settings | Gate-0b-dependent | S11. | S11 |
