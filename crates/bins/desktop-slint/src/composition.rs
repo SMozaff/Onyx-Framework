@@ -263,8 +263,11 @@ impl SlintComposition {
             tracing::warn!("session is active in memory only; keyring save failed");
         }
         let summary = outcome.summary;
-        self.start_outbox(&summary.organization_id.to_string(), &summary.server_address)
-            .await;
+        self.start_outbox(
+            &summary.organization_id.to_string(),
+            &summary.server_address,
+        )
+        .await;
         Ok(summary)
     }
 
@@ -472,7 +475,10 @@ mod lifecycle_tests {
 
     #[test]
     fn relay_endpoints_follow_the_session_server() {
-        assert_eq!(relay_ws_endpoint("https://org.example"), "wss://org.example");
+        assert_eq!(
+            relay_ws_endpoint("https://org.example"),
+            "wss://org.example"
+        );
         assert_eq!(relay_ws_endpoint("http://127.0.0.1:9"), "ws://127.0.0.1:9");
         assert_eq!(relay_ws_endpoint("ws://already"), "ws://already");
     }
@@ -483,12 +489,18 @@ mod lifecycle_tests {
             password_failure_code("CURRENT_PASSWORD_INCORRECT"),
             PasswordFailure::CurrentPasswordIncorrect
         );
-        assert_eq!(password_failure_code("WEAK_PASSWORD"), PasswordFailure::WeakPassword);
+        assert_eq!(
+            password_failure_code("WEAK_PASSWORD"),
+            PasswordFailure::WeakPassword
+        );
         assert_eq!(
             password_failure_code("PASSWORD_UNCHANGED"),
             PasswordFailure::PasswordUnchanged
         );
-        assert_eq!(password_failure_code("something else"), PasswordFailure::Server);
+        assert_eq!(
+            password_failure_code("something else"),
+            PasswordFailure::Server
+        );
     }
 
     #[test]
@@ -498,8 +510,11 @@ mod lifecycle_tests {
             "https://cloud.example"
         );
         assert_eq!(
-            server_from_lookup(r#"{"server_url":"https://org.example/"}"#, "https://cloud.example")
-                .unwrap(),
+            server_from_lookup(
+                r#"{"server_url":"https://org.example/"}"#,
+                "https://cloud.example"
+            )
+            .unwrap(),
             "https://org.example"
         );
         assert_eq!(
@@ -511,7 +526,10 @@ mod lifecycle_tests {
             "https://cloud.example"
         );
         assert_eq!(
-            server_from_lookup(r#"{"server_url":"ftp://org.example"}"#, "https://cloud.example"),
+            server_from_lookup(
+                r#"{"server_url":"ftp://org.example"}"#,
+                "https://cloud.example"
+            ),
             Err(LoginFailure::InvalidOrganizationServer)
         );
     }
@@ -540,7 +558,10 @@ mod desktop_login_tests {
 
     async fn lookup(State(mock): State<Arc<ServerMock>>) -> (StatusCode, Json<serde_json::Value>) {
         let status = *mock.lookup_status.lock().unwrap();
-        (StatusCode::from_u16(status).unwrap(), Json(json!({"server_url": null})))
+        (
+            StatusCode::from_u16(status).unwrap(),
+            Json(json!({"server_url": null})),
+        )
     }
 
     async fn login(
@@ -576,7 +597,10 @@ mod desktop_login_tests {
     ) -> (StatusCode, Json<serde_json::Value>) {
         *mock.password_body.lock().unwrap() = Some(body);
         let status = *mock.password_status.lock().unwrap();
-        (StatusCode::from_u16(status).unwrap(), Json(json!({"success": true})))
+        (
+            StatusCode::from_u16(status).unwrap(),
+            Json(json!({"success": true})),
+        )
     }
 
     async fn serve(mock: Arc<ServerMock>) -> String {
@@ -629,8 +653,14 @@ mod desktop_login_tests {
         assert_eq!(summary.server_address, origin);
         assert!(summary.must_change_password);
         let body = mock.login_body.lock().unwrap().clone().expect("login body");
-        assert_eq!(body.get("organization").and_then(|v| v.as_str()), Some("Acme"));
-        assert_eq!(body.get("username").and_then(|v| v.as_str()), Some("tester"));
+        assert_eq!(
+            body.get("organization").and_then(|v| v.as_str()),
+            Some("Acme")
+        );
+        assert_eq!(
+            body.get("username").and_then(|v| v.as_str()),
+            Some("tester")
+        );
     }
 
     #[tokio::test]
@@ -665,9 +695,20 @@ mod desktop_login_tests {
             .change_password("old-password", "new-password-12")
             .await
             .expect("password change");
-        let body = mock.password_body.lock().unwrap().clone().expect("password body");
-        assert_eq!(body.get("current_password").and_then(|v| v.as_str()), Some("old-password"));
-        assert_eq!(body.get("new_password").and_then(|v| v.as_str()), Some("new-password-12"));
+        let body = mock
+            .password_body
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("password body");
+        assert_eq!(
+            body.get("current_password").and_then(|v| v.as_str()),
+            Some("old-password")
+        );
+        assert_eq!(
+            body.get("new_password").and_then(|v| v.as_str()),
+            Some("new-password-12")
+        );
         assert!(composition.current_summary().await.is_none());
     }
 }
