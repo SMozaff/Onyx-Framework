@@ -609,8 +609,8 @@ fn load_holds(weak: slint::Weak<AppWindow>, session: SessionSlot, lang: Lang) {
                     let items: Vec<HoldItem> = rows
                         .into_iter()
                         .map(|hold| HoldItem {
-                            id: hold.id.into(),
                             display_id: id_display::display_id(&hold.id).into(),
+                            id: hold.id.into(),
                             status: hold.status.into(),
                         })
                         .collect();
