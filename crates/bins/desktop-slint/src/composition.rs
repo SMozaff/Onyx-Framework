@@ -21,9 +21,12 @@ use tokio::sync::Mutex;
 
 use desktop_session::{
     secure_storage::{keyring_adapter::KeyringSecureStorage, SecureStorage},
-    session::{self, HttpSessionApi, SessionError},
-    session_authority::{SessionAuthority, SessionBearerProvider, SessionSummary},
+    session::{self, SessionError},
+    session_authority::{
+        http_api_factory, SessionAuthority, SessionBearerProvider, SessionSummary,
+    },
 };
+use serde_json::Value;
 
 use crate::device;
 use relay_websocket_adapter::TungsteniteRelaySocketFactory;
@@ -34,6 +37,77 @@ pub const ONYX_API_ORIGIN: &str = match option_env!("ONYX_API_ORIGIN") {
     Some(origin) => origin,
     None => "https://onyx-framework.soheil-mozaffari.workers.dev",
 };
+
+/// Stable login failures for the UI. The Worker remains the authority; these
+/// are only the host's display categories, never a substitute for server policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginFailure {
+    OrganizationNotFound,
+    InvalidOrganizationServer,
+    InvalidCredentials,
+    Network,
+    Server,
+}
+
+/// Stable password-change failures for the UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PasswordFailure {
+    CurrentPasswordIncorrect,
+    WeakPassword,
+    PasswordUnchanged,
+    SessionExpired,
+    Network,
+    Server,
+}
+
+/// Maps an HTTP(S) origin to the relay endpoint used by the local outbox.
+pub fn relay_ws_endpoint(server: &str) -> String {
+    if let Some(rest) = server.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = server.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        server.to_string()
+    }
+}
+
+fn password_failure_code(code: &str) -> PasswordFailure {
+    match code {
+        "CURRENT_PASSWORD_INCORRECT" => PasswordFailure::CurrentPasswordIncorrect,
+        "WEAK_PASSWORD" | "INVALID_PASSWORD_CHANGE" => PasswordFailure::WeakPassword,
+        "PASSWORD_UNCHANGED" => PasswordFailure::PasswordUnchanged,
+        "PASSWORD_CHANGE_REQUIRED" => PasswordFailure::SessionExpired,
+        _ => PasswordFailure::Server,
+    }
+}
+
+/// Reads the organization registry response. A null/empty `server_url` means
+/// the cloud server itself; only http(s) addresses are accepted.
+fn server_from_lookup(body: &str, cloud_base: &str) -> Result<String, LoginFailure> {
+    let value: Value = serde_json::from_str(body).map_err(|_| LoginFailure::Server)?;
+    let Some(url) = value.get("server_url").and_then(Value::as_str) else {
+        return Ok(cloud_base.to_string());
+    };
+    let url = url.trim_end_matches('/');
+    if url.is_empty() {
+        return Ok(cloud_base.to_string());
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        Ok(url.to_string())
+    } else {
+        Err(LoginFailure::InvalidOrganizationServer)
+    }
+}
+
+impl From<SessionError> for LoginFailure {
+    fn from(error: SessionError) -> Self {
+        match error {
+            SessionError::InvalidCredentials => LoginFailure::InvalidCredentials,
+            SessionError::Network(_) => LoginFailure::Network,
+            SessionError::UnexpectedResponse(_) | SessionError::Storage(_) => LoginFailure::Server,
+        }
+    }
+}
 
 pub struct SlintComposition {
     api_origin: String,
@@ -98,9 +172,11 @@ impl SlintComposition {
             .await
             .map_err(|e| format!("apply migrations: {e}"))?;
 
-        let api =
-            Arc::new(HttpSessionApi::new(&api_origin).map_err(|e| format!("session api: {e}"))?);
-        let session = SessionAuthority::new(&api_origin, api, Arc::clone(&storage));
+        let session = SessionAuthority::with_api_factory(
+            &api_origin,
+            http_api_factory(),
+            Arc::clone(&storage),
+        );
         let authority: Arc<dyn AuthorityProvider> =
             Arc::new(SessionBearerProvider::new(Arc::clone(&session)));
         let socket_factory = Arc::new(TungsteniteRelaySocketFactory::with_cancellation(
@@ -132,8 +208,11 @@ impl SlintComposition {
         match session::load(storage).await {
             Ok(Some(stored)) => {
                 if let Some(summary) = self.session.restore(stored).await {
-                    self.start_outbox(&summary.organization_id.to_string())
-                        .await;
+                    self.start_outbox(
+                        &summary.organization_id.to_string(),
+                        &summary.server_address,
+                    )
+                    .await;
                 }
             }
             Ok(None) => {}
@@ -141,19 +220,99 @@ impl SlintComposition {
         }
     }
 
+    /// Asks the cloud registry which server serves the organization. A null
+    /// `server_url` means the cloud server itself. Only http(s) is accepted.
+    async fn resolve_organization_server(&self, organization: &str) -> Result<String, LoginFailure> {
+        let identifier = organization.trim();
+        if identifier.is_empty() {
+            return Err(LoginFailure::OrganizationNotFound);
+        }
+        let response = reqwest::Client::new()
+            .get(format!("{}/api/organizations/lookup", self.api_origin))
+            .query(&[("identifier", identifier)])
+            .send()
+            .await
+            .map_err(|_| LoginFailure::Network)?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(LoginFailure::OrganizationNotFound);
+        }
+        if !response.status().is_success() {
+            return Err(LoginFailure::Server);
+        }
+        let body = response.text().await.map_err(|_| LoginFailure::Server)?;
+        server_from_lookup(&body, &self.api_origin)
+    }
+
+    /// Signs in with the source-confirmed three fields. The organization
+    /// determines the server, and the resulting session is pinned to it.
     pub async fn login(
         &self,
+        organization: &str,
         username: &str,
         password: &str,
-    ) -> Result<SessionSummary, SessionError> {
-        let outcome = self.session.sign_in(username, password).await?;
+    ) -> Result<SessionSummary, LoginFailure> {
+        let server = self.resolve_organization_server(organization).await?;
+        let outcome = self
+            .session
+            .sign_in_at(&server, Some(organization.trim()), username, password)
+            .await?;
         if !outcome.persisted {
             tracing::warn!("session is active in memory only; keyring save failed");
         }
         let summary = outcome.summary;
-        self.start_outbox(&summary.organization_id.to_string())
+        self.start_outbox(&summary.organization_id.to_string(), &summary.server_address)
             .await;
         Ok(summary)
+    }
+
+    /// The live session, if any. Used at startup so a restored session is not
+    /// hidden behind the login pane.
+    pub async fn current_summary(&self) -> Option<SessionSummary> {
+        self.session.current_summary().await
+    }
+
+    /// Changes the account password on the session's own server. The Worker
+    /// revokes every session on success, so the local session is signed out too.
+    pub async fn change_password(
+        &self,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), PasswordFailure> {
+        let summary = self
+            .session
+            .current_summary()
+            .await
+            .ok_or(PasswordFailure::SessionExpired)?;
+        let token = self
+            .session
+            .current_access_token()
+            .await
+            .ok_or(PasswordFailure::SessionExpired)?;
+        let response = reqwest::Client::new()
+            .post(format!("{}/api/auth/password", summary.server_address))
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "current_password": current_password,
+                "new_password": new_password,
+            }))
+            .send()
+            .await
+            .map_err(|_| PasswordFailure::Network)?;
+        if response.status().is_success() {
+            self.logout().await;
+            return Ok(());
+        }
+        let body = response.text().await.unwrap_or_default();
+        let code = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default();
+        Err(password_failure_code(&code))
     }
 
     pub async fn logout(&self) {
@@ -161,10 +320,10 @@ impl SlintComposition {
         self.session.sign_out().await;
     }
 
-    /// Builds the app state for `organization_id` and starts its sync agent.
-    /// A failure is logged; login still succeeds and rows stay in the local
-    /// outbox until a later attempt.
-    async fn start_outbox(&self, organization_id: &str) {
+    /// Builds the app state for `organization_id` and starts its sync agent
+    /// against the server that issued the session. A failure is logged; login
+    /// still succeeds and rows stay in the local outbox until a later attempt.
+    async fn start_outbox(&self, organization_id: &str, server_address: &str) {
         self.stop_outbox().await;
         let org = match OrganizationId::from_uuid_str(organization_id) {
             Ok(org) => org,
@@ -179,7 +338,7 @@ impl SlintComposition {
             organization_id: org,
             sync_agent_config: client_composition::sync_agent::SyncAgentConfig::default(),
             event_bus_capacity: 1024,
-            cloud_relay_endpoint: self.api_origin.replacen("https://", "wss://", 1),
+            cloud_relay_endpoint: relay_ws_endpoint(server_address),
             local_discovery: None,
             cloud_relay_auth_provider: Arc::new(SessionBearerProvider::new(Arc::clone(
                 &self.session,
@@ -190,7 +349,7 @@ impl SlintComposition {
             )),
             blob_store_root: self.data_dir.join("blobs"),
             owner_authority: None,
-            cloud_outbox_endpoint: Some(format!("{}/api/sync/outbox", self.api_origin)),
+            cloud_outbox_endpoint: Some(format!("{server_address}/api/sync/outbox")),
         };
 
         match AppState::new(self.pool.clone(), config).await {
@@ -306,5 +465,206 @@ mod lifecycle_tests {
         composition.logout().await;
         composition.logout().await;
         assert!(composition.session.current_summary().await.is_none());
+    }
+
+    #[test]
+    fn relay_endpoints_follow_the_session_server() {
+        assert_eq!(relay_ws_endpoint("https://org.example"), "wss://org.example");
+        assert_eq!(relay_ws_endpoint("http://127.0.0.1:9"), "ws://127.0.0.1:9");
+        assert_eq!(relay_ws_endpoint("ws://already"), "ws://already");
+    }
+
+    #[test]
+    fn password_error_codes_are_mapped_by_identifier_only() {
+        assert_eq!(
+            password_failure_code("CURRENT_PASSWORD_INCORRECT"),
+            PasswordFailure::CurrentPasswordIncorrect
+        );
+        assert_eq!(password_failure_code("WEAK_PASSWORD"), PasswordFailure::WeakPassword);
+        assert_eq!(
+            password_failure_code("PASSWORD_UNCHANGED"),
+            PasswordFailure::PasswordUnchanged
+        );
+        assert_eq!(password_failure_code("something else"), PasswordFailure::Server);
+    }
+
+    #[test]
+    fn lookup_server_is_display_only_derived_from_registry_response() {
+        assert_eq!(
+            server_from_lookup(r#"{"server_url":null}"#, "https://cloud.example").unwrap(),
+            "https://cloud.example"
+        );
+        assert_eq!(
+            server_from_lookup(r#"{"server_url":"https://org.example/"}"#, "https://cloud.example")
+                .unwrap(),
+            "https://org.example"
+        );
+        assert_eq!(
+            server_from_lookup(
+                r#"{"error":"INVALID_ORGANIZATION"}"#,
+                "https://cloud.example"
+            )
+            .unwrap(),
+            "https://cloud.example"
+        );
+        assert_eq!(
+            server_from_lookup(r#"{"server_url":"ftp://org.example"}"#, "https://cloud.example"),
+            Err(LoginFailure::InvalidOrganizationServer)
+        );
+    }
+}
+
+#[cfg(test)]
+mod desktop_login_tests {
+    use super::*;
+    use axum::{
+        extract::{Json, State},
+        http::StatusCode,
+        routing::{get, post},
+        Router,
+    };
+    use serde_json::json;
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Default)]
+    struct ServerMock {
+        lookup_status: StdMutex<u16>,
+        login_status: StdMutex<u16>,
+        password_status: StdMutex<u16>,
+        login_body: StdMutex<Option<serde_json::Value>>,
+        password_body: StdMutex<Option<serde_json::Value>>,
+    }
+
+    async fn lookup(State(mock): State<Arc<ServerMock>>) -> (StatusCode, Json<serde_json::Value>) {
+        let status = *mock.lookup_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(json!({"server_url": null})))
+    }
+
+    async fn login(
+        State(mock): State<Arc<ServerMock>>,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        *mock.login_body.lock().unwrap() = Some(body);
+        let status = *mock.login_status.lock().unwrap();
+        (
+            StatusCode::from_u16(status).unwrap(),
+            Json(json!({
+                "access_token": "access-token",
+                "refresh_token": "refresh-token",
+                "expires_in": 3600,
+                "user": {
+                    "id": uuid::Uuid::from_bytes([1; 16]).to_string(),
+                    "username": "tester",
+                    "organization_id": uuid::Uuid::from_bytes([2; 16]).to_string(),
+                    "is_admin": false,
+                    "must_change_password": true
+                }
+            })),
+        )
+    }
+
+    async fn logout() -> (StatusCode, Json<serde_json::Value>) {
+        (StatusCode::OK, Json(json!({"success": true})))
+    }
+
+    async fn password(
+        State(mock): State<Arc<ServerMock>>,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        *mock.password_body.lock().unwrap() = Some(body);
+        let status = *mock.password_status.lock().unwrap();
+        (StatusCode::from_u16(status).unwrap(), Json(json!({"success": true})))
+    }
+
+    async fn serve(mock: Arc<ServerMock>) -> String {
+        let app = Router::new()
+            .route("/api/organizations/lookup", get(lookup))
+            .route("/api/auth/login", post(login))
+            .route("/api/auth/logout", post(logout))
+            .route("/api/auth/password", post(password))
+            .with_state(mock);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{address}")
+    }
+
+    fn storage() -> Arc<dyn SecureStorage> {
+        let store = keyring_core::mock::Store::new().expect("mock store");
+        Arc::new(KeyringSecureStorage::with_store(
+            "com.onyx.platform.slint.test",
+            store,
+        ))
+    }
+
+    async fn open(origin: &str) -> (Arc<SlintComposition>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let composition = SlintComposition::open_with(OpenOptions {
+            data_dir: dir.path().to_path_buf(),
+            storage: storage(),
+            api_origin: origin.to_string(),
+        })
+        .await
+        .expect("open");
+        (composition, dir)
+    }
+
+    #[tokio::test]
+    async fn three_field_login_uses_the_registry_and_the_issuing_server() {
+        let mock = Arc::new(ServerMock::default());
+        *mock.lookup_status.lock().unwrap() = 200;
+        *mock.login_status.lock().unwrap() = 200;
+        let origin = serve(mock.clone()).await;
+        let (composition, _dir) = open(&origin).await;
+
+        let summary = composition
+            .login("Acme", "tester", "password")
+            .await
+            .expect("login");
+        assert_eq!(summary.server_address, origin);
+        assert!(summary.must_change_password);
+        let body = mock.login_body.lock().unwrap().clone().expect("login body");
+        assert_eq!(body.get("organization").and_then(|v| v.as_str()), Some("Acme"));
+        assert_eq!(body.get("username").and_then(|v| v.as_str()), Some("tester"));
+    }
+
+    #[tokio::test]
+    async fn unknown_organization_is_rejected_before_login() {
+        let mock = Arc::new(ServerMock::default());
+        *mock.lookup_status.lock().unwrap() = 404;
+        let origin = serve(mock.clone()).await;
+        let (composition, _dir) = open(&origin).await;
+
+        let error = composition
+            .login("Missing", "tester", "password")
+            .await
+            .expect_err("unknown organization");
+        assert_eq!(error, LoginFailure::OrganizationNotFound);
+        assert!(mock.login_body.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn password_change_uses_the_session_server_and_signs_out() {
+        let mock = Arc::new(ServerMock::default());
+        *mock.lookup_status.lock().unwrap() = 200;
+        *mock.login_status.lock().unwrap() = 200;
+        *mock.password_status.lock().unwrap() = 200;
+        let origin = serve(mock.clone()).await;
+        let (composition, _dir) = open(&origin).await;
+        composition
+            .login("Acme", "tester", "password")
+            .await
+            .expect("login");
+
+        composition
+            .change_password("old-password", "new-password-12")
+            .await
+            .expect("password change");
+        let body = mock.password_body.lock().unwrap().clone().expect("password body");
+        assert_eq!(body.get("current_password").and_then(|v| v.as_str()), Some("old-password"));
+        assert_eq!(body.get("new_password").and_then(|v| v.as_str()), Some("new-password-12"));
+        assert!(composition.current_summary().await.is_none());
     }
 }

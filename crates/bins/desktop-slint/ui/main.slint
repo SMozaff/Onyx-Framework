@@ -1,19 +1,24 @@
 import { Button, LineEdit, VerticalBox } from "std-widgets.slint";
 
 export component DesktopWindow inherits Window {
+    in-out property <string> organization: "";
     in-out property <string> username: "";
     in-out property <string> password: "";
+    in-out property <string> current-password: "";
+    in-out property <string> new-password: "";
     in-out property <string> status: "Sign in to ONYX";
     in-out property <string> display-name: "";
     in-out property <bool> busy: false;
     in property <string> build-label: "";
     in-out property <bool> authenticated: false;
-    callback login-requested(string, string);
+    in-out property <bool> must-change-password: false;
+    callback login-requested(string, string, string);
+    callback change-password-requested(string, string);
     callback logout-requested();
 
     title: "ONYX Desktop — Feasibility" + build-label;
     width: 720px;
-    height: 520px;
+    height: 560px;
     background: #10141f;
 
     VerticalBox {
@@ -28,39 +33,44 @@ export component DesktopWindow inherits Window {
             horizontal-alignment: center;
         }
 
-        if !root.authenticated: VerticalBox {
+        if root.must-change-password: VerticalBox {
             alignment: center;
             spacing: 12px;
 
             Text {
-                text: "Sign in with your ONYX account";
-                color: #9eacc4;
+                text: "Change your password";
+                color: #e6edf7;
+                font-size: 20px;
                 horizontal-alignment: center;
             }
-
-            LineEdit {
-                placeholder-text: "Username";
-                text <=> root.username;
-                enabled: !root.busy;
+            Text {
+                text: "Your account requires a new password before you can continue.";
+                color: #9eacc4;
+                horizontal-alignment: center;
+                wrap: word-wrap;
             }
-
             LineEdit {
-                placeholder-text: "Password";
+                placeholder-text: "Current password";
                 input-type: InputType.password;
-                text <=> root.password;
+                text <=> root.current-password;
                 enabled: !root.busy;
             }
-
-            Button {
-                text: root.busy ? "Signing in…" : "Sign in";
+            LineEdit {
+                placeholder-text: "New password (12 characters minimum)";
+                input-type: InputType.password;
+                text <=> root.new-password;
                 enabled: !root.busy;
+            }
+            Button {
+                text: root.busy ? "Changing password…" : "Change password";
+                enabled: !root.busy && root.current-password != "" && root.new-password != "";
                 clicked => {
-                    root.login-requested(root.username, root.password);
+                    root.change-password-requested(root.current-password, root.new-password);
                 }
             }
         }
 
-        if root.authenticated: VerticalBox {
+        if root.authenticated && !root.must-change-password: VerticalBox {
             alignment: center;
             spacing: 12px;
 
@@ -69,18 +79,50 @@ export component DesktopWindow inherits Window {
                 color: #e6edf7;
                 horizontal-alignment: center;
             }
-
             Text {
                 text: "The native session is active. Full application and peer-sync composition remains a migration gate.";
                 color: #9eacc4;
                 horizontal-alignment: center;
                 wrap: word-wrap;
             }
-
             Button {
                 text: root.busy ? "Signing out…" : "Sign out";
                 enabled: !root.busy;
                 clicked => { root.logout-requested(); }
+            }
+        }
+
+        if !root.authenticated && !root.must-change-password: VerticalBox {
+            alignment: center;
+            spacing: 12px;
+
+            Text {
+                text: "Sign in with your organization credentials";
+                color: #9eacc4;
+                horizontal-alignment: center;
+            }
+            LineEdit {
+                placeholder-text: "Organization (ID or name)";
+                text <=> root.organization;
+                enabled: !root.busy;
+            }
+            LineEdit {
+                placeholder-text: "Staff ID, username or email";
+                text <=> root.username;
+                enabled: !root.busy;
+            }
+            LineEdit {
+                placeholder-text: "Password";
+                input-type: InputType.password;
+                text <=> root.password;
+                enabled: !root.busy;
+            }
+            Button {
+                text: root.busy ? "Signing in…" : "Sign in";
+                enabled: !root.busy && root.organization != "" && root.username != "" && root.password != "";
+                clicked => {
+                    root.login-requested(root.organization, root.username, root.password);
+                }
             }
         }
 

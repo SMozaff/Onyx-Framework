@@ -588,3 +588,30 @@ DEP-01 and all other entries are unchanged.
 This stage is documentation plus the earlier S5/S6 code work. Verification of code is via GitHub
 Actions (admin-slint workflow) per the owner's instruction; no local build/test result is claimed
 here. No deploy, D1 migration, production data access or credential use occurred.
+
+## S7 — Desktop Slint login/session parity (2026-11-25)
+
+### Changes (R-40 / R-41)
+- `crates/bins/desktop-slint/ui/main.slint`: three login fields in the Tauri order
+  (Organization, Staff identifier, Password), a forced password-change pane, and busy/validation
+  gating. `login-requested` now carries the organization; `change-password-requested` was added.
+- `crates/bins/desktop-slint/src/composition.rs`: `SessionAuthority::with_api_factory` +
+  `sign_in_at` with the server from `GET /api/organizations/lookup?identifier=`; null/empty
+  `server_url` → cloud base, only `http(s)` accepted. Startup restore and outbox/relay endpoints
+  now use the server recorded in the session instead of the build-time origin.
+  `change_password` posts to `{session server}/api/auth/password` with the bearer token, maps the
+  Worker codes (`CURRENT_PASSWORD_INCORRECT`, `WEAK_PASSWORD`/`INVALID_PASSWORD_CHANGE`,
+  `PASSWORD_UNCHANGED`) to stable failures and signs out after success.
+- `crates/bins/desktop-slint/src/main.rs`: styles restored sessions (including
+  `must_change_password`) before showing the window, maps login/password failures to status text,
+  and returns to the login pane after a successful change.
+
+### Tests added
+Pure tests for relay endpoint mapping, password-code mapping and registry response parsing, plus
+axum mock-server tests for three-field login (organization sent, issuing server recorded),
+unknown-organization rejection before login, and password change signing the session out.
+
+### Verification boundary
+GitHub Actions only (owner instruction); no local build/test was run. `StoredSession.must_change_password`
+keeps `#[serde(default)]` so older keyring records still load. Secrets remain in Rust/keyring only —
+no token or password is a Slint property. No deploy or live Worker run occurred.
