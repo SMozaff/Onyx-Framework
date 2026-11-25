@@ -1,20 +1,18 @@
-# Admin Slint migration status (updated 2026-11-23)
+---
+status: active
+---
+# Admin/Desktop Slint migration status (updated 2026-11-25)
 
 ## Verified state
-- `crates/bins/admin-slint/` is a feasibility client with all Admin pages: sign-in, Users, Settings (mobile access + policy/rules + legal holds), Profiles, Organizations (All-Father-gated).
-- S5 (R-20..R-23): code-based concurrency error mapping, structured evaluation display, per-policy pending rules with removal, legal-hold retry key retention and release-reason input.
-- S6 (R-24..R-28): `docs/migrations/slint/admin-parity-matrix.md` (AD-01..AD-07, AD-I-001..AD-I-061); R-25 validation/busy bindings implemented; R-26 Users search/sort/paging determined NOT a parity gap (blocked on owner approval + U-01 evidence); R-28 shared Latin-digit helper applied to read-only hold-ID display.
-- S9: `docs/migrations/slint/gate-0b/` holds PROPOSED drafts (C-01, C-03, C-09, Q-14, R-17, R-29 23 EN=FA keys, R-62 plan path). Dated amendment appended to MASTER-MIGRATION-RECORD.md + decision log. No blocker closed, no contract frozen.
-- All work committed and pushed to `main` (https://github.com/SMozaff/Onyx-Framework). Latest push: `9bafe451` (rustfmt fix from CI). Working tree clean.
+- `admin-slint`: S5/S6 complete (R-20..R-28), parity matrix at `docs/migrations/slint/admin-parity-matrix.md`, S9 PROPOSED drafts in `docs/migrations/slint/gate-0b/`. Admin CI: only pre-existing rust-advisories known red.
+- `desktop-slint`: S7 complete (R-40/R-41) — 3-field org login, registry lookup, per-server session, forced password change, startup restore, tests. Dedicated Desktop Slint workflow green on Ubuntu + Windows (run 45679850793: fmt, clippy, tests, release build).
+- All committed and pushed to `main` (latest `11973395`). Working tree clean.
+- An unpushed local commit that removed ~24k lines of tests was dropped on owner instruction; test suites and CI configs are intact.
 
-## Still blocked / not done
-- **Gate 0b BLOCKED**, Contract Freeze v1 unsigned. No production Admin modules authorized.
-- Tauri admin (`crates/bins/admin-shell`) is still the shipped client; removal is Phase 16 / R-72 after Gate 15 + owner approval.
-- Worker not deployed (R-10); no live click-through (R-30).
-- Remaining parity gaps: access-denied screen, remember-username, password show/hide, profile edit overlay, open-policy-by-id, Users search/sort/paging.
-- Farsi review pending (D-01/D-03): several labels still English in `fa.json`.
-- CI: rust-advisories failure is pre-existing (D-11); other jobs must be read from latest PR head.
+## Still blocked
+- Gate 0b BLOCKED, Contract Freeze v1 unsigned; Gate 15 not reached. Tauri/React admin+desktop shells remain shipped (R-72 removal only after owner approval).
+- CI `check` job fails workspace clippy on pre-existing `rfd` feature conflict (`gtk3` + `xdg-portal`); `merge-gate` consequent; `rust-advisories` pre-existing (D-11).
+- No Worker deploy/live GUI run (R-10/R-30); Farsi review pending; Q-14/D-01/D-03/D-16 owner decisions open.
 
-## Working agreements
-- Verification is via GitHub Actions only — no local builds/tests (owner instruction).
-- Push uses SSH keyring because GH_TOKEN is invalid; local git config rewrites https://github.com/ to git@github.com: for this repo.
+## Rules
+- No local builds/tests; verification via GitHub Actions only. Push via SSH; `gh` needs `env -u GH_TOKEN`.
